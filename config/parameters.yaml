@@ -789,34 +789,51 @@ stage4_core_score:
         status: UNVALIDATED
         note: "Only used when weighting_mode == explicit."
 
+    # QUALITY -- redefined 2026-08-18 to what an income statement can actually
+    # support. The previous component list assumed a balance sheet (ROE,
+    # debt-to-equity, accruals); Indian companies file balance sheets
+    # half-yearly at best, so those were never computable from quarterly
+    # results and the factor was dropped at runtime every single run.
+    #
+    # These four ARE computable from the Ind-AS quarterly filing, point-in-time
+    # gated on filing_date. Evidence: the profitability factor in Fama-French
+    # five-factor replications on Indian data (CNX 500, NSE 500).
     quality:
       enabled: true
-      weight_band:
-        value: [0.20, 0.35]
-        status: UNVALIDATED
-        note: "●●○. Documented job is crash stabilisation, not co-equal alpha."
-      explicit_weight:
-        value: null
-        status: UNVALIDATED
-      # Sub-component weights inside the quality composite (renormalised over
-      # whichever components actually have data).
+      weight_band: [0.20, 0.35]
+      explicit_weight: null
       components:
-        return_on_equity:      { enabled: true,  weight: 0.30, higher_is_better: true }
-        gross_profitability:   { enabled: true,  weight: 0.25, higher_is_better: true }
-        accrual_intensity:     { enabled: true,  weight: 0.15, higher_is_better: false }
-        debt_to_equity:        { enabled: true,  weight: 0.15, higher_is_better: false }
-        interest_coverage:     { enabled: true,  weight: 0.15, higher_is_better: true }
-      # If fewer than this many components have data for a stock, quality is
-      # reported as UNAVAILABLE for that stock -- never silently imputed to 0.
-      min_components_required:
-        value: 3
-        status: OPERATIONAL
-      # What the engine does when fundamentals are absent for the whole universe
-      # (the default state on free data). "drop_factor" renormalises the
-      # remaining factors and says so loudly on every card.
-      on_universe_missing:
-        value: "drop_factor"         # drop_factor | halt
-        status: OPERATIONAL
+        net_margin:
+          enabled: true
+          weight: 0.30
+          higher_is_better: true
+        interest_coverage:
+          enabled: true
+          weight: 0.25
+          higher_is_better: true
+        earnings_growth:
+          enabled: true
+          weight: 0.25
+          higher_is_better: true
+        earnings_stability:
+          enabled: true
+          weight: 0.20
+          higher_is_better: true
+      min_components_required: 3
+      on_universe_missing: "drop_factor"
+
+    # VALUE -- added 2026-08-18. The factor with the STRONGEST India-specific
+    # evidence, and previously absent entirely because market capitalisation
+    # was not computable. It now is: shares outstanding derives from paid-up
+    # capital over face value in the quarterly filing.
+    #
+    # Earnings yield rather than P/E: it is defined for loss-making companies
+    # (negative yield ranks them last, which is correct) whereas P/E is not.
+    value:
+      enabled: true
+      weight_band: [0.25, 0.40]
+      explicit_weight: null
+      metric: "earnings_yield"
 
     sector_relative_strength:
       enabled: true

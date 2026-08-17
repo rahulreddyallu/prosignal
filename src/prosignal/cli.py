@@ -475,6 +475,64 @@ def _storage_rows(cfg: AppConfig):
     ]
 
 
+
+def cmd_data_fundamentals(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Ingest point-in-time fundamentals from NSE quarterly filings."""
+    from .data.providers.http import HttpClient, NseJsonSession
+    from .data.providers.nse_fundamentals import NseFundamentalsProvider
+    from .data.store import DataStore
+
+    p = cfg.params.providers
+    client = HttpClient(
+        cache_dir=cfg.paths.cache, user_agent=p.http.user_agent,
+        min_interval_seconds=p.http.min_interval_seconds,
+    )
+    session = NseJsonSession(
+        client=client, base=p.nse_json_api.base, warmup_path=p.nse_json_api.warmup_path
+    )
+    provider = NseFundamentalsProvider(
+        session=session, client=client, max_quarters=int(getattr(args, "quarters", 8))
+    )
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+
+    index = str(cfg.params.universe.index_name.value)
+    dates = store.universe_snapshot_dates(index)
+    if not dates:
+        raise DataError(f"no universe snapshot for {index}; run `prosignal data ingest` first")
+    symbols = store.read_universe_snapshot(index, dates[-1])["symbol"].tolist()
+
+    _rule("Point-in-time fundamentals")
+    _print(f"  source : NSE quarterly results (Ind-AS XBRL), gated on filing_date")
+    _print(f"  symbols: {len(symbols)}")
+    _print()
+
+    frame = provider.fetch_universe(
+        symbols,
+        progress=lambda i, n, sym: _print(f"  [{i}/{n}] {sym}") if i % 25 == 0 else None,
+    )
+    if frame.empty:
+        _print("[red]No fundamentals retrieved.[/red]" if _console else "No fundamentals retrieved.")
+        _print(f"  last error: {provider.last_error}")
+        return 3
+
+    store.write_fundamentals(frame)
+    covered = frame["symbol"].nunique()
+    _print()
+    _table("Result", ["metric", "value"], [
+        ["filings stored", f"{len(frame):,}"],
+        ["symbols covered", f"{covered} of {len(symbols)} ({covered/len(symbols):.0%})"],
+        ["quarters per symbol", f"{len(frame)/max(covered,1):.1f}"],
+    ])
+    _print()
+    _print(
+        "[dim]Banks and financials file a different Ind-AS schema, so their line "
+        "items are absent. Those names score neutrally on value/quality rather "
+        "than being excluded.[/dim]" if _console
+        else "Banks file a different schema; their line items are absent."
+    )
+    return 0
+
+
 def cmd_data_budget(cfg: AppConfig, args: argparse.Namespace) -> int:
     import shutil as _shutil
 
@@ -988,6 +1046,13 @@ def build_parser() -> argparse.ArgumentParser:
     check = data_sub.add_parser("check", help="run data-integrity checks")
     check.add_argument("--date", default=None)
     check.set_defaults(func=cmd_data_check)
+
+    fundamentals = data_sub.add_parser(
+        "fundamentals", help="ingest point-in-time fundamentals from NSE filings"
+    )
+    fundamentals.add_argument("--quarters", type=int, default=8,
+                              help="quarters of history per symbol")
+    fundamentals.set_defaults(func=cmd_data_fundamentals)
 
     budget = data_sub.add_parser("budget", help="storage usage against the budget")
     budget.set_defaults(func=cmd_data_budget)

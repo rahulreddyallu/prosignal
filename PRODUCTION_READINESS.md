@@ -164,3 +164,59 @@ what the validation machinery was built to detect, and it detected it on the
 first honest run.
 
 Trading this with real capital is not justified by the current evidence.
+
+---
+
+# ADDENDUM — v2 result, 2026-08-18
+
+The research-backed factors were implemented and the walk-forward re-run. **The
+strategy got worse on every metric.** Reported as found.
+
+| Metric | v1 (momentum-led) | **v2 (4 factors)** |
+|---|---|---|
+| Decision dates | 104 | 138 |
+| NO TRADE | 78 (75%) | 90 (65%) |
+| Trades | 37 | **63** |
+| Win rate | 48.6% | **46.0%** |
+| Mean net | +1.19% | **+0.42%** |
+| Median net | −5.01% | **−6.29%** |
+| Profit factor | 1.245 | **1.079** |
+| Max drawdown | −49.8% | **−66.1%** |
+| Sharpe / trade | 0.103 | **0.035** |
+| **DSR** | 0.7% | **0.2%** |
+
+## What this does and does not mean
+
+**Not a clean A/B.** v2 spans 2023-10 to 2026-08; v1 spanned 2024-07 to 2026-08.
+Different sample, different regime mix.
+
+**Fundamentals coverage decays backwards.** Only 8 quarters were ingested, so
+for late-2023 decision dates the point-in-time gate finds few filings and
+value/quality are thin or dropped. Early dates were therefore still effectively
+momentum-driven, but at 25% weight instead of 50% — arguably the worst of both.
+
+**The honest reading.** A profit factor of 1.079 across 63 trades with a −66%
+drawdown is indistinguishable from noise. Both configurations fail DSR
+decisively (0.7% and 0.2% against a 95% bar). Adding the best-evidenced factors
+did not rescue the strategy.
+
+## What I am NOT going to do next
+
+Search for a factor mix that backtests better. My own DSR interpretation string
+says it: *"Simplify the model or gather more data — do not search further."*
+Trying combinations until one clears the bar is precisely the behaviour PBO
+exists to detect, and the trial count is already 796.
+
+## What would actually be informative
+
+1. **Deeper fundamentals** — 8 quarters is not enough for a 3-year backtest.
+   40 quarters would let value/quality act across the whole window.
+2. **Longer history** — 990 sessions covers one broadly rising market. Bear-regime
+   behaviour is untested.
+3. **A simpler hypothesis** — the evidence points toward a low-turnover,
+   long-hold value tilt rather than a 18-session momentum trade. The measured
+   cost drag of ~0.38%/trade is a large share of a thin edge, and the fix for
+   that is trading less, not scoring better.
+
+**Verdict unchanged: the engineering works; the strategy has no demonstrated
+edge. Do not trade this with capital.**

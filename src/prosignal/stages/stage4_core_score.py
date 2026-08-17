@@ -39,6 +39,7 @@ from ..core.contracts import (
 from ..core.logging import get_logger
 from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
+from ..features import compute_features
 from ..indicators import (
     momentum_skip,
     rank_to_unit_interval,
@@ -52,6 +53,11 @@ from ..indicators import (
 __all__ = ["run", "STAGE_NAME"]
 
 STAGE_NAME = "stage4_core_score"
+
+#: A factor must be measurable for at least this share of the eligible universe
+#: to be used at all. Below it, median-filling the remainder means most names
+#: are ranked by a number that was never computed for them.
+_MIN_FACTOR_COVERAGE = 0.60
 log = get_logger(__name__)
 
 
@@ -103,21 +109,54 @@ def run(
         else:
             dropped["sector_relative_strength"] = "benchmark index unavailable"
 
-    # Quality: only with point-in-time fundamentals carrying filing dates.
+    # Value and quality, from point-in-time fundamentals. Both are gated on
+    # filing_date <= as_of inside features.compute_features, which is the whole
+    # reason they are trustworthy: the measured NSE disclosure lag is 9-45 days,
+    # so keying on period end instead would leak that window.
     fundamentals = store.read_fundamentals()
-    if bv(cfg.factors.quality.enabled):
-        if fundamentals is None or fundamentals.empty:
-            dropped["quality"] = (
-                "no point-in-time fundamentals with filing dates. Computing "
-                "quality from current-vintage data would be lookahead, so the "
-                "factor is dropped and the remaining weights renormalise."
-            )
+    if fundamentals is None or fundamentals.empty:
+        reason = (
+            "no point-in-time fundamentals stored. Run `prosignal data "
+            "fundamentals` to ingest them from NSE quarterly filings. Computing "
+            "these from current-vintage data would be lookahead, so they are "
+            "dropped rather than approximated."
+        )
+        if bv(cfg.factors.value.enabled):
+            dropped["value"] = reason
+        if bv(cfg.factors.quality.enabled):
+            dropped["quality"] = reason
+    else:
+        last_close = closes.iloc[-1].to_dict() if not closes.empty else {}
+        feats = compute_features(fundamentals, last_close, as_of)
+        if feats.empty:
+            note = "fundamentals stored but none were public as of this date"
+            if bv(cfg.factors.value.enabled):
+                dropped["value"] = note
+            if bv(cfg.factors.quality.enabled):
+                dropped["quality"] = note
         else:
-            q = _quality(fundamentals, symbols, as_of, cfg.factors.quality)
-            if q is None:
-                dropped["quality"] = "too few quality components available"
-            else:
-                raw["quality"] = q
+            feats = feats.set_index(SYMBOL)
+
+            if bv(cfg.factors.value.enabled):
+                metric = str(v(cfg.factors.value.metric))
+                series = feats[metric].reindex(symbols).astype("float64")
+                coverage = float(series.notna().mean())
+                if coverage >= _MIN_FACTOR_COVERAGE:
+                    raw["value"] = series
+                else:
+                    dropped["value"] = (
+                        f"{metric} available for only {coverage:.0%} of the "
+                        f"eligible universe, below the {_MIN_FACTOR_COVERAGE:.0%} "
+                        f"floor. A factor scored on a minority of names ranks "
+                        f"the rest by median fill, which is not a ranking."
+                    )
+
+            if bv(cfg.factors.quality.enabled):
+                q, q_note = _quality_from_features(feats, symbols, cfg.factors.quality)
+                if q is not None:
+                    raw["quality"] = q
+                else:
+                    dropped["quality"] = q_note
 
     if not raw:
         return CoreScoreReport(
@@ -143,9 +182,14 @@ def run(
     # ---- weights, renormalised over surviving factors ----------------------
     weights = _weights(cfg, list(standardised))
     # Regime multipliers scale each family's contribution.
+    # Value tracks the quality multiplier: both are fundamental, slow-moving and
+    # behave as crash stabilisers, which is the opposite of how momentum behaves
+    # in a turn. Giving value the momentum multiplier would dampen it exactly
+    # when it is most useful.
     mult = {
         "momentum_12_1": regime.momentum_multiplier,
         "quality": regime.quality_multiplier,
+        "value": regime.quality_multiplier,
         "sector_relative_strength": regime.sector_rs_multiplier,
     }
     effective = {n: weights[n] * mult.get(n, 1.0) for n in standardised}
@@ -213,14 +257,16 @@ def run(
 
 # =============================================================================
 _TIER = {
+    "value": "OOO high (strongest India-specific evidence)",
     "momentum_12_1": "OOO high",
     "sector_relative_strength": "OO medium",
     "quality": "OO medium",
 }
 _CITE = {
+    "value": "Fama & French (1993, 2015); FF5 replications on CNX 500 / NSE 500",
     "momentum_12_1": "Jegadeesh & Titman (1993); Asness, Moskowitz & Pedersen (2013)",
     "sector_relative_strength": "Moskowitz & Grinblatt (1999) industry momentum",
-    "quality": "Asness, Frazzini & Pedersen (2019) quality-minus-junk",
+    "quality": "Asness, Frazzini & Pedersen (2019); FF5 profitability factor, India-replicated",
 }
 
 
@@ -275,47 +321,40 @@ def _relative_strength(closes, sectors, store, as_of, params, cfg) -> Optional[p
     return pd.Series(out, dtype="float64")
 
 
-def _quality(fundamentals: pd.DataFrame, symbols, as_of, cfg) -> Optional[pd.Series]:
-    """Composite quality from whatever point-in-time components are present.
+def _quality_from_features(feats, symbols, cfg):
+    """Composite quality from whichever components cleared the coverage floor.
 
-    Every row must carry a filing date at or before ``as_of`` -- a fundamental
-    figure is not usable before it was public, and the median disclosure lag on
-    NSE is about 21 days (see DATA_SOURCES.md).
+    Components are z-scored INDIVIDUALLY before weighting, so a component
+    measured in multiples (interest coverage, which ranges 1 to 100) cannot
+    swamp one measured as a fraction (net margin, 0 to 0.3). Weighting raw
+    values would make the composite almost entirely interest coverage.
     """
-    f = fundamentals.copy()
-    if "filing_date" not in f.columns:
-        return None
-    f["filing_date"] = pd.to_datetime(f["filing_date"], errors="coerce").dt.date
-    f = f[f["filing_date"].notna() & (f["filing_date"] <= as_of)]
-    if f.empty:
-        return None
-    f = f.sort_values("filing_date").groupby(SYMBOL).tail(1).set_index(SYMBOL)
-
     comps = cfg.components
-    spec = [
-        ("return_on_equity", comps.return_on_equity),
-        ("gross_profitability", comps.gross_profitability),
-        ("accrual_intensity", comps.accrual_intensity),
-        ("debt_to_equity", comps.debt_to_equity),
-        ("interest_coverage", comps.interest_coverage),
-    ]
-    available = [(n, c) for n, c in spec if bv(c.enabled) and n in f.columns]
-    if len(available) < iv(cfg.min_components_required):
-        return None
+    used, total = [], 0.0
+    acc = pd.Series(0.0, index=symbols, dtype="float64")
 
-    total = 0.0
-    acc = pd.Series(0.0, index=f.index, dtype="float64")
-    for name, c in available:
-        vals = pd.to_numeric(f[name], errors="coerce")
-        z = standardise(winsorise(vals, 2.0, 98.0), method="zscore")
-        if not bv(c.higher_is_better):
+    for name, comp in comps.items():
+        if not bv(comp.enabled) or name not in feats.columns:
+            continue
+        series = feats[name].reindex(symbols).astype("float64")
+        if float(series.notna().mean()) < _MIN_FACTOR_COVERAGE:
+            continue
+        z = standardise(winsorise(series, 2.0, 98.0), method="zscore")
+        if not bv(comp.higher_is_better):
             z = -z
-        w = fv(c.weight)
-        acc = acc.add(z * w, fill_value=0.0)
-        total += w
-    if total <= 0:
-        return None
-    return (acc / total).reindex(symbols)
+        weight = fv(comp.weight)
+        acc = acc.add(z.fillna(0.0) * weight, fill_value=0.0)
+        total += weight
+        used.append(name)
+
+    need = iv(cfg.min_components_required)
+    if len(used) < need:
+        return None, (
+            f"only {len(used)} quality component(s) cleared the coverage floor "
+            f"({used or 'none'}), need {need}. Banks and financials file a "
+            f"different Ind-AS schema, so their line items are absent."
+        )
+    return acc / total, ""
 
 
 def _weights(cfg, surviving: List[str]) -> Dict[str, float]:
@@ -333,6 +372,7 @@ def _weights(cfg, surviving: List[str]) -> Dict[str, float]:
     bands = {
         "momentum_12_1": v(cfg.factors.momentum_12_1.weight_band),
         "quality": v(cfg.factors.quality.weight_band),
+        "value": v(cfg.factors.value.weight_band),
         "sector_relative_strength": v(cfg.factors.sector_relative_strength.weight_band),
     }
     mids = {n: (float(bands[n][0]) + float(bands[n][1])) / 2.0 for n in surviving if n in bands}

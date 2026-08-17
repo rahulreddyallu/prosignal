@@ -713,6 +713,36 @@ class QualityFactorConfig(_Base):
         return self
 
 
+class ValueFactorConfig(_Base):
+    """Earnings yield -- the factor with the strongest India-specific evidence.
+
+    Computable only since 2026-08-18, when shares outstanding became derivable
+    from the quarterly filing (paid-up capital / face value), which is what
+    makes market capitalisation and therefore a yield possible.
+
+    Earnings yield rather than P/E on purpose: it is defined for loss-making
+    companies, where a negative yield correctly ranks them last, whereas a
+    negative P/E is meaningless and usually gets dropped -- silently treating
+    the worst names as neutral.
+    """
+
+    enabled: bool = True
+    weight_band: TLF
+    explicit_weight: TOF = None
+    metric: TS = None
+
+    @model_validator(mode="after")
+    def _check(self) -> "ValueFactorConfig":
+        allowed = {"earnings_yield"}
+        if self.metric is not None and self.metric.value not in allowed:
+            raise ValueError(
+                f"stage4.factors.value.metric must be one of {sorted(allowed)}; "
+                f"book-to-price and EV/EBITDA need a balance sheet, which Indian "
+                f"quarterly filings do not carry."
+            )
+        return self
+
+
 class SectorRsFactorConfig(_Base):
     enabled: bool = True
     horizons_sessions: Tunable[List[int]]
@@ -743,6 +773,7 @@ class FactorsConfig(_Base):
 
     momentum_12_1: MomentumFactorConfig
     quality: QualityFactorConfig
+    value: ValueFactorConfig
     sector_relative_strength: SectorRsFactorConfig
 
 
