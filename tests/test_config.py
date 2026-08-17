@@ -13,7 +13,7 @@ import datetime as dt
 import pytest
 
 from prosignal.config.loader import load_config
-from prosignal.config.schema import ParamStatus, RootConfig, Tunable
+from prosignal.config.schema import ParamStatus, Tunable
 from prosignal.core.errors import ConfigError
 
 from .conftest import write_config

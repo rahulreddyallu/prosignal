@@ -193,6 +193,18 @@ capital:
   # Hard cap: a single position may not exceed this fraction of the stock's
   # trailing average daily traded VALUE. This is the single most important
   # number for the "solo founder edge" thesis (research program section 9).
+  # Fraction of total capital risked on a single trade, measured from entry to
+  # stop -- NOT the position size. With a 1% risk budget and a 5% stop, the
+  # position is 20% of capital; with a 10% stop it is 10%. This is what makes
+  # size respond to the stock's own volatility instead of being a flat slice.
+  risk_per_trade_pct:
+    value: 1.0
+    status: OPERATIONAL
+    note: >-
+      Your risk appetite, not a research parameter. 1% is the conventional
+      practitioner figure; at 8 concurrent positions it puts 8% of the book at
+      risk if every stop fires at once.
+
   max_participation_of_adtv:
     value: 0.01                      # 1% of ADTV
     status: UNVALIDATED

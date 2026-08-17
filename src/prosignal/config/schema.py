@@ -334,6 +334,7 @@ class StorageConfig(_Base):
 
 class CapitalConfig(_Base):
     total_capital_inr: TF
+    risk_per_trade_pct: TF
     max_open_positions: TI
     per_position_inr: TOF
     max_participation_of_adtv: TF

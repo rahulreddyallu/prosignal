@@ -124,3 +124,22 @@ def synthetic_prices(
 @pytest.fixture
 def prices(sessions) -> pd.DataFrame:
     return synthetic_prices(["AAA", "BBB", "CCC"], sessions)
+
+
+@pytest.fixture(scope="session")
+def live_cfg():
+    """The REAL project config and store, for end-to-end pipeline tests.
+
+    Skips when the store has no data, so the suite still runs on a clean clone.
+    """
+    from pathlib import Path as _P
+
+    from prosignal.config import load_config as _load
+    from prosignal.data.store import DataStore as _DS
+
+    root = _P(__file__).resolve().parents[1]
+    cfg = _load(project_root=root, use_cache=False)
+    store = _DS(cfg.paths.curated, cfg.paths.snapshots)
+    if not store.price_sessions():
+        pytest.skip("no ingested data; run `prosignal data ingest --full`")
+    return cfg

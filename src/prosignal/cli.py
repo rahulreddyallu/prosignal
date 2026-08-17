@@ -626,6 +626,144 @@ def _resolve_as_of(calendar, requested: Optional[str]):
     return resolved
 
 
+
+def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """RUN MARKET ANALYSIS -- the full eight-stage decision pipeline."""
+    from .pipeline import PipelineBlocked, run_analysis
+    from .stages.stage8_final_signal import PROBABILITY_UNAVAILABLE
+
+    _rule("RUN MARKET ANALYSIS")
+    try:
+        run = run_analysis(
+            cfg,
+            as_of=_resolve_arg_date(getattr(args, "date", None)),
+            progress=lambda i, label: _print(f"  [{i+1}/9] {label}"),
+        )
+    except PipelineBlocked as blocked:
+        _print()
+        _print("[red]ANALYSIS BLOCKED -- INSUFFICIENT DATA[/red]" if _console
+               else "ANALYSIS BLOCKED -- INSUFFICIENT DATA")
+        _print(f"stage: {blocked.stage}")
+        for r in blocked.reasons:
+            _print(f"  - {r}")
+        _print()
+        _print("No signal is produced. This is deliberately NOT reported as NO TRADE: "
+               "the engine refuses to form a view, which is different from having "
+               "looked and found nothing.")
+        return 3
+
+    o = run.output
+    r = o.regime_state
+
+    _print()
+    _rule(f"Market regime -- {o.as_of_date}")
+    _print(f"  {r.regime_bucket}  |  trend {r.trend_regime.value}  |  "
+           f"volatility {r.vol_tercile.value}/{r.vol_context.value}  |  "
+           f"breadth {r.breadth_state.value}"
+           + (f" ({r.breadth_pct_above_ma:.0f}%)" if r.breadth_pct_above_ma is not None else ""))
+    _print(f"  new entries allowed: {'YES' if r.allow_new_entries else 'NO'}   "
+           f"compatibility: {r.compatibility().value}")
+
+    _rule("Funnel")
+    _table("Candidates surviving each gate", ["gate", "count"],
+           [[k.replace('_', ' '), f"{v:,}"] for k, v in run.funnel.items()])
+
+    decision = f"{len(o.recommendations)} BUY / {len(o.watchlist)} WATCH"
+    _print()
+    _rule("Decision")
+    if o.no_trade:
+        _print("[bold red]NO TRADE[/bold red]" if _console else "NO TRADE")
+        _print(f"  {o.no_trade.reason}")
+        if o.no_trade.closest_candidates:
+            _table("Closest candidates and the gate each failed",
+                   ["rank", "ticker", "score", "gate failed", "detail"],
+                   [[str(c.rank), c.ticker, f"{c.composite_score:.3f}",
+                     c.gate_failed, (c.detail or "")[:70]]
+                    for c in o.no_trade.closest_candidates])
+    else:
+        _print(f"[bold green]{decision}[/bold green]" if _console else decision)
+
+    for rec in o.recommendations + o.watchlist[: int(getattr(args, "watch", 3) or 3)]:
+        _print()
+        _rule(f"{rec.decision.value} -- {rec.ticker}"
+              + (f" ({rec.company_name})" if rec.company_name else ""))
+        rows = [
+            ["last close", _money(rec.last_close)],
+            ["entry zone", f"{_money(rec.entry_zone[0])} - {_money(rec.entry_zone[1])}"
+             if rec.entry_zone else "no trigger active"],
+            ["initial stop", _money(rec.initial_stop)],
+            ["invalidation", _money(rec.invalidation_level)],
+            ["target 1", _money(rec.target_1)],
+            ["target 2", _money(rec.target_2)],
+            ["signal strength", rec.signal_strength_band.value],
+            ["composite (rank)", f"{rec.composite_score:.3f}  #{rec.rank}, "
+                                 f"{rec.universe_percentile:.0f}th pct"],
+            ["regime fit", rec.regime_compatibility.value],
+            ["holding period", rec.expected_holding_period],
+            ["risk category", rec.position_risk_category.value if rec.position_risk_category else "-"],
+        ]
+        _table("Trade", ["field", "value"], rows)
+
+        if rec.cost_note:
+            _print(f"  cost: {rec.cost_note}")
+
+        _print()
+        _print("[bold]WHY THIS SIGNAL EXISTS[/bold]" if _console else "WHY THIS SIGNAL EXISTS")
+        for line in rec.why_this_signal_exists:
+            _print(f"  + {line}")
+
+        _print()
+        _print("[bold yellow]WHY THIS TRADE MAY BE WRONG[/bold yellow]" if _console
+               else "WHY THIS TRADE MAY BE WRONG")
+        for line in rec.false_signal_flagged or []:
+            _print(f"  - {line}")
+        for line in rec.market_regime:
+            _print(f"  - context: {line}")
+
+        if rec.false_signal_not_testable:
+            _print()
+            _print("[dim]NOT TESTABLE WITH CURRENT DATA[/dim]" if _console
+                   else "NOT TESTABLE WITH CURRENT DATA")
+            for line in rec.false_signal_not_testable:
+                _print(f"  ? {line}")
+
+        if rec.sell_conditions:
+            _print()
+            _print("[bold]EXIT HIERARCHY[/bold]" if _console else "EXIT HIERARCHY")
+            for line in rec.sell_conditions[:4]:
+                _print(f"  {line}")
+
+    _print()
+    _rule("Honesty")
+    _print(f"  {PROBABILITY_UNAVAILABLE}")
+    _print(f"  {rec_warning()}")
+    _print()
+    _print(f"run_id {o.run_id} | config {o.config_version} | engine {o.engine_version}")
+    _print(f"stage timings (ms): {o.stage_timings_ms}")
+    for f in o.data_quality_flags:
+        _print(f"  data-quality: {f}")
+    return 0
+
+
+def rec_warning() -> str:
+    from .core.contracts import Recommendation
+    return Recommendation.model_fields["unvalidated_parameter_warning"].default
+
+
+def _money(v) -> str:
+    return "-" if v is None else f"Rs {v:,.2f}"
+
+
+def _resolve_arg_date(raw):
+    import datetime as _dt
+    if not raw:
+        return None
+    try:
+        return _dt.date.fromisoformat(raw)
+    except ValueError as exc:
+        raise DataError(f"--date must be YYYY-MM-DD; got {raw!r}") from exc
+
+
 def cmd_analyse_regime(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Stage 2 in isolation. Also the query behind the webapp's regime strip."""
     from .stages import stage2_regime
@@ -881,6 +1019,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     regime.set_defaults(func=cmd_analyse_regime)
+
+    full = analyse_sub.add_parser(
+        "run", help="RUN MARKET ANALYSIS -- the full eight-stage decision pipeline"
+    )
+    full.add_argument("--date", help="decision date (YYYY-MM-DD)")
+    full.add_argument("--watch", type=int, default=3,
+                      help="how many watchlist cards to print")
+    full.set_defaults(func=cmd_analyse_run)
 
     return parser
 

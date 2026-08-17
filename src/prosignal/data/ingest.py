@@ -28,7 +28,7 @@ import datetime as dt
 import shutil
 import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
