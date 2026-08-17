@@ -38,6 +38,7 @@ from .costs import CostModel
 from .data.store import DataStore
 from .data.types import DATE, SYMBOL
 from .data.universe import UniverseSnapshot
+from .ledger import Ledger, row_from_output
 from .stages import (
     stage1_data_quality,
     stage2_regime,
@@ -251,6 +252,13 @@ def run_analysis(
         "triggered": len(entries.triggered()),
         "buys": len(buys),
     }
+
+    # -- persist BEFORE returning. A run that is not recorded must not be
+    # -- reported as evidence, so a ledger failure fails the run.
+    duration_ms = (dt.datetime.now() - started).total_seconds() * 1000.0
+    Ledger(config.paths.ledger).append(
+        row_from_output(output, context, funnel, duration_ms)
+    )
 
     log.info(
         "analysis complete",

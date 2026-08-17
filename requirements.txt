@@ -23,6 +23,8 @@ yfinance>=0.2.40         # SECONDARY price source (used for cross-source agreeme
 # --- API layer (Stage 8 -> webapp) -----------------------------------------
 
 # --- CLI ergonomics ---------------------------------------------------------
+fastapi>=0.110
+uvicorn[standard]>=0.27
 rich>=13.0
 
 # --- Development / QA -------------------------------------------------------

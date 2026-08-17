@@ -1,0 +1,181 @@
+"""Append-only research ledger.
+
+Every run lands here, signal or not. That is the point: a ledger that only
+records the interesting days is a biased sample, and the honest trial count it
+produces is a direct input to the Deflated Sharpe Ratio. A run that does not
+appear here corrupts every subsequent statistical claim.
+
+Format is JSONL -- one JSON object per line, appended, never rewritten. Chosen
+over a database deliberately: it is append-only by construction, survives a
+crash mid-write with at most one truncated line, is readable without tooling,
+and diffs sanely. There is no query load here to justify anything heavier.
+
+Writes are fsync'd. A run that reports success but whose record is still sitting
+in a kernel buffer when the machine dies is exactly the gap that makes an audit
+trail worthless.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional
+
+from .core.contracts import FinalSignalOutput, LedgerRow, RunContext
+from .core.errors import LedgerError
+from .core.logging import get_logger
+
+__all__ = ["Ledger", "row_from_output"]
+
+log = get_logger(__name__)
+
+
+class Ledger:
+    """Append-only JSONL store of every analysis run."""
+
+    def __init__(self, ledger_dir: Path) -> None:
+        self.dir = Path(ledger_dir)
+        self.dir.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, when: dt.date) -> Path:
+        """One file per year. Keeps any single file readable by eye."""
+        return self.dir / f"runs-{when.year}.jsonl"
+
+    def append(self, row: LedgerRow) -> Path:
+        """Append one row and fsync it.
+
+        Raises
+        ------
+        LedgerError
+            On any write failure. Deliberately fatal: continuing after failing
+            to record a run would silently corrupt the trial count.
+        """
+        path = self._path(row.date)
+        payload = row.model_dump(mode="json")
+        line = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+        except OSError as exc:
+            raise LedgerError(
+                f"could not append run {row.run_id} to {path}: {exc}. The run is "
+                f"NOT recorded, so its trial must not be counted as evidence.",
+                run_id=row.run_id,
+                path=str(path),
+            ) from exc
+        log.info("ledger appended", extra={"run_id": row.run_id, "file": path.name})
+        return path
+
+    # -- reading -------------------------------------------------------------
+    def read_all(self) -> List[Dict[str, Any]]:
+        return list(self.iter_rows())
+
+    def iter_rows(self) -> Iterator[Dict[str, Any]]:
+        """Yield every recorded run, oldest file first.
+
+        A truncated final line (crash mid-append) is skipped with a warning
+        rather than raising -- one lost record must not make the whole history
+        unreadable.
+        """
+        for path in sorted(self.dir.glob("runs-*.jsonl")):
+            with open(path, "r", encoding="utf-8") as fh:
+                for n, line in enumerate(fh, start=1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        log.warning(
+                            "skipping malformed ledger line",
+                            extra={"file": path.name, "line": n},
+                        )
+
+    def count(self) -> int:
+        return sum(1 for _ in self.iter_rows())
+
+    def trial_count(self) -> int:
+        """Distinct trial ids recorded. Feeds the DSR multiple-testing penalty."""
+        return len({r.get("trial_id") for r in self.iter_rows() if r.get("trial_id")})
+
+    def last_run(self) -> Optional[Dict[str, Any]]:
+        last = None
+        for row in self.iter_rows():
+            last = row
+        return last
+
+    def signals_for(self, ticker: str) -> List[Dict[str, Any]]:
+        """Every run that produced a signal for one ticker -- the audit question."""
+        return [r for r in self.iter_rows() if ticker in (r.get("signals_generated") or [])]
+
+
+def row_from_output(
+    output: FinalSignalOutput,
+    context: RunContext,
+    funnel: Dict[str, int],
+    duration_ms: float,
+    error: Optional[str] = None,
+) -> LedgerRow:
+    """Flatten a completed run into its permanent record.
+
+    Captures enough to answer "why did the system say this?" six months later:
+    the config hash, the engine version, the regime, the full funnel, and every
+    scored name with its factor values -- not just the winners.
+    """
+    scored: List[Dict[str, Any]] = []
+    for rec in list(output.recommendations) + list(output.watchlist):
+        scored.append(
+            {
+                "ticker": rec.ticker,
+                "decision": rec.decision.value,
+                "composite_score": rec.composite_score,
+                "percentile": rec.universe_percentile,
+                "rank": rec.rank,
+                "sector": rec.sector,
+                "last_close": rec.last_close,
+                "entry_zone": list(rec.entry_zone) if rec.entry_zone else None,
+                "stop": rec.initial_stop,
+                "target_1": rec.target_1,
+                "target_2": rec.target_2,
+                "strength_band": rec.signal_strength_band.value,
+            }
+        )
+
+    regime = output.regime_state
+    return LedgerRow(
+        trial_id=context.trial_id,
+        run_id=output.run_id,
+        date=output.as_of_date,
+        logged_at=dt.datetime.now(),
+        engine_version=output.engine_version,
+        schema_version=context.schema_version,
+        config_version=output.config_version,
+        mode=context.mode,
+        regime_state={
+            "bucket": regime.regime_bucket,
+            "trend": regime.trend_regime.value,
+            "vol_tercile": regime.vol_tercile.value,
+            "vol_context": regime.vol_context.value,
+            "breadth_pct": regime.breadth_pct_above_ma,
+            "transition": regime.transition_flag,
+            "momentum_multiplier": regime.momentum_multiplier,
+            "allow_new_entries": regime.allow_new_entries,
+        },
+        eligible_universe_size=funnel.get("passed_eligibility", 0),
+        universe_considered=funnel.get("universe_considered", 0),
+        stocks_scored=scored,
+        signals_generated=[r.ticker for r in output.recommendations],
+        watchlist_generated=[r.ticker for r in output.watchlist],
+        no_trade=output.no_trade is not None,
+        no_trade_reason=output.no_trade.reason if output.no_trade else None,
+        gate_counts=dict(funnel),
+        data_quality_flags=list(output.data_quality_flags),
+        survivorship_risk=bool(output.manifest.survivorship_risk) if output.manifest else False,
+        stage_timings_ms=dict(output.stage_timings_ms),
+        duration_ms=round(duration_ms, 1),
+        error=error,
+    )

@@ -20,6 +20,8 @@ dependencies = [
     "requests>=2.31",
     "python-dateutil>=2.8",
     "yfinance>=0.2.40",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
     "rich>=13.0",
 ]
 
@@ -33,7 +35,7 @@ prosignal = "prosignal.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-prosignal = ["py.typed"]
+prosignal = ["py.typed", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

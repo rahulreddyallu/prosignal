@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stock Analysis System</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e9ef;
+    --dim:#98a2b3; --accent:#4f8cff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+  }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#f6f7f9;--panel:#fff;--line:#e3e6ea;--text:#1a1d23;--dim:#5b6472;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:900px;margin:0 auto;padding:32px 20px 80px}
+  h1{font-size:20px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:28px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+         padding:20px;margin-bottom:16px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:10px;
+         padding:14px 28px;font-size:16px;font-weight:600;cursor:pointer;width:100%}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;
+       border-bottom:1px solid var(--line);font-size:14px}
+  .row:last-child{border-bottom:0}
+  .row .k{color:var(--dim)}
+  .row .v{font-variant-numeric:tabular-nums;text-align:right}
+  .steps{list-style:none;padding:0;margin:12px 0 0;font-size:14px}
+  .steps li{padding:5px 0;color:var(--dim)}
+  .steps li.done{color:var(--ok)}
+  .steps li.active{color:var(--text);font-weight:600}
+  .bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin:14px 0 4px}
+  .bar > i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+  .pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;
+        font-weight:600;border:1px solid var(--line)}
+  .pill.buy{background:rgba(63,185,80,.15);color:var(--ok);border-color:var(--ok)}
+  .pill.watch{background:rgba(210,153,34,.15);color:var(--warn);border-color:var(--warn)}
+  .pill.none{background:rgba(152,162,179,.12);color:var(--dim)}
+  .card{border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:12px}
+  .card h3{margin:0 0 2px;font-size:16px}
+  .card .co{color:var(--dim);font-size:13px;margin-bottom:12px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:12px 0}
+  .grid div{background:var(--bg);border-radius:8px;padding:9px 11px}
+  .grid .lbl{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+  .grid .val{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+  ul.ev{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--dim)}
+  ul.ev li{margin:3px 0}
+  .ev-ok li::marker{content:"✓  ";color:var(--ok)}
+  .ev-bad li::marker{content:"✕  ";color:var(--bad)}
+  .ev-q li::marker{content:"?  ";color:var(--dim)}
+  h4{margin:14px 0 2px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  .note{font-size:12px;color:var(--dim);margin-top:14px;line-height:1.5}
+  .err{border-color:var(--bad)}
+  .err h2{color:var(--bad);margin:0 0 8px;font-size:16px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase}
+  code{font-size:12px;color:var(--dim)}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Stock Analysis System</h1>
+  <div class="sub">NSE equities · end-of-day · decision support only — this system never places orders</div>
+
+  <div class="panel">
+    <div id="ready"></div>
+    <div style="margin-top:16px"><button id="run">RUN ANALYSIS</button></div>
+    <div id="hint" class="note"></div>
+  </div>
+
+  <div id="progress" class="panel hide">
+    <strong>Analysis running…</strong>
+    <div class="bar"><i id="fill"></i></div>
+    <ul class="steps" id="steps"></ul>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const STEPS = ["Loading market data","Validating data quality","Assessing market regime",
+  "Screening eligibility","Scoring the universe","Running false-signal defense",
+  "Checking entry triggers","Building risk plans","Applying decision gates"];
+const $ = s => document.querySelector(s);
+const money = v => v == null ? "—" : "₹" + Number(v).toLocaleString("en-IN",{maximumFractionDigits:2});
+const esc = s => String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+let poll = null;
+
+async function boot(){
+  try{
+    const r = await fetch("/ready"); const d = await r.json();
+    const c = d.checks || {};
+    $("#ready").innerHTML =
+      row("Status", d.ready ? "<span class='pill buy'>Ready</span>" : "<span class='pill none'>Not ready</span>") +
+      row("Latest session", esc(c.latest_session || "—")) +
+      row("Sessions held", esc(c.price_sessions ?? "—")) +
+      row("Analysable dates", esc(c.analysable_dates ?? "—")) +
+      row("Universe", esc(c.universe || "—")) +
+      row("Config", "<code>"+esc(c.config_version||"")+"</code>");
+    $("#run").disabled = !d.ready;
+    if(!d.ready) $("#hint").textContent = c.price_data || "System is not ready to analyse.";
+  }catch(e){ $("#ready").innerHTML = "<span class='pill none'>Backend unreachable</span>"; }
+}
+const row = (k,v) => `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+
+$("#run").onclick = async () => {
+  $("#run").disabled = true; $("#out").innerHTML = ""; $("#progress").classList.remove("hide");
+  drawSteps(0);
+  try{
+    const r = await fetch("/analysis/run",{method:"POST"});
+    const job = await r.json();
+    if(job.already_running) $("#hint").textContent = "An analysis was already running — showing that one.";
+    watch(job.id);
+  }catch(e){ fail("Could not reach the analysis service.", String(e)); }
+};
+
+function drawSteps(step){
+  $("#fill").style.width = Math.round(100*step/STEPS.length) + "%";
+  $("#steps").innerHTML = STEPS.map((s,i)=>{
+    const cls = i < step ? "done" : (i === step ? "active" : "");
+    const mark = i < step ? "✓" : (i === step ? "▸" : "·");
+    return `<li class="${cls}">${mark}  ${s}</li>`;
+  }).join("");
+}
+
+function watch(id){
+  clearInterval(poll);
+  poll = setInterval(async () => {
+    try{
+      const r = await fetch(`/analysis/${id}`); const j = await r.json();
+      drawSteps(j.progress.step);
+      if(j.state === "COMPLETED"){ clearInterval(poll); load(id); }
+      else if(j.state === "FAILED" || j.state === "CANCELLED"){
+        clearInterval(poll); $("#progress").classList.add("hide"); $("#run").disabled = false;
+        fail(j.state === "CANCELLED" ? "Analysis cancelled." : "Analysis could not complete.",
+             j.error, id);
+      }
+    }catch(e){ clearInterval(poll); $("#run").disabled = false;
+               fail("Lost contact with the analysis service.", String(e), id); }
+  }, 700);
+}
+
+function fail(title, detail, id){
+  $("#out").innerHTML = `<div class="panel err"><h2>${esc(title)}</h2>
+    <div class="note">${esc(detail||"")}</div>
+    ${id?`<div class="note">Run ID: <code>${esc(id)}</code></div>`:""}
+    <div class="note"><strong>No signals were issued.</strong> A partial or failed
+    analysis never produces a trade recommendation.</div></div>`;
+}
+
+async function load(id){
+  $("#progress").classList.add("hide"); $("#run").disabled = false;
+  const d = await (await fetch(`/analysis/${id}/results`)).json();
+  const f = d.funnel || {};
+  const nBuy = d.recommendations.length, nWatch = d.watchlist.length;
+
+  let html = `<div class="panel">
+    <strong>Analysis complete</strong>
+    ${row("Decision", nBuy ? `<span class="pill buy">${nBuy} BUY</span>`
+        : `<span class="pill none">NO TRADE</span>`)}
+    ${row("Watchlist", nWatch)}
+    ${row("Market regime", esc(d.regime.bucket)+" · "+esc(d.regime.trend)+" · "+esc(d.regime.volatility))}
+    ${row("Breadth", d.regime.breadth_pct!=null ? Math.round(d.regime.breadth_pct)+"% above long-term avg" : "not measurable")}
+    ${row("New entries allowed", d.regime.allow_new_entries ? "yes" : "no")}
+    ${row("Data as of", esc(d.as_of_date))}
+    ${row("Analysed at", esc(new Date(d.generated_at).toLocaleString("en-IN")))}
+    ${row("Run ID", "<code>"+esc(d.run_id)+"</code>")}
+  </div>`;
+
+  html += `<div class="panel"><strong>How the universe narrowed</strong>
+    <table><tr><th>Gate</th><th style="text-align:right">Remaining</th></tr>` +
+    Object.entries(f).map(([k,v])=>`<tr><td>${esc(k.replace(/_/g," "))}</td>
+      <td style="text-align:right">${v}</td></tr>`).join("") + `</table></div>`;
+
+  if(d.no_trade){
+    html += `<div class="panel"><strong>No valid trading opportunities today.</strong>
+      <div class="note">${esc(d.no_trade.reason)}<br><br>
+      <strong>This is expected behaviour.</strong> The strategy produces a signal only
+      when every gate is satisfied. It will return NO TRADE on most days by design.</div>`;
+    if(d.no_trade.closest.length){
+      html += `<h4>Closest candidates and the gate each failed</h4><table>
+        <tr><th>#</th><th>Stock</th><th>Score</th><th>Failed at</th></tr>` +
+        d.no_trade.closest.map(c=>`<tr><td>${c.rank}</td><td>${esc(c.ticker)}</td>
+          <td>${c.score.toFixed(3)}</td><td>${esc(c.gate_failed)}</td></tr>`).join("") +
+        `</table>`;
+    }
+    html += `</div>`;
+  }
+
+  [...d.recommendations, ...d.watchlist].forEach(c => html += card(c));
+
+  html += `<div class="panel"><h4>Honesty</h4>
+    <div class="note">${esc(d.probability_note)}</div>
+    <div class="note">${esc(d.disclaimer)}</div>
+    ${d.data_quality_flags.map(x=>`<div class="note">Data quality: ${esc(x)}</div>`).join("")}
+  </div>`;
+  $("#out").innerHTML = html;
+}
+
+function card(c){
+  const rr = (c.target_1 && c.stop && c.last_close)
+    ? ((c.target_1-c.last_close)/(c.last_close-c.stop)).toFixed(1) : null;
+  return `<div class="panel"><div class="card">
+    <span class="pill ${c.decision.includes("BUY")?"buy":"watch"}">${esc(c.decision)}</span>
+    <h3 style="margin-top:8px">${esc(c.ticker)}</h3>
+    <div class="co">${esc(c.company_name||"")} ${c.sector?"· "+esc(c.sector):""}</div>
+    <div class="grid">
+      <div><div class="lbl">Last close</div><div class="val">${money(c.last_close)}</div></div>
+      <div><div class="lbl">Entry</div><div class="val">${c.entry_zone?money(c.entry_zone[0])+"–"+money(c.entry_zone[1]):"no trigger"}</div></div>
+      <div><div class="lbl">Stop</div><div class="val">${money(c.stop)}</div></div>
+      <div><div class="lbl">Target 1</div><div class="val">${money(c.target_1)}</div></div>
+      <div><div class="lbl">Target 2</div><div class="val">${money(c.target_2)}</div></div>
+      ${rr?`<div><div class="lbl">R:R (T1)</div><div class="val">1 : ${rr}</div></div>`:""}
+      <div><div class="lbl">Score</div><div class="val">${(c.score*100).toFixed(0)}/100</div></div>
+      <div><div class="lbl">Strength</div><div class="val">${esc(c.strength)}</div></div>
+    </div>
+    <h4>Why this signal exists</h4>
+    <ul class="ev ev-ok">${c.why.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>
+    <h4>Why this trade may be wrong</h4>
+    <ul class="ev ev-bad">${(c.against.length?c.against:["No disconfirming evidence among the checks that could run. That is not the same as no risk."]).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>
+    ${c.not_testable.length?`<h4>Not testable with current data</h4>
+      <ul class="ev ev-q">${c.not_testable.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+    ${c.exits.length?`<h4>Exit hierarchy</h4>
+      <ul class="ev">${c.exits.slice(0,4).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+    ${c.cost_note?`<div class="note">${esc(c.cost_note)}</div>`:""}
+    <div class="note">${esc(c.warning)}</div>
+  </div></div>`;
+}
+boot();
+</script>
+</body>
+</html>
