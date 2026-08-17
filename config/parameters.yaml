@@ -480,6 +480,19 @@ stage1_data_quality:
     value: 0.25
     status: UNVALIDATED
     search_range: [0.05, 0.60]
+    note: >-
+      Above this share of the universe failing stock-level checks, the FEED is
+      the likely fault rather than the stocks, and the run halts instead of
+      silently shrinking the universe to whatever happened to survive.
+  min_universe_for_failure_fraction:
+    value: 20
+    status: STRUCTURAL
+    note: >-
+      The failure-fraction rule is a claim about a population and needs a
+      population to mean anything. On a 3-name watchlist one bad tick is a 33%
+      failure rate, which says nothing about feed health. Below this many
+      names the engine excludes the individual stocks and draws no conclusion
+      about the feed.
 
   # --- Point-in-time audit (research program section 7) ---
   # These are structural switches, not thresholds. Turning one off is a

@@ -250,6 +250,25 @@ class DataStore:
             out = out[out["index_name"].isin(wanted)]
         return out.reset_index(drop=True)
 
+    def resolve_index_name(self, name: str) -> Optional[str]:
+        """Match an index name case- and whitespace-insensitively.
+
+        NSE publishes ``Nifty 200`` in ``ind_close_all`` while the config, and
+        most people, write ``NIFTY 200``. That mismatch is not hypothetical --
+        it silently halted Stage 2 the first time it ran against real data,
+        because an exact-match lookup returned an empty series and the regime
+        engine correctly refused to form a view without a benchmark.
+
+        Resolving here rather than at each call site means a change in NSE's
+        capitalisation cannot break callers, and a genuinely absent index still
+        returns ``None`` rather than being papered over.
+        """
+        target = " ".join(str(name).strip().casefold().split())
+        for candidate in self.available_index_names():
+            if " ".join(candidate.strip().casefold().split()) == target:
+                return candidate
+        return None
+
     def index_series(
         self,
         index_name: str,
@@ -257,10 +276,24 @@ class DataStore:
         start: Optional[dt.date] = None,
         end: Optional[dt.date] = None,
     ) -> pd.Series:
-        """A single index's field as a date-indexed Series."""
-        frame = self.read_indices(names=[index_name], start=start, end=end)
+        """A single index's field as a date-indexed Series.
+
+        The name is resolved case-insensitively; an unknown index yields an
+        empty Series so the caller can decide whether that is fatal.
+        """
+        resolved = self.resolve_index_name(index_name) or index_name
+        frame = self.read_indices(names=[resolved], start=start, end=end)
         if frame.empty:
-            return pd.Series(dtype="float64", name=index_name)
+            # An EMPTY DatetimeIndex, not the default RangeIndex. Callers slice
+            # these series by date, and an integer index makes `series.index <=
+            # Timestamp` raise an opaque TypeError. That turned a missing India
+            # VIX feed -- which Stage 2 is designed to survive with a reduced-
+            # confidence note -- into a crash.
+            return pd.Series(
+                dtype="float64",
+                index=pd.DatetimeIndex([], name=DATE),
+                name=index_name,
+            )
         frame = frame.sort_values(DATE)
         series = pd.Series(
             frame[field].to_numpy(),

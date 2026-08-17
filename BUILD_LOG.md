@@ -294,117 +294,238 @@ searching until something scores better.
 
 ---
 
-## START HERE TOMORROW — Chunk 2
+## CHUNK 2 — Indicator library, Stage 1 gate, Stage 2 regime engine
 
-**Goal: Stage 1 (Data Quality Gate) + Stage 2 (Market Regime Engine), plus the
-indicator library both depend on.**
+**Status: COMPLETE. 242 tests passing (110 new). Verified against 318 sessions
+of live NSE data.**
 
-Everything needed already exists. No new data sources, no new providers.
+### `src/prosignal/indicators/` — 6 modules, 58 tests
 
-### Step 0 — confirm the ground is solid (2 minutes)
+Pure functions over pandas. Nothing in this package imports config, contracts,
+or the store, which keeps every function testable against hand-computed values
+and means a stage cannot smuggle a threshold in here where it would escape the
+parameter inventory.
+
+Two invariants, both enforced by tests rather than by convention:
+
+1. **Point-in-time safety.** The lookahead tests assert the property directly:
+   truncating the series must not change any value that was already
+   computable. Any indicator that peeks fails immediately. `as_of=` on the
+   scalar helpers is asserted to behave exactly like truncation.
+2. **Honest windows.** A window of `n` returns `NaN` until it has `n` real
+   observations; scalar helpers return `None`, never `0.0`. A missing factor
+   must be reported as missing so Stage 4 can renormalise — a zero would read
+   as "no momentum", which is a completely different claim.
+
+Details worth knowing, each of which is a real bug in some other codebase:
+
+- `ema` uses `adjust=False`. Pandas' default is a *different estimator* from
+  the recursive EMA every charting package means by "50 EMA"; they converge,
+  but not before ~`span` observations.
+- `wilder_ma(n)` ≡ `ema(span=2n-1)`, and that is asserted. Confusing Wilder
+  smoothing with a same-period EMA is why two packages disagree about "the
+  14-period ATR" — and it mis-sizes every stop.
+- `true_range` returns `NaN` on the first bar, not `high - low`. Seeding a
+  recursive average with an understated first value biases it for many
+  sessions. Gap handling is tested both ways: on the NSE, results-day and
+  block-deal gaps are routine, and a stop sized on the intraday range alone is
+  far too tight on exactly the days that matter.
+- `momentum_skip` implements 12-1 properly, and a test proves the recent month
+  genuinely cannot influence the value. Dropping the skip does not "use more
+  data" — short-term reversal dominates the last month, so including it mixes
+  two opposing effects and cancels a real edge.
+- `distance_from_ma_atr` exists because percent extension is not comparable
+  across the universe. 5% means different things for an FMCG major and a
+  smallcap that moves 4% a session; normalising by the stock's own ATR is what
+  stops a naive screen filling with high-volatility names.
+- `sector_neutralise` skips sectors below `min_sector_size`. Demeaning a
+  two-stock sector forces one to `+x` and the other to `-x` by construction,
+  manufacturing a signal out of arithmetic.
+
+### Stage 1 — `stages/stage1_data_quality.py`, 23 tests
+
+Every check binary and independent; nothing blended into a score, because a
+score lets three moderate problems average into an acceptable-looking number.
+
+The market-wide vs per-stock split is the core of the design. If a quarter of
+the universe fails the same check on the same session, the feed changed format
+— 50 companies did not simultaneously have bad ticks. Treating that as 50
+individual exclusions would silently shrink the universe to whatever survived,
+which is worse than halting *and invisible*. `MarketWideHalt` is explicitly not
+NO TRADE: it means the engine refuses to form an opinion.
+
+The bad-tick check requires a move to be extreme **and** unexplained. Volume is
+what separates a real breakout from a fat-fingered print — a genuine 20% move
+on results day arrives with a volume surge. Rejecting on size alone would throw
+away exactly the moves the engine exists to find, and there is a test for each
+direction.
+
+Continuity counts **consecutive** missing sessions, not total. Eight scattered
+gaps across a quarter is a data annoyance; eight in a row was a suspension,
+which is a different fact about the company.
+
+### Stage 2 — `stages/stage2_regime.py`, 27 tests
+
+Four reads kept deliberately separate so one broken input cannot swing the
+whole conclusion.
+
+**Trend** requires the regression slope on log price and the 200-DMA position
+to *agree* before making a directional call. This is what stops the flapping
+that makes regime engines useless. The test that matters constructs a bear-
+market bounce: slope strongly positive, price still below the 200-DMA. Slope
+alone calls that an uptrend and gets you long into a bear rally; the engine
+reports Range-bound and says why.
+
+**Volatility** reads India VIX as a percentile of its own trailing year, never
+an absolute level — it has printed from ~8 to ~87, so "high is above 20" would
+call 2017 alarming and April 2020 a relief. Two tests assert the same VIX of 18
+maps to HIGH in a calm year and LOW in a violent one. Then the asymmetric split
+(Thenmozhi & Chandra): rising-into-decline, rising-into-rally, falling, stable
+— with `vol_signal_confidence` carrying the asymmetry explicitly, because a
+falling-VIX all-clear is the least reliable read there is.
+
+**Breadth** is market-level only and never reaches a stock-level score. It is
+the read that would have flagged 2021-22 on the NSE, when the index was carried
+by a handful of heavyweights while participation narrowed underneath. A
+cap-weighted index cannot show you that.
+
+**Transition** compares today's read against the read 10 sessions ago. Where
+the dampener applies is a deliberate call: momentum and sector-RS are cut,
+**quality is left intact**, because quality's documented job is crash
+stabilisation and dampening it during a turn removes the exposure most likely
+to help. Tagged UNVALIDATED like the rest of the multiplier design.
+
+**Momentum crash** — the Daniel & Moskowitz state gets its own bucket and a
+hard entry block, not a trimmed multiplier. The crash does not happen in the
+decline; it happens in the violent rebound off the bottom, when the most
+beaten-down names rally hardest and everything a momentum screen owns
+underperforms at once. March–June 2020 is the textbook instance, and the test
+reconstructs that shape.
+
+### Three real defects found by running against live data
+
+1. **Index name case mismatch.** NSE publishes `Nifty 200`; the config says
+   `NIFTY 200`. Exact-match lookup returned an empty series and Stage 2
+   correctly refused to form a view — a silent production halt. Fixed with a
+   case- and whitespace-insensitive resolver in the store, so NSE changing
+   capitalisation cannot break callers.
+
+2. **Flat-series percentile returned 100.** Under naive "count values ≤
+   current" ranking, every element of a constant series ties, so the rank is
+   100. A dead-flat India VIX would have read as *maximum volatility forever*,
+   parking the engine in its most defensive bucket during the calmest possible
+   market. Fixed by adopting the textbook midpoint convention
+   `(below + 0.5·equal) / n`, which returns 50 — today is exactly typical of
+   its own history. Regression test pins it.
+
+3. **Empty index series had a `RangeIndex`.** Callers slice these by date, so
+   `series.index <= Timestamp` raised an opaque `TypeError`. That turned a
+   missing India VIX — a case Stage 2 is explicitly designed to survive with a
+   reduced-confidence note — into a crash. Fixed by returning an empty
+   `DatetimeIndex` so the type contract holds whether or not data exists.
+
+### One finding logged, not tuned away
+
+Over the last 25 sessions the bucket changed 7 times, with long persistent runs
+(`range_midvol` → `uptrend_midvol` for 8 sessions → `uptrend_lowvol`). That is
+healthy. But **2026-07-24 shows a single-session flip** to `range_highvol` and
+straight back — a one-day VIX spike crossing the tercile boundary.
+
+This is tercile-boundary sensitivity, and it is recorded here rather than
+smoothed away. Adding hysteresis would be a parameter chosen to make the output
+look tidy, which is precisely the behaviour the research ledger exists to
+prevent. If CPCV shows the boundary matters, it gets fixed with evidence.
+
+### New parameter
+
+`stage1_data_quality.min_universe_for_failure_fraction: 20` (STRUCTURAL). The
+failure-fraction rule is a claim about a population and needs one to mean
+anything — on a 3-name watchlist a single bad tick is a 33% failure rate and
+would halt the run. Below this many names the engine excludes individual
+stocks and draws no conclusion about the feed.
+
+### Storage discipline validated end to end
+
+The full backfill — the exact operation that filled the disk two days ago — ran
+to completion: **318 sessions, `data/` at 230 MB against a 3,072 MB budget,
+3.4 GB free throughout.** Batched writes and the never-cache policy held.
+
+### New command
 
 ```bash
-.venv/bin/python -m pytest tests/ -q && .venv/bin/prosignal data status
+.venv/bin/prosignal analyse regime --history 25
 ```
 
-If the full backfill was interrupted, resume it — it is incremental and
-cache-backed, so re-running costs almost nothing:
+Single-date or N-session history. The history view exists specifically to check
+that buckets persist rather than flap, and it prints a warning if the bucket
+changes more than once every three sessions. This is also the query behind the
+webapp's always-visible regime strip (FR-1).
+
+---
+
+## START HERE TOMORROW — Chunk 3
+
+**Goal: Stage 3 (Eligibility) + Stage 4 (Core Score + redundancy check).**
+
+Everything needed exists. No new data sources.
+
+### Step 0 — confirm the ground (1 minute)
 
 ```bash
-.venv/bin/prosignal data ingest --full
+.venv/bin/python -m pytest tests/ -q && .venv/bin/prosignal analyse regime
 ```
 
-### Step 1 — `src/prosignal/indicators/` (new package)
+### Step 1 — `stages/stage3_eligibility.py`
 
-Pure functions over pandas, no config reads, no I/O. Everything below is needed
-by Stage 2 and reused by Stages 4–7.
-
-- `returns.py` — simple/log returns, cumulative return over a session window,
-  the 12-1 skip-month construction, rolling realised volatility.
-- `moving_averages.py` — SMA, EMA, and distance-from-MA in percent and in ATRs.
-- `atr.py` — true range, Wilder ATR **and** SMA ATR (config selects; Wilder is
-  the default and `STRUCTURAL`).
-- `trend.py` — OLS log-price slope annualised over a session window.
-- `crosssection.py` — winsorise, z-score, cross-sectional rank to `[0, 1]`,
-  sector-neutral demeaning, Spearman correlation matrix (Stage 4's redundancy
-  check needs this).
-- `stats.py` — rolling percentile of a value within its own trailing
-  distribution (the India VIX tercile needs it), rolling sigma of returns.
-
-Write `tests/test_indicators.py` alongside — hand-computed expected values, not
-"whatever the code returns".
-
-### Step 2 — `src/prosignal/stages/stage1_data_quality.py`
-
-Signature: `run(manifest, store, calendar, universe, config) -> DataQualityReport`
+Signature: `run(universe, store, calendar, quality_report, config) -> EligibilityReport`
 (contract already defined in `core/contracts.py`).
 
-Checks, each binary — never blended into a score:
+Hard gates only, all binary, all firing **before** any scoring. Order matters:
+a stock excluded here must never reach a stage that could score it well enough
+to overcome the exclusion.
 
-1. **Staleness** — every feed's `age_sessions` vs `feeds.<name>.max_age_sessions`.
-   Any *required* feed stale → market-wide FAIL → raise `MarketWideHalt`.
-2. **Universe-wide failure fraction** — if more than
-   `max_universe_failure_fraction` of names fail stock-level checks, the *feed*
-   is broken, not the stocks. Halt.
-3. **Cross-source agreement** — NSE close vs the `prices_secondary` table
-   (yfinance), in bps. Beyond tolerance → soft flag (or reject, per
-   `source_disagreement_action`). Never silently pick a source.
-4. **Outlier / bad tick** — return beyond `outlier_return_sigma` of the stock's
-   own trailing distribution, *or* beyond `outlier_absolute_return_pct`, with no
-   corroborating volume and no corporate action → hard-reject that stock.
-5. **Corporate-action adjustment** — call `detect_unexplained_jumps()` (already
-   written and calibrated). Any hit → hard-reject that stock.
-6. **Continuity** — more than `max_consecutive_missing_sessions` gaps inside
-   `continuity_window_sessions` → exclude.
-7. **Point-in-time audit** — populate `pit_audit` / `pit_audit_failures` from
-   `manifest.survivorship_risk` and the `stage1_data_quality.pit_audit` switches.
+1. **Data quality** — anything Stage 1 failed is out. Feed
+   `quality_report.failed_tickers()` straight in.
+2. **History** — `universe.min_history_sessions` (300). Insufficient history is
+   `RejectionReason.INSUFFICIENT_HISTORY`, never a partial-window score.
+3. **Liquidity** — ADTV in INR over the configured window, and the
+   `max_participation_of_adtv` position-size check. This is Tier-A parameter
+   #1; the ADTV figure computed here feeds it directly.
+4. **Price floor**, **series allowed** (`EQ` only), **manual exclusions**.
+5. **Pledging** — `NOT_TESTABLE` when the CSV is absent. It does NOT pass.
+6. **Earnings conflict** — hard reject inside the blackout window; the config
+   validator already forbids relaxing this without the PEAD flag.
+7. **Regulatory cooldown** — from `regulatory_events`.
 
-Note: `MarketWideHalt` already exists in `core/errors.py` and carries the
-reason list the webapp's FR-9 needs.
+Populate `not_testable` verbatim for every check that could not run; it prints
+on every card.
 
-### Step 3 — `src/prosignal/stages/stage2_regime.py`
+### Step 2 — `stages/stage4_core_score.py`
 
-Signature: `run(store, calendar, eligible_symbols, config) -> RegimeState`
-(contract already defined).
+Signature: `run(eligibility, store, calendar, regime, config) -> CoreScoreReport`
 
-All inputs come from `store.index_series(...)`, which is already populated:
+Use the cross-section helpers already written and tested:
+`winsorise → standardise → sector_neutralise → weight`. That order is not
+negotiable and `tests/test_indicators.py` explains why.
 
-- **Trend** — Nifty 200 vs 50-DMA and 200-DMA, plus annualised OLS slope; flat
-  band → `Range-bound`.
-- **Volatility** — India VIX tercile against its own trailing 252-session
-  distribution. Then the **asymmetric split** (Thenmozhi & Chandra 2013):
-  compute VIX rate-of-change and the index move over the same window, and map to
-  `rising-in-decline` / `rising-in-rally` / `falling` / `stable`. Set
-  `vol_signal_confidence` from `asymmetric_confidence` — a rising-VIX read is
-  more reliable than a falling-VIX all-clear (G.C. & Kothari 2016).
-- **Breadth** — % of the eligible universe above its own 200-DMA, plus the
-  divergence flag (index makes a new N-session high, breadth does not).
-  Market-level only. It must never reach a stock-level score.
-- **Transition** — compare the current read against the trailing
-  `lookback_sessions` read; if at least `min_components_disagreeing` of
-  {trend, vol, breadth} disagree, set `transition_flag` and apply `dampener`
-  **market-wide**, not just to the flagged name.
-- **Bucket** — `f"{trend.bucket_key}_{vol.bucket_key}"`, with the special
-  `uptrend_highvol_rebound` case when the Daniel & Moskowitz crash signature
-  fires (prior decline + high vol + sharp rebound). Look the multipliers up in
-  `stage2_regime.multipliers.table`; apply `weak_breadth_momentum_penalty` when
-  breadth is weak; set `allow_new_entries=False` when the bucket is in
-  `no_new_entry_buckets`.
+- Factors from `stage4_core_score.factors`. **Quality is dropped** — no
+  point-in-time fundamentals exist, Stage 1 already records
+  `fundamentals_filing_date: False`, and the remaining weights renormalise.
+  State it on every card.
+- Apply the Stage 2 multipliers per factor: `momentum_multiplier`,
+  `quality_multiplier`, `sector_rs_multiplier`.
+- Map the composite to `[0, 1]` across the eligible universe with
+  `rank_to_unit_interval` — every Stage 5/8 threshold operates on that scale.
+- **Redundancy check** — `spearman_pairs()` is written and tested. Measure it,
+  do not assume it. Log the technical-collapse diagnostic too: RSI / MACD /
+  MA-crossover are *expected* to collapse into momentum, and expecting it is
+  not the same as verifying it.
 
-`RegimeState.compatibility()` is already written and maps the multipliers onto
-the card's Favorable / Neutral / Unfavorable line.
+### Step 3 — wire and verify
 
-### Step 4 — wire up and verify
-
-Add `prosignal analyse regime --date YYYY-MM-DD` to the CLI so Stage 2 can be
-inspected on its own. That command is also what the webapp's `GET /regime`
-endpoint (FR-1, the always-visible regime strip) will call later.
-
-Sanity check against reality: with roughly a year of data loaded, print the
-regime for the last ~20 sessions and confirm the buckets move sensibly rather
-than flapping every session. Flapping means the transition detector or the
-tercile lookback needs attention — and that is a finding to log, not a number
-to tune until it looks nice.
+Add `prosignal analyse score --date --top 20`. Then read the top 20 as a
+trader: if it is 15 names from two sectors, sector-neutralisation is not doing
+its job and that is a finding to log.
 
 ---
 
@@ -413,8 +534,8 @@ to tune until it looks nice.
 | # | Scope | Status |
 |---|---|---|
 | 1 | Foundation, config, Stage 0 data layer | **done** |
-| 2 | Indicator library, Stage 1 data-quality gate, Stage 2 regime engine | next |
-| 3 | Stage 3 eligibility, Stage 4 core score + redundancy check | |
+| 2 | Indicator library, Stage 1 data-quality gate, Stage 2 regime engine | **done** |
+| 3 | Stage 3 eligibility, Stage 4 core score + redundancy check | next |
 | 4 | Stage 5 false-signal defense matrix (the largest single stage) | |
 | 5 | Stage 6 entry confirmation, Stage 7 risk/position engine | |
 | 6 | Stage 8 final signal, recommendation formatter, research ledger | |

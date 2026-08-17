@@ -23,7 +23,7 @@ import sys
 from typing import List, Optional
 
 from .config.loader import AppConfig, load_config
-from .core.errors import ProSignalError
+from .core.errors import DataError, ProSignalError
 from .core.logging import get_logger, setup_logging
 from .version import ENGINE_NAME, ENGINE_VERSION, SCHEMA_VERSION
 
@@ -583,6 +583,200 @@ def cmd_data_gc(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_market(cfg: AppConfig):
+    """Store, calendar and current universe -- the inputs every analysis needs."""
+    from .core.calendar import TradingCalendar
+    from .data.store import DataStore
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError(
+            "the local store has no price sessions. Run `prosignal data ingest --full` first."
+        )
+    calendar = TradingCalendar(sessions)
+
+    index_name = str(cfg.params.stage2_regime.benchmark_index.value)
+    snapshot_dates = store.universe_snapshot_dates(index_name)
+    symbols: List[str] = []
+    if snapshot_dates:
+        snapshot = store.read_universe_snapshot(index_name, snapshot_dates[-1])
+        if snapshot is not None and not snapshot.empty:
+            symbols = snapshot["symbol"].tolist()
+    return store, calendar, symbols
+
+
+def _resolve_as_of(calendar, requested: Optional[str]):
+    """Resolve a requested date back to a real session."""
+    import datetime as _dt
+
+    if not requested:
+        return calendar.last
+    try:
+        wanted = _dt.date.fromisoformat(requested)
+    except ValueError as exc:
+        raise DataError(f"--date must be YYYY-MM-DD; got {requested!r}") from exc
+
+    resolved = calendar.last_session_on_or_before(wanted)
+    if resolved is None:
+        raise DataError(
+            f"no trading session on or before {wanted} in the local store "
+            f"(earliest is {calendar.first})."
+        )
+    return resolved
+
+
+def cmd_analyse_regime(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Stage 2 in isolation. Also the query behind the webapp's regime strip."""
+    from .stages import stage2_regime
+
+    store, calendar, symbols = _load_market(cfg)
+    as_of = _resolve_as_of(calendar, getattr(args, "date", None))
+
+    history = int(getattr(args, "history", 1) or 1)
+    if history > 1:
+        return _regime_history(cfg, store, calendar, symbols, as_of, history)
+
+    state = stage2_regime.run(store, calendar, symbols, cfg, as_of=as_of)
+
+    _rule(f"Market regime -- {state.as_of_date}")
+    if as_of != _requested_date(args, as_of):
+        _print(f"[dim]requested {args.date}; resolved back to session {as_of}[/dim]"
+               if _console else f"requested {args.date}; resolved to session {as_of}")
+
+    rows = [
+        ["Regime bucket", state.regime_bucket],
+        ["Trend", f"{state.trend_regime.value}"],
+        ["  slope (annualised)", _opt_pct(state.trend_slope_annualised)],
+        ["  vs fast MA", _opt_num(state.index_vs_fast_ma_pct, "%")],
+        ["  vs slow MA", _opt_num(state.index_vs_slow_ma_pct, "%")],
+        ["Volatility", f"{state.vol_tercile.value} / {state.vol_context.value}"],
+        ["  India VIX", _opt_num(state.vix_level)],
+        ["  percentile of own year", _opt_num(state.vix_percentile, "%")],
+        ["  change", _opt_num(state.vix_change_pct, "%")],
+        ["  signal confidence", f"{state.vol_signal_confidence:.2f}"],
+        ["Breadth", state.breadth_state.value],
+        ["  above long-term MA", _opt_num(state.breadth_pct_above_ma, "%")],
+        ["  sample", str(state.breadth_sample_size)],
+        ["  divergence", "yes" if state.breadth_divergence_flag else "no"],
+        ["Transition", "YES" if state.transition_flag else "no"],
+    ]
+    for component in state.transition_components:
+        rows.append(["  ", component])
+    _table("Regime", ["read", "value"], rows)
+
+    _table(
+        "Factor multipliers",
+        ["factor", "multiplier"],
+        [
+            ["momentum", f"{state.momentum_multiplier:.3f}"],
+            ["quality", f"{state.quality_multiplier:.3f}"],
+            ["sector RS", f"{state.sector_rs_multiplier:.3f}"],
+            ["dampener applied", f"{state.dampener_applied:.2f}"],
+        ],
+    )
+
+    _print()
+    _print(f"New entries allowed : {'YES' if state.allow_new_entries else 'NO'}")
+    _print(f"Regime compatibility: {state.compatibility().value}")
+    if state.block_reason:
+        _print(f"[red]{state.block_reason}[/red]" if _console else state.block_reason)
+
+    if state.notes:
+        _rule("Notes")
+        for note in state.notes:
+            _print(f"  {note}")
+
+    _print()
+    _print(
+        "[dim]Every multiplier above is an UNVALIDATED hypothesis until CPCV "
+        "promotes it.[/dim]"
+        if _console
+        else "Multipliers are UNVALIDATED until CPCV promotes them."
+    )
+    return 0
+
+
+def _regime_history(cfg, store, calendar, symbols, as_of, history: int) -> int:
+    """Print the regime for the last N sessions.
+
+    The sanity check that matters for a regime engine: buckets should persist
+    for weeks at a time. A bucket that changes every session is not detecting
+    regime, it is tracking noise -- and that is a finding to log, not a number
+    to tune until the output looks tidy.
+    """
+    from .stages import stage2_regime
+
+    window = calendar.trailing_window(as_of, history)
+    rows = []
+    buckets = []
+    for day in window:
+        state = stage2_regime.run(store, calendar, symbols, cfg, as_of=day)
+        buckets.append(state.regime_bucket)
+        rows.append(
+            [
+                day.isoformat(),
+                state.regime_bucket,
+                state.trend_regime.value,
+                f"{state.vol_tercile.value}/{state.vol_context.value}",
+                _opt_num(state.breadth_pct_above_ma, "%"),
+                "T" if state.transition_flag else "",
+                f"{state.momentum_multiplier:.2f}",
+                "" if state.allow_new_entries else "BLOCKED",
+            ]
+        )
+
+    _rule(f"Regime over the last {len(window)} sessions")
+    _table(
+        "History",
+        ["date", "bucket", "trend", "volatility", "breadth", "trn", "mom", "entries"],
+        rows,
+    )
+
+    changes = sum(1 for a, b in zip(buckets, buckets[1:]) if a != b)
+    _print()
+    _print(f"bucket changes over {len(buckets)} sessions: {changes}")
+    if len(buckets) > 4 and changes > len(buckets) // 3:
+        _print(
+            "[red]The bucket is changing more than once every three sessions. "
+            "That is flapping, not regime detection -- investigate the tercile "
+            "lookback and the transition detector before trusting this.[/red]"
+            if _console
+            else "WARNING: bucket is flapping; investigate before trusting it."
+        )
+    else:
+        _print(
+            "[dim]Buckets persist across multiple sessions, which is what a "
+            "regime read should do.[/dim]"
+            if _console
+            else "Buckets persist across sessions, as expected."
+        )
+    return 0
+
+
+def _requested_date(args: argparse.Namespace, fallback):
+    import datetime as _dt
+
+    raw = getattr(args, "date", None)
+    if not raw:
+        return fallback
+    try:
+        return _dt.date.fromisoformat(raw)
+    except ValueError:
+        return fallback
+
+
+def _opt_num(value: Optional[float], suffix: str = "") -> str:
+    """Format an optional number. Missing prints as '-', never as 0."""
+    if value is None:
+        return "-"
+    return f"{value:,.2f}{suffix}"
+
+
+def _opt_pct(value: Optional[float]) -> str:
+    return "-" if value is None else f"{value:+.1%}"
+
+
 def cmd_data_purge_cache(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .data.providers.http import HttpClient
 
@@ -665,6 +859,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     purge = data_sub.add_parser("purge-cache", help="delete cached HTTP payloads")
     purge.set_defaults(func=cmd_data_purge_cache)
+
+    # -- analyse ------------------------------------------------------------
+    analyse_p = sub.add_parser("analyse", help="run individual pipeline stages")
+    analyse_sub = analyse_p.add_subparsers(dest="subcommand")
+
+    regime = analyse_sub.add_parser(
+        "regime", help="Stage 2 -- market regime for a date"
+    )
+    regime.add_argument(
+        "--date",
+        help="decision date (YYYY-MM-DD). Resolved back to the last real session.",
+    )
+    regime.add_argument(
+        "--history",
+        type=int,
+        default=1,
+        help=(
+            "print the regime for the last N sessions instead of one, to check "
+            "the buckets persist rather than flapping"
+        ),
+    )
+    regime.set_defaults(func=cmd_analyse_regime)
 
     return parser
 

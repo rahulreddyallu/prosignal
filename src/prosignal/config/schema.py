@@ -499,6 +499,7 @@ class Stage1Config(_Base):
     max_consecutive_missing_sessions: TI
     continuity_window_sessions: TI
     max_universe_failure_fraction: TF
+    min_universe_for_failure_fraction: TI
     pit_audit: PitAuditConfig = Field(default_factory=PitAuditConfig)
 
     @model_validator(mode="after")
