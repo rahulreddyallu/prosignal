@@ -65,10 +65,25 @@ def point_in_time_snapshot(
     if fundamentals is None or fundamentals.empty:
         return pd.DataFrame()
     frame = fundamentals.copy()
-    frame["filing_date"] = pd.to_datetime(frame["filing_date"], errors="coerce").dt.date
-    frame["period_end"] = pd.to_datetime(frame["period_end"], errors="coerce").dt.date
+    frame["filing_date"] = pd.to_datetime(frame["filing_date"], errors="coerce")
+    frame["period_end"] = pd.to_datetime(frame["period_end"], errors="coerce")
     frame = frame.dropna(subset=["filing_date", "period_end"])
-    frame = frame[frame["filing_date"] <= as_of]
+    if frame.empty:
+        # Every row lacked a usable date. Return early rather than comparing an
+        # all-NaT datetime64 column against a date, which raises TypeError and
+        # would take the whole pipeline down instead of simply dropping the
+        # factor. A provider returning undated rows is a degradation, not a
+        # crash.
+        return pd.DataFrame(columns=fundamentals.columns)
+
+    # Compare in datetime space, then hand back plain dates: mixing
+    # datetime64 columns with datetime.date objects is the usual source of
+    # "Invalid comparison" in this codepath.
+    frame = frame[frame["filing_date"] <= pd.Timestamp(as_of)]
+    if frame.empty:
+        return pd.DataFrame(columns=fundamentals.columns)
+    frame["filing_date"] = frame["filing_date"].dt.date
+    frame["period_end"] = frame["period_end"].dt.date
     return frame.sort_values([SYMBOL, "period_end"], ascending=[True, False])
 
 
