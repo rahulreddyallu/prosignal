@@ -29,10 +29,10 @@ reports optimistic numbers for a mechanical reason and you will believe them.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from itertools import combinations
 from math import comb
-from typing import Iterator, List, Optional, Sequence, Tuple
+from typing import Iterator, List, Sequence, Tuple
 
 import numpy as np
 

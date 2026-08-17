@@ -12,7 +12,7 @@ import datetime as dt
 
 import pytest
 
-from prosignal.config.loader import config_hash, load_config
+from prosignal.config.loader import load_config
 from prosignal.config.schema import ParamStatus, RootConfig, Tunable
 from prosignal.core.errors import ConfigError
 
@@ -170,18 +170,34 @@ def test_order_placement_interlock_cannot_be_enabled(tmp_project, baseline_yaml)
     assert "decision-support" in str(exc.value)
 
 
-def test_estimate_revision_factor_cannot_carry_weight(tmp_project, baseline_yaml):
-    """No timestamped India analyst feed exists, so this must stay at zero."""
+def test_estimate_revision_factor_cannot_be_reintroduced(tmp_project, baseline_yaml):
+    """The factor was removed; adding it back must fail loudly.
+
+    A source audit (see DATA_SOURCES.md) found no free or scrapeable India feed
+    carrying timestamped analyst consensus estimates, and unlike every other
+    gap it cannot be derived -- a changed analyst opinion leaves no trace in
+    price or filings. `extra="forbid"` is what stops someone reinstating the
+    key and quietly approximating it from an untimestamped source, which is
+    precisely the leakage the research program forbids.
+    """
     bad = copy.deepcopy(baseline_yaml)
-    bad["stage4_core_score"]["factors"]["estimate_revision_momentum"]["enabled"] = True
-    bad["stage4_core_score"]["factors"]["estimate_revision_momentum"]["weight_band"]["value"] = [
-        0.1,
-        0.2,
-    ]
+    bad["stage4_core_score"]["factors"]["estimate_revision_momentum"] = {
+        "enabled": True,
+        "weight_band": {"value": [0.1, 0.2], "status": "UNVALIDATED"},
+    }
     write_config(tmp_project, bad)
     with pytest.raises(ConfigError) as exc:
         load_config(project_root=tmp_project, use_cache=False)
-    assert "point-in-time India analyst data" in str(exc.value)
+    assert "estimate_revision_momentum" in str(exc.value)
+
+
+def test_shipped_config_has_no_estimate_revision_factor(cfg):
+    """It is gone from the live config, not merely disabled in it."""
+    factors = cfg.params.stage4_core_score.factors
+    assert not hasattr(factors, "estimate_revision_momentum")
+    assert all(
+        "estimate_revision" not in t["path"] for t in cfg.params.iter_tunables()
+    )
 
 
 def test_earnings_hard_reject_cannot_be_relaxed_without_pead_flag(tmp_project, baseline_yaml):
@@ -260,3 +276,51 @@ def test_local_overlay_is_merged(tmp_project, baseline_yaml):
     assert cfg.params.capital.total_capital_inr.value == 5_000_000
     # Untouched sections survive the merge.
     assert cfg.params.universe.index_name.value == "NIFTY 200"
+
+
+# =============================================================================
+# codebase-wide invariants
+# =============================================================================
+
+
+def test_every_public_annotation_resolves_at_runtime():
+    """Catches the `undefined name 'List'` class of bug across the whole package.
+
+    `from __future__ import annotations` makes type hints lazy strings, so a
+    missing import in a signature raises nothing at import time and nothing in
+    normal use -- it only fails when something actually resolves the hints.
+    Pydantic does that, and FastAPI (chunk 7) does it for every route it
+    serves, which is a bad place to discover it.
+
+    One such defect was found this way in `HttpClient.purge_violating_policy`.
+    """
+    import importlib
+    import inspect
+    import pkgutil
+    import typing
+
+    import prosignal
+
+    broken = []
+    for mod_info in pkgutil.walk_packages(prosignal.__path__, "prosignal."):
+        module = importlib.import_module(mod_info.name)
+        for name, obj in vars(module).items():
+            if name.startswith("_"):
+                continue
+            if inspect.isfunction(obj) and obj.__module__ == mod_info.name:
+                targets = [obj]
+            elif inspect.isclass(obj) and obj.__module__ == mod_info.name:
+                targets = [
+                    f
+                    for n, f in vars(obj).items()
+                    if inspect.isfunction(f) and not n.startswith("__")
+                ]
+            else:
+                continue
+            for fn in targets:
+                try:
+                    typing.get_type_hints(fn)
+                except Exception as exc:  # noqa: BLE001 - reporting, not handling
+                    broken.append(f"{mod_info.name}.{fn.__qualname__}: {exc}")
+
+    assert not broken, "unresolvable type annotations:\n  " + "\n  ".join(broken)

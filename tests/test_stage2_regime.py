@@ -8,8 +8,6 @@ shapes those rules exist to catch.
 
 from __future__ import annotations
 
-import datetime as dt
-
 import numpy as np
 import pandas as pd
 import pytest

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import combinations
-from math import comb, erf, exp, log, sqrt
+from math import erf, exp, log, sqrt
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np

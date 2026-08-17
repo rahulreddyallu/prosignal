@@ -47,7 +47,6 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-import numpy as np
 import pandas as pd
 
 from ..core.calendar import TradingCalendar
@@ -60,7 +59,6 @@ from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL, normalise_symbol
 from ..indicators import (
     annualised_log_slope,
-    is_above,
     percentile_of_last,
     rate_of_change_pct,
     sma,

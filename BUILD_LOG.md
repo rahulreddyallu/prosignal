@@ -73,7 +73,7 @@ A live ingest produced:
 |---|---|
 | `nsearchives.nseindia.com` | **200 OK**, no auth |
 | `archives.nseindia.com` | **200 OK**, no auth |
-| `www.nseindia.com` (JSON API) | **403 — bot-shielded.** Implemented as best-effort; no required feed depends on it |
+| `www.nseindia.com` (JSON API) | **CORRECTED 2026-08-17: returns 200 with a cookie session.** The original 403 came from probing without first loading a listing page to obtain `_abck`/`bm_sz`/`nsit`. The homepage genuinely does 403; the listing pages do not. This one wrong note cost the engine insider-trading, corporate-announcement, shareholding and financial-results feeds. See `DATA_SOURCES.md` |
 | `ind_close_all_DDMMYYYY.csv` | one file per session, all indices **+ India VIX**. This single file is the whole Stage 2 input set |
 | `sec_bhavdata_full_DDMMYYYY.csv` | adds `DELIV_QTY` / `DELIV_PER` and `AVG_PRICE` (an honest daily VWAP proxy) |
 | F&O bhavcopy | `FinInstrmTp` values are `STF` (stock futures), `STO`, `IDF`, `IDO`. Filter `STF`, sum OI across expiries |

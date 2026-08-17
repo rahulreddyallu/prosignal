@@ -9,7 +9,6 @@ These tests pin the policies that stop it happening again.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest

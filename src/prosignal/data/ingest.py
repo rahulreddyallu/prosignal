@@ -44,7 +44,7 @@ from .providers.http import HttpClient, NseJsonSession
 from .providers.nse_archives import INDIA_VIX_NAME, NseArchivesProvider
 from .providers.yfinance_provider import YFinanceProvider
 from .store import DataStore
-from .types import DATE, SYMBOL, normalise_symbol
+from .types import DATE, SYMBOL
 from .universe import UniverseResolver, UniverseSnapshot
 
 __all__ = ["DataIngestor", "IngestOptions", "IngestResult"]

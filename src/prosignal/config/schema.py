@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import datetime as dt
 from enum import Enum
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -732,27 +732,19 @@ class SectorRsFactorConfig(_Base):
         return self
 
 
-class EstimateRevisionFactorConfig(_Base):
-    enabled: bool = False
-    weight_band: TLF
-
-    @model_validator(mode="after")
-    def _locked(self) -> "EstimateRevisionFactorConfig":
-        if self.enabled and max(self.weight_band.value or [0.0]) > 0:
-            raise ValueError(
-                "estimate_revision_momentum cannot carry weight: it requires "
-                "timestamped point-in-time India analyst data. Approximating it "
-                "with an untimestamped source is exactly the leakage the "
-                "research program forbids."
-            )
-        return self
-
-
 class FactorsConfig(_Base):
+    """The factors that can actually be computed from obtainable data.
+
+    ``estimate_revision_momentum`` was removed on 2026-08-17. It needed
+    timestamped point-in-time analyst consensus estimates; a source audit found
+    none available on any free or scrapeable India feed, and unlike the other
+    gaps it cannot be derived from prices or filings -- a changed analyst
+    opinion leaves no trace in market data. See DATA_SOURCES.md.
+    """
+
     momentum_12_1: MomentumFactorConfig
     quality: QualityFactorConfig
     sector_relative_strength: SectorRsFactorConfig
-    estimate_revision_momentum: EstimateRevisionFactorConfig
 
 
 class RedundancyConfig(_Base):

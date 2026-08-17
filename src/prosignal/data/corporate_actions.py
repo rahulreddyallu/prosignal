@@ -22,7 +22,6 @@ prices by. A 1:1 bonus doubles the share count, so ``ratio = 0.5``.
 
 from __future__ import annotations
 
-import datetime as dt
 import re
 from fractions import Fraction
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple

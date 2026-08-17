@@ -341,7 +341,16 @@ providers:
     enabled: true
     treat_failure_as: "soft"         # "soft" -> log + continue | "hard" -> fail run
     base: "https://www.nseindia.com"
-    warmup_path: "/"
+    # MUST NOT be "/". The NSE homepage is the one path that genuinely returns
+    # 403 to a non-browser client; every /companies-listing/* page returns 200
+    # and sets the `_abck` / `bm_sz` / `nsit` cookies the JSON API requires.
+    #
+    # Warming up on "/" was the single reason this whole API was believed to be
+    # "403, bot-shielded" and left unused through Chunk 1 -- costing the engine
+    # its insider-trading, corporate-announcement, shareholding and
+    # financial-results feeds. Probed and corrected 2026-08-17; see
+    # DATA_SOURCES.md for the response structure of each endpoint.
+    warmup_path: "/companies-listing/corporate-filings-announcements"
     corporate_actions_path: "/api/corporates-corporateActions?index=equities&from_date={from_ddmmyyyy}&to_date={to_ddmmyyyy}"
     event_calendar_path: "/api/event-calendar?index=equities&from_date={from_ddmmyyyy}&to_date={to_ddmmyyyy}"
     shareholding_path: "/api/corporate-share-holdings-master?index=equities&symbol={symbol}"
@@ -817,14 +826,20 @@ stage4_core_score:
         value: null
         status: UNVALIDATED
 
-    estimate_revision_momentum:
-      enabled: false
-      weight_band:
-        value: [0.0, 0.0]
-        status: UNVALIDATED
-        note: >-
-          LOCKED AT ZERO. Requires timestamped point-in-time India analyst data
-          that does not exist on any free feed. Do not approximate it.
+    # REMOVED 2026-08-17: estimate_revision_momentum.
+    #
+    # It required timestamped point-in-time analyst consensus estimates. A
+    # source audit found no free or scrapeable India feed carrying them --
+    # I/B/E/S, Refinitiv and Bloomberg are the only real options and all are
+    # paid and licence-restricted. Unlike every other gap found in that audit,
+    # this one cannot be derived from price, volume, or filings either: an
+    # analyst's changed opinion is not recoverable from market data.
+    #
+    # It was previously shipped disabled with a weight locked at zero, which
+    # meant ~40 lines of config, schema, and validator existed to hold a factor
+    # that could never fire. Carrying dead scaffolding for a factor with no
+    # path to data is worse than not having it: it implies the capability is
+    # one config change away, and it is not. See DATA_SOURCES.md.
 
   # --- Redundancy check (master prompt Stage 4) ---
   redundancy:

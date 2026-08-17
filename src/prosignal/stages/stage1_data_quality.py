@@ -31,7 +31,7 @@ data happened to survive -- which is a far worse outcome than halting.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
