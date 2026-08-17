@@ -395,7 +395,6 @@ class NseArchivesConfig(_Base):
     bhavcopy_legacy_path: str
     sec_bhavdata_full_path: str
     index_close_all_path: str
-    fo_bhavcopy_path: str
     equity_master_path: str
     index_constituent_files: Dict[str, str]
 
@@ -461,7 +460,6 @@ KNOWN_FEEDS = (
     "earnings_calendar",
     "fundamentals",
     "pledging",
-    "fo_open_interest",
     "regulatory_events",
 )
 
@@ -827,13 +825,6 @@ class NewsSpikeConfig(_Base):
     penalty: TF
 
 
-class ShortCoveringConfig(_Base):
-    enabled: bool = True
-    lookback_sessions: TI
-    min_price_change_pct: TF
-    min_oi_decline_pct: TF
-    penalty: TF
-
 
 class BetaExplainedConfig(_Base):
     enabled: bool = True
@@ -918,7 +909,6 @@ class Stage5Config(_Base):
     liquidity_distortion: LiquidityDistortionConfig
     gap_signal: GapSignalConfig
     news_spike: NewsSpikeConfig
-    short_covering: ShortCoveringConfig
     beta_explained_move: BetaExplainedConfig
     overextension: OverextensionConfig
     earnings_distortion: EarningsDistortionConfig

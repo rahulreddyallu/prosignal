@@ -21,8 +21,6 @@ python-dateutil>=2.8
 yfinance>=0.2.40         # SECONDARY price source (used for cross-source agreement)
 
 # --- API layer (Stage 8 -> webapp) -----------------------------------------
-fastapi>=0.110
-uvicorn>=0.27
 
 # --- CLI ergonomics ---------------------------------------------------------
 rich>=13.0

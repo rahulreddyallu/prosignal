@@ -10,7 +10,6 @@ sec_bhavdata_full            adds DELIV_QTY / DELIV_PER (delivery percentage)
 ind_close_all                OHLC for EVERY NSE index in one file, incl India VIX
 ind_nifty<N>list             current constituents + Industry (sector) + ISIN
 EQUITY_L                     every listed symbol with DATE OF LISTING and ISIN
-F&O bhavcopy                 open interest, for the Stage 5 OI context check
 ===========================  ==================================================
 
 ``ind_close_all`` is quietly the most valuable file here: one request per
@@ -111,7 +110,7 @@ class NseArchivesProvider:
 
     #: Logical feed keys the storage policy can name in
     #: ``storage.raw_cache.never_cache_feeds``.
-    FEED_KEYS = ("cm_bhavcopy", "fo_bhavcopy", "delivery", "index_close_all")
+    FEED_KEYS = ("cm_bhavcopy", "delivery", "index_close_all")
 
     def __init__(
         self,
@@ -139,7 +138,6 @@ class NseArchivesProvider:
         """
         by_feed = {
             "cm_bhavcopy": self.cfg.bhavcopy_udiff_path,
-            "fo_bhavcopy": self.cfg.fo_bhavcopy_path,
             "delivery": self.cfg.sec_bhavdata_full_path,
             "index_close_all": self.cfg.index_close_all_path,
         }
@@ -437,59 +435,7 @@ class NseArchivesProvider:
     # =========================================================================
     # F&O open interest
     # =========================================================================
-    def fetch_fo_open_interest(self, day: dt.date) -> Optional[pd.DataFrame]:
-        """Stock-futures OI aggregated across expiries, per underlying.
 
-        Feeds only the Stage 5 long-buildup / short-covering CONTEXT check.
-        Per the research program's section 2.G this is practitioner-grade
-        (evidence tier ●○○) and can never be a standalone signal: OI cannot
-        separate hedging from directional betting, and the four-way labels are
-        inferences from the price move, not independent confirmation.
-        """
-        url = self._archives_url(_fmt(self.cfg.fo_bhavcopy_path, day))
-        # This is the single largest payload the engine downloads (~1.3 MB per
-        # session) and it yields roughly 5 KB of aggregated open interest --
-        # every option strike for every underlying, of which we keep only the
-        # stock-futures rows. Caching it is a ~280:1 waste of disk, so by
-        # default it is parsed once and discarded.
-        res = self.client.get(
-            url,
-            ttl_seconds=self._ttl(day),
-            context="nse_archives.fo",
-            cacheable=self._cacheable("fo_bhavcopy"),
-        )
-        if res is None:
-            return None
-        raw = _read_zip_csv(res.content)
-        if "FinInstrmTp" not in raw.columns:
-            return None
-
-        futures = raw[raw["FinInstrmTp"].astype(str).str.upper() == "STF"].copy()
-        if futures.empty:
-            return None
-
-        futures[SYMBOL] = futures["TckrSymb"].map(normalise_symbol)
-        futures["oi"] = _num(futures["OpnIntrst"])
-        futures["oi_change"] = _num(futures["ChngInOpnIntrst"])
-        futures["fut_close"] = _num(futures["ClsPric"])
-        futures["fut_volume"] = _num(futures["TtlTradgVol"])
-
-        grouped = (
-            futures.groupby(SYMBOL, as_index=False)
-            .agg(
-                oi=("oi", "sum"),
-                oi_change=("oi_change", "sum"),
-                fut_volume=("fut_volume", "sum"),
-                fut_close=("fut_close", "first"),
-            )
-        )
-        grouped[DATE] = pd.to_datetime(day)
-        grouped["source"] = self.name
-        return grouped[[DATE, SYMBOL, "oi", "oi_change", "fut_volume", "fut_close", "source"]]
-
-    # =========================================================================
-    # Calendar discovery
-    # =========================================================================
     def session_exists(self, day: dt.date) -> bool:
         """Cheap probe: did NSE publish an index file for ``day``?
 

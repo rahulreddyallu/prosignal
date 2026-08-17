@@ -141,7 +141,9 @@ storage:
     # worth 1.3 MB of disk to avoid re-downloading.
     max_payload_mb_to_cache: 0.6
     # Feeds never cached regardless of size. Parse-once, discard.
-    never_cache_feeds: ["fo_bhavcopy"]
+    # No feed currently needs this. Kept as a policy hook: any parse-once
+    # payload that dwarfs the data extracted from it belongs here.
+    never_cache_feeds: []
 
   # Rolling window of raw payloads kept for audit/debug under data/raw.
   # Everything older is evicted; the curated parquet is the durable record.
@@ -303,7 +305,6 @@ providers:
 
     # F&O bhavcopy: gives Open Interest for the Stage 5 long-buildup /
     # short-covering context check.
-    fo_bhavcopy_path: "/content/fo/BhavCopy_NSE_FO_0_0_0_{yyyymmdd}_F_0000.csv.zip"
 
     # Master list of every listed equity, with DATE OF LISTING and ISIN.
     equity_master_path: "/content/equities/EQUITY_L.csv"
@@ -393,7 +394,6 @@ feeds:
   earnings_calendar: { max_age_sessions: 10, required: false }
   fundamentals:      { max_age_sessions: 130, required: false }
   pledging:          { max_age_sessions: 130, required: false }
-  fo_open_interest:  { max_age_sessions: 2, required: false }
   regulatory_events: { max_age_sessions: 999, required: false }
 
 
@@ -946,24 +946,6 @@ stage5_false_signal:
       value: 0.12
       status: UNVALIDATED
       search_range: [0.0, 0.4]
-
-  short_covering:
-    enabled: true
-    # India analogue of a short squeeze: price UP + open interest DOWN.
-    # Practitioner-grade only (●○○). Context, never a standalone signal.
-    lookback_sessions: 5
-    min_price_change_pct:
-      value: 3.0
-      status: UNVALIDATED
-      search_range: [1.0, 10.0]
-    min_oi_decline_pct:
-      value: 5.0
-      status: UNVALIDATED
-      search_range: [1.0, 20.0]
-    penalty:
-      value: 0.08
-      status: UNVALIDATED
-      search_range: [0.0, 0.3]
 
   beta_explained_move:
     enabled: true

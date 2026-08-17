@@ -351,7 +351,7 @@ def cmd_data_status(cfg: AppConfig, args: argparse.Namespace) -> int:
     _print()
 
     rows = []
-    for name in ("prices", "indices", "delivery", "open_interest"):
+    for name in ("prices", "indices", "delivery"):
         blob = summary[name]
         rows.append(
             [

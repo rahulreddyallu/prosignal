@@ -172,17 +172,20 @@ def test_shipped_storage_config_is_coherent(cfg):
     s = cfg.params.storage
     assert s.raw_cache.max_mb <= s.max_total_mb
     assert s.halt_free_disk_mb < s.warn_free_disk_mb
-    assert "fo_bhavcopy" in s.raw_cache.never_cache_feeds, (
-        "the F&O bhavcopy is the largest payload the engine downloads and "
-        "yields the least data per byte; it must stay on the never-cache list"
-    )
     assert s.write_batch_sessions > 1, (
         "per-session writes make a backfill O(n^2) in disk I/O"
     )
 
 
 def test_never_cache_markers_are_derived_from_config(cfg):
-    """Renaming an endpoint must not leave the purge sweep matching nothing."""
+    """Renaming an endpoint must not leave the purge sweep matching nothing.
+
+    The shipped ``never_cache_feeds`` list is empty since the F&O feed was
+    removed, so this exercises the derivation with an explicitly-listed feed
+    rather than depending on the live config to populate it. Testing the
+    mechanism is the point; which feeds happen to be listed is a config
+    decision that can change.
+    """
     from prosignal.data.providers.nse_archives import NseArchivesProvider
 
     provider = NseArchivesProvider(
@@ -190,9 +193,30 @@ def test_never_cache_markers_are_derived_from_config(cfg):
         cfg=cfg.params.providers.nse_archives,
         ttl_historical_s=0,
         ttl_current_s=0,
-        never_cache_feeds=cfg.params.storage.raw_cache.never_cache_feeds,
+        never_cache_feeds=["delivery"],
     )
     markers = provider.never_cache_url_markers()
-    assert markers, "never_cache_feeds is set but produced no URL markers"
+    assert markers, "a listed feed must produce at least one URL marker"
     for marker in markers:
-        assert marker in cfg.params.providers.nse_archives.fo_bhavcopy_path
+        assert marker in cfg.params.providers.nse_archives.sec_bhavdata_full_path
+
+
+def test_shipped_config_lists_no_never_cache_feeds(cfg):
+    """Documents the current state: the only entry was the removed F&O feed."""
+    assert cfg.params.storage.raw_cache.never_cache_feeds == []
+
+
+def test_no_derivatives_feed_remains_in_the_mvp_path(cfg):
+    """The MVP is NSE cash equities only. No F&O anywhere in config or provider.
+
+    Open interest was fetched and stored for 67,287 rows but no stage ever read
+    it -- it could not influence a signal. It cost ~70% of the raw HTTP cache
+    to produce data nothing consumed.
+    """
+    from prosignal.data.providers.nse_archives import NseArchivesProvider
+
+    assert "fo_open_interest" not in cfg.params.feeds
+    assert not hasattr(cfg.params.providers.nse_archives, "fo_bhavcopy_path")
+    assert "fo_bhavcopy" not in NseArchivesProvider.FEED_KEYS
+    assert not hasattr(NseArchivesProvider, "fetch_fo_open_interest")
+    assert not hasattr(cfg.params.stage5_false_signal, "short_covering")

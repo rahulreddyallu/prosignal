@@ -67,7 +67,6 @@ class IngestOptions:
     force_reference_refresh: bool = False
     #: Pull optional feeds (delivery, open interest).
     include_delivery: bool = True
-    include_open_interest: bool = True
     #: Pull the secondary price source for cross-checking. Slow; worth it.
     include_secondary_prices: bool = True
     #: Corporate actions / earnings are refreshed at most this often.
@@ -425,8 +424,7 @@ class DataIngestor:
             "prices": [],
             "indices": [],
             "delivery": [],
-            "oi": [],
-        }
+            }
 
         def flush() -> None:
             if buffers["indices"]:
@@ -435,8 +433,6 @@ class DataIngestor:
                 self.store.write_prices(pd.concat(buffers["prices"], ignore_index=True))
             if buffers["delivery"]:
                 self.store.write_delivery(pd.concat(buffers["delivery"], ignore_index=True))
-            if buffers["oi"]:
-                self.store.write_open_interest(pd.concat(buffers["oi"], ignore_index=True))
             for key in buffers:
                 buffers[key] = []
 
@@ -478,15 +474,6 @@ class DataIngestor:
                             extra={"day": str(day), "error": exc.message},
                         )
 
-                if opts.include_open_interest:
-                    try:
-                        oi = self.nse.fetch_fo_open_interest(day)
-                        if oi is not None and not oi.empty:
-                            buffers["oi"].append(oi)
-                    except ProviderError as exc:
-                        log.debug(
-                            "OI fetch failed", extra={"day": str(day), "error": exc.message}
-                        )
         finally:
             # Flush whatever was collected even if the loop aborted, so an
             # interrupted backfill resumes from real progress instead of
@@ -614,19 +601,6 @@ class DataIngestor:
             ],
         )
 
-        oi_last = self.store.open_interest.max_date()
-        oi_today = self.store.read_open_interest(start=as_of, end=as_of)
-        self._record_feed(
-            "fo_open_interest",
-            FeedStatus.OK if oi_last else FeedStatus.MISSING,
-            SourceName.NSE_ARCHIVES,
-            last_timestamp=oi_last,
-            row_count=len(oi_today),
-            symbols_covered=int(oi_today[SYMBOL].nunique()) if not oi_today.empty else 0,
-            notes=[]
-            if oi_last
-            else ["F&O OI unavailable; the Stage 5 short-covering check will report NOT_TESTABLE"],
-        )
 
     # =====================================================================
     # secondary price source (cross-check)

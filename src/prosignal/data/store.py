@@ -5,7 +5,6 @@ Layout under ``data/``::
     curated/prices/year=2025.parquet        tidy OHLCV, one file per year
     curated/indices/year=2025.parquet       tidy index OHLC incl. India VIX
     curated/delivery/year=2025.parquet      delivery qty / %
-    curated/open_interest/year=2025.parquet stock-futures OI
     curated/equity_master.parquet           symbol -> listing date, ISIN
     curated/corporate_actions.parquet       ex-date-stamped adjustment ratios
     curated/earnings_calendar.parquet       scheduled results dates
@@ -211,8 +210,6 @@ class DataStore:
         self.prices = _PartitionedTable(self.curated, "prices", [SYMBOL, DATE])
         self.indices = _PartitionedTable(self.curated, "indices", ["index_name", DATE])
         self.delivery = _PartitionedTable(self.curated, "delivery", [SYMBOL, DATE])
-        self.open_interest = _PartitionedTable(self.curated, "open_interest", [SYMBOL, DATE])
-
         self._state_path = self.curated / _STATE_FILE
 
     # =====================================================================
@@ -323,20 +320,8 @@ class DataStore:
     ) -> pd.DataFrame:
         return self.delivery.read(start=start, end=end, symbols=symbols)
 
-    def write_open_interest(self, df: pd.DataFrame) -> int:
-        return self.open_interest.write(df)
 
-    def read_open_interest(
-        self,
-        symbols: Optional[Iterable[str]] = None,
-        start: Optional[dt.date] = None,
-        end: Optional[dt.date] = None,
-    ) -> pd.DataFrame:
-        return self.open_interest.read(start=start, end=end, symbols=symbols)
 
-    # =====================================================================
-    # flat reference tables
-    # =====================================================================
     def _flat_path(self, name: str) -> Path:
         return self.curated / f"{name}.parquet"
 
@@ -531,7 +516,6 @@ class DataStore:
                 "names": len(self.available_index_names()),
             },
             "delivery": _rng(self.delivery),
-            "open_interest": _rng(self.open_interest),
             "equity_master_rows": len(self.read_equity_master()),
             "corporate_actions_rows": len(self.read_corporate_actions()),
             "earnings_rows": len(self.read_earnings_calendar()),

@@ -20,8 +20,6 @@ dependencies = [
     "requests>=2.31",
     "python-dateutil>=2.8",
     "yfinance>=0.2.40",
-    "fastapi>=0.110",
-    "uvicorn>=0.27",
     "rich>=13.0",
 ]
 
