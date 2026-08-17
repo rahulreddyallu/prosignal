@@ -54,6 +54,7 @@ class Job:
     id: str
     state: JobState
     created_at: dt.datetime
+    kind: str = "analysis"
     started_at: Optional[dt.datetime] = None
     finished_at: Optional[dt.datetime] = None
     progress_step: int = 0
@@ -66,6 +67,7 @@ class Job:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "kind": self.kind,
             "state": self.state.value,
             "created_at": self.created_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
@@ -87,9 +89,10 @@ class Job:
         }
 
 
-_SCHEMA = """
+_TABLE = """
 CREATE TABLE IF NOT EXISTS jobs (
     id             TEXT PRIMARY KEY,
+    kind           TEXT NOT NULL DEFAULT 'analysis',
     state          TEXT NOT NULL,
     created_at     TEXT NOT NULL,
     started_at     TEXT,
@@ -101,9 +104,25 @@ CREATE TABLE IF NOT EXISTS jobs (
     error          TEXT,
     error_detail   TEXT
 );
+"""
+
+#: Indexes are created AFTER column migrations. An index on a column that a
+#: migration is about to add will fail against an older database, which is how
+#: the first version of this broke: the schema script referenced `kind` before
+#: the ALTER that creates it had run.
+_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_jobs_state   ON jobs(state);
+CREATE INDEX IF NOT EXISTS idx_jobs_kind    ON jobs(kind);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
 """
+
+
+#: Additive-only migrations, applied when a column is absent. Append here;
+#: never rewrite history, and never drop a column -- an older process may still
+#: be reading the same file during a rolling restart.
+_MIGRATIONS = [
+    ("kind", "kind TEXT NOT NULL DEFAULT 'analysis'"),
+]
 
 
 class JobManager:
@@ -131,12 +150,28 @@ class JobManager:
         return conn
 
     def _init_db(self) -> None:
+        """Create the schema, then apply additive migrations.
+
+        `CREATE TABLE IF NOT EXISTS` silently does nothing when the table
+        already exists with an older shape, so a database created by a previous
+        version keeps its old columns and every query against a new one fails.
+        That matters most in deployment, where a persistent disk carries the old
+        file across releases -- exactly the case a fresh local run would never
+        reproduce.
+        """
         with self._connect() as conn:
-            conn.executescript(_SCHEMA)
+            conn.executescript(_TABLE)
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+            for column, ddl in _MIGRATIONS:
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {ddl}")
+                    log.info("jobs schema migrated", extra={"added": column})
+            conn.executescript(_INDEXES)
 
     def _row_to_job(self, row: sqlite3.Row) -> Job:
         return Job(
             id=row["id"],
+            kind=(row["kind"] if "kind" in row.keys() else "analysis"),
             state=JobState(row["state"]),
             created_at=dt.datetime.fromisoformat(row["created_at"]),
             started_at=dt.datetime.fromisoformat(row["started_at"]) if row["started_at"] else None,
@@ -188,11 +223,13 @@ class JobManager:
             row = cur.fetchone()
         return self._row_to_job(row) if row else None
 
-    def start(self) -> Job:
-        """Start an analysis, or return the one already running.
+    def start(self, kind: str = "analysis", runner=None) -> Job:
+        """Start a job, or return whichever one is already running.
 
-        Idempotent by design: a second click gets the first job back, not a
-        second full-universe run.
+        Single-flight is GLOBAL rather than per-kind on purpose: both job types
+        are expensive and both touch the same data store, so running an
+        analysis while the store is being rebuilt underneath it would produce a
+        result from a half-written store.
         """
         with self._lock:
             self.reap_stale()
@@ -205,10 +242,13 @@ class JobManager:
             now = dt.datetime.now()
             with self._connect() as conn:
                 conn.execute(
-                    "INSERT INTO jobs (id, state, created_at, progress_label) VALUES (?,?,?,?)",
-                    (job_id, JobState.QUEUED.value, now.isoformat(), "queued"),
+                    "INSERT INTO jobs (id, kind, state, created_at, progress_label) "
+                    "VALUES (?,?,?,?,?)",
+                    (job_id, kind, JobState.QUEUED.value, now.isoformat(), "queued"),
                 )
-            self._thread = threading.Thread(target=self._execute, args=(job_id,), daemon=True)
+            self._thread = threading.Thread(
+                target=self._execute, args=(job_id, runner or self.runner), daemon=True
+            )
             self._thread.start()
             log.info("analysis job started", extra={"job_id": job_id})
             return self.get(job_id)  # type: ignore[return-value]
@@ -220,14 +260,15 @@ class JobManager:
                 (step + 1, label, job_id),
             )
 
-    def _execute(self, job_id: str) -> None:
+    def _execute(self, job_id: str, runner=None) -> None:
         with self._connect() as conn:
             conn.execute(
                 "UPDATE jobs SET state=?, started_at=? WHERE id=?",
                 (JobState.RUNNING.value, dt.datetime.now().isoformat(), job_id),
             )
         try:
-            result = self.runner(lambda step, label: self._progress(job_id, step, label))
+            runner = runner or self.runner
+            result = runner(lambda step, label: self._progress(job_id, step, label))
             with self._connect() as conn:
                 conn.execute(
                     "UPDATE jobs SET state=?, finished_at=?, result_json=?, "

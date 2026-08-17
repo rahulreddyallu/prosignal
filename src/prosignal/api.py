@@ -103,6 +103,12 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                     f"only {len(sessions)} sessions; need more than {need} before "
                     f"any stock has enough history"
                 )
+                checks["remedy"] = (
+                    "the market-data store is empty or short. POST /admin/bootstrap "
+                    "(or press BUILD DATA STORE in the UI) to populate it from NSE. "
+                    "This is expected on a fresh deployment: data/ is not in version "
+                    "control."
+                )
             else:
                 checks["price_data"] = "ok"
                 checks["latest_session"] = sessions[-1].isoformat()
@@ -170,6 +176,68 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         if job.result is None:
             raise HTTPException(409, f"job {run_id} is {job.state.value}; no results yet")
         return job.result
+
+
+    def _bootstrap_runner(progress) -> Dict[str, Any]:
+        """Populate the data store from NSE, in a bounded chunk.
+
+        A fresh deployment clones no market data -- `data/` is not in version
+        control -- so the analysis button is unusable until the store is built
+        ON the server. Measured cost is roughly 20s per session against NSE, so
+        the full ~360-session requirement is a ~2 hour job. That is too long to
+        treat as one atomic operation on a host that can restart.
+
+        So it runs in CHUNKS. Ingest is incremental and cache-backed, meaning a
+        repeated call resumes rather than restarting: each press adds another
+        chunk and the store converges. A killed process costs one chunk, not
+        the whole build.
+        """
+        from .data.ingest import DataIngestor, IngestOptions
+
+        need = int(cfg.params.universe.min_history_sessions.value) + 30
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        have = len(store.price_sessions())
+
+        chunk = int(getattr(cfg.params.api, "bootstrap_chunk_sessions", 0) or 90)
+        target = min(have + chunk, need) if have else min(chunk, need)
+
+        progress(0, f"Have {have} of {need} sessions. Fetching up to {target}...")
+        result = DataIngestor(cfg).run(
+            options=IngestOptions(
+                history_sessions=target,
+                include_secondary_prices=False,
+                include_delivery=True,
+            )
+        )
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        sessions = store.price_sessions()
+        done = len(sessions) >= need
+        progress(8, "complete" if done else f"{len(sessions)}/{need} sessions - press again to continue")
+
+        return {
+            "sessions_in_store": len(sessions),
+            "sessions_required": need,
+            "complete": done,
+            "sessions_fetched_this_run": result.sessions_fetched,
+            "latest_session": sessions[-1].isoformat() if sessions else None,
+            "universe_size": len(result.universe.symbols),
+            "next_step": (
+                "ready to analyse"
+                if done
+                else "press BUILD DATA STORE again to fetch the next chunk"
+            ),
+        }
+
+    @app.post("/admin/bootstrap")
+    def bootstrap() -> Dict[str, Any]:
+        """Build the market-data store on this host.
+
+        Single-flight shares the analysis slot deliberately: analysing a store
+        that is being rewritten underneath would produce a result from
+        half-written data.
+        """
+        job = jobs.start(kind="bootstrap", runner=_bootstrap_runner)
+        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
 
     @app.get("/analysis")
     def recent_jobs(limit: int = 20) -> Dict[str, Any]:
