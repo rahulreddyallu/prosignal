@@ -1,0 +1,64 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib60/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual envs ---
+.venv/
+venv/
+ENV/
+env/
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# --- Project data (NEVER commit market data or credentials) ---
+data/raw/
+data/curated/
+data/snapshots/
+data/cache/
+data/ledger/
+logs/
+*.parquet
+*.duckdb
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+config/secrets.yaml
+config/parameters.local.yaml
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

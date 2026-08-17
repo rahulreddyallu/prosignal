@@ -1,0 +1,321 @@
+"""Point-in-time universe resolution.
+
+The single most expensive silent error in a retail-built India backtest is
+projecting *today's* NIFTY 200 list backwards. Every name that fell out of the
+index because it collapsed disappears from history, and the strategy looks
+brilliant for reasons that have nothing to do with the strategy.
+
+NSE only publishes the current constituent list, so there is no free way to
+retroactively fix that. What this module does instead is refuse to hide it:
+
+**Resolution order (best available wins)**
+
+1. ``config/reference/index_membership.csv`` -- hand-maintained effective-dated
+   membership transcribed from NSE reconstitution circulars. This is genuinely
+   point-in-time and is always preferred when it covers the requested date.
+2. A dated snapshot taken on or before ``as_of``. The engine snapshots the live
+   list on every run, so real point-in-time membership accumulates going
+   forward from the day you start using it.
+3. The most recent snapshot, *later* than ``as_of``. This is survivorship-
+   biased by construction. It sets ``survivorship_risk=True`` on the manifest,
+   and under ``universe.pre_snapshot_policy: halt`` it refuses to run at all --
+   which is the correct setting the moment you start backtesting.
+
+Listing dates from ``EQUITY_L.csv`` are applied on top: a company cannot be in
+the universe on a date before it was listed, whatever any snapshot says.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Sequence, Set
+
+import pandas as pd
+
+from ..core.errors import IntegrityError
+from ..core.logging import get_logger
+from .store import DataStore
+from .types import SYMBOL, normalise_symbol
+
+__all__ = ["UniverseSnapshot", "UniverseResolver"]
+
+log = get_logger(__name__)
+
+
+@dataclass
+class UniverseSnapshot:
+    """The universe as it stood (or as best we can reconstruct it) on a date."""
+
+    index_name: str
+    as_of: dt.date
+    symbols: List[str]
+    sector_map: Dict[str, str] = field(default_factory=dict)
+    company_names: Dict[str, str] = field(default_factory=dict)
+    isin_map: Dict[str, str] = field(default_factory=dict)
+    source: str = "unknown"
+    survivorship_risk: bool = False
+    note: Optional[str] = None
+    excluded_not_yet_listed: List[str] = field(default_factory=list)
+    excluded_manual: List[str] = field(default_factory=list)
+
+    def __len__(self) -> int:
+        return len(self.symbols)
+
+    def sector_of(self, symbol: str) -> str:
+        return self.sector_map.get(normalise_symbol(symbol), "Unknown")
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "index_name": self.index_name,
+            "as_of": self.as_of.isoformat(),
+            "size": len(self.symbols),
+            "source": self.source,
+            "survivorship_risk": self.survivorship_risk,
+            "note": self.note,
+            "excluded_not_yet_listed": len(self.excluded_not_yet_listed),
+            "excluded_manual": len(self.excluded_manual),
+        }
+
+
+class UniverseResolver:
+    """Resolves index membership for a decision date, honestly."""
+
+    def __init__(self, store: DataStore, config: "object") -> None:
+        self.store = store
+        self.cfg = config
+
+    # =====================================================================
+    # public
+    # =====================================================================
+    def resolve(
+        self,
+        index_name: str,
+        as_of: dt.date,
+        membership_csv: Optional[pd.DataFrame] = None,
+        manual_exclusions: Optional[Sequence[str]] = None,
+        pre_snapshot_policy: str = "flag",
+    ) -> UniverseSnapshot:
+        snap = self._resolve_membership(index_name, as_of, membership_csv)
+
+        if snap.survivorship_risk and pre_snapshot_policy == "halt":
+            raise IntegrityError(
+                f"No point-in-time membership for {index_name} on {as_of}. The "
+                f"only available snapshot is dated later, which makes the "
+                f"universe survivorship-biased. universe.pre_snapshot_policy is "
+                f"set to 'halt', so this run is refused. Either transcribe the "
+                f"relevant NSE reconstitution circulars into "
+                f"config/reference/index_membership.csv, or switch the policy to "
+                f"'flag' if this is a forward/live run where today's list IS the "
+                f"point-in-time list.",
+                index_name=index_name,
+                as_of=as_of.isoformat(),
+                available_snapshots=[
+                    d.isoformat() for d in self.store.universe_snapshot_dates(index_name)
+                ][-5:],
+            )
+
+        self._apply_listing_dates(snap, as_of)
+        self._apply_manual_exclusions(snap, manual_exclusions or [])
+        return snap
+
+    def snapshot_current(
+        self, index_name: str, as_of: dt.date, constituents: pd.DataFrame
+    ) -> None:
+        """Persist today's live constituent list as a dated snapshot."""
+        if constituents is None or constituents.empty:
+            return
+        self.store.write_universe_snapshot(index_name, as_of, constituents)
+        log.info(
+            "universe snapshot written",
+            extra={"index": index_name, "as_of": as_of.isoformat(), "size": len(constituents)},
+        )
+
+    # =====================================================================
+    # resolution strategies
+    # =====================================================================
+    def _resolve_membership(
+        self,
+        index_name: str,
+        as_of: dt.date,
+        membership_csv: Optional[pd.DataFrame],
+    ) -> UniverseSnapshot:
+        # -- 1. hand-maintained effective-dated membership -------------------
+        if membership_csv is not None and not membership_csv.empty:
+            snap = self._from_membership_csv(index_name, as_of, membership_csv)
+            if snap is not None:
+                return snap
+
+        # -- 2/3. dated snapshots -------------------------------------------
+        available = self.store.universe_snapshot_dates(index_name)
+        if not available:
+            raise IntegrityError(
+                f"No universe data for {index_name}. Run `prosignal data ingest` "
+                f"first -- the engine will not invent a constituent list.",
+                index_name=index_name,
+            )
+
+        on_or_before = [d for d in available if d <= as_of]
+        if on_or_before:
+            chosen = on_or_before[-1]
+            frame = self.store.read_universe_snapshot(index_name, chosen)
+            lag = (as_of - chosen).days
+            note = (
+                f"membership from snapshot dated {chosen} "
+                f"({lag} calendar day(s) before the decision date)"
+            )
+            return self._frame_to_snapshot(
+                index_name, as_of, frame, source=f"snapshot:{chosen}", note=note
+            )
+
+        chosen = available[0]
+        frame = self.store.read_universe_snapshot(index_name, chosen)
+        note = (
+            f"SURVIVORSHIP RISK: earliest available snapshot is {chosen}, which is "
+            f"AFTER the decision date {as_of}. Constituents that left the index "
+            f"between those dates are invisible to this run, and names that "
+            f"joined later are wrongly present. Treat any backtest result built "
+            f"on this as unusable."
+        )
+        log.warning("survivorship risk", extra={"index": index_name, "as_of": as_of.isoformat()})
+        snap = self._frame_to_snapshot(
+            index_name, as_of, frame, source=f"snapshot:{chosen}", note=note
+        )
+        snap.survivorship_risk = True
+        return snap
+
+    def _from_membership_csv(
+        self, index_name: str, as_of: dt.date, membership: pd.DataFrame
+    ) -> Optional[UniverseSnapshot]:
+        wanted = index_name.strip().upper()
+        rows = membership[membership["index_name"].str.upper() == wanted]
+        if rows.empty:
+            return None
+
+        ts = pd.Timestamp(as_of)
+        # Does the file actually cover this date? If its earliest effective_from
+        # is after as_of, it does not, and we must fall through rather than
+        # return a confidently wrong (empty) universe.
+        if rows["effective_from"].min() > ts:
+            return None
+
+        active = rows[rows["effective_from"] <= ts]
+        active = active[active["effective_to"].isna() | (active["effective_to"] > ts)]
+        if active.empty:
+            return None
+
+        symbols = sorted(set(active[SYMBOL].map(normalise_symbol)))
+        snap = UniverseSnapshot(
+            index_name=index_name,
+            as_of=as_of,
+            symbols=symbols,
+            source="index_membership.csv",
+            note=(
+                "point-in-time membership from your hand-maintained "
+                "config/reference/index_membership.csv"
+            ),
+        )
+        self._attach_sectors_from_latest_snapshot(snap)
+        return snap
+
+    def _frame_to_snapshot(
+        self,
+        index_name: str,
+        as_of: dt.date,
+        frame: Optional[pd.DataFrame],
+        source: str,
+        note: Optional[str],
+    ) -> UniverseSnapshot:
+        if frame is None or frame.empty:
+            raise IntegrityError(
+                f"universe snapshot for {index_name} is empty", source=source
+            )
+        symbols = sorted(set(frame[SYMBOL].map(normalise_symbol)))
+        sector_map: Dict[str, str] = {}
+        company_names: Dict[str, str] = {}
+        isin_map: Dict[str, str] = {}
+        for _, row in frame.iterrows():
+            sym = normalise_symbol(row[SYMBOL])
+            if "sector" in frame.columns and pd.notna(row.get("sector")):
+                sector_map[sym] = str(row["sector"]).strip() or "Unknown"
+            if "company_name" in frame.columns and pd.notna(row.get("company_name")):
+                company_names[sym] = str(row["company_name"]).strip()
+            if "isin" in frame.columns and pd.notna(row.get("isin")):
+                isin_map[sym] = str(row["isin"]).strip()
+        return UniverseSnapshot(
+            index_name=index_name,
+            as_of=as_of,
+            symbols=symbols,
+            sector_map=sector_map,
+            company_names=company_names,
+            isin_map=isin_map,
+            source=source,
+            note=note,
+        )
+
+    def _attach_sectors_from_latest_snapshot(self, snap: UniverseSnapshot) -> None:
+        """Sector labels come from the newest snapshot we hold.
+
+        Stated plainly because it matters: NSE's constituent file carries only
+        the CURRENT industry label, so a company reclassified since your data
+        window inherits its new sector for old dates. That is a known,
+        acknowledged deviation from the research program's "historical sector
+        classification" requirement, and the only clean fix is a paid
+        point-in-time classification feed dropped into the CSV importer.
+        """
+        dates = self.store.universe_snapshot_dates(snap.index_name)
+        if not dates:
+            return
+        frame = self.store.read_universe_snapshot(snap.index_name, dates[-1])
+        if frame is None or frame.empty:
+            return
+        for _, row in frame.iterrows():
+            sym = normalise_symbol(row[SYMBOL])
+            if sym not in snap.symbols:
+                continue
+            if "sector" in frame.columns and pd.notna(row.get("sector")):
+                snap.sector_map.setdefault(sym, str(row["sector"]).strip() or "Unknown")
+            if "company_name" in frame.columns and pd.notna(row.get("company_name")):
+                snap.company_names.setdefault(sym, str(row["company_name"]).strip())
+        snap.note = (snap.note or "") + (
+            " | sector labels are current-vintage, not historical"
+        )
+
+    # =====================================================================
+    # filters applied on top of membership
+    # =====================================================================
+    def _apply_listing_dates(self, snap: UniverseSnapshot, as_of: dt.date) -> None:
+        master = self.store.read_equity_master()
+        if master.empty or "listing_date" not in master.columns:
+            return
+        listing = (
+            master.dropna(subset=["listing_date"])
+            .assign(**{SYMBOL: lambda d: d[SYMBOL].map(normalise_symbol)})
+            .set_index(SYMBOL)["listing_date"]
+        )
+        listing = listing[~listing.index.duplicated(keep="first")]
+        ts = pd.Timestamp(as_of)
+        not_yet: List[str] = []
+        for sym in list(snap.symbols):
+            listed_on = listing.get(sym)
+            if listed_on is not None and pd.notna(listed_on) and pd.Timestamp(listed_on) > ts:
+                not_yet.append(sym)
+        if not_yet:
+            keep: Set[str] = set(snap.symbols) - set(not_yet)
+            snap.symbols = sorted(keep)
+            snap.excluded_not_yet_listed = sorted(not_yet)
+            log.info(
+                "excluded names not yet listed at decision date",
+                extra={"count": len(not_yet), "as_of": as_of.isoformat()},
+            )
+
+    def _apply_manual_exclusions(
+        self, snap: UniverseSnapshot, exclusions: Sequence[str]
+    ) -> None:
+        if not exclusions:
+            return
+        blocked = {normalise_symbol(s) for s in exclusions}
+        removed = sorted(blocked & set(snap.symbols))
+        if removed:
+            snap.symbols = sorted(set(snap.symbols) - blocked)
+            snap.excluded_manual = removed

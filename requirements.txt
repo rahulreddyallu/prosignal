@@ -1,0 +1,31 @@
+# Pro Stock Signal BOT — runtime dependencies
+# Target runtime: Python 3.9+ (developed and smoke-tested on CPython 3.9.6, macOS)
+#
+# Version pins are deliberately conservative ranges, not exact pins, so that
+# `pip install -r requirements.txt` keeps working as point releases land.
+# If you need a fully reproducible build, run `pip freeze > requirements.lock.txt`
+# after your first successful install and use that instead.
+
+# --- Numerics / data frames -------------------------------------------------
+numpy>=1.24,<2.1
+pandas>=2.0,<2.3
+pyarrow>=14.0            # parquet engine for the point-in-time store
+
+# --- Configuration & schemas ------------------------------------------------
+pydantic>=2.5,<3         # every stage I/O contract + the parameter schema
+PyYAML>=6.0              # config/parameters.yaml
+
+# --- Networking / data providers -------------------------------------------
+requests>=2.31
+python-dateutil>=2.8
+yfinance>=0.2.40         # SECONDARY price source (used for cross-source agreement)
+
+# --- API layer (Stage 8 -> webapp) -----------------------------------------
+fastapi>=0.110
+uvicorn>=0.27
+
+# --- CLI ergonomics ---------------------------------------------------------
+rich>=13.0
+
+# --- Development / QA -------------------------------------------------------
+pytest>=8.0

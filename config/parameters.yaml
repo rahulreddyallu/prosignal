@@ -1,0 +1,1580 @@
+# =============================================================================
+#  Pro Stock Signal BOT  --  THE ONLY FILE YOU EVER NEED TO EDIT
+# =============================================================================
+#  Every tunable number, threshold, weight, path and switch in the entire engine
+#  lives here. No core module hardcodes a magic number. If you find one, it is a
+#  bug -- report it, don't patch the core file.
+#
+#  HOW A TUNABLE IS WRITTEN
+#  ------------------------
+#  Long form (preferred -- carries its own honesty metadata):
+#
+#      atr_stop_multiple:
+#        value: 2.5
+#        status: UNVALIDATED
+#        search_range: [1.5, 3.5]
+#        note: "Kaminski & Lo (2014) support the mechanism, not this multiplier."
+#
+#  Short form (allowed -- status silently becomes UNVALIDATED):
+#
+#      atr_stop_multiple: 2.5
+#
+#  STATUS VALUES  (this is the "no fabricated precision" discipline, in code)
+#  -------------------------------------------------------------------------
+#    UNVALIDATED  A hypothesis. Never been through CPCV on point-in-time India
+#                 data. The engine will happily use it AND will tell the user,
+#                 on every single output, that it is unvalidated.
+#    VALIDATED    Promoted after a real CPCV/PBO/DSR run. You must also fill in
+#                 `validated_by` (ledger trial id) and `validated_on` (date).
+#                 The loader REFUSES to accept VALIDATED without both.
+#    STATUTORY    Fixed by SEBI / the exchange / the tax code. Not a hypothesis.
+#                 Verify against the live circular; do not "optimise" these.
+#    STRUCTURAL   Definitional. Changing it changes what the factor *is*
+#                 (e.g. 12-1 momentum is 252/21 by academic construction).
+#    OPERATIONAL  Your own business constraint (capital, broker, appetite).
+#                 Not a research parameter -- no search range applies.
+#
+#  If `search_range` is present, `value` MUST sit inside it or the engine
+#  refuses to start. That is deliberate: it catches fat-finger edits before
+#  they reach a live decision.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 0. META
+# -----------------------------------------------------------------------------
+meta:
+  # Free-text label for this parameter set. It is combined with a SHA-256 hash
+  # of every `value` in this file to produce the config_version stamped onto
+  # every research-ledger row. Change the label when you make a deliberate
+  # regime change to your research; the hash changes automatically regardless.
+  config_label: "baseline-v1"
+  owner: "rahulreddyallu"
+  description: >-
+    Baseline India solo-quant decision-support configuration. Every research
+    parameter is UNVALIDATED until a CPCV run on point-in-time NSE data
+    promotes it. Nothing in this file has been backtested yet.
+
+
+# -----------------------------------------------------------------------------
+# 1. RUNTIME  --  paths, logging, clock
+# -----------------------------------------------------------------------------
+runtime:
+  # All relative paths below resolve against the project root (the directory
+  # that contains this config/ folder).
+  timezone: "Asia/Kolkata"
+
+  # THREE STORAGE TIERS, deliberately separated. Know which is which before
+  # deleting anything:
+  #
+  #   TRANSIENT  data/cache      Raw provider payloads, byte-for-byte as
+  #                              downloaded. A re-download accelerator, never
+  #                              authoritative. Hard-capped and LRU-evicted
+  #                              (see the `storage:` section). Safe to delete
+  #                              at any time -- costs time, never data.
+  #
+  #   AUDIT      data/raw        Optional rolling archive of raw payloads kept
+  #                              for debugging a parse. Off by default; when on,
+  #                              only the last N sessions are retained.
+  #
+  #   DURABLE    data/curated    Parsed, validated, corporate-action-adjusted
+  #              data/snapshots  parquet, plus dated point-in-time universe
+  #              data/ledger     snapshots and the append-only research ledger.
+  #                              THIS IS THE RECORD. Everything else can be
+  #                              rebuilt from the network; this cannot.
+  paths:
+    data_dir: "data"                 # root for everything the engine writes
+    raw_dir: "data/raw"              # AUDIT tier (see storage.audit_raw)
+    curated_dir: "data/curated"      # DURABLE tier
+    snapshot_dir: "data/snapshots"   # DURABLE tier: dated PIT universe snapshots
+    cache_dir: "data/cache"          # TRANSIENT tier: LRU-evicted HTTP cache
+    ledger_dir: "data/ledger"        # DURABLE tier: append-only research ledger
+    reference_dir: "config/reference" # your hand-maintained CSV drop-ins
+    log_dir: "logs"
+
+  logging:
+    level: "INFO"                    # DEBUG | INFO | WARNING | ERROR
+    to_file: true
+    to_console: true
+    # Keep this many rotated log files.
+    backup_count: 14
+
+  # The engine never assumes "today" has data. It resolves the decision date
+  # backwards to the most recent session for which a bhavcopy actually exists.
+  date_resolution:
+    max_lookback_calendar_days: 10   # how far back to search for a live session
+    allow_future_dates: false
+
+
+# -----------------------------------------------------------------------------
+# 1b. STORAGE BUDGET  --  hard caps, measured from real usage
+# -----------------------------------------------------------------------------
+# MEASURED on this machine (94 sessions of NIFTY-200-era data):
+#
+#   feed                 raw MB/session   what we actually keep
+#   -------------------  --------------   -------------------------------------
+#   F&O bhavcopy                  1.324   208 rows of aggregated OI  (~280:1 waste)
+#   delivery                      0.366   ~3,300 rows
+#   CM bhavcopy (OHLCV)           0.190   ~3,464 rows
+#   ind_close_all                 0.016   164 rows
+#   raw TOTAL                     1.896
+#   curated TOTAL                 0.255   <- 7.4x smaller than the raw it came from
+#
+# The durable artefact is the CURATED parquet. Raw payloads are a re-download
+# accelerator and an audit trail, nothing more -- so they get a hard cap and an
+# LRU eviction policy rather than growing without bound.
+#
+#   330 sessions (live signals)   ->  84 MB curated
+#   1,250 sessions (5y CPCV)      -> 318 MB curated
+#   2,500 sessions (10y CPCV)     -> 637 MB curated
+storage:
+  # Ceiling for everything the engine writes under data/. Checked before each
+  # ingest; exceeded means evict, then refuse.
+  max_total_mb: 3072
+
+  raw_cache:
+    enabled: true
+    # LRU-evicted down to this after every ingest.
+    max_mb: 384
+    # Payloads bigger than this are parsed and thrown away rather than cached.
+    # Rationale: a 1.3 MB F&O zip that yields 4.7 KB of open interest is not
+    # worth 1.3 MB of disk to avoid re-downloading.
+    max_payload_mb_to_cache: 0.6
+    # Feeds never cached regardless of size. Parse-once, discard.
+    never_cache_feeds: ["fo_bhavcopy"]
+
+  # Rolling window of raw payloads kept for audit/debug under data/raw.
+  # Everything older is evicted; the curated parquet is the durable record.
+  audit_raw:
+    enabled: false
+    retain_sessions: 10
+
+  # Free-disk interlocks. Below `halt_free_disk_mb` the ingest refuses to start
+  # rather than filling the volume and taking the rest of the machine with it.
+  warn_free_disk_mb: 4096
+  halt_free_disk_mb: 768
+
+  # Sessions accumulated in memory before one batched parquet write.
+  # Writing per-session forces a full read-modify-write of the year file each
+  # time, which is O(n^2) I/O across a backfill.
+  write_batch_sessions: 25
+
+
+# -----------------------------------------------------------------------------
+# 2. CAPITAL  --  your actual book. Drives the liquidity gate and impact model.
+# -----------------------------------------------------------------------------
+# NOTE: these are the numbers that make the liquidity filter *relative to your
+# position size* (research program section 9) rather than an arbitrary cutoff.
+capital:
+  total_capital_inr:
+    value: 1000000                   # Rs 10,00,000
+    status: OPERATIONAL
+    note: "Total deployable equity book. Set this to your real number."
+
+  max_open_positions:
+    value: 8
+    status: OPERATIONAL
+    optimization_tier: A_SEARCH
+    search_points: 3
+    search_range: [3, 30]
+    note: >-
+      Experiment #7 (top-5 vs top-15 vs top-30). Genuinely changes the
+      conviction/diversification trade-off, so it earns a place in the search
+      grid. 8 is a placeholder, not a finding.
+
+  # Value of a single new position, in rupees. If null, computed as
+  # total_capital_inr / max_open_positions.
+  per_position_inr:
+    value: null
+    status: OPERATIONAL
+
+  # Hard cap: a single position may not exceed this fraction of the stock's
+  # trailing average daily traded VALUE. This is the single most important
+  # number for the "solo founder edge" thesis (research program section 9).
+  max_participation_of_adtv:
+    value: 0.01                      # 1% of ADTV
+    status: UNVALIDATED
+    optimization_tier: A_SEARCH
+    search_points: 4
+    search_range: [0.002, 0.05]
+    note: >-
+      THE single most important parameter in this system. Research program
+      section 9 identifies capacity-vs-impact as the test the whole "solo
+      founder edge" thesis lives or dies on: a 10bp execution premium turned a
+      113% modelled return into 65% realised in the cited study. Must be
+      stress-tested at 2x cost and worse slippage before it is trusted.
+
+
+# -----------------------------------------------------------------------------
+# 3. UNIVERSE  --  what the engine is allowed to look at
+# -----------------------------------------------------------------------------
+universe:
+  # Which NSE index defines the tradable universe. Must match a key in
+  # providers.nse_archives.index_constituent_files below.
+  index_name:
+    value: "NIFTY 200"
+    status: OPERATIONAL
+    note: "NIFTY 200 per master prompt Stage 0/3. Change to NIFTY 500 to widen."
+
+  # Only these NSE series are treated as ordinary tradable equity.
+  # EQ = rolling settlement, BE = trade-for-trade, BZ = surveillance T2T.
+  allowed_series:
+    value: ["EQ"]
+    status: OPERATIONAL
+    note: >-
+      BE/BZ are surveillance/trade-for-trade series -- generally uninvestable
+      for a systematic book. Add them only if you know why you want them.
+
+  # A stock must have at least this much price history before it can be scored.
+  # 12-1 momentum needs 252 sessions; add buffer for the MA/ATR warm-up.
+  min_history_sessions:
+    value: 300
+    status: STRUCTURAL
+    note: "252 (momentum lookback) + 21 (skip) + buffer for indicator warm-up."
+
+  # Absolute floor on price. Sub-rupee names have pathological tick behaviour.
+  min_price_inr:
+    value: 20.0
+    status: UNVALIDATED
+    search_range: [1.0, 100.0]
+
+  # Hard-exclude these symbols regardless of anything else (your own blacklist).
+  manual_exclusions:
+    value: []
+    status: OPERATIONAL
+
+  # POINT-IN-TIME HONESTY SWITCH.
+  # NSE only publishes the *current* constituent list. The engine snapshots that
+  # list every time it runs, building a genuine point-in-time history going
+  # forward. For any as-of date BEFORE your earliest snapshot, membership is
+  # survivorship-biased by construction.
+  #   "halt"  -> refuse to run (correct for backtests; research program section 7)
+  #   "flag"  -> run but stamp SURVIVORSHIP_RISK on the output (live use only)
+  pre_snapshot_policy:
+    value: "flag"
+    status: OPERATIONAL
+    note: >-
+      Set to "halt" the moment you start backtesting. "flag" is only acceptable
+      for live/forward runs where today's list IS the point-in-time list.
+
+
+# -----------------------------------------------------------------------------
+# 4. DATA PROVIDERS  --  where bytes come from
+# -----------------------------------------------------------------------------
+# Verified reachable as of build (2026-08-17) from a normal Indian retail
+# connection: nsearchives.nseindia.com and archives.nseindia.com return 200.
+# The www.nseindia.com JSON API is frequently 403-blocked by NSE's bot shield --
+# it is implemented but treated as best-effort, never as a hard dependency.
+providers:
+  http:
+    timeout_seconds: 30
+    max_retries: 3
+    backoff_base_seconds: 1.5        # exponential: base^attempt
+    # Politeness: minimum gap between two requests to the same host.
+    min_interval_seconds: 0.35
+    user_agent: >-
+      Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
+      (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+    # Cache successful raw downloads on disk. Historical NSE files are immutable
+    # once published, so caching is safe and saves enormous time on re-runs.
+    cache_enabled: true
+    cache_ttl_days_historical: 3650  # effectively forever for past sessions
+    cache_ttl_hours_current: 6       # today's files may still be republished
+
+  # ---- Primary: NSE static archives (official, free, no auth) ---------------
+  nse_archives:
+    enabled: true
+    base_archives: "https://nsearchives.nseindia.com"
+    base_legacy: "https://archives.nseindia.com"
+
+    # UDiFF-format cash bhavcopy. NSE switched to this on 2024-07-08.
+    bhavcopy_udiff_path: "/content/cm/BhavCopy_NSE_CM_0_0_0_{yyyymmdd}_F_0000.csv.zip"
+    bhavcopy_udiff_from: "2024-07-08"
+    # Legacy cash bhavcopy, used for dates before the switch.
+    bhavcopy_legacy_path: "/content/historical/EQUITIES/{yyyy}/{MON}/cm{ddMONyyyy}bhav.csv.zip"
+
+    # Full security-wise data: adds DELIV_QTY and DELIV_PER (delivery %), which
+    # is a genuinely India-specific quality-of-move input.
+    sec_bhavdata_full_path: "/products/content/sec_bhavdata_full_{ddmmyyyy}.csv"
+
+    # ONE file per day containing OHLC for every NSE index INCLUDING India VIX
+    # and every sector index. This is the backbone of Stage 2 and sector RS.
+    index_close_all_path: "/content/indices/ind_close_all_{ddmmyyyy}.csv"
+
+    # F&O bhavcopy: gives Open Interest for the Stage 5 long-buildup /
+    # short-covering context check.
+    fo_bhavcopy_path: "/content/fo/BhavCopy_NSE_FO_0_0_0_{yyyymmdd}_F_0000.csv.zip"
+
+    # Master list of every listed equity, with DATE OF LISTING and ISIN.
+    equity_master_path: "/content/equities/EQUITY_L.csv"
+
+    # Current constituent lists. These also carry the `Industry` column, which
+    # is the engine's sector classification source.
+    index_constituent_files:
+      "NIFTY 50": "/content/indices/ind_nifty50list.csv"
+      "NIFTY 100": "/content/indices/ind_nifty100list.csv"
+      "NIFTY 200": "/content/indices/ind_nifty200list.csv"
+      "NIFTY 500": "/content/indices/ind_nifty500list.csv"
+      "NIFTY MIDCAP 150": "/content/indices/ind_niftymidcap150list.csv"
+      "NIFTY SMALLCAP 250": "/content/indices/ind_niftysmallcap250list.csv"
+
+  # ---- Secondary: Yahoo Finance via yfinance --------------------------------
+  # Role: (a) the SECOND source required by the Stage 1 cross-source agreement
+  # check, (b) corporate-action ratios (Yahoo maps Indian bonus issues into its
+  # "Stock Splits" series), (c) earnings dates.
+  yfinance:
+    enabled: true
+    equity_suffix: ".NS"
+    # Symbols that differ between NSE and Yahoo go here.
+    symbol_overrides: {}
+    # Batch size for multi-ticker downloads (Yahoo throttles large batches).
+    batch_size: 40
+    pause_between_batches_seconds: 1.0
+    index_symbols:
+      "NIFTY 50": "^NSEI"
+      "NIFTY 200": "^CNX200"
+      "NIFTY 500": "^CRSLDX"
+      "INDIA VIX": "^INDIAVIX"
+
+  # ---- Best-effort: NSE JSON API (often 403 from outside India / datacentres)
+  nse_json_api:
+    enabled: true
+    treat_failure_as: "soft"         # "soft" -> log + continue | "hard" -> fail run
+    base: "https://www.nseindia.com"
+    warmup_path: "/"
+    corporate_actions_path: "/api/corporates-corporateActions?index=equities&from_date={from_ddmmyyyy}&to_date={to_ddmmyyyy}"
+    event_calendar_path: "/api/event-calendar?index=equities&from_date={from_ddmmyyyy}&to_date={to_ddmmyyyy}"
+    shareholding_path: "/api/corporate-share-holdings-master?index=equities&symbol={symbol}"
+
+  # ---- Manual / paid feed drop-in ------------------------------------------
+  # Anything the free sources cannot give you honestly goes here. Drop a CSV in
+  # and the engine picks it up. If the file is absent, the dependent check
+  # reports NOT_TESTABLE -- it never silently passes.
+  csv_import:
+    enabled: true
+    # Columns: symbol,as_of_date,pledged_pct_of_promoter_holding,promoter_holding_pct,source
+    pledging_file: "config/reference/promoter_pledging.csv"
+    # Columns: symbol,filing_date,period_end,revenue,net_profit,total_equity,total_assets,
+    #          total_debt,ebit,interest_expense,operating_cash_flow,shares_outstanding
+    fundamentals_file: "config/reference/fundamentals_pit.csv"
+    # Columns: symbol,earnings_date,confirmed(bool),source
+    earnings_calendar_file: "config/reference/earnings_calendar.csv"
+    # Columns: symbol,ex_date,action_type(split|bonus|rights|dividend),ratio_from,ratio_to,details
+    corporate_actions_file: "config/reference/corporate_actions.csv"
+    # Columns: symbol,event_date,cooldown_days,reason
+    regulatory_events_file: "config/reference/regulatory_events.csv"
+    # Columns: index_name,symbol,effective_from,effective_to(blank=current)
+    index_membership_file: "config/reference/index_membership.csv"
+
+
+# -----------------------------------------------------------------------------
+# 5. FEED FRESHNESS  --  Stage 1 staleness gate
+# -----------------------------------------------------------------------------
+# `max_age_sessions` is measured in NSE TRADING SESSIONS, not calendar days, so
+# a long weekend never spuriously fails the gate.
+# `required: true` means a stale/missing feed HALTS the entire run market-wide.
+feeds:
+  equity_ohlcv:      { max_age_sessions: 1, required: true }
+  index_ohlcv:       { max_age_sessions: 1, required: true }
+  india_vix:         { max_age_sessions: 1, required: true }
+  index_membership:  { max_age_sessions: 25, required: true }
+  equity_master:     { max_age_sessions: 25, required: true }
+  delivery_data:     { max_age_sessions: 2, required: false }
+  corporate_actions: { max_age_sessions: 5, required: false }
+  earnings_calendar: { max_age_sessions: 10, required: false }
+  fundamentals:      { max_age_sessions: 130, required: false }
+  pledging:          { max_age_sessions: 130, required: false }
+  fo_open_interest:  { max_age_sessions: 2, required: false }
+  regulatory_events: { max_age_sessions: 999, required: false }
+
+
+# -----------------------------------------------------------------------------
+# 6. STAGE 1  --  DATA QUALITY / LEAKAGE GATE  (binary, never a score)
+# -----------------------------------------------------------------------------
+stage1_data_quality:
+  # --- Cross-source agreement (needs >= 2 price sources enabled) ---
+  require_two_price_sources:
+    value: false
+    status: OPERATIONAL
+    note: >-
+      Set true once you are confident yfinance coverage is stable. When true,
+      a stock with only one usable price source is excluded rather than flagged.
+
+  source_agreement_tolerance_bps:
+    value: 50.0                      # 0.50% close-price disagreement
+    status: UNVALIDATED
+    search_range: [5.0, 300.0]
+    note: >-
+      NSE close vs Yahoo close legitimately differ (Yahoo adjusts, rounds, and
+      occasionally lags corporate actions). Disagreement is FLAGGED, never
+      silently resolved by picking a source.
+
+  source_disagreement_action:
+    value: "flag"                    # "flag" -> soft flag | "reject" -> drop stock
+    status: OPERATIONAL
+
+  # --- Outlier / bad-tick detection ---
+  outlier_return_sigma:
+    value: 8.0
+    status: UNVALIDATED
+    search_range: [4.0, 15.0]
+    note: >-
+      Single-session return this many standard deviations outside the stock's
+      own trailing distribution, with NO corroborating volume and NO corporate
+      action, is treated as a bad tick and hard-rejected.
+
+  outlier_sigma_lookback_sessions:
+    value: 252
+    status: UNVALIDATED
+    search_range: [60, 756]
+
+  # A move this large is checked even if it is inside the sigma band (protects
+  # against stocks whose trailing vol is itself inflated by earlier bad ticks).
+  outlier_absolute_return_pct:
+    value: 25.0
+    status: UNVALIDATED
+    search_range: [10.0, 60.0]
+
+  # Volume that corroborates a large move: if session volume exceeds this
+  # multiple of trailing average, the move is treated as real, not a bad tick.
+  outlier_corroborating_volume_multiple:
+    value: 2.0
+    status: UNVALIDATED
+    search_range: [1.2, 5.0]
+
+  # --- Corporate-action adjustment verification ---
+  # An overnight close-to-open ratio near a clean fraction (1/2, 1/5, 2/3 ...)
+  # with no corporate action on file means the series is NOT adjusted.
+  unexplained_split_ratio_tolerance:
+    value: 0.015                     # 1.5% around the clean ratio
+    status: UNVALIDATED
+    search_range: [0.002, 0.02]
+    note: >-
+      MUST stay below half the smallest gap between two candidate corporate-
+      action ratios (currently ~4.2%, between the 1:4 and 1:5 bonus factors).
+      A looser tolerance makes an observed move ambiguous between two different
+      "clean" ratios, at which point the detector is flagging ordinary
+      volatility. tests/test_corporate_actions.py enforces this relationship.
+
+  unexplained_split_min_ratio_gap:
+    value: 0.30                      # only investigate |ratio-1| > 30%
+    status: UNVALIDATED
+    search_range: [0.15, 0.60]
+
+  # --- Continuity ---
+  max_consecutive_missing_sessions:
+    value: 5
+    status: UNVALIDATED
+    search_range: [1, 20]
+    note: "A stock missing more sessions than this in the recent window is excluded."
+
+  continuity_window_sessions:
+    value: 60
+    status: UNVALIDATED
+    search_range: [20, 252]
+
+  # --- Market-wide halt conditions ---
+  # If more than this fraction of the universe fails stock-level data quality,
+  # something is wrong with the FEED, not with the stocks -> halt the run.
+  max_universe_failure_fraction:
+    value: 0.25
+    status: UNVALIDATED
+    search_range: [0.05, 0.60]
+
+  # --- Point-in-time audit (research program section 7) ---
+  # These are structural switches, not thresholds. Turning one off is a
+  # deliberate, logged decision to accept a known bias.
+  pit_audit:
+    enforce_historical_membership: true
+    enforce_delisted_inclusion: true
+    enforce_fundamentals_filing_date: true
+    enforce_pledging_disclosure_date: true
+    enforce_historical_sector: true
+    forbid_forward_fill_across_sessions: true
+    max_forward_fill_sessions: 0
+
+
+# -----------------------------------------------------------------------------
+# 7. STAGE 2  --  MARKET REGIME ENGINE
+# -----------------------------------------------------------------------------
+stage2_regime:
+  benchmark_index:
+    value: "NIFTY 200"
+    status: OPERATIONAL
+    note: "Breadth and market-relative RS are measured against this index."
+
+  secondary_index:
+    value: "NIFTY 50"
+    status: OPERATIONAL
+
+  # --- Trend regime ---
+  trend:
+    fast_ma_sessions:
+      value: 50
+      status: UNVALIDATED
+      search_range: [20, 100]
+    slow_ma_sessions:
+      value: 200
+      status: UNVALIDATED
+      search_range: [100, 300]
+    # Linear-regression slope of log price over this window, annualised.
+    slope_lookback_sessions:
+      value: 63
+      status: UNVALIDATED
+      search_range: [21, 126]
+    # |annualised slope| below this = Range-bound rather than Up/Down trend.
+    slope_flat_band_annualised:
+      value: 0.05                    # +/- 5% p.a.
+      status: UNVALIDATED
+      search_range: [0.01, 0.20]
+
+  # --- Volatility regime (India VIX) ---
+  volatility:
+    vix_percentile_lookback_sessions:
+      value: 252
+      status: UNVALIDATED
+      search_range: [126, 756]
+    # Tercile cut points on the trailing VIX distribution.
+    low_tercile_pct:
+      value: 33.3
+      status: STRUCTURAL
+    high_tercile_pct:
+      value: 66.7
+      status: STRUCTURAL
+    vix_roc_lookback_sessions:
+      value: 5
+      status: UNVALIDATED
+      search_range: [1, 21]
+    # VIX change beyond this over the ROC window counts as "rising"/"falling".
+    vix_rising_threshold_pct:
+      value: 10.0
+      status: UNVALIDATED
+      search_range: [3.0, 30.0]
+    # Index return over the same window that defines "decline" vs "rally", for
+    # the Thenmozhi & Chandra (2013) asymmetric split.
+    market_move_threshold_pct:
+      value: 1.5
+      status: UNVALIDATED
+      search_range: [0.5, 5.0]
+    # G.C. & Kothari (2016): a rising-VIX flag is more reliable than a
+    # falling-VIX all-clear. This asymmetry is intentional.
+    asymmetric_confidence:
+      rising_vix_weight: 1.0
+      falling_vix_weight: 0.5
+
+  # --- Breadth regime ---
+  breadth:
+    ma_sessions:
+      value: 200
+      status: UNVALIDATED
+      search_range: [50, 200]
+    # Below this % of the universe above its own MA = weak breadth.
+    weak_threshold_pct:
+      value: 40.0
+      status: UNVALIDATED
+      search_range: [20.0, 55.0]
+    strong_threshold_pct:
+      value: 60.0
+      status: UNVALIDATED
+      search_range: [50.0, 80.0]
+    # Divergence: index makes a new N-session high while breadth does not.
+    divergence_lookback_sessions:
+      value: 21
+      status: UNVALIDATED
+      search_range: [10, 63]
+    divergence_min_breadth_drop_pct:
+      value: 7.5
+      status: UNVALIDATED
+      search_range: [2.0, 20.0]
+
+  # --- Regime transition detection ---
+  transition:
+    lookback_sessions:
+      value: 10
+      status: UNVALIDATED
+      search_range: [3, 21]
+    # How many of the three sub-regimes (trend/vol/breadth) must disagree with
+    # their trailing read to declare a transition.
+    min_components_disagreeing:
+      value: 2
+      status: UNVALIDATED
+      search_range: [1, 3]
+    # Market-wide score dampener applied while a transition is in progress.
+    dampener:
+      value: 0.70
+      status: UNVALIDATED
+      search_range: [0.3, 1.0]
+
+  # --- Regime -> factor multipliers (research program section 4.3) -----------
+  # DIRECTION is evidence-based (Daniel & Moskowitz 2016; quality-as-stabiliser).
+  # MAGNITUDE is not. Every number here is an unvalidated hypothesis.
+  multipliers:
+    status: UNVALIDATED
+    note: >-
+      Direction from Daniel & Moskowitz (2016) momentum-crash literature and the
+      quality-as-crash-stabiliser framing in Asness/Frazzini/Pedersen. Magnitudes
+      are placeholders pending CPCV.
+    table:
+      # bucket_key: [momentum_multiplier, quality_multiplier, sector_rs_multiplier]
+      "uptrend_lowvol":            [1.00, 1.00, 1.00]
+      "uptrend_midvol":            [0.90, 1.00, 0.95]
+      "uptrend_highvol":           [0.55, 1.10, 0.70]
+      "uptrend_highvol_rebound":   [0.20, 1.20, 0.50]   # D&M crash signature
+      "range_lowvol":              [0.75, 1.05, 0.85]
+      "range_midvol":              [0.65, 1.05, 0.80]
+      "range_highvol":             [0.40, 1.15, 0.60]
+      "downtrend_lowvol":          [0.55, 1.10, 0.70]
+      "downtrend_midvol":          [0.40, 1.15, 0.60]
+      "downtrend_highvol":         [0.15, 1.20, 0.40]
+    # Applied on top of the table when breadth is weak.
+    weak_breadth_momentum_penalty:
+      value: 0.85
+      status: UNVALIDATED
+      search_range: [0.5, 1.0]
+
+  # Regime buckets in which the engine refuses to issue ANY new buy candidate.
+  no_new_entry_buckets:
+    value: ["uptrend_highvol_rebound", "downtrend_highvol"]
+    status: UNVALIDATED
+    note: >-
+      Hard market-wide gate. "uptrend_highvol_rebound" is the Daniel & Moskowitz
+      momentum-crash state; "downtrend_highvol" is a capital-preservation choice.
+
+
+# -----------------------------------------------------------------------------
+# 8. STAGE 3  --  STOCK ELIGIBILITY  (runs BEFORE any scoring)
+# -----------------------------------------------------------------------------
+stage3_eligibility:
+  liquidity:
+    adtv_lookback_sessions:
+      value: 21
+      status: UNVALIDATED
+      search_range: [5, 63]
+    # Absolute floor, independent of your book size. Belt and braces.
+    min_adtv_inr:
+      value: 50000000                # Rs 5 crore/day
+      status: UNVALIDATED
+      search_range: [10000000, 1000000000]
+    # The real gate: position value / ADTV <= capital.max_participation_of_adtv
+    use_participation_gate: true
+    # Reject if the median session in the lookback had zero trades.
+    reject_on_zero_volume_sessions:
+      value: 2
+      status: UNVALIDATED
+      search_range: [0, 10]
+
+  pledging:
+    # Kalia (2024): pledging predicts CRASH RISK, not negative alpha. Used as a
+    # hard risk-exclusion filter only -- never blended into the score.
+    max_pledged_pct_of_promoter_holding:
+      value: 20.0
+      status: UNVALIDATED
+      search_range: [0.0, 50.0]
+    # What to do when pledging data is simply unavailable (the common case on
+    # free feeds). "not_testable" is the honest answer and is reported as such
+    # in the False-Signal Check section. "reject" is the paranoid setting.
+    on_missing_data:
+      value: "not_testable"          # not_testable | reject
+      status: OPERATIONAL
+
+  earnings_proximity:
+    # Exclude if scheduled results fall inside the expected holding window.
+    holding_window_sessions:
+      value: 45
+      status: UNVALIDATED
+      search_range: [10, 90]
+      note: "Should track stage7_risk.max_holding_sessions."
+    # PEAD in India is CONTRADICTORY (Harshita 2018 vs the 2014-18 ERC study).
+    # Until your own point-in-time test resolves it, no PEAD exemption exists.
+    pead_conditional_signal_enabled:
+      value: false
+      status: UNVALIDATED
+      note: "Locked off. Turning this on without your own India PEAD test is data-mining."
+    on_missing_data:
+      value: "not_testable"          # not_testable | reject
+      status: OPERATIONAL
+
+  regulatory_cooldown:
+    default_cooldown_sessions:
+      value: 10
+      status: UNVALIDATED
+      search_range: [1, 60]
+
+  # Soft pre-check here; enforced strictly at Stage 8.
+  sector_concentration:
+    max_candidates_per_sector_soft:
+      value: 3
+      status: UNVALIDATED
+      search_range: [1, 10]
+
+
+# -----------------------------------------------------------------------------
+# 9. STAGE 4  --  CORE STOCK SCORE
+# -----------------------------------------------------------------------------
+stage4_core_score:
+  # DEFAULT IS EQUAL WEIGHT. The research program predicts equal-weighting wins
+  # or ties against rank-IC weighting out-of-sample (Experiment #4), because
+  # in-sample IC gains are usually overfitting. Do not change this to
+  # "band_midpoint" or "rank_ic" until CPCV says so.
+  weighting_mode:
+    value: "equal_weight"            # equal_weight | band_midpoint | explicit | rank_ic
+    status: UNVALIDATED
+    note: "equal_weight is the safe default per research program section 4.2."
+
+  # Cross-sectional standardisation. Rank is less outlier-sensitive than z
+  # (research program section 11) -- but z is retained for diagnostics.
+  standardisation:
+    value: "rank"                    # rank | zscore
+    status: UNVALIDATED
+  winsorize_pct:
+    value: 2.0                       # clip each tail at 2% before z-scoring
+    status: UNVALIDATED
+    search_range: [0.0, 10.0]
+  sector_neutral:
+    value: false
+    status: UNVALIDATED
+    note: "Experiment #3: sector-neutral vs sector-tilted is an open question."
+
+  factors:
+    momentum_12_1:
+      enabled: true
+      lookback_sessions:
+        value: 252
+        status: STRUCTURAL
+        note: "Jegadeesh & Titman (1993) standard construction."
+      skip_sessions:
+        value: 21
+        status: STRUCTURAL
+        note: "Skips the short-term reversal window (Jegadeesh 1990)."
+      weight_band:
+        value: [0.35, 0.50]
+        status: UNVALIDATED
+        note: "Evidence tier ●●●. Band, not a point estimate."
+      explicit_weight:
+        value: null
+        status: UNVALIDATED
+        note: "Only used when weighting_mode == explicit."
+
+    quality:
+      enabled: true
+      weight_band:
+        value: [0.20, 0.35]
+        status: UNVALIDATED
+        note: "●●○. Documented job is crash stabilisation, not co-equal alpha."
+      explicit_weight:
+        value: null
+        status: UNVALIDATED
+      # Sub-component weights inside the quality composite (renormalised over
+      # whichever components actually have data).
+      components:
+        return_on_equity:      { enabled: true,  weight: 0.30, higher_is_better: true }
+        gross_profitability:   { enabled: true,  weight: 0.25, higher_is_better: true }
+        accrual_intensity:     { enabled: true,  weight: 0.15, higher_is_better: false }
+        debt_to_equity:        { enabled: true,  weight: 0.15, higher_is_better: false }
+        interest_coverage:     { enabled: true,  weight: 0.15, higher_is_better: true }
+      # If fewer than this many components have data for a stock, quality is
+      # reported as UNAVAILABLE for that stock -- never silently imputed to 0.
+      min_components_required:
+        value: 3
+        status: OPERATIONAL
+      # What the engine does when fundamentals are absent for the whole universe
+      # (the default state on free data). "drop_factor" renormalises the
+      # remaining factors and says so loudly on every card.
+      on_universe_missing:
+        value: "drop_factor"         # drop_factor | halt
+        status: OPERATIONAL
+
+    sector_relative_strength:
+      enabled: true
+      # Multi-horizon RS, in sessions. Each horizon is z/rank-scored then averaged.
+      horizons_sessions:
+        value: [21, 63, 126]
+        status: UNVALIDATED
+        note: "1mo / 3mo / 6mo per research program section 2.F."
+      # Blend of market-relative and sector-relative RS. Must sum to 1.0.
+      market_relative_weight:
+        value: 0.5
+        status: UNVALIDATED
+        search_range: [0.0, 1.0]
+      weight_band:
+        value: [0.15, 0.30]
+        status: UNVALIDATED
+        note: "Partially redundant with momentum BY CONSTRUCTION. Shrink after measuring rho."
+      explicit_weight:
+        value: null
+        status: UNVALIDATED
+
+    estimate_revision_momentum:
+      enabled: false
+      weight_band:
+        value: [0.0, 0.0]
+        status: UNVALIDATED
+        note: >-
+          LOCKED AT ZERO. Requires timestamped point-in-time India analyst data
+          that does not exist on any free feed. Do not approximate it.
+
+  # --- Redundancy check (master prompt Stage 4) ---
+  redundancy:
+    enabled: true
+    max_abs_spearman:
+      value: 0.60
+      status: UNVALIDATED
+      search_range: [0.4, 0.85]
+      note: "|rho| above this means the factor is not new information."
+    # What to do when two factors breach the cutoff on live data.
+    #   "log"    -> record the finding in the ledger, keep both (default; the
+    #               research program says this is a FINDING, not something to
+    #               silently override mid-run)
+    #   "shrink" -> multiply the weaker factor's weight by (1 - |rho|)
+    on_breach:
+      value: "log"                   # log | shrink
+      status: OPERATIONAL
+    # Diagnostic only: proves RSI/MACD/MA-cross collapse into momentum rather
+    # than assuming it. Never scored.
+    run_technical_collapse_diagnostic: true
+
+  # Data-quality gate multiplier, per master prompt weighting formula.
+  data_quality_gate_penalty:
+    value: 0.0                       # 0.0 = a flagged stock contributes nothing
+    status: STRUCTURAL
+
+
+# -----------------------------------------------------------------------------
+# 10. STAGE 5  --  FALSE-SIGNAL DEFENSE MATRIX
+# -----------------------------------------------------------------------------
+# Every check emits PASS / SCORE_PENALTY / HARD_REJECT / NOT_TESTABLE.
+# Penalties are subtracted from the normalised composite score (0..1 scale).
+stage5_false_signal:
+  # How many top-ranked names get the full (expensive) defense matrix run.
+  top_n_to_defend:
+    value: 25
+    status: OPERATIONAL
+    search_range: [5, 100]
+
+  # Cumulative penalty above this = the candidate is dropped even if no single
+  # check hard-rejected it.
+  max_cumulative_penalty:
+    value: 0.35
+    status: UNVALIDATED
+    search_range: [0.1, 0.8]
+
+  # ---- 5.1 Market structure ----
+  low_volume_breakout:
+    enabled: true
+    lookback_sessions: 20
+    min_volume_multiple:
+      value: 1.5
+      status: UNVALIDATED
+      search_range: [1.0, 3.0]
+      note: >-
+        Bulkowski's practitioner sample (mostly US large/mid-cap) clusters here.
+        NOT peer-reviewed and NOT transferable to NSE mid-caps without your test.
+    penalty:
+      value: 0.10
+      status: UNVALIDATED
+      search_range: [0.0, 0.4]
+
+  liquidity_distortion:
+    enabled: true
+    # HARD REJECT. Re-checks the Stage 3 gate against the *current* session,
+    # not the trailing average, to catch a liquidity collapse.
+    min_session_turnover_vs_adtv:
+      value: 0.25
+      status: UNVALIDATED
+      search_range: [0.05, 0.8]
+    action: "hard_reject"
+
+  gap_signal:
+    enabled: true
+    # Overnight gap larger than this many ATRs is treated as gap-driven.
+    max_gap_atr_multiple:
+      value: 1.5
+      status: UNVALIDATED
+      search_range: [0.5, 4.0]
+    # If price closed back inside the gap, the move did not hold.
+    require_next_session_confirmation: true
+    penalty:
+      value: 0.12
+      status: UNVALIDATED
+      search_range: [0.0, 0.4]
+
+  news_spike:
+    enabled: true
+    # Big move + big volume + NO scheduled event on the calendar = unexplained.
+    move_sigma:
+      value: 3.0
+      status: UNVALIDATED
+      search_range: [1.5, 6.0]
+    volume_multiple:
+      value: 2.5
+      status: UNVALIDATED
+      search_range: [1.5, 6.0]
+    # Require the move to persist this many sessions before it counts.
+    persistence_sessions:
+      value: 3
+      status: UNVALIDATED
+      search_range: [1, 10]
+    penalty:
+      value: 0.12
+      status: UNVALIDATED
+      search_range: [0.0, 0.4]
+
+  short_covering:
+    enabled: true
+    # India analogue of a short squeeze: price UP + open interest DOWN.
+    # Practitioner-grade only (●○○). Context, never a standalone signal.
+    lookback_sessions: 5
+    min_price_change_pct:
+      value: 3.0
+      status: UNVALIDATED
+      search_range: [1.0, 10.0]
+    min_oi_decline_pct:
+      value: 5.0
+      status: UNVALIDATED
+      search_range: [1.0, 20.0]
+    penalty:
+      value: 0.08
+      status: UNVALIDATED
+      search_range: [0.0, 0.3]
+
+  beta_explained_move:
+    enabled: true
+    # Regress stock returns on market (and sector) over this window; if the
+    # move is mostly beta, it is not a stock-specific signal.
+    lookback_sessions:
+      value: 63
+      status: UNVALIDATED
+      search_range: [21, 252]
+    beta_estimation_sessions:
+      value: 252
+      status: UNVALIDATED
+      search_range: [126, 756]
+    # Penalty scales linearly with the fraction of the move explained by beta,
+    # starting at this threshold.
+    explained_fraction_threshold:
+      value: 0.70
+      status: UNVALIDATED
+      search_range: [0.4, 0.95]
+    max_penalty:
+      value: 0.20
+      status: UNVALIDATED
+      search_range: [0.0, 0.5]
+
+  # ---- 5.2 Continuation vs reversal ----
+  overextension:
+    enabled: true
+    short_horizon_sessions:
+      value: 5
+      status: UNVALIDATED
+      search_range: [1, 10]
+    # Move over the short horizon, in ATRs, above which the name is "extended".
+    extended_atr_multiple:
+      value: 3.0
+      status: UNVALIDATED
+      search_range: [1.0, 6.0]
+    # Per the evidence: DO NOT FADE. Downgrade to WATCHLIST and wait for a
+    # pullback instead. Short-term reversal evidence is ●○○ and weak at this
+    # horizon; momentum evidence is ●●●.
+    action:
+      value: "watchlist"             # watchlist | penalty
+      status: STRUCTURAL
+    penalty:
+      value: 0.10
+      status: UNVALIDATED
+      search_range: [0.0, 0.3]
+
+  # ---- 5.3 Event-driven ----
+  earnings_distortion:
+    enabled: true
+    action: "hard_reject"            # unless a validated PEAD signal applies
+    # Also penalise if results were released very recently (post-event drift
+    # window contamination) without a validated PEAD signal.
+    recent_earnings_sessions:
+      value: 3
+      status: UNVALIDATED
+      search_range: [0, 10]
+    recent_earnings_penalty:
+      value: 0.15
+      status: UNVALIDATED
+      search_range: [0.0, 0.5]
+
+  corporate_action_distortion:
+    enabled: true
+    action: "hard_reject"
+    # Any unadjusted corporate action inside this window kills the candidate.
+    lookback_sessions:
+      value: 30
+      status: UNVALIDATED
+      search_range: [5, 90]
+
+  insider_activity:
+    enabled: true
+    lookback_sessions: 30
+    penalty:
+      value: 0.10
+      status: UNVALIDATED
+      search_range: [0.0, 0.3]
+
+  regulatory_shock:
+    enabled: true
+    action: "hard_reject"
+
+  # ---- 5.4 Regime / market-wide ----
+  regime_transition:
+    enabled: true
+    # Applied market-wide, not just to the flagged stock (master prompt 5.4).
+    penalty:
+      value: 0.10
+      status: UNVALIDATED
+      search_range: [0.0, 0.4]
+
+  volatility_shock:
+    enabled: true
+    vix_spike_pct:
+      value: 20.0
+      status: UNVALIDATED
+      search_range: [5.0, 60.0]
+    vix_spike_lookback_sessions:
+      value: 3
+      status: UNVALIDATED
+      search_range: [1, 10]
+    penalty:
+      value: 0.15
+      status: UNVALIDATED
+      search_range: [0.0, 0.5]
+
+  momentum_crash:
+    enabled: true
+    # Daniel & Moskowitz (2016) crash signature: prior market decline, elevated
+    # volatility, sharp rebound in progress.
+    prior_decline_lookback_sessions:
+      value: 126
+      status: UNVALIDATED
+      search_range: [42, 252]
+    prior_decline_threshold_pct:
+      value: -10.0
+      status: UNVALIDATED
+      search_range: [-30.0, -3.0]
+    rebound_lookback_sessions:
+      value: 21
+      status: UNVALIDATED
+      search_range: [5, 63]
+    rebound_threshold_pct:
+      value: 5.0
+      status: UNVALIDATED
+      search_range: [1.0, 20.0]
+    action: "hard_reject"
+
+  # ---- 5.5 Data integrity (live re-affirmation of Stage 1) ----
+  data_integrity:
+    enabled: true
+    stale_data_action: "hard_reject"
+    outlier_action: "hard_reject"
+    source_disagreement_action: "flag"
+    # Execution realism: implied fill size vs actual ADTV.
+    execution_realism_hard_reject_participation:
+      value: 0.05                    # 5% of ADTV in one order = unrealistic
+      status: UNVALIDATED
+      search_range: [0.01, 0.20]
+    execution_realism_penalty_per_pct_over:
+      value: 0.05
+      status: UNVALIDATED
+      search_range: [0.0, 0.3]
+
+
+# -----------------------------------------------------------------------------
+# 11. STAGE 6  --  ENTRY CONFIRMATION
+# -----------------------------------------------------------------------------
+stage6_entry:
+  confirmation:
+    require_volume_confirmation: true
+    volume_multiple:
+      value: 1.3
+      status: UNVALIDATED
+      search_range: [1.0, 3.0]
+    volume_lookback_sessions:
+      value: 20
+      status: UNVALIDATED
+      search_range: [5, 63]
+    # India-specific: delivery percentage as a quality-of-move filter.
+    # Available free from NSE sec_bhavdata_full. Practitioner-grade at best.
+    require_delivery_confirmation:
+      value: false
+      status: UNVALIDATED
+      note: "No academic backing found. Off by default; test it before trusting it."
+    min_delivery_pct:
+      value: 40.0
+      status: UNVALIDATED
+      search_range: [20.0, 80.0]
+    reject_if_overextended: true
+
+  # Triggers, ordered most-confirmation-demanded first. The engine evaluates in
+  # this order and stops at the first that fires. More confirmation = fewer,
+  # slower signals: that scarcity is intentional.
+  triggers:
+    order:
+      value: ["pullback", "ma_reclaim", "breakout"]
+      status: OPERATIONAL
+
+    pullback:
+      enabled: true
+      # Price must be within this many ATRs of the reference MA.
+      support_ma_sessions:
+        value: 50
+        status: UNVALIDATED
+        search_range: [10, 200]
+      max_distance_atr:
+        value: 1.0
+        status: UNVALIDATED
+        search_range: [0.25, 3.0]
+      # And the last session must show a bullish reversal (close > open, close
+      # in the upper part of the range).
+      require_reversal_candle: true
+      min_close_position_in_range:
+        value: 0.60
+        status: UNVALIDATED
+        search_range: [0.3, 0.9]
+
+    ma_reclaim:
+      enabled: true
+      reference:
+        value: "vwap_anchored"       # vwap_anchored | ma
+        status: OPERATIONAL
+        note: >-
+          True intraday VWAP needs tick data. "vwap_anchored" uses the NSE
+          bhavcopy AVG_PRICE (turnover/volume) as an honest daily proxy and
+          says so in the output. Set to "ma" to use a plain moving average.
+      ma_sessions:
+        value: 20
+        status: UNVALIDATED
+        search_range: [5, 100]
+      lookback_sessions:
+        value: 10
+        status: UNVALIDATED
+        search_range: [3, 30]
+      require_above_average_volume: true
+
+    breakout:
+      enabled: true
+      # Highest high over this window must be cleared.
+      lookback_sessions:
+        value: 63
+        status: UNVALIDATED
+        search_range: [20, 252]
+      # Strictest volume bar of the three triggers, deliberately.
+      min_volume_multiple:
+        value: 2.0
+        status: UNVALIDATED
+        search_range: [1.2, 4.0]
+      min_breakout_margin_pct:
+        value: 0.5
+        status: UNVALIDATED
+        search_range: [0.0, 3.0]
+
+  # Entry zone is a RANGE, never a single price (no false precision).
+  entry_zone:
+    # Half-width of the zone, in ATRs, around the reference price.
+    half_width_atr:
+      value: 0.35
+      status: UNVALIDATED
+      search_range: [0.1, 1.0]
+    # Never quote an entry zone wider than this % of price.
+    max_width_pct:
+      value: 3.0
+      status: UNVALIDATED
+      search_range: [0.5, 8.0]
+    round_to_paise: 5                # round zone bounds to nearest 5 paise
+
+
+# -----------------------------------------------------------------------------
+# 12. STAGE 7  --  RISK / POSITION ENGINE
+# -----------------------------------------------------------------------------
+stage7_risk:
+  atr:
+    period_sessions:
+      value: 14
+      status: UNVALIDATED
+      search_range: [5, 30]
+    method:
+      value: "wilder"                # wilder | sma
+      status: STRUCTURAL
+
+  stop_loss:
+    # Kaminski & Lo (2014) establish WHEN stops help (positive serial
+    # correlation -- satisfied by a momentum-anchored book). They do NOT
+    # establish a multiplier. Anyone quoting "2x ATR is optimal" is quoting a
+    # blog, not a journal.
+    atr_multiple:
+      value: 2.5
+      status: UNVALIDATED
+      optimization_tier: A_SEARCH
+      search_points: 4
+      search_range: [1.5, 3.5]
+      note: >-
+        Explicitly a free parameter. Kaminski & Lo (2014) establish WHEN stops
+        help (positive serial correlation, which a momentum book satisfies) but
+        NOT a multiplier. The practitioner "2x ATR" figure traces to blogs, not
+        journals, so this is searched rather than assumed.
+    # Never place the stop further than this % from entry, regardless of ATR.
+    max_stop_distance_pct:
+      value: 15.0
+      status: UNVALIDATED
+      search_range: [5.0, 30.0]
+    min_stop_distance_pct:
+      value: 2.0
+      status: UNVALIDATED
+      search_range: [0.5, 8.0]
+
+  trailing_stop:
+    enabled: true
+    style:
+      value: "chandelier"            # chandelier (from highest high since entry)
+      status: STRUCTURAL
+    atr_multiple:
+      value: 3.0
+      status: UNVALIDATED
+      search_range: [1.5, 5.0]
+    # Only start trailing after the position has moved this many R in favour.
+    activate_after_r:
+      value: 1.0
+      status: UNVALIDATED
+      search_range: [0.0, 3.0]
+
+  targets:
+    # Expressed as multiples of initial risk (R = entry - stop).
+    t1_r_multiple:
+      value: 1.5
+      status: UNVALIDATED
+      search_range: [0.5, 4.0]
+    t2_r_multiple:
+      value: 3.0
+      status: UNVALIDATED
+      search_range: [1.5, 8.0]
+    # Also snap targets to nearby swing highs when one is within this % of the
+    # R-derived level (levels, never guarantees).
+    snap_to_resistance_within_pct:
+      value: 2.0
+      status: UNVALIDATED
+      search_range: [0.0, 6.0]
+    resistance_lookback_sessions:
+      value: 252
+      status: UNVALIDATED
+      search_range: [63, 756]
+
+  thesis_invalidation:
+    # Distinct from the mechanical stop: the level/condition at which the
+    # ORIGINAL SIGNAL is falsified.
+    # Momentum score falling below this percentile of the eligible universe
+    # means the thesis is dead even if the stop has not been hit.
+    momentum_rank_exit_percentile:
+      value: 50.0
+      status: UNVALIDATED
+      search_range: [20.0, 80.0]
+    # Price level proxy: loss of the trend structure that generated the signal.
+    structure_ma_sessions:
+      value: 50
+      status: UNVALIDATED
+      search_range: [20, 200]
+    structure_buffer_atr:
+      value: 0.5
+      status: UNVALIDATED
+      search_range: [0.0, 2.0]
+
+  # Position Risk Category -- NEVER a % allocation (no validated Kelly inputs).
+  risk_category:
+    # Thresholds on the composite (confidence x regime x relative-vol) score.
+    standard_min_score:
+      value: 0.70
+      status: UNVALIDATED
+      search_range: [0.5, 0.95]
+    reduced_min_score:
+      value: 0.45
+      status: UNVALIDATED
+      search_range: [0.2, 0.7]
+    # Below reduced_min_score -> "Minimum".
+    # Relative volatility input: stock ATR% vs the median ATR% of candidates.
+    relative_vol_lookback_sessions:
+      value: 63
+      status: UNVALIDATED
+      search_range: [21, 252]
+
+  holding_period:
+    # Backstop only. Primary exit is signal deterioration (#5 in the hierarchy).
+    min_holding_sessions:
+      value: 15
+      status: UNVALIDATED
+      search_range: [5, 60]
+    max_holding_sessions:
+      value: 63                      # ~3 months
+      status: UNVALIDATED
+      optimization_tier: A_SEARCH
+      search_points: 3
+      search_range: [21, 252]
+      note: >-
+        Experiment #9 (calendar exit vs signal-deterioration exit). Time
+        expiration remains a BACKSTOP, never the primary trigger -- what is
+        being searched is how loose the backstop should be, not whether to
+        promote it.
+
+  # Exit priority hierarchy. Order is fixed by the research program (section
+  # 6.2); these switches only let you disable a rung, never reorder it.
+  exit_hierarchy:
+    thesis_invalidation: true
+    stop_loss_breach: true
+    new_hard_rejection: true
+    severe_regime_change: true
+    signal_reversal: true
+    trailing_stop: true
+    target_achieved: true
+    time_expiration: true
+
+
+# -----------------------------------------------------------------------------
+# 13. STAGE 8  --  FINAL SIGNAL
+# -----------------------------------------------------------------------------
+stage8_final_signal:
+  # Portfolio-level sanity: don't present five versions of the same trade.
+  portfolio:
+    max_pairwise_correlation:
+      value: 0.70
+      status: UNVALIDATED
+      search_range: [0.4, 0.9]
+    correlation_lookback_sessions:
+      value: 126
+      status: UNVALIDATED
+      search_range: [42, 252]
+    max_signals_per_sector:
+      value: 2
+      status: OPERATIONAL
+      search_range: [1, 5]
+    max_signals_per_run:
+      value: 5
+      status: OPERATIONAL
+      search_range: [1, 20]
+
+  # Scarcity threshold, applied LAST so signal count is a consequence of
+  # evidence, not an optimisation target.
+  scarcity:
+    # Minimum post-penalty composite score, on the 0..1 normalised scale.
+    min_composite_score:
+      value: 0.60
+      status: UNVALIDATED
+      optimization_tier: A_SEARCH
+      search_points: 3
+      search_range: [0.3, 0.9]
+      note: >-
+        Sets how selective the engine is, and therefore the whole
+        scarcity-vs-opportunity trade-off. Real economic content, so it is
+        searched -- but applied LAST in Stage 8, so signal count stays a
+        consequence of evidence rather than a target being optimised toward.
+    # And the candidate must sit in the top X% of the eligible universe.
+    min_universe_percentile:
+      value: 90.0
+      status: UNVALIDATED
+      search_range: [70.0, 99.0]
+    # A run producing zero signals is a legitimate, expected outcome.
+    expect_frequent_no_trade: true
+
+  # Signal Strength Band cut points on the post-penalty composite score.
+  # Bands, not a 0-100 score -- no CPCV-derived scoring exists yet.
+  strength_bands:
+    high_min:
+      value: 0.80
+      status: UNVALIDATED
+      search_range: [0.6, 0.95]
+    medium_min:
+      value: 0.65
+      status: UNVALIDATED
+      search_range: [0.4, 0.8]
+
+  # NO TRADE output: how many near-miss candidates to explain.
+  no_trade:
+    show_closest_n:
+      value: 5
+      status: OPERATIONAL
+      search_range: [1, 20]
+
+
+# -----------------------------------------------------------------------------
+# 14. COST MODEL  --  India 2026 stack (research program section 9)
+# -----------------------------------------------------------------------------
+# STATUTORY entries are set by law/exchange. VERIFY against the live SEBI/NSE
+# circular before you trade -- rates do get revised, and this file is not a
+# legal source.
+costs:
+  segment:
+    value: "delivery"                # delivery | intraday
+    status: OPERATIONAL
+
+  stt_delivery_buy_pct:
+    value: 0.1
+    status: STATUTORY
+    note: "0.1% on BOTH legs for equity delivery."
+  stt_delivery_sell_pct:
+    value: 0.1
+    status: STATUTORY
+  stt_intraday_sell_pct:
+    value: 0.025
+    status: STATUTORY
+
+  stamp_duty_buy_pct:
+    value: 0.015
+    status: STATUTORY
+    note: "Buy side only, delivery. State-linked; 0.015% is the standard rate."
+
+  exchange_transaction_charge_pct:
+    value: 0.00297
+    status: STATUTORY
+    note: "NSE cash segment. Both legs."
+
+  sebi_turnover_fee_pct:
+    value: 0.0001
+    status: STATUTORY
+
+  gst_pct_on_charges:
+    value: 18.0
+    status: STATUTORY
+    note: "18% on (brokerage + exchange txn charge + SEBI fee), NOT on trade value."
+
+  brokerage_flat_per_order_inr:
+    value: 20.0
+    status: OPERATIONAL
+    note: "Typical Indian discount broker. Many charge 0 for delivery."
+  brokerage_pct_of_turnover:
+    value: 0.0
+    status: OPERATIONAL
+  brokerage_cap_per_order_inr:
+    value: 20.0
+    status: OPERATIONAL
+
+  dp_charge_per_scrip_sell_inr:
+    value: 15.93
+    status: OPERATIONAL
+    note: "Depository participant charge, sell leg only, per scrip per day."
+
+  # --- Market impact: the cost that actually threatens the small/mid-cap edge
+  impact_model:
+    # cost_bps = coefficient * (participation_rate ^ exponent) * 10000
+    # Square-root impact law: exponent 0.5 is the standard practitioner form.
+    type:
+      value: "square_root"           # square_root | linear | fixed_bps
+      status: UNVALIDATED
+    coefficient:
+      value: 0.10
+      status: UNVALIDATED
+      search_range: [0.02, 0.50]
+      note: >-
+        UNCALIBRATED. Must be fitted against your own realised slippage before
+        any net-of-cost claim is made. Research program section 9 shows a 10bp
+        execution premium can turn 113% modelled into 65% realised.
+    exponent:
+      value: 0.5
+      status: UNVALIDATED
+      search_range: [0.3, 1.0]
+    # Half the quoted bid-ask spread, in bps, as a floor on impact.
+    assumed_half_spread_bps:
+      value: 5.0
+      status: UNVALIDATED
+      search_range: [1.0, 50.0]
+
+  # Mandatory stress tests (research program section 9).
+  stress_tests:
+    cost_multiplier: 2.0
+    impact_multiplier: 3.0
+    require_edge_survives_stress: true
+
+
+# -----------------------------------------------------------------------------
+# 15. RESEARCH LEDGER  --  append-only, one row per run
+# -----------------------------------------------------------------------------
+ledger:
+  enabled: true
+  # Fatal-on-failure by design: an unlogged run corrupts the DSR trial count.
+  fail_run_if_unwritable: true
+  format:
+    value: "jsonl"                   # jsonl | sqlite | both
+    status: OPERATIONAL
+  filename: "research_ledger.jsonl"
+  # Also write a full per-run detail JSON (every stock's score and gate).
+  write_run_detail: true
+  run_detail_subdir: "runs"
+  retain_runs: 2000
+
+
+# -----------------------------------------------------------------------------
+# 16. VALIDATION HARNESS  --  CPCV / PBO / DSR  (interface live, results pending)
+# -----------------------------------------------------------------------------
+validation:
+  cpcv:
+    n_groups:
+      value: 10
+      status: STRUCTURAL
+      note: "Research program section 8 starting point."
+    n_test_groups:
+      value: 2
+      status: STRUCTURAL
+    purge_sessions:
+      value: 21
+      status: STRUCTURAL
+      note: "Label overlap purge. Must be >= your forward-return label horizon."
+    embargo_sessions:
+      value: 21
+      status: STRUCTURAL
+      note: "~1 business month, per published practice."
+  holdout:
+    # NEVER touched during development. Used exactly once.
+    reserve_most_recent_sessions:
+      value: 378                     # ~18 months
+      status: STRUCTURAL
+    sacred: true
+  significance:
+    t_stat_bar:
+      value: 3.0
+      status: STRUCTURAL
+      note: "Harvey, Liu & Zhu (2016). Contested, but the conservative choice."
+  label:
+    forward_return_sessions:
+      value: 21
+      status: UNVALIDATED
+      search_range: [5, 63]
+
+  # --- ANTI-OVERFITTING BUDGET, enforced at config-load time -----------------
+  # The Deflated Sharpe Ratio charges you for every configuration you tried.
+  # Declaring the budget up front, and having the loader refuse to exceed it,
+  # is cheaper than discovering after a three-week campaign that the penalty is
+  # unpayable.
+  #
+  # Scale of the thing being defended against: a naive 3-point sweep of all 132
+  # UNVALIDATED parameters would be 9.55e62 configurations. Not "expensive" --
+  # arithmetically impossible, with a Probability of Backtest Overfitting of
+  # essentially 1. The tier system exists to keep the real number near 400.
+  search_budget:
+    # A_SEARCH parameters allowed. Raising this raises the significance bar you
+    # then have to clear (Harvey, Liu & Zhu 2016) -- it is not a free knob.
+    max_tier_a_parameters: 6
+    # Product of all A_SEARCH grid sizes. Multiplicative, so it bites fast.
+    max_grid_configurations: 512
+    # Trials already spent across previous campaigns. Feeds the DSR trial count.
+    # Update this from the research ledger after every campaign.
+    cumulative_trials_logged: 0
+    # A configuration with PBO above this cannot be promoted to VALIDATED.
+    # A high PBO is an instruction to SIMPLIFY the model, not to keep searching
+    # for a configuration that happens to score better.
+    max_acceptable_pbo: 0.5
+
+
+# -----------------------------------------------------------------------------
+# 17. API / WEBAPP
+# -----------------------------------------------------------------------------
+api:
+  host: "127.0.0.1"
+  port: 8000
+  cors_origins: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000"]
+  # v1 is single-user localhost. Set a token if you ever expose this.
+  auth_token: null
+  # Hard safety interlock. There is no order-routing code in this project, and
+  # this flag exists so that any future addition must be explicitly enabled.
+  allow_order_placement: false
+  disclaimer: >-
+    Decision-support tool. Not financial advice. No trades are placed
+    automatically.

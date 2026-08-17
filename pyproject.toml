@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prosignal"
+version = "0.1.0"
+description = "India solo-quant decision-support signal engine (NSE equities). Not an auto-trader."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+authors = [{ name = "rahulreddyallu" }]
+
+dependencies = [
+    "numpy>=1.24,<2.1",
+    "pandas>=2.0,<2.3",
+    "pyarrow>=14.0",
+    "pydantic>=2.5,<3",
+    "PyYAML>=6.0",
+    "requests>=2.31",
+    "python-dateutil>=2.8",
+    "yfinance>=0.2.40",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+prosignal = "prosignal.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+prosignal = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning"]

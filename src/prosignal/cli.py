@@ -1,0 +1,714 @@
+"""Command-line interface.
+
+    prosignal version
+    prosignal config show [--unvalidated-only] [--grep TEXT]
+    prosignal config validate
+    prosignal config templates [--overwrite]
+    prosignal data ingest [--sessions N] [--date YYYY-MM-DD] [--offline]
+                          [--refetch] [--no-secondary] [--full]
+    prosignal data status
+    prosignal data check [--date YYYY-MM-DD]
+    prosignal data purge-cache
+
+Every command exits non-zero on failure and prints a specific reason. The
+config commands exist because the transparency requirement (webapp FR-8) should
+hold at the terminal too, not only in a browser.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import sys
+from typing import List, Optional
+
+from .config.loader import AppConfig, load_config
+from .core.errors import ProSignalError
+from .core.logging import get_logger, setup_logging
+from .version import ENGINE_NAME, ENGINE_VERSION, SCHEMA_VERSION
+
+log = get_logger(__name__)
+
+try:
+    from rich.console import Console
+    from rich.table import Table
+
+    _console: Optional["Console"] = Console()
+except ImportError:  # pragma: no cover - rich is a listed dependency
+    _console = None
+
+
+# =============================================================================
+# output helpers
+# =============================================================================
+
+
+def _print(msg: str = "") -> None:
+    if _console is not None:
+        _console.print(msg)
+    else:  # pragma: no cover
+        print(msg)
+
+
+def _rule(title: str) -> None:
+    if _console is not None:
+        _console.rule(f"[bold]{title}")
+    else:  # pragma: no cover
+        print(f"\n== {title} ==")
+
+
+def _table(title: str, columns: List[str], rows: List[List[str]]) -> None:
+    if _console is None:  # pragma: no cover
+        print(title)
+        print(" | ".join(columns))
+        for r in rows:
+            print(" | ".join(str(c) for c in r))
+        return
+    table = Table(title=title, header_style="bold", show_lines=False)
+    for col in columns:
+        table.add_column(col, overflow="fold")
+    for row in rows:
+        table.add_row(*[str(c) for c in row])
+    _console.print(table)
+
+
+_STATUS_STYLE = {
+    "UNVALIDATED": "yellow",
+    "VALIDATED": "green",
+    "STATUTORY": "cyan",
+    "STRUCTURAL": "blue",
+    "OPERATIONAL": "magenta",
+    "OK": "green",
+    "STALE": "yellow",
+    "MISSING": "red",
+    "PARTIAL": "yellow",
+    "DEGRADED": "yellow",
+}
+
+
+def _tag(text: str) -> str:
+    style = _STATUS_STYLE.get(text)
+    return f"[{style}]{text}[/{style}]" if style and _console else text
+
+
+# =============================================================================
+# config commands
+# =============================================================================
+
+
+def cmd_config_show(cfg: AppConfig, args: argparse.Namespace) -> int:
+    report = cfg.transparency_report()
+    _rule("Configuration")
+    _print(f"file          : {report['source_file']}")
+    _print(f"config version: [bold]{report['config_version']}[/bold]" if _console else report["config_version"])
+    _print(f"parameters    : {report['total_parameters']}")
+    counts = ", ".join(
+        f"{_tag(k)}={v}" for k, v in sorted(report["counts_by_status"].items())
+    )
+    _print(f"by status     : {counts}")
+    _print()
+
+    params = report["parameters"]
+    if args.unvalidated_only:
+        params = [p for p in params if p["status"] == "UNVALIDATED"]
+    if args.grep:
+        needle = args.grep.lower()
+        params = [
+            p
+            for p in params
+            if needle in p["path"].lower() or needle in str(p.get("note", "")).lower()
+        ]
+
+    rows = []
+    for p in params:
+        rng = (
+            f"[{p['search_range'][0]}, {p['search_range'][1]}]"
+            if p.get("search_range")
+            else "-"
+        )
+        rows.append([p["path"], repr(p["value"]), _tag(p["status"]), rng])
+    _table(f"Parameters ({len(rows)})", ["path", "value", "status", "search range"], rows)
+
+    _print()
+    _print(f"[dim]{report['honesty_note']}[/dim]" if _console else report["honesty_note"])
+    return 0
+
+
+def cmd_config_validate(cfg: AppConfig, args: argparse.Namespace) -> int:
+    # Reaching this point means load_config() already validated everything.
+    _rule("Configuration valid")
+    _print(f"config version : {cfg.version}")
+    _print(f"project root   : {cfg.paths.root}")
+    _print(f"parameters     : {len(cfg.params.iter_tunables())}")
+    _print(f"unvalidated    : {cfg.params.unvalidated_count()}")
+    _print(f"universe       : {cfg.params.universe.index_name.value}")
+    _print(f"capital        : Rs {cfg.params.capital.total_capital_inr.value:,.0f}")
+    _print(f"position value : Rs {cfg.params.capital.position_value_inr():,.0f}")
+    _print()
+    _print(
+        "[yellow]Reminder:[/yellow] an UNVALIDATED parameter is a hypothesis. "
+        "Nothing here has been through CPCV on point-in-time India data yet."
+        if _console
+        else "Reminder: UNVALIDATED parameters are hypotheses, not results."
+    )
+    return 0
+
+
+_TIER_STYLE = {
+    "A_SEARCH": "red",
+    "B_SENSITIVITY": "yellow",
+    "C_FIXED": "blue",
+    "D_OPERATIONAL": "magenta",
+}
+
+_TIER_MEANING = {
+    "A_SEARCH": "searched in CPCV; every value tried is charged to the DSR trial count",
+    "B_SENSITIVITY": "perturbed to prove robustness; NEVER selected on",
+    "C_FIXED": "set from evidence or convention; never searched",
+    "D_OPERATIONAL": "your business constraint, not a research parameter",
+}
+
+
+def cmd_config_tiers(cfg: AppConfig, args: argparse.Namespace) -> int:
+    report = cfg.params.search_space_report()
+    _rule("Optimisation tiers and search budget")
+
+    counts = report["tier_counts"]
+    rows = []
+    for tier in ("A_SEARCH", "B_SENSITIVITY", "C_FIXED", "D_OPERATIONAL"):
+        label = (
+            f"[{_TIER_STYLE[tier]}]{tier}[/{_TIER_STYLE[tier]}]" if _console else tier
+        )
+        rows.append([label, str(counts.get(tier, 0)), _TIER_MEANING[tier]])
+    _table("Classification", ["tier", "count", "meaning"], rows)
+
+    _print()
+    _table(
+        "Tier A -- the only parameters allowed into the search grid",
+        ["path", "value", "grid points", "search range"],
+        [
+            [
+                e["path"],
+                repr(e["value"]),
+                str(e["grid_points"]),
+                str(e["search_range"]),
+            ]
+            for e in report["tier_a_parameters"]
+        ],
+    )
+
+    grid = report["grid_configurations"]
+    paths = report["cpcv_paths"]
+    _print()
+    _print(f"grid configurations   : {grid:,} / budget {report['max_grid_configurations']:,}")
+    _print(f"CPCV paths per config : {paths:,}")
+    _print(f"total model fits      : {grid * paths:,}")
+    _print(f"trials already logged : {report['cumulative_trials_logged']:,}")
+    _print(
+        f"DSR trial count if swept: [bold]{report['effective_trials_if_swept']:,}[/bold]"
+        if _console
+        else f"DSR trial count if swept: {report['effective_trials_if_swept']:,}"
+    )
+
+    naive = report["naive_all_unvalidated_3pt_sweep"]
+    _print()
+    _print(
+        f"For contrast, a 3-point sweep of every UNVALIDATED parameter would be "
+        f"[red]{naive:.2e}[/red] configurations -- not expensive, arithmetically "
+        f"impossible, with a Probability of Backtest Overfitting of essentially 1. "
+        f"Keeping the real number near {grid:,} is the entire point of the tier "
+        f"system."
+        if _console
+        else f"A 3-point sweep of every UNVALIDATED parameter would be {naive:.2e} configurations."
+    )
+
+    if not report["within_budget"]:
+        _print()
+        _print("[red]OVER BUDGET[/red]" if _console else "OVER BUDGET")
+        return 2
+    return 0
+
+
+def cmd_config_templates(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from .data.providers.csv_import import CsvImportProvider
+
+    provider = CsvImportProvider(
+        cfg=cfg.params.providers.csv_import, project_root=cfg.paths.root
+    )
+    written = provider.write_templates(overwrite=args.overwrite)
+    _rule("Reference CSV templates")
+    if not written:
+        _print("All template files already exist. Use --overwrite to reset them.")
+    for path in written:
+        _print(f"  created {path}")
+    _print()
+    _print(
+        "These are the feeds no free India source supplies reliably. Until a "
+        "file has rows, the dependent check reports NOT_TESTABLE -- it does not "
+        "pass."
+    )
+    return 0
+
+
+# =============================================================================
+# data commands
+# =============================================================================
+
+
+def cmd_data_ingest(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from .data.ingest import DataIngestor, IngestOptions
+
+    requested: Optional[dt.date] = (
+        dt.date.fromisoformat(args.date) if args.date else None
+    )
+    sessions = args.sessions
+    if args.full:
+        sessions = int(cfg.params.universe.min_history_sessions.value) + 30
+
+    opts = IngestOptions(
+        history_sessions=sessions,
+        offline=args.offline,
+        include_secondary_prices=not args.no_secondary,
+        refetch_stored_sessions=args.refetch,
+        force_reference_refresh=args.refetch,
+    )
+
+    _rule("Stage 0 -- data ingestion")
+    if sessions and sessions > 60 and not args.offline:
+        _print(
+            f"[dim]Backfilling ~{sessions} sessions. First run pulls each session "
+            f"from NSE (a few minutes); later runs come from the local HTTP "
+            f"cache in seconds.[/dim]"
+            if _console
+            else f"Backfilling ~{sessions} sessions; first run is slow, later runs are cached."
+        )
+
+    with DataIngestor(cfg) as ingestor:
+        result = ingestor.run(requested_date=requested, options=opts)
+
+    m = result.manifest
+    _print()
+    _print(f"decision date : [bold]{m.as_of_date}[/bold]" if _console else str(m.as_of_date))
+    _print(f"universe      : {m.universe_size_raw} names ({cfg.params.universe.index_name.value})")
+    _print(f"calendar      : {m.calendar_sessions_available} sessions, last {m.calendar_last_session}")
+    _print(f"sessions new  : {result.sessions_fetched}")
+    _print(f"http          : {result.http_stats}")
+
+    rows = []
+    for name, rec in sorted(m.feeds.items()):
+        rows.append(
+            [
+                name,
+                _tag(rec.status.value),
+                rec.source.value if rec.source else "-",
+                str(rec.last_timestamp or "-"),
+                "-" if rec.age_sessions is None else str(rec.age_sessions),
+                "yes" if rec.required else "",
+                f"{rec.row_count:,}",
+            ]
+        )
+    _table(
+        "Feed manifest",
+        ["feed", "status", "source", "last", "age", "required", "rows"],
+        rows,
+    )
+
+    notes = [(n, note) for n, rec in sorted(m.feeds.items()) for note in rec.notes]
+    if notes:
+        _rule("Notes")
+        for feed, note in notes:
+            _print(f"  [dim]{feed}[/dim]: {note}" if _console else f"  {feed}: {note}")
+
+    if m.survivorship_risk:
+        _print()
+        _print(
+            f"[red]SURVIVORSHIP RISK[/red]: {m.survivorship_note}"
+            if _console
+            else f"SURVIVORSHIP RISK: {m.survivorship_note}"
+        )
+
+    missing_required = m.missing_required()
+    stale_required = m.stale_required()
+    if missing_required or stale_required:
+        _print()
+        _print(
+            "[yellow]Stage 1 will halt this run:[/yellow] "
+            f"missing={missing_required} stale={stale_required}"
+            if _console
+            else f"Stage 1 will halt: missing={missing_required} stale={stale_required}"
+        )
+        return 2
+    return 0
+
+
+def cmd_data_status(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from .data.store import DataStore
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    summary = store.summary()
+    _rule("Data store")
+    _print(f"location: {cfg.paths.curated}")
+    _print()
+
+    rows = []
+    for name in ("prices", "indices", "delivery", "open_interest"):
+        blob = summary[name]
+        rows.append(
+            [
+                name,
+                str(blob.get("sessions", 0)),
+                str(blob.get("first") or "-"),
+                str(blob.get("last") or "-"),
+                f"{blob.get('rows', 0):,}" if "rows" in blob else "-",
+                str(blob.get("symbols", blob.get("names", "-"))),
+            ]
+        )
+    _table("Time series", ["table", "sessions", "first", "last", "rows", "symbols"], rows)
+
+    ref_rows = [
+        ["equity_master", f"{summary['equity_master_rows']:,}"],
+        ["corporate_actions", f"{summary['corporate_actions_rows']:,}"],
+        ["earnings_calendar", f"{summary['earnings_rows']:,}"],
+        ["pledging", f"{summary['pledging_rows']:,}"],
+        ["fundamentals", f"{summary['fundamentals_rows']:,}"],
+    ]
+    _table("Reference tables", ["table", "rows"], ref_rows)
+
+    index_name = cfg.params.universe.index_name.value
+    snaps = store.universe_snapshot_dates(index_name)
+    _print(f"universe snapshots for {index_name}: {len(snaps)}")
+    if snaps:
+        _print(f"  earliest {snaps[0]}   latest {snaps[-1]}")
+        _print(
+            "[dim]Point-in-time membership is only trustworthy from the earliest "
+            "snapshot onwards. Backtests before that date are "
+            "survivorship-biased.[/dim]"
+            if _console
+            else "  Point-in-time membership is trustworthy only from the earliest snapshot onwards."
+        )
+    return 0
+
+
+def cmd_data_check(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from .data.corporate_actions import detect_unexplained_jumps
+    from .data.store import DataStore
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    s1 = cfg.params.stage1_data_quality
+
+    _rule("Data integrity checks")
+    problems = 0
+
+    try:
+        store.validate_no_duplicates()
+        _print("duplicate (symbol, date) rows : [green]none[/green]" if _console else "duplicates: none")
+    except ProSignalError as exc:
+        problems += 1
+        _print(f"[red]{exc.message}[/red]" if _console else exc.message)
+
+    prices = store.read_prices()
+    if prices.empty:
+        _print("price store is empty -- run `prosignal data ingest` first")
+        return 1
+
+    actions = store.read_corporate_actions()
+    jumps = detect_unexplained_jumps(
+        prices,
+        actions,
+        min_ratio_gap=float(s1.unexplained_split_min_ratio_gap.value),
+        tolerance=float(s1.unexplained_split_ratio_tolerance.value),
+    )
+    if jumps.empty:
+        _print(
+            "unexplained split-like jumps    : [green]none[/green]"
+            if _console
+            else "unexplained jumps: none"
+        )
+    else:
+        problems += 1
+        rows = [
+            [
+                r["symbol"],
+                str(r["date"].date()),
+                f"{r['ratio']:.4f}",
+                f"{r['nearest_clean_factor']:.4f}",
+                f"{r['prev_close']:.2f}",
+                f"{r['close']:.2f}",
+            ]
+            for _, r in jumps.head(40).iterrows()
+        ]
+        _table(
+            f"Unexplained split-like jumps ({len(jumps)})",
+            ["symbol", "date", "ratio", "nearest clean", "prev close", "close"],
+            rows,
+        )
+        _print(
+            "These look like unadjusted corporate actions. Stage 1 hard-rejects "
+            "the affected names -- an unadjusted 5:1 split reads as a -80% "
+            "single-session return and would poison a 12-1 momentum score for a "
+            "year."
+        )
+
+    sessions = store.known_sessions()
+    _print(f"trading sessions known          : {len(sessions)}")
+    if sessions:
+        _print(f"  {sessions[0]} .. {sessions[-1]}")
+    return 1 if problems else 0
+
+
+def _dir_mb(path) -> float:
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.is_dir():
+        return 0.0
+    return sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / 1e6
+
+
+def _storage_rows(cfg: AppConfig):
+    return [
+        ("raw cache (data/cache)", _dir_mb(cfg.paths.cache), cfg.params.storage.raw_cache.max_mb),
+        ("curated (data/curated)", _dir_mb(cfg.paths.curated), None),
+        ("snapshots", _dir_mb(cfg.paths.snapshots), None),
+        ("ledger", _dir_mb(cfg.paths.ledger), None),
+        ("logs", _dir_mb(cfg.paths.logs), None),
+    ]
+
+
+def cmd_data_budget(cfg: AppConfig, args: argparse.Namespace) -> int:
+    import shutil as _shutil
+
+    storage = cfg.params.storage
+    _rule("Storage budget")
+
+    rows = []
+    for name, used, cap in _storage_rows(cfg):
+        rows.append([name, f"{used:,.1f}", f"{cap:,.0f}" if cap else "-"])
+    total = _dir_mb(cfg.paths.data)
+    rows.append(["TOTAL data/", f"{total:,.1f}", f"{storage.max_total_mb:,.0f}"])
+    _table("Usage (MB)", ["area", "used", "cap"], rows)
+
+    free_mb = _shutil.disk_usage(str(cfg.paths.data)).free / 1e6
+    _print(f"free on volume : {free_mb:,.0f} MB")
+    _print(f"warn below     : {storage.warn_free_disk_mb:,.0f} MB")
+    _print(f"halt below     : {storage.halt_free_disk_mb:,.0f} MB")
+
+    over = total > storage.max_total_mb
+    low = free_mb < storage.halt_free_disk_mb
+    if over or low:
+        _print()
+        _print(
+            "[red]over budget[/red]" if over else "[red]free disk below halt floor[/red]"
+            if _console
+            else "OVER BUDGET"
+        )
+        _print("Run `prosignal data gc` to reclaim the raw cache.")
+        return 2
+
+    # Projection, using the measured per-session curated cost.
+    from .data.store import DataStore
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    known = len(store.known_sessions())
+    curated_mb = _dir_mb(cfg.paths.curated)
+    if known:
+        per_session = curated_mb / known
+        _print()
+        _print(f"measured curated cost: {per_session:.3f} MB/session over {known} sessions")
+        proj = [
+            ["live signals", int(cfg.params.universe.min_history_sessions.value) + 30],
+            ["+ 18mo sacred holdout", int(cfg.params.universe.min_history_sessions.value) + 30 + int(cfg.params.validation.holdout.reserve_most_recent_sessions.value)],
+            ["CPCV 5 years", 1250],
+            ["CPCV 10 years", 2500],
+        ]
+        _table(
+            "Projected curated size",
+            ["purpose", "sessions", "curated MB"],
+            [[label, str(n), f"{n * per_session:,.0f}"] for label, n in proj],
+        )
+    return 0
+
+
+def cmd_data_gc(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from .data.providers.http import HttpClient
+    from .data.providers.nse_archives import NseArchivesProvider
+
+    storage = cfg.params.storage
+    before = _dir_mb(cfg.paths.data)
+
+    client = HttpClient(
+        cache_dir=cfg.paths.cache,
+        user_agent=cfg.params.providers.http.user_agent,
+        max_payload_bytes_to_cache=int(storage.raw_cache.max_payload_mb_to_cache * 1e6),
+        max_cache_bytes=int(storage.raw_cache.max_mb * 1e6),
+    )
+    provider = NseArchivesProvider(
+        client=client,
+        cfg=cfg.params.providers.nse_archives,
+        ttl_historical_s=0,
+        ttl_current_s=0,
+        never_cache_feeds=storage.raw_cache.never_cache_feeds,
+    )
+
+    _rule("Storage garbage collection")
+
+    policy = client.purge_violating_policy(provider.never_cache_url_markers())
+    _print(
+        f"policy sweep : removed {policy['removed']:,} entries, "
+        f"freed {policy['freed_bytes'] / 1e6:,.1f} MB"
+    )
+    _print(
+        "[dim]  (entries the current policy would never have written: "
+        "oversized payloads and never-cache feeds)[/dim]"
+        if _console
+        else "  (oversized payloads and never-cache feeds)"
+    )
+
+    lru = client.evict_lru()
+    _print(
+        f"LRU eviction : removed {lru['evicted']:,} entries, "
+        f"freed {lru['freed_bytes'] / 1e6:,.1f} MB "
+        f"(cap {storage.raw_cache.max_mb:,.0f} MB)"
+    )
+
+    after = _dir_mb(cfg.paths.data)
+    _print()
+    _print(f"data/ {before:,.1f} MB -> {after:,.1f} MB  (reclaimed {before - after:,.1f} MB)")
+    _print(
+        "[dim]Nothing durable was removed: the curated parquet store is the "
+        "record, the cache only ever saves a re-download.[/dim]"
+        if _console
+        else "Nothing durable removed; cache only saves a re-download."
+    )
+    return 0
+
+
+def cmd_data_purge_cache(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from .data.providers.http import HttpClient
+
+    client = HttpClient(
+        cache_dir=cfg.paths.cache,
+        user_agent=cfg.params.providers.http.user_agent,
+    )
+    removed = client.purge_cache()
+    _print(f"removed {removed} cached HTTP payload file(s) from {cfg.paths.cache}")
+    return 0
+
+
+# =============================================================================
+# parser
+# =============================================================================
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="prosignal",
+        description=(
+            "India solo-quant decision-support signal engine (NSE equities). "
+            "Not financial advice. No trades are placed automatically."
+        ),
+    )
+    parser.add_argument("--config", help="path to parameters.yaml", default=None)
+    parser.add_argument("--log-level", default=None, help="DEBUG|INFO|WARNING|ERROR")
+    parser.add_argument("--quiet", action="store_true", help="suppress console logging")
+
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("version", help="print engine and schema versions")
+
+    # -- config -----------------------------------------------------------
+    cfg_p = sub.add_parser("config", help="inspect and validate parameters.yaml")
+    cfg_sub = cfg_p.add_subparsers(dest="subcommand")
+
+    show = cfg_sub.add_parser("show", help="print every tunable with its status")
+    show.add_argument("--unvalidated-only", action="store_true")
+    show.add_argument("--grep", default=None, help="filter by substring")
+    show.set_defaults(func=cmd_config_show)
+
+    validate = cfg_sub.add_parser("validate", help="load and validate the config")
+    validate.set_defaults(func=cmd_config_validate)
+
+    tiers = cfg_sub.add_parser(
+        "tiers", help="optimisation-tier classification and search budget"
+    )
+    tiers.set_defaults(func=cmd_config_tiers)
+
+    templates = cfg_sub.add_parser("templates", help="write blank reference CSVs")
+    templates.add_argument("--overwrite", action="store_true")
+    templates.set_defaults(func=cmd_config_templates)
+
+    # -- data -------------------------------------------------------------
+    data_p = sub.add_parser("data", help="Stage 0 data ingestion and inspection")
+    data_sub = data_p.add_subparsers(dest="subcommand")
+
+    ingest = data_sub.add_parser("ingest", help="pull every Stage 0 feed")
+    ingest.add_argument("--sessions", type=int, default=None, help="sessions of history to guarantee")
+    ingest.add_argument("--date", default=None, help="decision date (YYYY-MM-DD)")
+    ingest.add_argument("--offline", action="store_true", help="use the store only")
+    ingest.add_argument("--refetch", action="store_true", help="re-pull sessions already stored")
+    ingest.add_argument("--no-secondary", action="store_true", help="skip the yfinance cross-check")
+    ingest.add_argument("--full", action="store_true", help="backfill the full required history")
+    ingest.set_defaults(func=cmd_data_ingest)
+
+    status = data_sub.add_parser("status", help="summarise the local store")
+    status.set_defaults(func=cmd_data_status)
+
+    check = data_sub.add_parser("check", help="run data-integrity checks")
+    check.add_argument("--date", default=None)
+    check.set_defaults(func=cmd_data_check)
+
+    budget = data_sub.add_parser("budget", help="storage usage against the budget")
+    budget.set_defaults(func=cmd_data_budget)
+
+    gc = data_sub.add_parser("gc", help="reclaim raw cache to fit policy and budget")
+    gc.set_defaults(func=cmd_data_gc)
+
+    purge = data_sub.add_parser("purge-cache", help="delete cached HTTP payloads")
+    purge.set_defaults(func=cmd_data_purge_cache)
+
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "version":
+        _print(f"{ENGINE_NAME} {ENGINE_VERSION} (stage schema v{SCHEMA_VERSION})")
+        return 0
+
+    if not getattr(args, "func", None):
+        parser.print_help()
+        return 1
+
+    try:
+        cfg = load_config(config_path=args.config)
+    except ProSignalError as exc:
+        _print(f"[red]{exc.message}[/red]" if _console else exc.message)
+        return 1
+
+    setup_logging(
+        level=args.log_level or cfg.params.runtime.logging.level,
+        log_dir=cfg.paths.logs,
+        to_console=cfg.params.runtime.logging.to_console and not args.quiet,
+        to_file=cfg.params.runtime.logging.to_file,
+        backup_count=cfg.params.runtime.logging.backup_count,
+        force=True,
+    )
+
+    try:
+        return int(args.func(cfg, args))
+    except ProSignalError as exc:
+        _print()
+        _print(f"[red]{exc.code}[/red]: {exc.message}" if _console else f"{exc.code}: {exc.message}")
+        if exc.context:
+            for k, v in sorted(exc.context.items()):
+                _print(f"  {k}: {v}")
+        return 1
+    except KeyboardInterrupt:  # pragma: no cover
+        _print("\ninterrupted")
+        return 130
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
