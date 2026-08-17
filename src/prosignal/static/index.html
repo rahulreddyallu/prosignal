@@ -69,7 +69,10 @@
 
   <div class="panel">
     <div id="ready"></div>
-    <div style="margin-top:16px"><button id="run">RUN ANALYSIS</button></div>
+    <div style="margin-top:16px">
+      <button id="run">RUN ANALYSIS</button>
+      <button id="build" class="hide" style="background:var(--warn);margin-top:10px">BUILD DATA STORE</button>
+    </div>
     <div id="hint" class="note"></div>
   </div>
 
@@ -103,7 +106,13 @@ async function boot(){
       row("Universe", esc(c.universe || "—")) +
       row("Config", "<code>"+esc(c.config_version||"")+"</code>");
     $("#run").disabled = !d.ready;
-    if(!d.ready) $("#hint").textContent = c.price_data || "System is not ready to analyse.";
+    $("#build").classList.toggle("hide", !!d.ready);
+    if(!d.ready){
+      $("#hint").innerHTML = esc(c.price_data || "System is not ready to analyse.") +
+        (c.remedy ? "<br><br>" + esc(c.remedy) : "");
+    } else {
+      $("#hint").textContent = "";
+    }
   }catch(e){ $("#ready").innerHTML = "<span class='pill none'>Backend unreachable</span>"; }
 }
 const row = (k,v) => `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
@@ -126,6 +135,49 @@ function drawSteps(step){
     const mark = i < step ? "✓" : (i === step ? "▸" : "·");
     return `<li class="${cls}">${mark}  ${s}</li>`;
   }).join("");
+}
+
+$("#build").onclick = async () => {
+  $("#build").disabled = true; $("#run").disabled = true; $("#out").innerHTML = "";
+  $("#progress").classList.remove("hide");
+  $("#steps").innerHTML = "<li class='active'>\u25b8  Fetching from NSE (~20s per session). Keep this tab open \u2014 polling keeps the server awake.</li>";
+  $("#fill").style.width = "5%";
+  try{
+    const job = await (await fetch("/admin/bootstrap",{method:"POST"})).json();
+    watchBuild(job.id);
+  }catch(e){ $("#build").disabled = false; fail("Could not start the data build.", String(e)); }
+};
+
+function watchBuild(id){
+  clearInterval(poll);
+  poll = setInterval(async () => {
+    try{
+      const j = await (await fetch(`/analysis/${id}`)).json();
+      $("#fill").style.width = Math.max(j.progress.pct, 5) + "%";
+      $("#steps").innerHTML = `<li class='active'>\u25b8  ${esc(j.progress.label)}</li>`;
+      if(j.state === "COMPLETED"){
+        clearInterval(poll); $("#progress").classList.add("hide");
+        $("#build").disabled = false;
+        const r = j.result || {};
+        const done = r.complete;
+        $("#out").innerHTML = `<div class="panel">
+          <strong>${done ? "Data store ready." : "Chunk complete."}</strong>
+          <div class="note">${esc(r.sessions_in_store ?? 0)} of ${esc(r.sessions_required ?? 0)} sessions.
+          ${esc(r.next_step || "")}</div>
+          ${done ? "" : `<div style="margin-top:14px"><button onclick="document.querySelector('#build').click()">FETCH NEXT CHUNK</button></div>`}
+        </div>`;
+        boot();
+      } else if(j.state === "FAILED" || j.state === "CANCELLED"){
+        clearInterval(poll); $("#progress").classList.add("hide");
+        $("#build").disabled = false;
+        fail("Could not build the data store.",
+             (j.error||"") + " \u2014 if this host cannot reach NSE (common for " +
+             "non-Indian datacentres, which NSE may block), the store must be " +
+             "built elsewhere and uploaded to the persistent disk.", id);
+      }
+    }catch(e){ clearInterval(poll); $("#build").disabled = false;
+               fail("Lost contact while building the data store.", String(e), id); }
+  }, 1500);
 }
 
 function watch(id){
