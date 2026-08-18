@@ -870,6 +870,20 @@ stage4_core_score:
     # path to data is worse than not having it: it implies the capability is
     # one config change away, and it is not. See DATA_SOURCES.md.
 
+  # A name must have at least this share of total factor WEIGHT actually
+  # measured, or it is left unscored rather than imputed.
+  #
+  # Added 2026-08-18 after a review found the #1 ranked name was scored partly
+  # on a median-filled value factor it had no data for. Imputing the median
+  # makes a missing factor look average rather than unknown, which is the more
+  # dangerous of the two errors: it silently promotes names with thin evidence.
+  min_name_factor_coverage:
+    value: 0.60
+    status: STRUCTURAL
+    note: >-
+      Weight-share, not factor-count: missing a 0.25-weight factor costs 25% of
+      coverage regardless of how many factors exist.
+
   # --- Redundancy check (master prompt Stage 4) ---
   redundancy:
     enabled: true

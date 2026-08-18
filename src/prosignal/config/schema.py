@@ -797,6 +797,7 @@ class Stage4Config(_Base):
     sector_neutral: TB
     factors: FactorsConfig
     redundancy: RedundancyConfig
+    min_name_factor_coverage: TF
     data_quality_gate_penalty: TF
 
     @model_validator(mode="after")
