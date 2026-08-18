@@ -526,6 +526,10 @@ class Recommendation(_Contract):
     research_basis: List[str] = Field(default_factory=list)
     data_quality_note: List[str] = Field(default_factory=list)
 
+    #: Structured factor values, mirroring `why_this_signal_exists` in numeric
+    #: form so the UI can sort and align on them without parsing prose.
+    factor_detail: Dict[str, FactorScore] = Field(default_factory=dict)
+
     cost_note: Optional[str] = None
     unvalidated_parameter_warning: str = (
         "Every threshold behind this output is an UNVALIDATED hypothesis until a "

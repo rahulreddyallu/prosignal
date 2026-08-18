@@ -306,4 +306,45 @@ def test_ledger_endpoint_exposes_run_history(client):
 def test_ui_is_served(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert "RUN ANALYSIS" in r.text
+    assert '<div class="hdr-in">' in r.text
+
+
+def test_ui_has_no_external_requests(client):
+    """The UI must render with no third-party fetch.
+
+    A CDN font or script would put a network dependency between the user and
+    their own analysis, and would leak the fact that they are running it. It
+    would also break entirely on the Render instance behind a cold start.
+    """
+    text = client.get("/").text
+    for pattern in ('src="http', 'href="http', "@import", "//fonts.", "cdn."):
+        assert pattern not in text, f"external dependency introduced: {pattern}"
+
+
+def test_ui_states_are_all_reachable(client):
+    """Every state the interface can enter must have real markup behind it.
+
+    These are the states a user actually hits -- not-ready, empty, failure --
+    and each has been a blank screen at some point in this project's history.
+    """
+    text = client.get("/").text
+    for marker in (
+        "Market data store is empty",   # store not bootstrapped
+        "No qualifying signals today",  # the designed common outcome
+        "No signals were issued",       # failure must not imply a trade
+        "Why it may be wrong",          # disconfirming evidence is not optional
+        "Not testable with current data",
+    ):
+        assert marker in text, f"state missing from UI: {marker}"
+
+
+def test_ui_never_labels_the_score_a_probability(client):
+    """The engine emits a rank, not a calibrated probability.
+
+    Dressing a percentile up as "confidence" or "probability" in the interface
+    would launder an ordinal into a number the user could size a position on.
+    """
+    text = client.get("/").text
+    body = text.split("<body>")[1]
+    for banned in ("Confidence", "Probability", "% chance", "Win rate", "Accuracy"):
+        assert banned not in body, f"UI implies calibration it does not have: {banned}"
