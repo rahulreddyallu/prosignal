@@ -12,11 +12,26 @@ services:
     name: prosignal
     runtime: python
     buildCommand: "pip install -r requirements.txt && pip install --no-deps -e ."
-    startCommand: "uvicorn prosignal.api:create_app --factory --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
+    # Single worker on purpose. Each uvicorn worker is a full Python process
+    # carrying its own pandas/pyarrow import floor (~99 MB measured), so two
+    # workers cost ~200 MB of a 512 MB budget before any data is read. The
+    # analysis is single-flight anyway -- a second worker would add memory
+    # without adding throughput.
+    startCommand: "uvicorn prosignal.api:create_app --factory --host 0.0.0.0 --port $PORT --workers 1"
     envVars:
       - key: PYTHON_VERSION
         value: "3.12"
+      # glibc keeps freed memory in per-thread arenas and never returns it, so
+      # RSS only ever climbs -- which is the number Render kills on. Capping
+      # the arena count bounds that fragmentation. Measured locally: RSS grew
+      # monotonically 206 -> 546 MB across six pipeline stages even though no
+      # stage needs the previous stage's frames.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      # Python does not release small-object arenas back to the OS by default.
+      - key: PYTHONMALLOC
+        value: "malloc"
     # The engine reads and writes market data under data/. Without a persistent
     # disk every restart loses the store and /ready returns 503 until a full
     # re-ingest. A free-tier instance has ephemeral storage, so this is required

@@ -725,7 +725,7 @@ def _load_breadth_frame(
     frame = frame.copy()
     frame[DATE] = pd.to_datetime(frame[DATE]).dt.normalize()
     wide = frame.pivot_table(
-        index=DATE, columns=SYMBOL, values="close", aggfunc="last"
+        index=DATE, columns=SYMBOL, values="close", aggfunc="last", observed=True
     ).sort_index()
     return wide.astype("float64")
 

@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config.loader import AppConfig, load_config
 from .core.logging import get_logger, setup_logging
+from .core.memory import release_memory, trim_available
 from .data.store import DataStore
 from .jobs import JobManager
 from .ledger import Ledger
@@ -75,13 +76,42 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # =====================================================================
     @app.get("/health")
     def health() -> Dict[str, Any]:
-        """Liveness only. Says nothing about whether analysis would work."""
-        return {
+        """Liveness, plus resident memory.
+
+        RSS is included because it is the number a container platform kills on,
+        and it is not otherwise observable from inside a running deployment.
+        On a 512 MB instance this is the field to watch.
+        """
+        payload: Dict[str, Any] = {
             "status": "ok",
             "engine": ENGINE_NAME,
             "version": ENGINE_VERSION,
             "schema": SCHEMA_VERSION,
             "time": dt.datetime.now().isoformat(),
+        }
+        payload["memory"] = _memory_report()
+        return payload
+
+    @app.post("/admin/release-memory")
+    def release() -> Dict[str, Any]:
+        """Hand free allocator arenas back to the OS.
+
+        Called automatically after every job; exposed so an operator can
+        confirm it works on their host and see the effect.
+        """
+        before = _rss_mb()
+        trimmed = release_memory()
+        after = _rss_mb()
+        return {
+            "trimmed": trimmed,
+            "rss_before_mb": before,
+            "rss_after_mb": after,
+            "freed_mb": (round(before - after, 1) if before and after else None),
+            "note": (
+                "trimmed=false means malloc_trim is unavailable (macOS, or musl "
+                "libc such as Alpine). Python memory is still collected; it is "
+                "simply not returned to the OS, so RSS will not fall."
+            ),
         }
 
     @app.get("/ready")
@@ -279,6 +309,29 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             return FileResponse(str(_STATIC / "index.html"))
 
     return app
+
+
+def _rss_mb() -> Optional[float]:
+    """Resident set size in MB, or None when psutil is not installed."""
+    try:
+        import psutil  # noqa: PLC0415 - optional dependency, imported lazily
+    except ImportError:
+        return None
+    import os
+
+    return round(psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024, 1)
+
+
+def _memory_report() -> Dict[str, Any]:
+    rss = _rss_mb()
+    return {
+        "rss_mb": rss,
+        "malloc_trim_available": trim_available(),
+        "hint": (
+            None if rss is None or rss < 400
+            else "RSS is high; POST /admin/release-memory or check instance size"
+        ),
+    }
 
 
 def _shape(run) -> Dict[str, Any]:

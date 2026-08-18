@@ -138,7 +138,7 @@ def run(
 
     # -- 4. per-stock checks -------------------------------------------------
     per_stock: Dict[str, StockDataFlags] = {}
-    grouped = {sym: frame for sym, frame in prices.groupby(SYMBOL, sort=False)}
+    grouped = {sym: frame for sym, frame in prices.groupby(SYMBOL, sort=False, observed=True)}
 
     for symbol in symbols:
         frame = grouped.get(symbol)

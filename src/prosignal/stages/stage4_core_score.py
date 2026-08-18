@@ -91,7 +91,7 @@ def run(
     prices = store.read_prices(symbols=symbols, start=start, end=as_of)
     prices = prices.copy()
     prices[DATE] = pd.to_datetime(prices[DATE]).dt.normalize()
-    closes = prices.pivot_table(index=DATE, columns=SYMBOL, values="close", aggfunc="last").sort_index()
+    closes = prices.pivot_table(index=DATE, columns=SYMBOL, values="close", aggfunc="last", observed=True).sort_index()
 
     sectors = dict(eligibility.sector_map)
 
