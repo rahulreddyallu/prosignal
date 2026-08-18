@@ -71,7 +71,7 @@ def run(
     start = window[0] if window else calendar.first
     prices = store.read_prices(symbols=symbols, start=start, end=as_of).copy()
     prices[DATE] = pd.to_datetime(prices[DATE]).dt.normalize()
-    grouped = {s: f.sort_values(DATE) for s, f in prices.groupby(SYMBOL, sort=False)}
+    grouped = {s: f.sort_values(DATE) for s, f in prices.groupby(SYMBOL, sort=False, observed=True)}
 
     bench = store.index_series(str(v(p.stage2_regime.benchmark_index)), "close", end=as_of)
     actions = store.read_corporate_actions()

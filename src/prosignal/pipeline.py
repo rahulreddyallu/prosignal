@@ -34,6 +34,7 @@ from .core.contracts import (
 )
 from .core.errors import MarketWideHalt
 from .core.logging import get_logger
+from .core.memory import release_memory
 from .costs import CostModel
 from .data.store import DataStore
 from .data.types import DATE, SYMBOL
@@ -139,12 +140,14 @@ def run_analysis(
     except MarketWideHalt as halt:
         raise PipelineBlocked(halt.reasons, stage=stage1_data_quality.STAGE_NAME) from halt
     timings[stage1_data_quality.STAGE_NAME] = t()
+    release_memory()
 
     # ---- Stage 2 ----------------------------------------------------------
     step(2)
     t = _clock()
     regime = stage2_regime.run(store, calendar, universe.symbols, config, as_of=resolved)
     timings[stage2_regime.STAGE_NAME] = t()
+    release_memory()
 
     # ---- Stage 3 ----------------------------------------------------------
     step(3)
@@ -153,6 +156,7 @@ def run_analysis(
         universe, store, calendar, quality, config, as_of=resolved
     )
     timings[stage3_eligibility.STAGE_NAME] = t()
+    release_memory()
 
     # ---- Stage 4 ----------------------------------------------------------
     step(4)
@@ -161,6 +165,7 @@ def run_analysis(
         eligibility, store, calendar, regime, config, as_of=resolved
     )
     timings[stage4_core_score.STAGE_NAME] = t()
+    release_memory()
 
     # ---- Stage 5 ----------------------------------------------------------
     step(5)
@@ -169,6 +174,7 @@ def run_analysis(
         scores, store, calendar, regime, config, as_of=resolved
     )
     timings[stage5_false_signal.STAGE_NAME] = t()
+    release_memory()
 
     # ---- price frames shared by stages 6-8 --------------------------------
     defended = list(defense.per_stock)
@@ -204,6 +210,7 @@ def run_analysis(
             costs=costs,
         )
     timings[stage7_risk.STAGE_NAME] = t()
+    release_memory()
 
     # ---- Stage 8 ----------------------------------------------------------
     step(8)
@@ -355,7 +362,7 @@ def _frames(store, calendar, symbols, config, as_of) -> Dict[str, pd.DataFrame]:
     prices = prices.copy()
     prices[DATE] = pd.to_datetime(prices[DATE]).dt.normalize()
     return {s: f.sort_values(DATE).reset_index(drop=True)
-            for s, f in prices.groupby(SYMBOL, sort=False)}
+            for s, f in prices.groupby(SYMBOL, sort=False, observed=True)}
 
 
 def _closes(frames: Dict[str, pd.DataFrame]) -> pd.DataFrame:

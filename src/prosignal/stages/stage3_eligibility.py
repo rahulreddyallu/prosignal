@@ -70,7 +70,7 @@ def run(
 
     prices = prices.copy()
     prices[DATE] = pd.to_datetime(prices[DATE]).dt.normalize()
-    grouped = {s: f for s, f in prices.groupby(SYMBOL, sort=False)}
+    grouped = {s: f for s, f in prices.groupby(SYMBOL, sort=False, observed=True)}
 
     earnings = _earnings_map(store, calendar, as_of, cfg)
     regulatory = _regulatory_map(store, calendar, as_of, cfg)

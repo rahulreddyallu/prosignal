@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .core.logging import get_logger
+from .core.memory import release_memory
 
 __all__ = ["JobManager", "JobState", "Job"]
 
@@ -282,6 +283,8 @@ class JobManager:
                     ),
                 )
             log.info("analysis job completed", extra={"job_id": job_id})
+            # An idle web process must not sit on the run's peak.
+            release_memory()
         except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
             detail = traceback.format_exc()
             with self._connect() as conn:
@@ -296,6 +299,7 @@ class JobManager:
                     ),
                 )
             log.error("analysis job failed", extra={"job_id": job_id, "error": str(exc)})
+            release_memory()
 
     # -- queries ------------------------------------------------------------
     def get(self, job_id: str) -> Optional[Job]:

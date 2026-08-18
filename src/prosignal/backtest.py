@@ -223,7 +223,7 @@ def _load_bars(store: DataStore, start: dt.date, end: dt.date) -> Dict[str, pd.D
     frame = frame.copy()
     frame[DATE] = pd.to_datetime(frame[DATE]).dt.normalize()
     out: Dict[str, pd.DataFrame] = {}
-    for sym, chunk in frame.groupby(SYMBOL, sort=False):
+    for sym, chunk in frame.groupby(SYMBOL, sort=False, observed=True):
         out[str(sym)] = chunk.sort_values(DATE).reset_index(drop=True)
     return out
 

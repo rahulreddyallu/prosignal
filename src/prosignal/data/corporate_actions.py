@@ -272,9 +272,9 @@ def detect_unexplained_jumps(
     frame[DATE] = pd.to_datetime(frame[DATE]).dt.normalize()
     frame = frame.dropna(subset=["close"]).sort_values([SYMBOL, DATE])
     if lookback_sessions is not None and lookback_sessions > 0:
-        frame = frame.groupby(SYMBOL, group_keys=False).tail(lookback_sessions + 1)
+        frame = frame.groupby(SYMBOL, group_keys=False, observed=True).tail(lookback_sessions + 1)
 
-    frame["prev_close"] = frame.groupby(SYMBOL)["close"].shift(1)
+    frame["prev_close"] = frame.groupby(SYMBOL, observed=True)["close"].shift(1)
     frame = frame.dropna(subset=["prev_close"])
     frame = frame[frame["prev_close"] > 0]
     if frame.empty:

@@ -22,6 +22,7 @@ dependencies = [
     "yfinance>=0.2.40",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
+    "psutil>=5.9",
     "rich>=13.0",
 ]
 
