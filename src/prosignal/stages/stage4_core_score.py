@@ -203,8 +203,33 @@ def run(
     )
 
     # ---- composite ---------------------------------------------------------
+    # Each name is scored ONLY on the factors actually measured for it, with its
+    # own weights renormalised over what is available.
+    #
+    # The previous implementation median-filled missing factors before
+    # weighting. That makes an absent factor look AVERAGE rather than UNKNOWN,
+    # and it put an imputed value score into the composite of the top-ranked
+    # name -- 37% of the universe was affected on the value factor. A name
+    # should be ranked on its own evidence or not ranked at all.
     frame = pd.DataFrame(standardised)
-    composite_raw = sum(frame[n].fillna(frame[n].median()) * w for n, w in effective.items())
+    weight_vector = pd.Series(effective, dtype="float64")
+
+    available = frame.notna()
+    available_weight = available.mul(weight_vector, axis=1).sum(axis=1)
+    weighted_sum = frame.fillna(0.0).mul(weight_vector, axis=1).sum(axis=1)
+
+    min_name_cov = fv(cfg.min_name_factor_coverage)
+    scoreable = available_weight >= min_name_cov
+    composite_raw = (weighted_sum / available_weight.where(available_weight > 0))[scoreable]
+
+    unscoreable = [str(s_) for s_ in frame.index[~scoreable]]
+    if unscoreable:
+        notes.append(
+            f"{len(unscoreable)} name(s) carried less than {min_name_cov:.0%} of "
+            f"factor weight and were left unscored rather than imputed: "
+            f"{', '.join(unscoreable[:8])}"
+            + (" ..." if len(unscoreable) > 8 else "")
+        )
     composite_unit = rank_to_unit_interval(composite_raw)
     percentile = composite_unit * 100.0
     order = composite_raw.sort_values(ascending=False)
