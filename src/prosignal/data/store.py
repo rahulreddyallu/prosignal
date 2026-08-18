@@ -40,6 +40,7 @@ import pandas as pd
 
 from ..core.errors import DataError
 from ..core.logging import get_logger
+from ..core.memory import release_memory
 from .types import (
     CORPORATE_ACTION_COLUMNS,
     DATE,
@@ -205,6 +206,13 @@ class _PartitionedTable:
                 if col in chunk.columns and chunk[col].dtype == object:
                     chunk[col] = chunk[col].astype("category")
             frames.append(chunk)
+            # Trim between year-files. Measured: decoding five year-files to a
+            # 33 MB result peaked at 291 MB, because each file's transient
+            # decode buffers stayed in the allocator arena rather than being
+            # reused. Live data was never the problem; retained arena was.
+            # Trimming here bounds peak at roughly base + one file.
+            if len(years) > 1:
+                release_memory()
         if not frames:
             return pd.DataFrame()
         out = pd.concat(frames, ignore_index=True)
