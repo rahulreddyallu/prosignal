@@ -289,6 +289,7 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
             [f"Not testable: {', '.join(eligibility.not_testable.get(sym, []))}"]
             if eligibility.not_testable.get(sym) else []
         ),
+        factor_detail=dict(score.factors),
         cost_note=(
             f"Round-trip cost {plan.estimated_round_trip_cost_bps:.0f} bps, of which "
             f"~{plan.estimated_impact_bps:.0f} bps is modelled impact."

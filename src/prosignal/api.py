@@ -387,7 +387,24 @@ def _shape(run) -> Dict[str, Any]:
 
 
 def _card(rec) -> Dict[str, Any]:
+    """Shape one recommendation for the UI.
+
+    `factors` is exposed structurally in addition to the prose in `why`. The
+    scanner table needs the raw numbers to sort and align on, and parsing them
+    back out of formatted English in JavaScript would be fragile in exactly the
+    way that breaks silently. No calculation happens here -- these values are
+    already computed in stage 4.
+    """
     return {
+        "factors": {
+            name: {
+                "raw": f.raw_value,
+                "standardised": f.standardised,
+                "weight": f.weight,
+                "available": f.available,
+            }
+            for name, f in (getattr(rec, "factor_detail", None) or {}).items()
+        },
         "ticker": rec.ticker,
         "company_name": rec.company_name,
         "sector": rec.sector,
