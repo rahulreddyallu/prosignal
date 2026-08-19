@@ -1,19 +1,16 @@
-"""Data providers.
+"""Data providers, in priority order.
 
-Priority is deliberate and reflects what was verified working against the live
-hosts during the build:
-
-* :class:`NseArchivesProvider` -- PRIMARY. Official, free, unauthenticated, and
-  reachable (``nsearchives.nseindia.com`` and ``archives.nseindia.com`` both
-  return 200). Supplies OHLCV, delivery, all index series including India VIX,
-  index constituents with sector labels, listing dates, and F&O open interest.
-* :class:`YFinanceProvider` -- SECONDARY. The independent second opinion Stage 1
+* :class:`NseArchivesProvider` -- primary. Official, free, unauthenticated;
+  ``nsearchives.nseindia.com`` and ``archives.nseindia.com`` both return 200.
+  Supplies OHLCV, delivery, all index series including India VIX, constituents
+  with sector labels, listing dates and F&O open interest.
+* :class:`YFinanceProvider` -- secondary. The independent second source Stage 1
   needs for cross-source agreement, plus corporate-action ratios and earnings
   dates.
-* :class:`CsvImportProvider` -- MANUAL. Anything no free source supplies
-  honestly (promoter pledging, point-in-time fundamentals). Absent file means
+* :class:`CsvImportProvider` -- manual. Feeds no free source supplies honestly
+  (promoter pledging, point-in-time fundamentals). An absent file means
   NOT_TESTABLE, never a silent pass.
-* :class:`NseJsonSession` -- BEST-EFFORT. ``www.nseindia.com``'s JSON API sits
+* :class:`NseJsonSession` -- best effort. ``www.nseindia.com``'s JSON API sits
   behind a bot shield that returned 403 from the build machine, so no required
   feed depends on it.
 """

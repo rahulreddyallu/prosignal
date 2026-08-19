@@ -1,14 +1,14 @@
-"""Structured logging for the engine.
+"""Structured logging.
 
 Two consumers, two formats:
 
-* **Console** -- short, human-readable lines for the CLI.
-* **File** -- one JSON object per line under ``logs/``, so that a run can be
-  replayed and audited later. The research ledger records *decisions*; the log
-  records *how the engine got there*, including every provider fallback.
+* Console -- short human-readable lines for the CLI.
+* File -- one JSON object per line under ``logs/``, so a run can be replayed
+  later. The ledger records decisions; the log records how the engine reached
+  them, including provider fallbacks.
 
-A ``run_id`` is threaded through via a contextvar so that concurrent API
-requests never interleave unattributably in the log file.
+A ``run_id`` is threaded through a contextvar so concurrent API requests do not
+interleave unattributably.
 """
 
 from __future__ import annotations

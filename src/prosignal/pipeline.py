@@ -1,17 +1,16 @@
-"""The pipeline orchestrator -- what RUN MARKET ANALYSIS actually executes.
+"""Pipeline orchestrator -- what RUN MARKET ANALYSIS executes.
 
-Composes the eight stages in order and returns a single `FinalSignalOutput`.
-Stages never call each other; only this module knows the sequence, which is what
-keeps each one independently testable and independently re-validatable.
+Composes the eight stages in order and returns one `FinalSignalOutput`. Stages
+never call each other; only this module knows the sequence, which keeps each
+independently testable.
 
-Reproducibility is the design constraint. Every run stamps the engine version,
-the config hash, the resolved decision date and the data timestamps into the
-output, so a signal produced today can be reconstructed later and asked why.
+Every run stamps the engine version, config hash, resolved decision date and
+data timestamps into the output, so a signal can be reconstructed later.
 
-Failure is explicit. A `MarketWideHalt` from Stage 1 propagates as a blocked run
-with reasons attached -- it never degrades into a NO TRADE, because "we refuse
-to form a view" and "we looked and nothing qualified" are different statements
-and conflating them would hide a broken feed behind a normal-looking result.
+A `MarketWideHalt` from Stage 1 propagates as a blocked run with reasons
+attached rather than degrading into NO TRADE. Refusing to form a view and
+finding nothing that qualifies are different results, and conflating them would
+hide a broken feed behind a normal-looking one.
 """
 
 from __future__ import annotations

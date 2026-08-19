@@ -1,12 +1,12 @@
 """Pro Stock Signal BOT -- India solo-quant decision-support signal engine.
 
-This package ranks and screens NSE-listed equities and returns either a small
-set of high-conviction candidates or an explicit ``NO TRADE`` state. It does
-not place orders, and it contains no order-routing code.
+Ranks and screens NSE-listed equities and returns either a small set of
+high-conviction candidates or an explicit ``NO TRADE`` state. It places no
+orders and contains no order-routing code.
 
-It reasons in bands, gates and explicit hypotheses -- never in fabricated
-precision. Every tunable parameter is tagged with its evidence status in
-``config/parameters.yaml`` and surfaced to the user on every run.
+Output is expressed in bands, gates and stated hypotheses rather than
+fabricated precision. Every tunable parameter carries its evidence status in
+``config/parameters.yaml`` and is surfaced on every run.
 
     Decision-support tool. Not financial advice. No trades are placed
     automatically.

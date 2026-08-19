@@ -1,23 +1,20 @@
 """Indian equity transaction costs and market impact.
 
-Every rate is a config value, never a literal, because these are set by SEBI and
-the exchanges and they change. `parameters.yaml` tags them STATUTORY and carries
-the date they were verified.
+Rates are config values rather than literals: SEBI and the exchanges change
+them. `parameters.yaml` tags them STATUTORY with the date each was verified.
 
-The delivery-segment round trip on the NSE, as modelled here:
+Delivery-segment round trip as modelled:
 
     buy  : brokerage + STT + exchange txn + SEBI fee + GST + stamp duty
     sell : brokerage + STT + exchange txn + SEBI fee + GST + DP charge
 
-GST applies to brokerage + exchange charges + SEBI fee -- not to STT or stamp
-duty, which are taxes in their own right. Getting that wrong overstates costs by
-roughly 18% of the wrong base, which is small enough to hide and large enough to
-flip a marginal trade.
+GST applies to brokerage, exchange charges and the SEBI fee, not to STT or
+stamp duty, which are taxes in their own right. Applying it to the wrong base
+shifts total cost by roughly 18% of that base.
 
-Impact is modelled separately from fees because it behaves differently: fees are
-linear in turnover, impact grows with the square root of participation. The
-square-root law is the standard practitioner form (Almgren et al.); the
-coefficient here is UNVALIDATED and must be treated as a hypothesis.
+Impact is modelled separately from fees: fees are linear in turnover, impact
+grows with the square root of participation. The square-root form is standard
+(Almgren et al.); the coefficient here is UNVALIDATED.
 """
 
 from __future__ import annotations

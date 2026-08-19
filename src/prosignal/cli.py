@@ -10,9 +10,7 @@
     prosignal data check [--date YYYY-MM-DD]
     prosignal data purge-cache
 
-Every command exits non-zero on failure and prints a specific reason. The
-config commands exist because the transparency requirement (webapp FR-8) should
-hold at the terminal too, not only in a browser.
+Every command exits non-zero on failure with a specific reason.
 """
 
 from __future__ import annotations

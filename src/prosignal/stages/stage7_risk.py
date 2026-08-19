@@ -1,22 +1,21 @@
 """Stage 7 -- Risk, stop, target, and position size.
 
-Stop distance is derived from the stock's OWN volatility, never a flat percent.
-A 5% stop is loose on an FMCG major and inside the daily noise of a smallcap
-that routinely swings 4%; the same number means two different things, and using
-it guarantees you are stopped out of exactly the volatile names where the
-premium lives.
+Stop distance derives from the stock's own volatility rather than a flat
+percent. A 5% stop is loose on an FMCG major and inside the daily noise of a
+smallcap that swings 4%, so a fixed number stops out of the volatile names
+where the premium sits.
 
-Two distinct exit levels, deliberately kept separate:
+Two exit levels, kept separate:
 
-    stop_price          where the POSITION is closed on price
-    invalidation_level  where the ORIGINAL THESIS is dead
+    stop_price          where the position is closed on price
+    invalidation_level  where the original thesis is dead
 
-They are not the same. A stock can hold above its stop while the reason you
-bought it has evaporated, and that is an exit even though the stop never fired.
+A stock can hold above its stop while the reason for buying it has gone, which
+is an exit even though the stop never fired.
 
-Position size is the binding of three constraints -- risk budget, capital, and
-liquidity -- and liquidity wins when it is tightest. A trade whose executable
-size would move the price more than the modelled edge is not a trade.
+Position size binds three constraints -- risk budget, capital and liquidity --
+and the tightest wins. A trade whose executable size would move the price more
+than the modelled edge is not a trade.
 """
 
 from __future__ import annotations

@@ -1,17 +1,15 @@
 """Return freed memory to the operating system.
 
-`gc.collect()` frees Python objects, but on glibc the allocator keeps the
-underlying arenas and RSS never falls. That distinction matters because RSS is
-what a container platform measures and kills on: a 512 MB Render instance was
-restarted while the pipeline's *live* data was a fraction of that, simply
-because each stage's freed frames were still held in the arena.
+`gc.collect()` frees Python objects, but glibc keeps the underlying arenas and
+RSS does not fall. RSS is what a container platform measures and kills on: a
+512 MB instance was restarted while live data was a fraction of that, because
+each stage's freed frames were still held in the arena.
 
-Measured on this codebase: RSS climbed monotonically 206 -> 546 MB across six
-stages even though no stage needs the previous stage's frames.
+Measured here: RSS climbed 206 -> 546 MB across six stages although no stage
+needs the previous stage's frames.
 
-`malloc_trim(0)` asks glibc to give the free arenas back. It exists only on
-glibc, so this is a no-op on macOS and on musl (Alpine); the guard is
-deliberate rather than defensive -- the function must be safe to call
+`malloc_trim(0)` returns free arenas to the OS. It exists only on glibc, so
+this is a no-op on macOS and musl; the guard keeps the function safe to call
 unconditionally from the pipeline.
 """
 

@@ -1,15 +1,10 @@
 """Return and volatility primitives.
 
-Every function here is **point-in-time safe**: the value at index ``t`` uses
-only observations at or before ``t``. There is no ``center=True``, no
-``bfill()``, and no ``shift(-1)`` anywhere in this package. A single backward
-fill in an indicator is enough to make a backtest look brilliant and a live
-account lose money, and it is almost invisible once buried in a pipeline.
+Point-in-time safe: the value at ``t`` uses only observations at or before
+``t``. No ``center=True``, no ``bfill()``, no negative ``shift()``.
 
-The second discipline here is **explicit ``min_periods``**. Pandas will happily
-compute a "200-day average" from 3 observations if asked carelessly. In this
-package a window of ``n`` returns ``NaN`` until it genuinely has ``n``
-observations, because a 200-DMA seeded with a fortnight of data is not a
+Windows use explicit ``min_periods`` and return ``NaN`` until fully seeded, so
+a 200-session average is never computed from a fortnight of data.
 200-DMA -- it is a number that looks like one, which is worse than a gap.
 """
 
@@ -115,11 +110,8 @@ def momentum_skip(
     Jegadeesh & Titman (1993) 12-1 factor: twelve months of return, measured to
     one month ago.
 
-    The skip is the whole point and is not a detail to economise on. Short-term
-    reversal dominates the most recent month -- what went up hardest last month
-    tends to give some back -- so including it actively works against the
-    twelve-month effect. Dropping the skip does not "use more data"; it mixes
-    two opposing effects and cancels a real edge.
+    The skip matters: short-term reversal dominates the most recent month, so
+    including it works against the twelve-month effect rather than adding data.
 
     Requires ``lookback + skip + 1`` observations. Returns ``None`` when short.
     """

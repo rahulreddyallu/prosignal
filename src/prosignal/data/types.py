@@ -1,16 +1,15 @@
 """Canonical column names and frame contracts for the data layer.
 
-Every provider, regardless of what the upstream file calls things, returns
-frames using exactly these column names and dtypes. Downstream code therefore
-never contains a provider-specific column name -- swapping a data vendor is a
-provider change, not a pipeline change.
+Providers return frames using these column names and dtypes regardless of
+upstream naming, so downstream code contains no provider-specific column names
+and swapping a vendor is a provider change rather than a pipeline change.
 
-Two frame shapes exist:
+Two frame shapes:
 
-* **tidy** -- long format, one row per ``(date, symbol)``. This is the storage
-  format (parquet-friendly, partitionable, cheap to append).
-* **wide** -- a ``date x symbol`` matrix of one field. This is the compute
-  format for cross-sectional work (ranking, correlations, breadth).
+* tidy -- long format, one row per ``(date, symbol)``; the storage format,
+  partitionable and cheap to append.
+* wide -- a ``date x symbol`` matrix of one field; the compute format for
+  ranking, correlations and breadth.
 
 :func:`to_wide` / :func:`from_wide` convert between them.
 """

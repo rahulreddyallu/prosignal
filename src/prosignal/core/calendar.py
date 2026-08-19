@@ -1,27 +1,25 @@
 """NSE trading calendar.
 
-Design decision worth stating plainly: **the calendar is derived from data that
-actually exists, not from a hardcoded holiday table.** A shipped holiday list
-goes stale every year and, worse, fails silently -- the engine would happily
-compute a "21-session lookback" that spans a different number of real sessions
-than intended, and nothing would complain.
+The session list is derived from data that exists rather than a hardcoded
+holiday table. A shipped holiday list goes stale annually and fails silently: a
+"21-session lookback" would span a different number of real sessions than
+intended with nothing to flag it.
 
-So:
+* The authoritative session list is the set of dates for which NSE published an
+  index file.
+* ``STATIC_CLOSURE_HINTS`` only avoids probing dates almost certainly closed. A
+  wrong hint costs one wasted request, not a wrong answer, because a
+  hinted-closed date is still probed if it would otherwise be the resolved
+  decision date.
 
-* The authoritative session list is the set of dates for which NSE actually
-  published an index file. That is ground truth by construction.
-* ``STATIC_CLOSURE_HINTS`` exists only to avoid pointlessly probing dates that
-  are almost certainly closed. A wrong hint costs one wasted HTTP request, not
-  a wrong answer, because a hinted-closed date is still probed if it would
-  otherwise be the resolved decision date.
-
-Every lookback in this engine is expressed in *sessions*, never calendar days,
-so a Diwali week or a long weekend can never quietly change a window length.
+Every lookback is expressed in sessions, never calendar days, so a long weekend
+cannot change a window length.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import numpy as np
 from bisect import bisect_left, bisect_right
 from typing import Iterable, List, Optional, Sequence, Set
 
@@ -186,6 +184,28 @@ class TradingCalendar:
 
     def count_between(self, start: dt.date, end: dt.date, inclusive: bool = True) -> int:
         return len(self.sessions_between(start, end, inclusive=inclusive))
+
+    def sessions_until(self, as_of: dt.date, target: dt.date) -> int:
+        """Sessions from ``as_of`` to ``target``, including dates past the calendar.
+
+        ``count_between`` can only see sessions it holds, so for any target beyond
+        the last stored session it returns the distance to the end of the calendar
+        and not the real distance. A date three months out then measures as one
+        session away, which silently turns an earnings-proximity test into a
+        data-presence test.
+
+        Past the horizon we fall back to counting weekdays. That ignores exchange
+        holidays and so overstates the session count by roughly one per fortnight,
+        which widens the gap and errs toward keeping a stock rather than excluding
+        it on a number we cannot actually measure.
+        """
+        if target <= as_of:
+            return 0
+        last = self._sessions[-1] if self._sessions else as_of
+        if target <= last:
+            return max(0, self.count_between(as_of, target, inclusive=True) - 1)
+        known = max(0, self.count_between(as_of, last, inclusive=True) - 1)
+        return known + int(np.busday_count(last, target))
 
     def trailing_window(self, end: dt.date, sessions: int) -> List[dt.date]:
         """The ``sessions`` sessions ending at (and including) ``end``."""

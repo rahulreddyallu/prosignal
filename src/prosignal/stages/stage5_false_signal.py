@@ -1,23 +1,21 @@
 """Stage 5 -- False-signal defense.
 
-Actively looks for reasons the signal is WRONG. A screen that only accumulates
-confirming evidence is a confirmation machine, and the whole value of this stage
-is that it argues against its own candidates.
+Looks for reasons a candidate is wrong. A screen that only accumulates
+confirming evidence returns confirmations.
 
-Three outcomes per check, and the third one matters most:
+Four outcomes per check:
 
     PASS           the check ran and found nothing
     SCORE_PENALTY  the check ran and found something worth discounting
     HARD_REJECT    the check ran and found a disqualifying condition
-    NOT_TESTABLE   the check COULD NOT RUN
+    NOT_TESTABLE   the check could not run
 
-`NOT_TESTABLE` is never silently upgraded to PASS. Every untestable check is
-printed on the card under "not testable with current data", so a signal built on
-partial evidence says so.
+NOT_TESTABLE is never upgraded to PASS. Untestable checks are printed on the
+card, so a signal built on partial evidence says so.
 
-Only checks whose inputs actually exist are implemented here. Checks needing
-data the engine cannot obtain report NOT_TESTABLE by construction rather than
-existing as dead code -- see DATA_SOURCES.md for what is reachable.
+Only checks whose inputs exist are implemented. Checks needing data the engine
+cannot obtain report NOT_TESTABLE by construction rather than existing as dead
+code -- see DATA_SOURCES.md.
 """
 
 from __future__ import annotations

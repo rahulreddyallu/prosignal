@@ -1,23 +1,21 @@
 """Walk-forward backtest driver -- connects the strategy to CPCV/PBO/DSR.
 
-Execution model, which is the part most backtests get wrong:
+Execution model:
 
     session T close  ->  analysis runs, signal produced
     session T+1 OPEN ->  the trade is entered
 
-You cannot analyse a closing price and also transact at it. Modelling entry at
-the signal-session close would silently grant a full session of foresight, and
-that single assumption is enough to make a losing strategy look profitable.
-Entry is therefore at the NEXT session's open, which is what a human acting on
-an end-of-day signal can actually achieve.
+Entry at the signal session's close would grant a full session of foresight,
+which is enough on its own to make a losing strategy look profitable. Entry is
+at the next session's open, which is what acting on an end-of-day signal can
+achieve.
 
-Exits are evaluated on subsequent bars in priority order, with an intentionally
-pessimistic convention: if a bar's low touches the stop AND its high touches the
-target, the STOP is taken. Intraday sequence is unknowable from daily bars, and
-assuming the favourable ordering is how a backtest quietly inflates its win rate.
+Exits are evaluated on subsequent bars in priority order. If a bar's low
+touches the stop and its high touches the target, the stop is taken: intraday
+sequence is unknowable from daily bars, and assuming the favourable ordering
+inflates the win rate.
 
-Costs and slippage come from the same `CostModel` the live engine uses, so a
-backtested trade and a live trade are charged identically.
+Costs and slippage come from the same `CostModel` the live engine uses.
 """
 
 from __future__ import annotations

@@ -1,20 +1,14 @@
 """Typed schema for config/parameters.yaml.
 
-Two design rules drive this module:
+Each research parameter carries metadata rather than being a bare number:
+`Tunable` requires a `status` (UNVALIDATED / VALIDATED / STATUTORY /
+STRUCTURAL / OPERATIONAL) and accepts an optional `search_range` and `note`.
+The `/config` endpoint renders this metadata.
 
-1. **Every research parameter carries its own honesty metadata.** A bare number
-   in a quant system is a lie by omission -- it hides whether it came from a
-   journal, a blog, or a fat finger. `Tunable` forces each one to declare a
-   `status` (UNVALIDATED / VALIDATED / STATUTORY / STRUCTURAL / OPERATIONAL),
-   an optional `search_range`, and a free-text `note`. The `/config`
-   transparency endpoint (webapp FR-8) renders exactly this metadata.
+`extra="forbid"` applies throughout, so a typo in parameters.yaml fails at load
+rather than falling back to an unseen default.
 
-2. **`extra="forbid"` everywhere.** A typo in parameters.yaml must crash on
-   load, not silently fall back to a default the user never saw. This is the
-   single most valuable property of the whole config layer: the user edits one
-   file, and that file cannot fail quietly.
-
-`Tunable` accepts either form in YAML::
+Both YAML forms are accepted::
 
     atr_multiple: 2.5                      # short form -> status UNVALIDATED
     atr_multiple:                          # long form
@@ -23,10 +17,8 @@ Two design rules drive this module:
       search_range: [1.5, 3.5]
       note: "..."
 
-Access in engine code is always explicit: ``cfg.stage7_risk.stop_loss.atr_multiple.value``
-(or the shorthand ``.v``). There is deliberately no magic unwrapping -- reading
-``.value`` in the call site is a constant reminder that the number is a
-hypothesis, not a fact.
+Engine code reads ``cfg.stage7_risk.stop_loss.atr_multiple.value`` (or ``.v``).
+Values are not unwrapped implicitly.
 """
 
 from __future__ import annotations
@@ -72,31 +64,24 @@ class ParamStatus(str, Enum):
 class OptimizationTier(str, Enum):
     """How a parameter may be treated during validation.
 
-    This is the engine's structural defence against parameter overfitting.
-    "UNVALIDATED" says a value has not been tested; it does NOT say the value
-    should be searched. Those are different questions, and conflating them is
-    how a research programme ends up with a 132-dimensional search space and a
-    Probability of Backtest Overfitting near 1.
-
-    Harvey, Liu & Zhu (2016) is the relevant discipline: the significance bar
-    has to rise with the number of things you tried. The cheapest way to keep
-    the bar clearable is to try fewer things on purpose.
+    UNVALIDATED means a value has not been tested; it does not mean the value
+    should be searched. Under Harvey, Liu & Zhu (2016) the significance bar
+    rises with the number of configurations tried, so the search space is
+    restricted deliberately.
 
     A_SEARCH
-        Genuinely changes the edge. Gets a real grid in CPCV. Every value tried
-        counts toward the Deflated Sharpe trial budget. Must be opted in
-        explicitly, and the loader caps how many may exist.
+        Changes the edge. Gets a grid in CPCV, and every value tried counts
+        toward the Deflated Sharpe trial budget. Opt-in, and the loader caps
+        how many may exist.
     B_SENSITIVITY
-        Perturbed to confirm the result is not knife-edge, but the winning
-        configuration is NEVER selected on it. Robustness evidence, not a
-        degree of freedom. This is the safe default for anything UNVALIDATED.
+        Perturbed to confirm the result is not knife-edge; the winning
+        configuration is never selected on it. Default for UNVALIDATED values.
     C_FIXED
-        Set once from evidence or convention and never searched. Academic
-        constructions (12-1 momentum), statutory rates, definitional constants.
+        Set once from evidence or convention and never searched: academic
+        constructions such as 12-1 momentum, statutory rates, constants.
     D_OPERATIONAL
-        Your business constraint -- capital, broker fees, appetite. Not a
-        research parameter at all; changing it changes the problem, not the
-        answer.
+        A business constraint -- capital, fees, appetite. Changing it changes
+        the problem rather than the answer.
     """
 
     A_SEARCH = "A_SEARCH"
@@ -720,10 +705,9 @@ class ValueFactorConfig(_Base):
     from the quarterly filing (paid-up capital / face value), which is what
     makes market capitalisation and therefore a yield possible.
 
-    Earnings yield rather than P/E on purpose: it is defined for loss-making
-    companies, where a negative yield correctly ranks them last, whereas a
-    negative P/E is meaningless and usually gets dropped -- silently treating
-    the worst names as neutral.
+    Earnings yield rather than P/E because it is defined for loss-making
+    companies, where a negative yield ranks them last. A negative P/E is
+    meaningless and usually dropped, which treats the worst names as neutral.
     """
 
     enabled: bool = True

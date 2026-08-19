@@ -11,19 +11,15 @@ Layout under ``data/``::
     snapshots/universe/<INDEX>/<date>.parquet   dated membership snapshots
     curated/_state.json                     per-feed last-update bookkeeping
 
-Three properties this module guarantees:
+Appends are idempotent: dedup happens on write, since duplicate
+``(date, symbol)`` rows would double-count volume and corrupt cross-sectional
+ranks.
 
-**Idempotent appends.** Writing the same session twice is a no-op, not a
-duplicate. Duplicate ``(date, symbol)`` rows would double-count volume and
-corrupt every cross-sectional rank, so dedup happens on write, not on read.
+Writes are atomic via ``.tmp`` + ``os.replace``, so an interrupted ingest
+cannot leave a half-written parquet that still parses.
 
-**Atomic writes.** Every file lands via ``.tmp`` + ``os.replace``, so an
-interrupted ingest can never leave a half-written parquet that reads as
-plausible-but-wrong data.
-
-**No forward-fill, anywhere.** Gaps stay gaps. Filling them is a leakage source
-the research program's section 7 checklist names explicitly, and a store that
-did it silently would defeat Stage 1's continuity check.
+Gaps are never forward-filled. Filling them is a leakage source, and would
+defeat Stage 1's continuity check.
 """
 
 from __future__ import annotations
@@ -37,6 +33,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 from ..core.errors import DataError
 from ..core.logging import get_logger
@@ -149,23 +147,22 @@ class _PartitionedTable:
         symbols: Optional[Iterable[str]] = None,
         symbol_column: str = SYMBOL,
         columns: Optional[Sequence[str]] = None,
+        predicates: Optional[Sequence[tuple]] = None,
     ) -> pd.DataFrame:
         """Read a slice of the table.
 
-        Three memory disciplines, measured rather than assumed. On a 512 MB
-        host an unfiltered read of the price table was 972 MB and killed the
-        process:
+        An unfiltered read of the price table measured 972 MB and exceeded a
+        512 MB host, so three filters apply:
 
-        * ``columns`` projects at the parquet level -- the format is columnar,
-          so unread columns are never materialised at all;
-        * ``symbols`` is pushed into the parquet reader as a row-group filter
-          rather than loaded and then discarded;
-        * string columns come back as ``category``.
+        * ``columns`` projects at the parquet level, so unread columns are
+          never materialised;
+        * ``symbols`` and ``predicates`` are pushed into the reader as
+          row-group filters rather than loaded and discarded;
+        * string columns return as ``category``.
 
-        Together these took a year-file from 182 MB to 1 MB in measurement.
-        Float columns are deliberately left at float64: downcasting bought only
-        another 14 percentage points and would put a precision question over
-        every price, stop and target for no material gain.
+        Measured together, these took a year-file from 182 MB to 1 MB. Floats
+        stay float64: downcasting gained a further 14 percentage points and
+        would raise a precision question over every price, stop and target.
         """
         years = self.years()
         if not years:
@@ -181,9 +178,11 @@ class _PartitionedTable:
         # Push the symbol filter into the reader so non-matching row groups are
         # never decoded. Falls back to a post-read filter if the engine cannot
         # apply it (older pyarrow, or a column absent from this table).
-        pq_filters = (
-            [(symbol_column, "in", sorted(wanted))] if wanted is not None else None
-        )
+        pq_filters: Optional[List[tuple]] = None
+        if wanted is not None:
+            pq_filters = [(symbol_column, "in", sorted(wanted))]
+        if predicates:
+            pq_filters = (pq_filters or []) + list(predicates)
         for year in years:
             path = self._path(year)
             if not path.is_file():
@@ -240,22 +239,37 @@ class _PartitionedTable:
         return pd.to_datetime(chunk[DATE]).max().date()
 
     def distinct_dates(self) -> List[dt.date]:
-        out: List[dt.date] = []
+        """Session dates held by this table.
+
+        Uniqueness is resolved inside Arrow. Reading the column into pandas and
+        calling ``.dt.date`` first would allocate one Python date object per row
+        -- tens of millions of them across the price years -- to arrive at a list
+        of roughly a thousand.
+        """
+        out: set = set()
         for year in self.years():
             path = self._path(year)
             if not path.is_file():
                 continue
-            chunk = pd.read_parquet(path, columns=[DATE], engine="pyarrow")
-            if chunk.empty:
+            table = pq.read_table(path, columns=[DATE])
+            if table.num_rows == 0:
                 continue
-            out.extend(pd.to_datetime(chunk[DATE]).dt.normalize().dt.date.unique().tolist())
-        return sorted(set(out))
+            uniq = pc.unique(table.column(DATE).combine_chunks())
+            out.update(pd.to_datetime(uniq.to_pandas()).dt.normalize().dt.date)
+            del table, uniq
+        return sorted(out)
 
 
 class DataStore:
     """Everything the engine has persisted, addressed by feed."""
 
-    def __init__(self, curated_dir: Path, snapshot_dir: Path) -> None:
+    def __init__(
+        self,
+        curated_dir: Path,
+        snapshot_dir: Path,
+        equity_series: Sequence[str] = ("EQ",),
+    ) -> None:
+        self.equity_series = tuple(equity_series)
         self.curated = Path(curated_dir)
         self.snapshots = Path(snapshot_dir)
         self.curated.mkdir(parents=True, exist_ok=True)
@@ -287,9 +301,21 @@ class DataStore:
         end: Optional[dt.date] = None,
         columns: Optional[Sequence[str]] = None,
     ) -> pd.DataFrame:
+        """OHLCV for the cash equity series only.
+
+        NSE publishes debt instruments under the issuer's own ticker: NTPC has
+        an EQ line near Rs 358 and debenture lines (ND, N7, ...) between Rs 5 and
+        Rs 1,223. Bhavcopy carries them all, so an unfiltered read produces a
+        close series that jumps between the equity and a bond and back. Filtering
+        here rather than at each call site means no stage can accidentally price
+        an equity off its issuer's debt.
+        """
+        want = list(columns) if columns else self.PRICE_COLUMNS
+        predicates = (
+            [("series", "in", list(self.equity_series))] if self.equity_series else None
+        )
         out = self.prices.read(
-            start=start, end=end, symbols=symbols,
-            columns=list(columns) if columns else self.PRICE_COLUMNS,
+            start=start, end=end, symbols=symbols, columns=want, predicates=predicates,
         )
         return out if not out.empty else empty_ohlcv()
 
@@ -316,15 +342,12 @@ class DataStore:
     def resolve_index_name(self, name: str) -> Optional[str]:
         """Match an index name case- and whitespace-insensitively.
 
-        NSE publishes ``Nifty 200`` in ``ind_close_all`` while the config, and
-        most people, write ``NIFTY 200``. That mismatch is not hypothetical --
-        it silently halted Stage 2 the first time it ran against real data,
-        because an exact-match lookup returned an empty series and the regime
-        engine correctly refused to form a view without a benchmark.
+        NSE publishes ``Nifty 200`` in ``ind_close_all`` while the config
+        writes ``NIFTY 200``. An exact-match lookup returned an empty series
+        and halted Stage 2 the first time it ran against real data.
 
-        Resolving here rather than at each call site means a change in NSE's
-        capitalisation cannot break callers, and a genuinely absent index still
-        returns ``None`` rather than being papered over.
+        Resolving here means a change in NSE's capitalisation cannot break
+        callers, while a genuinely absent index still returns ``None``.
         """
         target = " ".join(str(name).strip().casefold().split())
         for candidate in self.available_index_names():

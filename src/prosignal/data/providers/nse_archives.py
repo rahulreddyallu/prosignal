@@ -1,25 +1,23 @@
-"""NSE static-archive provider -- the engine's PRIMARY data source.
+"""NSE static-archive provider -- the primary data source.
 
-Every endpoint below was probed against the live hosts during the build and
-returns HTTP 200 without authentication:
+Endpoints, all probed against the live hosts and returning 200 without auth:
 
 ===========================  ==================================================
 Bhavcopy (UDiFF, >=2024-07)  full cash-segment OHLCV + turnover + ISIN
 Bhavcopy (legacy, <2024-07)  same fields, older column names
 sec_bhavdata_full            adds DELIV_QTY / DELIV_PER (delivery percentage)
-ind_close_all                OHLC for EVERY NSE index in one file, incl India VIX
+ind_close_all                OHLC for every NSE index in one file, incl India VIX
 ind_nifty<N>list             current constituents + Industry (sector) + ISIN
 EQUITY_L                     every listed symbol with DATE OF LISTING and ISIN
 ===========================  ==================================================
 
-``ind_close_all`` is quietly the most valuable file here: one request per
-session yields Nifty 50, Nifty 200, every sector index, *and* India VIX, which
-is the entire input set for Stage 2's regime engine and for sector-relative
-strength in Stage 4.
+``ind_close_all`` carries Nifty 50, Nifty 200, every sector index and India VIX
+in one request per session, which covers Stage 2's regime inputs and Stage 4's
+sector-relative strength.
 
-A 404 means "no session that day" (weekend, holiday, or not yet published) and
-is returned as ``None``. Callers use that to *discover* the trading calendar
-rather than trusting a hardcoded holiday table.
+A 404 means no session that day -- weekend, holiday, or not yet published --
+and is returned as ``None``. Callers use that to discover the trading calendar
+rather than relying on a hardcoded holiday table.
 """
 
 from __future__ import annotations

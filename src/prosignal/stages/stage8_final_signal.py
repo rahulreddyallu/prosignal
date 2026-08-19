@@ -1,20 +1,15 @@
 """Stage 8 -- Final decision, portfolio constraints, and the NO-TRADE report.
 
-Two things this stage will not do.
+Thresholds are never lowered to produce a signal. If nothing clears the gates
+the answer is NO TRADE.
 
-**It will not lower a threshold to produce a signal.** If nothing clears the
-gates, the answer is NO TRADE, and that is a successful outcome rather than a
-failure to find something.
+No probability is emitted. Nothing here has been calibrated against realised
+outcomes, so a "72% chance" would be a weighted factor score presented as a
+statistic. The contract carries a signal strength band instead, and the card
+states that a probability is unavailable and why. A calibrated out-of-sample
+backtest is what would let a real probability attach here.
 
-**It will not emit a probability.** Nothing in this engine has been calibrated
-against realised outcomes, so any number presented as "72% chance" would be a
-weighted factor score wearing a statistical costume. The contract carries a
-signal STRENGTH BAND instead, and the card says explicitly that a probability is
-unavailable and why. When a backtest with out-of-sample calibration exists, and
-only then, this is where a real probability would attach.
-
-Every rejection is counted, so the NO-TRADE output can show the funnel rather
-than shrugging.
+Every rejection is counted so the NO-TRADE output can show the funnel.
 """
 
 from __future__ import annotations
@@ -74,7 +69,6 @@ def run(
         "survived_defense": 0,
         "triggered": 0,
         "passed_score_threshold": 0,
-        "passed_regime_gate": 0,
         "passed_portfolio_limits": 0,
     }
 
@@ -127,7 +121,6 @@ def run(
         if final_score < min_score or score.percentile < min_pct:
             continue
         gate_counts["passed_score_threshold"] += 1
-        gate_counts["passed_regime_gate"] += 1
 
         plan = plans.get(sym)
         rec = _card(sym, names.get(sym), score, defense_res, decision, plan,

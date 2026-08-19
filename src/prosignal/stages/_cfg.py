@@ -1,15 +1,13 @@
 """Config access helper shared by the stages.
 
 `parameters.yaml` mixes two shapes: research parameters are `Tunable` objects
-carrying provenance metadata (`.value`, `.status`, ...), while pure switches are
-bare scalars. Both are legitimate -- a boolean `enabled: true` has no search
-range and no evidence tier, so wrapping it in a Tunable would be noise.
+carrying provenance (`.value`, `.status`, ...), while pure switches are bare
+scalars. A boolean `enabled: true` has no search range or evidence tier, so
+wrapping it would add noise.
 
-`v()` accepts either and returns the underlying value, so a stage never has to
-remember which shape a given key uses. Reading `.value` directly at the call
-site was a deliberate design choice in chunk 1 (a constant reminder that the
-number is a hypothesis); that still holds for real parameters, and `v()` is for
-the places where the shape genuinely varies.
+`v()` accepts either shape and returns the underlying value, so a stage does not
+have to track which form a key uses. Real parameters are still read as `.value`
+at the call site; `v()` covers the places where the shape varies.
 """
 
 from __future__ import annotations

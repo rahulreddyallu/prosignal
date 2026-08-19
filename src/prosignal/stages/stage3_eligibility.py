@@ -1,13 +1,12 @@
-"""Stage 3 -- Eligibility. Hard gates only, all binary, all before any scoring.
+"""Stage 3 -- Eligibility. Hard gates only, binary, before any scoring.
 
-Order is the point: a stock excluded here can never be rescued by a high score
-later. Eligibility asks "may we trade this at all", which is a different and
-prior question to "is this attractive".
+A stock excluded here cannot be rescued by a high score later. Eligibility asks
+whether the stock may be traded at all, which is prior to whether it is
+attractive.
 
-A gate whose data is absent reports NOT_TESTABLE and the stock is NOT rejected
-on that basis -- but the untestable gate is recorded and printed on the card.
-Silently upgrading "we could not check" to "passed" is the single most dangerous
-thing an eligibility layer can do.
+A gate whose data is absent reports NOT_TESTABLE and does not reject the stock,
+but the untestable gate is recorded and printed on the card. Treating "could
+not check" as "passed" is the failure mode this ordering exists to prevent.
 """
 
 from __future__ import annotations
@@ -269,7 +268,7 @@ def _earnings_map(store, calendar, as_of, cfg) -> Optional[Dict[str, int]]:
     out: Dict[str, int] = {}
     for sym, rows in future.groupby(SYMBOL):
         nxt = min(rows["earnings_date"])
-        out[str(sym)] = calendar.count_between(as_of, nxt)
+        out[str(sym)] = calendar.sessions_until(as_of, nxt)
     return out
 
 

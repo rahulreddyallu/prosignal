@@ -1,23 +1,21 @@
 """Point-in-time value and quality features from quarterly filings.
 
-Every figure here is gated on `filing_date <= as_of`. That single rule is what
-separates a usable factor from lookahead: the measured NSE disclosure lag is
-9-45 days, so a feature keyed to period end rather than filing date would hand
-the backtest up to six weeks of foresight, and the backtest would reward it.
+Every figure is gated on `filing_date <= as_of`. Measured NSE disclosure lag is
+9-45 days, so a feature keyed to period end would hand the backtest up to six
+weeks of foresight.
 
-**What is computed, and why these and not others.** The quarterly Ind-AS filing
-is an income statement. It supports margins, interest coverage, earnings growth
-and earnings stability. It does NOT contain equity, assets or borrowings, so
-ROE, book-to-price and debt-to-equity are **absent rather than approximated** --
-Indian companies file balance sheets half-yearly at best.
+The quarterly Ind-AS filing is an income statement, supporting margins,
+interest coverage, earnings growth and earnings stability. It contains no
+equity, assets or borrowings, so ROE, book-to-price and debt-to-equity are
+absent rather than approximated -- Indian companies file balance sheets
+half-yearly at best.
 
 `earnings_yield` is the value factor with the strongest India-specific evidence
-(Fama-French replications on CNX 500 / NSE 500). It is computable here only
-because shares outstanding can be derived from paid-up capital over face value.
+(Fama-French replications on CNX 500 / NSE 500), computable here because shares
+outstanding derive from paid-up capital over face value.
 
-TTM rather than latest-quarter throughout: Indian earnings are seasonal, and a
-single quarter compares a company against its own seasonality rather than
-against its peers.
+TTM rather than latest quarter throughout, since Indian earnings are seasonal
+and a single quarter compares a company against its own seasonality.
 """
 
 from __future__ import annotations

@@ -1,14 +1,12 @@
-"""FastAPI layer -- the front door. Deliberately thin.
+"""FastAPI layer.
 
-Route handlers do three things: call a service, shape the response, return it.
-No analysis logic lives here, so the engine stays testable without HTTP and the
-API stays replaceable without touching the engine.
+Route handlers call a service, shape the response and return it. No analysis
+logic lives here, so the engine is testable without HTTP.
 
-Health vs readiness are genuinely different questions and are answered
-separately: `/health` says the process is alive, `/ready` says it could actually
-run an analysis right now (config loads, store has sessions, universe exists).
-A load balancer needs the first; a human deciding whether to press the button
-needs the second.
+`/health` reports that the process is alive; `/ready` reports whether an
+analysis could run now -- config loads, the store has sessions, the universe
+resolves. A load balancer needs the first, a user deciding whether to press the
+button needs the second.
 """
 
 from __future__ import annotations

@@ -1,20 +1,15 @@
 """Rolling distributional statistics.
 
-The India VIX tercile is the reason this module exists, and it is worth being
-precise about what "high VIX" means. India VIX has traded from roughly 8 to
-roughly 87 over its life. An absolute threshold -- "high is above 20" -- is
-therefore a claim that 2017 and 2020 should be read on the same scale, which
-is indefensible: a VIX of 18 was an alarming spike in the calm of 2017 and a
-profound relief in April 2020.
+India VIX has traded between roughly 8 and 87. An absolute threshold such as
+"high is above 20" reads 2017 and 2020 on the same scale: a VIX of 18 was a
+spike in the calm of 2017 and a relief in April 2020.
 
-So the engine asks a relative question instead: *where does today sit inside
-its own trailing distribution?* That is a rolling percentile, and it adapts as
-the volatility regime itself shifts.
+The engine asks where today sits within its own trailing distribution instead,
+which adapts as the volatility regime shifts.
 
-The window is a real trade-off, not a free parameter. Too short and the
-percentile saturates -- every day is the 99th percentile of a fortnight that
-has been rising. Too long and it stops responding to a genuine regime change.
-252 sessions (one year) is the configured default and is tagged UNVALIDATED.
+The window is a trade-off. Too short and the percentile saturates; too long and
+it stops responding to a genuine regime change. The configured default is 252
+sessions, tagged UNVALIDATED.
 """
 
 from __future__ import annotations
@@ -41,13 +36,10 @@ def _percentile_rank(win: np.ndarray, midpoint: bool = True) -> float:
 
         rank = 100 * (count_below + 0.5 * count_equal) / n
 
-    This is the standard definition, and using it is not pedantry -- the naive
-    "count values <= current" version returns **100 for a perfectly flat
-    series**, because every value ties the current one. That single detail
-    would make a dead-flat India VIX read as maximum volatility forever, and
-    the regime engine would sit in its most defensive bucket during the
-    calmest possible market. The midpoint convention returns 50 there, which
-    is the honest answer: today is exactly typical of its own history.
+    The naive "count values <= current" form returns 100 for a perfectly flat
+    series, since every value ties the current one. A dead-flat India VIX would
+    then read as maximum volatility and hold the regime engine in its most
+    defensive bucket. The midpoint convention returns 50.
     """
     current = win[-1]
     if np.isnan(current):

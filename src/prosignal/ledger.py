@@ -1,18 +1,15 @@
 """Append-only research ledger.
 
-Every run lands here, signal or not. That is the point: a ledger that only
-records the interesting days is a biased sample, and the honest trial count it
-produces is a direct input to the Deflated Sharpe Ratio. A run that does not
-appear here corrupts every subsequent statistical claim.
+Every run is recorded, signal or not. A ledger holding only the interesting days
+is a biased sample, and the trial count it produces feeds the Deflated Sharpe
+Ratio directly.
 
-Format is JSONL -- one JSON object per line, appended, never rewritten. Chosen
-over a database deliberately: it is append-only by construction, survives a
-crash mid-write with at most one truncated line, is readable without tooling,
-and diffs sanely. There is no query load here to justify anything heavier.
+JSONL, one object per line, appended and never rewritten: append-only by
+construction, survives a crash mid-write with at most one truncated line, and is
+readable without tooling. There is no query load to justify a database.
 
-Writes are fsync'd. A run that reports success but whose record is still sitting
-in a kernel buffer when the machine dies is exactly the gap that makes an audit
-trail worthless.
+Writes are fsync'd, so a run cannot report success while its record sits in a
+kernel buffer.
 """
 
 from __future__ import annotations

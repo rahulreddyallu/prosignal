@@ -1,25 +1,22 @@
-"""Stage 0 -- RAW DATA ingestion and the run manifest.
+"""Stage 0 -- raw data ingestion and the run manifest.
 
-This is the only module that talks to the network. It pulls every feed the
-pipeline needs, normalises it, persists it, and emits a
-:class:`~prosignal.core.contracts.RawDataManifest` describing exactly what was
-obtained, from which source, how fresh it is, and what is missing.
+The only module that talks to the network. It pulls every feed the pipeline
+needs, normalises it, persists it, and emits a
+:class:`~prosignal.core.contracts.RawDataManifest` recording what was obtained,
+from which source, how fresh it is, and what is missing.
 
-The manifest is not bookkeeping -- it is the input to Stage 1's gate. A feed
-that silently failed and a feed that succeeded must be distinguishable, or the
-"no signal on stale data" rule is unenforceable.
+Stage 1 gates on that manifest, so a feed that silently failed must remain
+distinguishable from one that succeeded.
 
-Design notes worth knowing before you change anything here:
+Three behaviours to know before changing anything here:
 
-* **The decision date is resolved backwards to a real session.** "Today" is not
-  a trading day at 09:00 on a Monday, and NSE publishes the bhavcopy after the
-  close. Asking for signals on a date with no data returns the last session
-  that does have data, and says so.
-* **The trading calendar is discovered, not assumed.** A 404 on the daily index
-  file means "no session"; that is how holidays are learned.
-* **Fallbacks are recorded, never hidden.** If Yahoo served a feed because NSE
-  failed, the manifest carries ``fallback_used=True`` and the primary error, so
-  the recommendation card's data-quality note can say so.
+* The decision date resolves backwards to a real session. NSE publishes the
+  bhavcopy after the close, so a request for a date with no data returns the
+  last session that has data, and reports that it did.
+* The trading calendar is discovered rather than assumed: a 404 on the daily
+  index file means no session, which is how holidays are learned.
+* Fallbacks are recorded. If Yahoo served a feed because NSE failed, the
+  manifest carries ``fallback_used=True`` and the primary error.
 """
 
 from __future__ import annotations

@@ -1,28 +1,24 @@
 """Point-in-time universe resolution.
 
-The single most expensive silent error in a retail-built India backtest is
-projecting *today's* NIFTY 200 list backwards. Every name that fell out of the
-index because it collapsed disappears from history, and the strategy looks
-brilliant for reasons that have nothing to do with the strategy.
+Projecting today's NIFTY 200 list backwards removes every name that fell out of
+the index after collapsing, which flatters a backtest for reasons unrelated to
+the strategy. NSE publishes only the current list, so this module surfaces the
+problem rather than hiding it.
 
-NSE only publishes the current constituent list, so there is no free way to
-retroactively fix that. What this module does instead is refuse to hide it:
-
-**Resolution order (best available wins)**
+Resolution order, best available first:
 
 1. ``config/reference/index_membership.csv`` -- hand-maintained effective-dated
-   membership transcribed from NSE reconstitution circulars. This is genuinely
-   point-in-time and is always preferred when it covers the requested date.
+   membership transcribed from NSE reconstitution circulars. Genuinely
+   point-in-time, preferred whenever it covers the requested date.
 2. A dated snapshot taken on or before ``as_of``. The engine snapshots the live
-   list on every run, so real point-in-time membership accumulates going
-   forward from the day you start using it.
-3. The most recent snapshot, *later* than ``as_of``. This is survivorship-
-   biased by construction. It sets ``survivorship_risk=True`` on the manifest,
-   and under ``universe.pre_snapshot_policy: halt`` it refuses to run at all --
-   which is the correct setting the moment you start backtesting.
+   list on every run, so point-in-time membership accumulates going forward.
+3. The most recent snapshot later than ``as_of``. Survivorship-biased by
+   construction: sets ``survivorship_risk=True``, and under
+   ``universe.pre_snapshot_policy: halt`` refuses to run, which is the correct
+   setting for backtesting.
 
-Listing dates from ``EQUITY_L.csv`` are applied on top: a company cannot be in
-the universe on a date before it was listed, whatever any snapshot says.
+Listing dates from ``EQUITY_L.csv`` are applied on top, so a company cannot
+appear before it was listed whatever a snapshot says.
 """
 
 from __future__ import annotations
