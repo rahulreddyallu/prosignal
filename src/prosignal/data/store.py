@@ -275,6 +275,7 @@ class DataStore:
         self.curated.mkdir(parents=True, exist_ok=True)
         self.snapshots.mkdir(parents=True, exist_ok=True)
 
+        self._price_cache: Optional[Dict[str, Any]] = None
         self.prices = _PartitionedTable(self.curated, "prices", [SYMBOL, DATE])
         self.indices = _PartitionedTable(self.curated, "indices", ["index_name", DATE])
         self.delivery = _PartitionedTable(self.curated, "delivery", [SYMBOL, DATE])
@@ -294,6 +295,77 @@ class DataStore:
         "volume", "turnover", "deliv_pct",
     ]
 
+    def prefetch_prices(
+        self,
+        symbols: Iterable[str],
+        start: dt.date,
+        end: dt.date,
+    ) -> int:
+        """Read one window that later reads can be served from.
+
+        Stages ask for overlapping windows of the same table: measured on a warm
+        run, seven calls decoded 255,270 rows to produce 15.4 MB of frames, and
+        the widest window contained almost all of the others. Reading that
+        window once and slicing it removes the repeated decode and the allocator
+        churn behind it.
+
+        Correctness is the whole risk here, so the cache is deliberately
+        conservative: it serves a later read only when the symbols, the dates
+        and the columns are all contained in what was fetched. Anything else
+        falls through to a real read.
+        """
+        frame = self.read_prices(symbols=symbols, start=start, end=end)
+        self._price_cache = None if frame.empty else {
+            "frame": frame,
+            "symbols": {normalise_symbol(s) for s in symbols},
+            "start": start,
+            "end": end,
+            "columns": set(frame.columns),
+        }
+        return 0 if frame.empty else len(frame)
+
+    def clear_price_cache(self) -> None:
+        self._price_cache = None
+
+    def _serve_from_cache(
+        self,
+        symbols: Optional[Iterable[str]],
+        start: Optional[dt.date],
+        end: Optional[dt.date],
+        columns: Optional[Sequence[str]],
+    ) -> Optional[pd.DataFrame]:
+        cache = getattr(self, "_price_cache", None)
+        if cache is None:
+            return None
+        # An unbounded request cannot be satisfied from a bounded window.
+        if symbols is None or start is None or end is None:
+            return None
+        wanted = {normalise_symbol(s) for s in symbols}
+        if not wanted <= cache["symbols"]:
+            return None
+        if start < cache["start"] or end > cache["end"]:
+            return None
+        cols = list(columns) if columns else self.PRICE_COLUMNS
+        if not set(cols) <= cache["columns"]:
+            return None
+        frame = cache["frame"]
+        dates = pd.to_datetime(frame[DATE])
+        mask = (
+            frame[SYMBOL].astype(str).isin(wanted)
+            & (dates >= pd.Timestamp(start))
+            & (dates <= pd.Timestamp(end))
+        )
+        out = frame.loc[mask, cols].reset_index(drop=True)
+        # Drop categories the slice no longer contains. A fresh read would only
+        # have the categories present in its own rows, and groupby with
+        # observed=False iterates categories rather than values -- so a slice
+        # carrying the full universe would behave differently from the read it
+        # replaces.
+        for col in out.columns:
+            if isinstance(out[col].dtype, pd.CategoricalDtype):
+                out[col] = out[col].cat.remove_unused_categories()
+        return out
+
     def read_prices(
         self,
         symbols: Optional[Iterable[str]] = None,
@@ -310,6 +382,10 @@ class DataStore:
         here rather than at each call site means no stage can accidentally price
         an equity off its issuer's debt.
         """
+        cached = self._serve_from_cache(symbols, start, end, columns)
+        if cached is not None:
+            return cached if not cached.empty else empty_ohlcv()
+
         want = list(columns) if columns else self.PRICE_COLUMNS
         predicates = (
             [("series", "in", list(self.equity_series))] if self.equity_series else None
