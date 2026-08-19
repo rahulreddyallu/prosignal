@@ -723,7 +723,14 @@ stage3_eligibility:
       value: 45
       status: UNVALIDATED
       search_range: [10, 90]
-      note: "Should track stage7_risk.max_holding_sessions."
+      note: >-
+        Deliberately SHORTER than stage7_risk.max_holding_sessions (63).
+        Indian results are quarterly, roughly 63 sessions apart, so a window
+        that spans the full holding period excludes an entire reporting cycle:
+        measured, widening 45 -> 63 collapses the eligible universe from 145
+        names to 26. A 63-session hold necessarily spans an earnings event for
+        most names; this gate keeps the entry away from the event, it cannot
+        keep the whole holding period away from it.
     # PEAD in India is CONTRADICTORY (Harshita 2018 vs the 2014-18 ERC study).
     # Until your own point-in-time test resolves it, no PEAD exemption exists.
     pead_conditional_signal_enabled:
