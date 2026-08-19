@@ -11,19 +11,15 @@ Layout under ``data/``::
     snapshots/universe/<INDEX>/<date>.parquet   dated membership snapshots
     curated/_state.json                     per-feed last-update bookkeeping
 
-Three properties this module guarantees:
+Appends are idempotent: dedup happens on write, since duplicate
+``(date, symbol)`` rows would double-count volume and corrupt cross-sectional
+ranks.
 
-**Idempotent appends.** Writing the same session twice is a no-op, not a
-duplicate. Duplicate ``(date, symbol)`` rows would double-count volume and
-corrupt every cross-sectional rank, so dedup happens on write, not on read.
+Writes are atomic via ``.tmp`` + ``os.replace``, so an interrupted ingest
+cannot leave a half-written parquet that still parses.
 
-**Atomic writes.** Every file lands via ``.tmp`` + ``os.replace``, so an
-interrupted ingest can never leave a half-written parquet that reads as
-plausible-but-wrong data.
-
-**No forward-fill, anywhere.** Gaps stay gaps. Filling them is a leakage source
-the research program's section 7 checklist names explicitly, and a store that
-did it silently would defeat Stage 1's continuity check.
+Gaps are never forward-filled. Filling them is a leakage source, and would
+defeat Stage 1's continuity check.
 """
 
 from __future__ import annotations
@@ -155,20 +151,18 @@ class _PartitionedTable:
     ) -> pd.DataFrame:
         """Read a slice of the table.
 
-        Three memory disciplines, measured rather than assumed. On a 512 MB
-        host an unfiltered read of the price table was 972 MB and killed the
-        process:
+        An unfiltered read of the price table measured 972 MB and exceeded a
+        512 MB host, so three filters apply:
 
-        * ``columns`` projects at the parquet level -- the format is columnar,
-          so unread columns are never materialised at all;
-        * ``symbols`` is pushed into the parquet reader as a row-group filter
-          rather than loaded and then discarded;
-        * string columns come back as ``category``.
+        * ``columns`` projects at the parquet level, so unread columns are
+          never materialised;
+        * ``symbols`` and ``predicates`` are pushed into the reader as
+          row-group filters rather than loaded and discarded;
+        * string columns return as ``category``.
 
-        Together these took a year-file from 182 MB to 1 MB in measurement.
-        Float columns are deliberately left at float64: downcasting bought only
-        another 14 percentage points and would put a precision question over
-        every price, stop and target for no material gain.
+        Measured together, these took a year-file from 182 MB to 1 MB. Floats
+        stay float64: downcasting gained a further 14 percentage points and
+        would raise a precision question over every price, stop and target.
         """
         years = self.years()
         if not years:
@@ -348,15 +342,12 @@ class DataStore:
     def resolve_index_name(self, name: str) -> Optional[str]:
         """Match an index name case- and whitespace-insensitively.
 
-        NSE publishes ``Nifty 200`` in ``ind_close_all`` while the config, and
-        most people, write ``NIFTY 200``. That mismatch is not hypothetical --
-        it silently halted Stage 2 the first time it ran against real data,
-        because an exact-match lookup returned an empty series and the regime
-        engine correctly refused to form a view without a benchmark.
+        NSE publishes ``Nifty 200`` in ``ind_close_all`` while the config
+        writes ``NIFTY 200``. An exact-match lookup returned an empty series
+        and halted Stage 2 the first time it ran against real data.
 
-        Resolving here rather than at each call site means a change in NSE's
-        capitalisation cannot break callers, and a genuinely absent index still
-        returns ``None`` rather than being papered over.
+        Resolving here means a change in NSE's capitalisation cannot break
+        callers, while a genuinely absent index still returns ``None``.
         """
         target = " ".join(str(name).strip().casefold().split())
         for candidate in self.available_index_names():

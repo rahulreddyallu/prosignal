@@ -1,13 +1,11 @@
 """Moving averages and distance-from-average measures.
 
-A note on the EMA, because it is the most common silent bug in this family:
 pandas' ``ewm`` defaults to ``adjust=True``, which renormalises by the weights
-actually available. That makes the first values a *different estimator* from
-the recursive EMA every charting package and every trader means when they say
-"50 EMA". The two converge, but not before roughly ``span`` observations, and
-in the interim a signal built on the difference between them fires at the wrong
-times. This module uses ``adjust=False`` and refuses to emit a value until the
-window is genuinely full.
+available so far. That is a different estimator from the recursive EMA meant by
+"50 EMA" in charting packages. The two converge only after roughly ``span``
+observations, and a signal built on the difference fires at the wrong times in
+the interim. This module uses ``adjust=False`` and emits nothing until the
+window is full.
 """
 
 from __future__ import annotations

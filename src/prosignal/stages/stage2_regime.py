@@ -1,44 +1,32 @@
 """Stage 2 -- Market Regime Engine.
 
-The premise, which is the most robust finding in the momentum literature: the
-same signal has a different expected value in a different market state. Momentum
-does not stop working in a crash -- it *inverts*, violently, and it does so
-exactly when a naive screen is most confident (Daniel & Moskowitz, 2016). So
-regime is not a filter bolted on afterwards; it scales the factors themselves.
+Momentum does not merely weaken in a crash, it inverts, and it does so when a
+naive screen is most confident (Daniel & Moskowitz, 2016). Regime therefore
+scales the factors rather than filtering their output.
 
-Four reads, each answering a different question, deliberately kept separate so
-a single broken input cannot silently swing the whole conclusion:
+Four independent reads, kept separate so one broken input cannot swing the
+whole conclusion:
 
-**Trend** -- which way, and how fast. Regression slope on log price *and*
-position against the 200-DMA, and both must agree before a directional call is
-made. Price 2% above a 200-DMA that has been falling all year is not an uptrend,
-and a rising slope beneath a falling 200-DMA is a bounce, not a turn. When they
-disagree the honest answer is Range-bound, and saying so prevents most of the
-flapping that makes regime engines useless.
+Trend -- regression slope on log price and position against the 200-DMA. Both
+must agree before a directional call is made; price above a falling 200-DMA, or
+a rising slope beneath one, reads as Range-bound.
 
-**Volatility** -- India VIX as a *percentile of its own trailing year*, never an
-absolute level. India VIX has printed from roughly 8 to roughly 87; "high is
-above 20" would call 2017 alarming and April 2020 a relief. Then the asymmetric
-split (Thenmozhi & Chandra, 2013): a VIX rising into a falling market means
-something quite different from a VIX rising into a rally, and both are more
-informative than a VIX drifting down, which is mostly complacency (G.C. &
-Kothari, 2016). That asymmetry is carried explicitly in
-``vol_signal_confidence`` rather than being averaged away.
+Volatility -- India VIX as a percentile of its own trailing year, not an
+absolute level: it has printed between roughly 8 and 87, so a fixed threshold
+would misread whole years. The rise/fall split follows Thenmozhi & Chandra
+(2013); a VIX rising into a falling market differs from one rising into a
+rally, and a drifting VIX is mostly complacency (G.C. & Kothari, 2016). The
+asymmetry is carried in ``vol_signal_confidence``.
 
-**Breadth** -- how much of the market is participating. This is the read that
-would have flagged 2021-22 on the NSE, when the index was carried by a handful
-of heavyweights while participation narrowed underneath. Breadth is
-**market-level only**: it never touches a stock-level score, because "most
-stocks are weak" is not evidence about any particular stock.
+Breadth -- participation, market-level only. It never reaches a stock-level
+score, since "most stocks are weak" says nothing about a particular stock.
 
-**Transition** -- whether the regime is currently *changing*, which is the state
-where every historical relationship is least reliable. Detected by comparing
-today's read against the read N sessions ago and counting disagreements.
+Transition -- whether the regime is currently changing, compared against the
+read N sessions ago. Historical relationships are least reliable in this state.
 
-The output is three multipliers -- momentum, quality, sector RS -- looked up
-from a table in ``parameters.yaml``. The direction of that table is grounded in
-published work; the magnitudes are placeholders tagged ``UNVALIDATED`` until
-CPCV promotes them, and nothing here pretends otherwise.
+Output is three multipliers (momentum, quality, sector RS) from a table in
+parameters.yaml. The direction of that table follows published work; the
+magnitudes are tagged UNVALIDATED until CPCV promotes them.
 """
 
 from __future__ import annotations

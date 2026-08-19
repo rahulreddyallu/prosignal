@@ -1,8 +1,7 @@
 """Vocabulary shared by every stage.
 
-These enums are the engine's controlled vocabulary. Stages communicate through
-them rather than through free strings so that a typo in one stage cannot
-silently create a new, unhandled state downstream.
+Stages communicate through these enums rather than free strings, so a typo in
+one stage cannot create an unhandled state downstream.
 """
 
 from __future__ import annotations

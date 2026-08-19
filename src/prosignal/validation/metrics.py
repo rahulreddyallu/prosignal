@@ -1,29 +1,21 @@
 """Probability of Backtest Overfitting, and the Deflated Sharpe Ratio.
 
-Two questions, two tools.
+PBO (Bailey, Borwein, Lopez de Prado & Zhu, 2014) estimates whether the
+configuration that ranked best in-sample holds up out-of-sample, via
+combinatorially symmetric cross-validation. A high PBO indicates the model
+should be simplified, not that the search should continue -- continued search
+is the behaviour PBO measures.
 
-**PBO** (Bailey, Borwein, López de Prado & Zhu, 2014) asks: *is the
-configuration that looked best in-sample actually any good out-of-sample, or
-did I select a fluke?* It answers with a probability, via combinatorially
-symmetric cross-validation. A high PBO is not merely a bad number to report --
-it is an instruction to simplify the model. It is emphatically not an
-instruction to keep searching until something scores better, because that is
-precisely the behaviour PBO exists to measure.
+DSR (Bailey & Lopez de Prado, 2014) discounts a Sharpe ratio for the number of
+configurations tried and for skew and kurtosis, which momentum strategies carry
+(see the momentum-crash literature).
 
-**DSR** (Bailey & López de Prado, 2014) asks: *given how many configurations I
-tried, and given that my returns are not normal, how much of this Sharpe ratio
-survives?* It corrects for two specific inflation sources -- selection bias
-from multiple testing, and skew/kurtosis, which momentum strategies genuinely
-have (see the momentum-crash literature).
+Both require an honest trial count, which is why the research ledger is
+append-only and the config enforces a search budget. An understated trial count
+inflates DSR.
 
-Both need an honest trial count. That is why the research ledger is
-append-only and why the config carries an enforced search budget: an
-understated trial count silently inflates DSR, which is the most flattering
-possible way to be wrong.
-
-No scipy dependency: the two normal-distribution functions needed are
-implemented here directly, which keeps the install surface small and makes the
-numerics auditable.
+The two normal-distribution functions needed are implemented here rather than
+pulling in scipy, keeping the install surface small.
 """
 
 from __future__ import annotations
@@ -335,11 +327,10 @@ def compute_pbo(performance: np.ndarray, n_splits: int = 16) -> PboResult:
         every way of assigning ``S/2`` of them to the in-sample half, giving
         ``C(S, S/2)`` symmetric train/test pairs. ``S`` must be even.
 
-    Method: for each pair, pick the configuration with the best in-sample
-    performance, then find its *rank* among all configurations out-of-sample.
-    Convert that relative rank to a logit. PBO is the fraction of pairs where
-    the logit is at or below zero -- i.e. where the in-sample winner landed
-    below the out-of-sample median.
+    Method: for each pair, take the best in-sample configuration and find its
+    rank among all configurations out-of-sample, converted to a logit. PBO is
+    the fraction of pairs where that logit is at or below zero, meaning the
+    in-sample winner landed below the out-of-sample median.
     """
     M = np.asarray(performance, dtype="float64")
     if M.ndim != 2:

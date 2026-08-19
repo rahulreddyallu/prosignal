@@ -1,20 +1,16 @@
 """Analysis job manager -- SQLite-backed, single-process, single-flight.
 
-The requirement is narrow: one user, one button, one expensive market-wide
-analysis at a time. SQLite plus a thread meets it exactly. Celery or Redis would
-add an operational surface (a broker to run, monitor, and recover) to solve a
-concurrency problem this system does not have.
+One user, one button, one market-wide analysis at a time. SQLite plus a thread
+covers that; a broker would add operational surface for a concurrency problem
+this system does not have.
 
-Two properties matter and both are enforced here rather than by convention:
+Single flight: `start()` returns the already-running job rather than queueing a
+second full-universe analysis, so a double click is idempotent.
 
-**Single flight.** Clicking the button twice must not launch two full-universe
-analyses. `start()` returns the ALREADY-RUNNING job instead of queueing a second
-one, so a double click is idempotent rather than expensive.
-
-**No permanently stuck jobs.** A process that dies mid-run leaves a row marked
-RUNNING that nothing will ever finish. On startup, and before each new job, any
-RUNNING row older than the timeout is reaped and marked FAILED with a reason.
-Without that, one crash blocks the button forever.
+Stuck-job reaping: a process that dies mid-run leaves a row marked RUNNING that
+nothing will finish. On startup and before each new job, any RUNNING row older
+than the timeout is marked FAILED with a reason, otherwise one crash blocks the
+button permanently.
 """
 
 from __future__ import annotations

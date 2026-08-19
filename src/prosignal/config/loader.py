@@ -1,15 +1,12 @@
 """Load, validate, hash and cache config/parameters.yaml.
 
-The loader's job is to make a bad edit impossible to miss:
-
 * pydantic validation errors are re-rendered as ``section.key: message`` lines
-  that map straight onto the YAML the user just edited;
-* the resulting object is frozen behind a module-level cache so that two
-  stages can never see two different parameter sets within one run;
-* a SHA-256 over every *value* (ignoring prose like ``note``/``description``)
-  produces the ``config_version`` stamped onto every research-ledger row, which
-  is what eventually lets live performance be attributed to an exact dated
-  parameter set.
+  matching the YAML that was edited;
+* the result is cached at module level so two stages cannot see different
+  parameter sets within one run;
+* a SHA-256 over every value, ignoring prose fields such as ``note``, produces
+  the ``config_version`` stamped onto each ledger row, which is what lets live
+  performance be attributed to an exact dated parameter set.
 """
 
 from __future__ import annotations

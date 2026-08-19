@@ -1,25 +1,20 @@
-"""Polite, cached, retrying HTTP client for NSE's static archives.
+"""Cached, rate-limited HTTP client for NSE's static archives.
 
-Three behaviours matter here and each was chosen after probing the live hosts:
+Three behaviours, each chosen after probing the live hosts:
 
-1. **Host-aware politeness.** NSE's archive hosts are generous but not
-   unlimited. Requests to the same host are spaced by
-   ``providers.http.min_interval_seconds``.
+1. Requests to one host are spaced by ``providers.http.min_interval_seconds``.
 
-2. **Immutable-file caching.** A bhavcopy for a past session never changes once
-   published, so it is cached effectively forever. Files for *today* get a
-   short TTL because NSE occasionally republishes them. This turns a 250-file
-   history pull from a ten-minute job into a one-second one on re-runs, which
-   matters enormously when iterating.
+2. A bhavcopy for a past session never changes once published, so it is cached
+   indefinitely; files for the current session get a short TTL because NSE
+   occasionally republishes them. Re-running a long history pull then costs
+   seconds rather than minutes.
 
-3. **404 is data, not an error.** A missing bhavcopy means "no session that
-   day" (weekend, holiday, or not yet published). It is returned as ``None``,
-   not raised, so the calendar-discovery logic can treat it as information.
+3. A 404 is data, not an error. A missing bhavcopy means no session that day,
+   and is returned as ``None`` so calendar discovery can use it.
 
 The ``www.nseindia.com`` JSON API sits behind a bot shield that returns 403 to
-many networks. :class:`NseJsonSession` implements the cookie warm-up it wants,
-but every caller must treat its failure as soft -- the engine is designed so
-that no *required* feed depends on it.
+many networks. :class:`NseJsonSession` performs the cookie warm-up it expects,
+but callers must treat failure as soft -- no required feed depends on it.
 """
 
 from __future__ import annotations

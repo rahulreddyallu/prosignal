@@ -1,26 +1,23 @@
-"""Yahoo Finance provider -- the engine's SECONDARY source.
+"""Yahoo Finance provider -- the secondary source.
 
-It exists for three jobs the NSE archives cannot do on their own:
+Three jobs the NSE archives cannot do alone:
 
-1. **Cross-source agreement.** Stage 1 requires at least two independent price
-   sources wherever possible so that disagreement can be *flagged* rather than
-   silently resolved by picking a favourite (research program section 3.6).
+1. Cross-source agreement. Stage 1 wants two independent price sources where
+   possible, so disagreement is flagged rather than resolved by preference.
 
-2. **Corporate-action ratios.** Yahoo maps Indian bonus issues into its
-   ``Stock Splits`` series (verified: Reliance's Oct-2024 1:1 bonus appears as
-   ratio 2.0), which gives the adjustment engine real ratios to work with
-   without depending on NSE's frequently-403 JSON API.
+2. Corporate-action ratios. Yahoo maps Indian bonus issues into its
+   ``Stock Splits`` series -- Reliance's Oct-2024 1:1 bonus appears as ratio
+   2.0 -- giving the adjustment engine real ratios without depending on NSE's
+   frequently-403 JSON API.
 
-3. **Scheduled earnings dates**, for the Stage 3 earnings-proximity gate.
+3. Scheduled earnings dates for the Stage 3 earnings-proximity gate.
 
-Two cautions are wired into the code rather than left to the reader:
+Two cautions handled in code rather than left to the caller:
 
-* Yahoo's prices are its own reconstruction, not the exchange's record. NSE
-  remains primary for anything that feeds a return calculation; Yahoo is the
-  cross-check.
-* Yahoo returns timezone-aware timestamps for ``.NS`` tickers, and its earnings
-  dates arrive in US/Eastern. Both are converted to IST *dates* here, once, so
-  no downstream module has to think about it.
+* Yahoo prices are its own reconstruction, not the exchange record. NSE stays
+  primary for anything feeding a return calculation.
+* Yahoo returns timezone-aware timestamps for ``.NS`` tickers and US/Eastern
+  earnings dates. Both are converted to IST dates here, once.
 """
 
 from __future__ import annotations

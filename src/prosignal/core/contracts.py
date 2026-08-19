@@ -1,10 +1,9 @@
 """Stage input/output contracts.
 
-The master prompt fixes the pipeline order and requires each stage to be a pure
-function with a declared schema, so that each can be tested and re-validated
-independently. These pydantic models *are* those schemas. They are also the
-wire format for the API, so the webapp and the engine can never drift apart:
-if a stage adds a field, the card renders it or fails loudly.
+Each stage is a pure function with a declared schema so it can be tested and
+re-validated independently. These pydantic models are those schemas, and also
+the API wire format, so a stage that adds a field either renders on the card or
+fails loudly.
 
     Stage 0  RawDataManifest
     Stage 1  DataQualityReport
@@ -17,13 +16,13 @@ if a stage adds a field, the card renders it or fails loudly.
     Stage 8  FinalSignalOutput  (Recommendation | NoTradeReport)
              LedgerRow
 
-Conventions enforced here rather than by convention:
+Conventions enforced by the models rather than by discipline:
 
-* prices are ``Optional[float]`` and are allowed to be ``None`` -- a missing
-  level is reported as missing, never as ``0.0``;
-* every band/category is an enum, never a free string;
-* every check carries an ``evidence`` citation so the "RESEARCH BASIS" section
-  of the output writes itself from data rather than from prose in a template.
+* prices are ``Optional[float]`` and may be ``None`` -- a missing level is
+  reported as missing, never as ``0.0``;
+* every band or category is an enum, never a free string;
+* every check carries an ``evidence`` citation, so the research-basis section
+  of the output is generated from data rather than template prose.
 """
 
 from __future__ import annotations

@@ -1,29 +1,26 @@
 """Combinatorial Purged Cross-Validation.
 
-Walk-forward validation tests a single historical path. That makes the result
-contingent on the one sequence of train/test windows you happened to draw, and
-it offers no defence at all against a researcher quietly trying many
-configurations along that path. Arian, Norouzi & Seco (2024) find walk-forward
-has "notable shortcomings in false discovery prevention" relative to CPCV on
-both PBO and DSR criteria.
+Walk-forward tests a single historical path, leaving the result contingent on
+the one sequence of train/test windows drawn, and offers no defence against
+many configurations being tried along that path. Arian, Norouzi & Seco (2024)
+find walk-forward weaker than CPCV on both PBO and DSR criteria for false
+discovery prevention.
 
-CPCV instead produces a *distribution* of out-of-sample estimates across many
-plausible historical paths. You then evaluate the stability of that
-distribution rather than a single headline number.
+CPCV produces a distribution of out-of-sample estimates across many plausible
+paths, so stability is assessed rather than a single figure.
 
-The construction (López de Prado):
+Construction (Lopez de Prado):
 
-1. Split the history into ``N`` contiguous, chronological groups.
-2. Take every combination of ``k`` groups as the test set -- ``C(N, k)`` splits.
-3. **Purge** from training any observation whose label window overlaps the test
-   window. This matters enormously here: a 21-session forward-return label
-   means an observation 20 sessions before a test block still "knows" part of
-   that block's outcome.
-4. **Embargo** a further span after each test block before training resumes, to
-   kill residual serial-correlation leakage.
+1. Split history into ``N`` contiguous chronological groups.
+2. Use every combination of ``k`` groups as the test set -- ``C(N, k)`` splits.
+3. Purge from training any observation whose label window overlaps the test
+   window. With a 21-session forward-return label, an observation 20 sessions
+   before a test block still encodes part of that block's outcome.
+4. Embargo a further span after each test block before training resumes, to
+   remove residual serial-correlation leakage.
 
-Purging and embargoing are not optional refinements. Without them a CPCV run
-reports optimistic numbers for a mechanical reason and you will believe them.
+Without purging and embargoing a CPCV run reports optimistic numbers for a
+mechanical reason.
 """
 
 from __future__ import annotations

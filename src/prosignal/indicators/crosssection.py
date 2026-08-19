@@ -6,15 +6,14 @@ symbol. Stage 4 applies them in order:
     winsorise  ->  standardise  ->  neutralise  ->  weight
 
 Winsorising comes first because a z-score's mean and standard deviation are
-both destroyed by a single extreme value, and Indian midcaps can legitimately
-order announcement, and left raw it will pull the entire universe's mean and
-inflate the sigma so that every other stock's z-score collapses toward zero.
-The result is a "diversified" factor score that is really a bet on one ticker.
+both wrecked by one extreme value. An Indian midcap can legitimately double on
+an order announcement; left raw it pulls the universe mean and inflates sigma
+until every other z-score collapses toward zero, producing a factor score that
+is really a bet on one ticker.
 
-Rank-based standardisation sidesteps the problem entirely and is the more
-robust default. It also throws away real information -- the *distance* between
-the first and second name -- which is why both are offered and the choice is a
-config parameter rather than a preference baked into the code.
+Rank-based standardisation avoids that but discards the distance between the
+first and second name, so both methods are available and the choice is a config
+parameter.
 """
 
 from __future__ import annotations

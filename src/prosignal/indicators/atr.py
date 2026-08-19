@@ -1,23 +1,20 @@
 """True Range and Average True Range.
 
-ATR is load-bearing in this engine. It sets the stop distance (Stage 7), it
-normalises "extended from the moving average" so the measure is comparable
-across the universe (Stage 6), and it feeds the risk category. So the exact
-definition matters more here than it would in a charting tool.
+ATR sets the stop distance (Stage 7), normalises distance-from-moving-average
+so it is comparable across the universe (Stage 6), and feeds the risk category.
 
-Two things that routinely go wrong and are handled explicitly below:
+Two definitional points handled explicitly below:
 
-**The gap.** True Range is not ``high - low``. It is the greater of the
-session's range and the distance from the *previous close* to today's high or
-low. On the NSE this is not a technicality: stocks gap regularly on results,
-block deals, and index-inclusion news, and a stop sized on the intraday range
-alone will be far too tight on exactly the days that matter.
+Gaps. True Range is not ``high - low`` but the greater of the session range and
+the distance from the previous close to today's high or low. NSE stocks gap
+regularly on results, block deals and index-inclusion news, and a stop sized on
+the intraday range alone is too tight on exactly those days.
 
-**Wilder vs SMA.** Wilder's smoothing uses ``alpha = 1/n``, which is a longer
-memory than a conventional ``n``-period EMA (equivalent to span ``2n-1``). The
-config selects the method; Wilder is the default and is tagged ``STRUCTURAL``
-because it is the definition, not a preference. The SMA variant exists so a
-sensitivity run can confirm the choice does not carry the result.
+Wilder vs SMA. Wilder smoothing uses ``alpha = 1/n``, a longer memory than a
+conventional n-period EMA (equivalent to span ``2n-1``). The config selects the
+method; Wilder is the default and tagged STRUCTURAL because it is the
+definition. The SMA variant exists so a sensitivity run can confirm the choice
+does not carry the result.
 """
 
 from __future__ import annotations

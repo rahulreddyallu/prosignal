@@ -2,22 +2,20 @@
 
 Three jobs, in dependency order:
 
-1. :func:`parse_action_subject` turns NSE's free-text corporate-action
-   description ("Face Value Split From Rs.10/- To Rs.2/-", "Bonus 1:1") into a
-   multiplicative **price factor**.
+1. :func:`parse_action_subject` turns NSE's free-text description ("Face Value
+   Split From Rs.10/- To Rs.2/-", "Bonus 1:1") into a multiplicative price
+   factor.
 
-2. :func:`apply_adjustments` rewrites an unadjusted OHLCV series so that every
-   return computed from it is economically meaningful. Prices before an ex-date
-   are multiplied by the factor; volumes are divided by it, so that rupee
-   turnover stays invariant.
+2. :func:`apply_adjustments` rewrites an unadjusted OHLCV series. Prices before
+   an ex-date are multiplied by the factor and volumes divided by it, leaving
+   rupee turnover invariant.
 
-3. :func:`detect_unexplained_jumps` looks for the opposite failure -- a series
-   that *looks* like it contains an unadjusted split (an overnight ratio near a
-   clean fraction) with no corporate action on file. Stage 1 hard-rejects those
-   names rather than letting a fabricated -80% "return" enter a momentum score.
+3. :func:`detect_unexplained_jumps` finds the opposite case: an overnight ratio
+   near a clean fraction with no corporate action on file. Stage 1 rejects
+   those names rather than admit a fabricated -80% return into a momentum score.
 
-Convention used everywhere: ``ratio`` is the factor you multiply PRE-ex-date
-prices by. A 1:1 bonus doubles the share count, so ``ratio = 0.5``.
+Convention: ``ratio`` multiplies PRE-ex-date prices. A 1:1 bonus doubles the
+share count, so ``ratio = 0.5``.
 """
 
 from __future__ import annotations

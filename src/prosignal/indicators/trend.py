@@ -1,16 +1,14 @@
 """Trend measurement by regression on log price.
 
-Why regression rather than "price vs the 200-DMA": the moving-average test
-answers a different, weaker question. Price can sit 2% above a 200-DMA that has
-been falling for six months, and the MA test calls that an uptrend. The slope
-of a regression through log price over a defined window answers the question
-actually being asked -- *which way, and how fast* -- and the R-squared tells
-you whether the answer means anything or whether the series is just noisy.
+A price-versus-200-DMA test answers a weaker question: price can sit 2% above a
+200-DMA that has fallen for six months and still read as an uptrend. The slope
+of a regression through log price gives direction and rate, and the R-squared
+indicates whether the fit means anything.
 
-Log price, not price. The slope of a regression on raw price is in rupees per
-session and is not comparable between a stock at 150 and one at 15,000. The
-slope on *log* price is a continuously-compounded growth rate, which
-annualises cleanly and compares across the whole universe.
+Log price rather than price: a slope on raw price is in rupees per session and
+is not comparable between a stock at 150 and one at 15,000. On log price it is
+a continuously-compounded growth rate, which annualises and compares across the
+universe.
 """
 
 from __future__ import annotations

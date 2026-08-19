@@ -1,29 +1,25 @@
 """Point-in-time fundamentals from NSE quarterly results (Ind-AS XBRL).
 
-This is the feed the research said was the critical missing input: the strongest
-India-specific factor evidence sits with value and profitability
-(Fama-French replications on CNX 500 / NSE 500), and neither was computable
-without fundamentals carrying a filing date.
+The strongest India-specific factor evidence sits with value and profitability
+(Fama-French replications on CNX 500 / NSE 500), neither computable without
+fundamentals carrying a filing date.
 
-**Why this source and not a fundamentals API.** Point-in-time integrity means
-knowing when a number became PUBLIC, not merely which quarter it describes.
-NSE's per-symbol results endpoint carries `filingDate` and `broadCastDate`
-alongside `fromDate`/`toDate`, so a figure can be gated on when the market
-actually learned it. Measured disclosure lag is 20-45 days (see
-DATA_SOURCES.md); a feed keyed only to period end leaks that entire window into
-a backtest.
+Source choice. Point-in-time integrity requires knowing when a number became
+public, not only which quarter it describes. NSE's per-symbol results endpoint
+carries `filingDate` and `broadCastDate` alongside `fromDate`/`toDate`, so a
+figure can be gated on when the market learned it. Measured disclosure lag is
+20-45 days (DATA_SOURCES.md); a feed keyed only to period end leaks that window
+into a backtest.
 
-**What this source can and cannot give.** The quarterly filing is an INCOME
-STATEMENT. That yields margins, interest coverage, earnings growth and earnings
-stability. It does NOT carry equity, assets or borrowings, so ROE, book value
-and debt-to-equity are **not** derivable here -- Indian companies file balance
-sheets half-yearly at best. Those factors are therefore absent rather than
-approximated.
+Coverage. The quarterly filing is an income statement, giving margins, interest
+coverage, earnings growth and earnings stability. It carries no equity, assets
+or borrowings, so ROE, book value and debt-to-equity are not derivable here --
+Indian companies file balance sheets half-yearly at best. Those factors are
+absent rather than approximated.
 
-**One genuinely useful derivation.** `PaidUpValueOfEquityShareCapital /
-FaceValueOfEquityShareCapital` gives shares outstanding, which with price gives
-**market capitalisation** -- unlocking earnings yield (the value factor) and,
-separately, a real answer to "top N by market cap" for universe construction.
+`PaidUpValueOfEquityShareCapital / FaceValueOfEquityShareCapital` gives shares
+outstanding, which with price gives market capitalisation, unlocking earnings
+yield and a real "top N by market cap" for universe construction.
 """
 
 from __future__ import annotations

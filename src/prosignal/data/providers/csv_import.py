@@ -1,18 +1,16 @@
 """User-supplied CSV drop-in provider.
 
-This is the honest answer to the feeds that no free source delivers reliably
-for India -- promoter pledging above all, plus point-in-time fundamentals with
-filing dates, confirmed earnings dates, and your own regulatory-event log.
+Covers the feeds no free source delivers reliably for India: promoter pledging,
+point-in-time fundamentals with filing dates, confirmed earnings dates, and a
+regulatory-event log.
 
-The contract is deliberately blunt: **if the file is absent, the dependent
-check reports NOT_TESTABLE.** It never quietly passes. An engine that treats
-"I could not check pledging" as "pledging is fine" is worse than one that has
-no pledging check at all, because it launders an unknown into a reassurance.
+If a file is absent the dependent check reports NOT_TESTABLE. It never passes
+by default -- treating "could not check pledging" as "pledging is fine" turns
+an unknown into a reassurance.
 
-Every loader here returns a frame with the exact columns the engine expects,
-empty if the file is missing, and raises only when a file exists but is
-structurally wrong -- because a malformed file the user believes is working is
-the dangerous case.
+Each loader returns a frame with the exact columns the engine expects, empty
+when the file is missing, and raises only when a file exists but is
+structurally wrong.
 """
 
 from __future__ import annotations

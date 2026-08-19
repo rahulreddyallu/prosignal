@@ -1,22 +1,19 @@
 """NSE trading calendar.
 
-Design decision worth stating plainly: **the calendar is derived from data that
-actually exists, not from a hardcoded holiday table.** A shipped holiday list
-goes stale every year and, worse, fails silently -- the engine would happily
-compute a "21-session lookback" that spans a different number of real sessions
-than intended, and nothing would complain.
+The session list is derived from data that exists rather than a hardcoded
+holiday table. A shipped holiday list goes stale annually and fails silently: a
+"21-session lookback" would span a different number of real sessions than
+intended with nothing to flag it.
 
-So:
+* The authoritative session list is the set of dates for which NSE published an
+  index file.
+* ``STATIC_CLOSURE_HINTS`` only avoids probing dates almost certainly closed. A
+  wrong hint costs one wasted request, not a wrong answer, because a
+  hinted-closed date is still probed if it would otherwise be the resolved
+  decision date.
 
-* The authoritative session list is the set of dates for which NSE actually
-  published an index file. That is ground truth by construction.
-* ``STATIC_CLOSURE_HINTS`` exists only to avoid pointlessly probing dates that
-  are almost certainly closed. A wrong hint costs one wasted HTTP request, not
-  a wrong answer, because a hinted-closed date is still probed if it would
-  otherwise be the resolved decision date.
-
-Every lookback in this engine is expressed in *sessions*, never calendar days,
-so a Diwali week or a long weekend can never quietly change a window length.
+Every lookback is expressed in sessions, never calendar days, so a long weekend
+cannot change a window length.
 """
 
 from __future__ import annotations

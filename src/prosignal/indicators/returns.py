@@ -110,11 +110,8 @@ def momentum_skip(
     Jegadeesh & Titman (1993) 12-1 factor: twelve months of return, measured to
     one month ago.
 
-    The skip is the whole point and is not a detail to economise on. Short-term
-    reversal dominates the most recent month -- what went up hardest last month
-    tends to give some back -- so including it actively works against the
-    twelve-month effect. Dropping the skip does not "use more data"; it mixes
-    two opposing effects and cancels a real edge.
+    The skip matters: short-term reversal dominates the most recent month, so
+    including it works against the twelve-month effect rather than adding data.
 
     Requires ``lookback + skip + 1`` observations. Returns ``None`` when short.
     """

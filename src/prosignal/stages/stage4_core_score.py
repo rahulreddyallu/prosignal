@@ -1,20 +1,20 @@
 """Stage 4 -- Cross-sectional factor scoring.
 
-Ranks the WHOLE eligible universe rather than testing one stock against
-thresholds. That is the point of a cross-sectional model: "strong momentum" is
-only meaningful relative to the other things you could have bought today.
+Ranks the whole eligible universe rather than testing one stock against fixed
+thresholds: "strong momentum" is only meaningful relative to the alternatives
+available on the same day.
 
-Pipeline order, which is not negotiable (see indicators/crosssection.py):
+Order (see indicators/crosssection.py):
 
     winsorise -> standardise -> sector-neutralise -> weight -> composite -> rank
 
-Factor families here are deliberately few and deliberately independent. Adding
-RSI, MACD and a moving-average cross would not add three confirmations -- they
-all encode the same trend information as momentum, and the redundancy check at
-the end of this stage measures exactly that rather than assuming it.
+Factor families are few and chosen to be independent. RSI, MACD and a
+moving-average cross would not add three confirmations, since all encode the
+same trend information as momentum; the redundancy check at the end of this
+stage measures that rather than assuming it.
 
-Quality is dropped when point-in-time fundamentals are absent, and the remaining
-weights renormalise. That is stated on every card. Computing it from
+Quality is dropped when point-in-time fundamentals are absent and the remaining
+weights renormalise, which is stated on the card. Computing it from
 current-vintage fundamentals would be lookahead.
 """
 

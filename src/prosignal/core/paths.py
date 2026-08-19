@@ -1,14 +1,14 @@
 """Project-root discovery and directory management.
 
-Every path in config/parameters.yaml is relative to the *project root*, defined
-as the directory containing ``config/parameters.yaml``. Discovery order:
+Paths in config/parameters.yaml are relative to the project root, defined as the
+directory containing ``config/parameters.yaml``. Discovery order:
 
-1. ``$PROSIGNAL_HOME`` environment variable, if set.
+1. ``$PROSIGNAL_HOME``, if set.
 2. Walk up from the current working directory.
-3. Walk up from this source file (covers ``pip install -e .`` layouts).
+3. Walk up from this source file, covering ``pip install -e .`` layouts.
 
-Keeping this in one place means the engine behaves identically whether it is
-invoked from the CLI, from pytest, or from uvicorn with a different cwd.
+Keeping this in one place means the engine behaves identically from the CLI,
+from pytest, or from uvicorn with a different cwd.
 """
 
 from __future__ import annotations

@@ -1,18 +1,17 @@
 """Indicator library -- pure functions over pandas, no config reads, no I/O.
 
-Deliberately dependency-free with respect to the rest of the engine: nothing in
-this package imports config, contracts, or the store. That keeps every function
-testable against hand-computed values, and it means a stage cannot smuggle a
-threshold in here where it would escape the parameter inventory.
+Nothing in this package imports config, contracts or the store, so every
+function is testable against hand-computed values and a stage cannot hide a
+threshold here where it would escape the parameter inventory.
 
-Two invariants hold throughout, and the tests enforce both:
+Two invariants, both enforced by tests:
 
-1. **Point-in-time safety.** The value at ``t`` uses only observations at or
-   before ``t``. No ``center=True``, no ``bfill``, no negative ``shift``.
-2. **Honest windows.** A window of ``n`` returns ``NaN`` until it has ``n``
-   real observations, and scalar helpers return ``None`` rather than a number
-   computed from too little history. A short-window value that looks like a
-   long-window value is worse than a gap, because a gap is visible.
+1. Point-in-time safety. The value at ``t`` uses only observations at or before
+   ``t``. No ``center=True``, no ``bfill``, no negative ``shift``.
+2. Honest windows. A window of ``n`` returns ``NaN`` until it has ``n`` real
+   observations, and scalar helpers return ``None`` rather than a number from
+   too little history. A short-window value that resembles a long-window value
+   is worse than a gap, because a gap is visible.
 """
 
 from __future__ import annotations

@@ -1,9 +1,7 @@
 """Typed exception hierarchy.
 
-Design rule (master prompt, non-negotiable rule #1 and #3): a hard reject is
-never an exception that bubbles up as a generic crash, and `NO TRADE` is never
-an error. Exceptions in this codebase mean "the engine could not run", never
-"the engine ran and found nothing".
+An exception means the engine could not run. NO TRADE is not an error and a
+hard reject is not an exception.
 
     ProSignalError
     ├── ConfigError            -- parameters.yaml is wrong / unloadable

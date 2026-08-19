@@ -1,33 +1,26 @@
 """Turnover-aware portfolio construction with buffer bands.
 
-This module exists because of a measured contradiction, not a hypothesis.
+Measured context:
 
-    Nifty200 Momentum 30, LIVE since its 2020-08-25 launch:  Sharpe 0.36
+    Nifty200 Momentum 30, live since its 2020-08-25 launch:  Sharpe 0.36
     Nifty 200 benchmark, same window:                        Sharpe 0.23
     This engine, walk-forward, 18-session holds:             DSR 0.2%
 
-The index earns its premium at **semi-annual rebalance** with near-zero
-turnover cost. The engine trades an 18-session median hold with a measured
-0.38% per-trade cost drag against a +0.42% mean net return -- costs consume
-roughly 90% of the gross edge. The momentum premium in India appears real and
-the implementation destroys it.
+The index earns its premium at semi-annual rebalance with near-zero turnover
+cost. The engine trades an 18-session median hold with a measured 0.38%
+per-trade cost drag against a +0.42% mean net return, so costs consume roughly
+90% of the gross edge.
 
-So the fix is not another factor. It is trading less.
+Buffer bands: a name enters only inside `entry_rank` but is not sold until it
+falls outside a wider `exit_rank`. Without a buffer, a name oscillating around
+the rank-30 boundary is bought and sold repeatedly, paying a full round trip
+each time for no change in exposure. NSE's own factor indices use this device.
 
-**Buffer bands.** A name enters the book only inside `entry_rank` but is not
-sold until it falls outside a wider `exit_rank`. This is standard index
-construction -- NSE's own factor indices use exactly this device -- and the
-reason is arithmetic rather than aesthetic: without a buffer, a name oscillating
-around the rank-30 boundary is bought and sold repeatedly, paying full
-round-trip costs each time for no change in exposure. The buffer converts that
-churn into a hold.
-
-**Fixed-cadence rebalance.** Decisions are made on a schedule, not whenever a
-score crosses a threshold. Continuous re-evaluation is what turns a quarterly
+Fixed-cadence rebalance: decisions are made on a schedule rather than whenever
+a score crosses a threshold, since continuous re-evaluation turns a quarterly
 premium into a weekly cost.
 
-Nothing here changes how a stock is *scored*. It changes only how often the
-book is allowed to change, which is the variable the evidence indicts.
+Scoring is unchanged here; only the frequency at which the book may change.
 """
 
 from __future__ import annotations

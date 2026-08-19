@@ -1,20 +1,18 @@
 """Stage 6 -- Entry confirmation.
 
-A good stock at a bad price is a bad trade. This stage refuses to convert a high
-rank into an entry unless price is currently at a location where a defined stop
-is close enough to make the risk/reward work.
+A high rank is not converted into an entry unless price is at a location where
+a defined stop is close enough for the risk/reward to work.
 
-Triggers are tried in configured order and the first match wins. They encode
-three genuinely different entries:
+Triggers are tried in configured order, first match wins:
 
-    pullback     strength that has come back to support -- the best risk/reward,
-                 because the stop sits just under structure
+    pullback     strength returning to support -- best risk/reward, since the
+                 stop sits just under structure
     ma_reclaim   a stock reclaiming a reference level it had lost
     breakout     a move through prior resistance on real volume -- worst
-                 risk/reward of the three, since the stop is furthest away
+                 risk/reward, since the stop is furthest away
 
-No trigger means WATCHLIST, not BUY. That distinction is the entire point: the
-engine is allowed to like a stock and still refuse to buy it today.
+No trigger means WATCHLIST, not BUY: the engine may rate a stock highly and
+still decline to buy it today.
 """
 
 from __future__ import annotations

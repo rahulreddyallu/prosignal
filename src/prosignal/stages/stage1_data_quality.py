@@ -1,31 +1,24 @@
 """Stage 1 -- Data Quality and Leakage Gate.
 
-This stage exists because of an asymmetry that is easy to state and easy to
-forget: a wrong number that *looks* reasonable is far more dangerous than a
-missing one. A missing price stops the pipeline. An unadjusted 5:1 split reads
-as a clean -80% session, sails through every downstream stage, and poisons a
-12-1 momentum score for the next twelve months while looking entirely normal on
-a chart.
+A wrong number that looks reasonable is more dangerous than a missing one. A
+missing price stops the pipeline; an unadjusted 5:1 split reads as a clean -80%
+session and corrupts a 12-1 momentum score for the next twelve months.
 
-So every check here is **binary and independent**. Nothing is blended into a
-"data quality score", because a score lets three moderate problems average out
-into an acceptable-looking number. Either a stock's data can be trusted or it
-cannot.
+Checks are binary and independent, never blended into a quality score, since a
+score lets several moderate problems average into an acceptable number.
 
-Two failure levels, and the distinction is the whole design:
+Two failure levels:
 
-* **Market-wide** -- the *feed* is broken. Raises :class:`MarketWideHalt`; the
-  engine refuses to form an opinion at all. Note this is emphatically NOT the
-  same as NO TRADE, which means "we ran cleanly and nothing qualified".
-* **Per-stock** -- this *name's* data is untrustworthy. The stock is excluded;
-  the run continues.
+* Market-wide -- the feed is broken. Raises :class:`MarketWideHalt`; the engine
+  forms no opinion. This is not NO TRADE, which means the run completed and
+  nothing qualified.
+* Per-stock -- that name's data is untrustworthy. The stock is excluded and the
+  run continues.
 
-The universe-wide failure fraction is what separates the two automatically. If
-a quarter of the universe fails a stock-level check on the same session, the
-overwhelmingly more likely explanation is that the feed changed format, not
-that 50 companies simultaneously had bad ticks. Treating that as 50 individual
-exclusions would silently shrink the universe to the handful of names whose
-data happened to survive -- which is a far worse outcome than halting.
+The universe-wide failure fraction separates the two. If a quarter of the
+universe fails the same stock-level check on one session, a format change is
+far more likely than 50 simultaneous bad ticks, and treating it as 50
+exclusions would shrink the universe to whichever names happened to survive.
 """
 
 from __future__ import annotations
