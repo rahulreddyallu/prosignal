@@ -890,6 +890,13 @@ stage4_core_score:
       Weight-share, not factor-count: missing a 0.25-weight factor costs 25% of
       coverage regardless of how many factors exist.
 
+  # A quarterly filing older than this is not evidence about current
+  # profitability. Past it the value and quality factors report unavailable and
+  # Stage 4 renormalises the remaining weights, which is visible on the card --
+  # rather than scoring a 2026 decision on 2024 earnings in silence.
+  # 240 days = one missed quarter plus the measured 45-day disclosure lag.
+  max_fundamental_age_days: 240
+
   # --- Redundancy check (master prompt Stage 4) ---
   redundancy:
     enabled: true

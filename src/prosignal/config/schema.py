@@ -787,6 +787,11 @@ class Stage4Config(_Base):
     redundancy: RedundancyConfig
     min_name_factor_coverage: TF
     data_quality_gate_penalty: TF
+    #: A filing older than this is not evidence about current profitability.
+    #: Beyond it the fundamental factors report unavailable, so Stage 4 drops
+    #: them and renormalises rather than scoring on a stale figure. 240 days
+    #: allows a missed quarter plus the 45-day disclosure lag.
+    max_fundamental_age_days: int = Field(240, ge=60, le=1095)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":

@@ -127,7 +127,10 @@ def run(
             dropped["quality"] = reason
     else:
         last_close = closes.iloc[-1].to_dict() if not closes.empty else {}
-        feats = compute_features(fundamentals, last_close, as_of)
+        feats = compute_features(
+            fundamentals, last_close, as_of,
+            max_age_days=int(iv(cfg.max_fundamental_age_days)),
+        )
         if feats.empty:
             note = "fundamentals stored but none were public as of this date"
             if bv(cfg.factors.value.enabled):

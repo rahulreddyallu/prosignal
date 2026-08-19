@@ -54,11 +54,18 @@ _GROWTH_QUARTERS = 8
 
 
 def point_in_time_snapshot(
-    fundamentals: pd.DataFrame, as_of: dt.date
+    fundamentals: pd.DataFrame, as_of: dt.date, max_age_days: Optional[int] = None
 ) -> pd.DataFrame:
     """Every filing publicly known on or before ``as_of``, newest first.
 
-    The entire point-in-time guarantee of this module lives in this function.
+    The point-in-time guarantee lives here: nothing filed after ``as_of`` is
+    visible.
+
+    ``max_age_days`` additionally drops filings too old to describe current
+    profitability. Gating only on ``filing_date <= as_of`` is correct against
+    lookahead but says nothing about staleness, so a store that stopped
+    receiving filings keeps scoring on the last one it saw -- measured at 525
+    days here, used as though it were current.
     """
     if fundamentals is None or fundamentals.empty:
         return pd.DataFrame()
@@ -66,6 +73,9 @@ def point_in_time_snapshot(
     frame["filing_date"] = pd.to_datetime(frame["filing_date"], errors="coerce")
     frame["period_end"] = pd.to_datetime(frame["period_end"], errors="coerce")
     frame = frame.dropna(subset=["filing_date", "period_end"])
+    if max_age_days is not None and not frame.empty:
+        floor = pd.Timestamp(as_of) - pd.Timedelta(days=int(max_age_days))
+        frame = frame[frame["filing_date"] >= floor]
     if frame.empty:
         # Every row lacked a usable date. Return early rather than comparing an
         # all-NaT datetime64 column against a date, which raises TypeError and
@@ -89,13 +99,14 @@ def compute_features(
     fundamentals: pd.DataFrame,
     prices: Dict[str, float],
     as_of: dt.date,
+    max_age_days: Optional[int] = None,
 ) -> pd.DataFrame:
     """Per-symbol value/quality features, using only publicly-known filings.
 
     ``prices`` maps symbol -> last close, used with derived shares outstanding
     to form market capitalisation.
     """
-    known = point_in_time_snapshot(fundamentals, as_of)
+    known = point_in_time_snapshot(fundamentals, as_of, max_age_days=max_age_days)
     if known.empty:
         return pd.DataFrame(columns=[SYMBOL] + FEATURE_NAMES)
 
