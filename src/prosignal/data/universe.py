@@ -189,6 +189,19 @@ class UniverseResolver:
             return None
 
         ts = pd.Timestamp(as_of)
+        # Coerce the date columns here rather than trusting the caller. A frame
+        # read straight from CSV carries strings, and comparing a string to a
+        # Timestamp raises -- which would break the one mechanism that can fix
+        # survivorship bias, at the moment someone finally populated the file.
+        rows = rows.copy()
+        rows["effective_from"] = pd.to_datetime(rows["effective_from"], errors="coerce")
+        rows["effective_to"] = pd.to_datetime(
+            rows["effective_to"].replace("", pd.NA), errors="coerce"
+        )
+        rows = rows.dropna(subset=["effective_from"])
+        if rows.empty:
+            return None
+
         # Does the file actually cover this date? If its earliest effective_from
         # is after as_of, it does not, and we must fall through rather than
         # return a confidently wrong (empty) universe.

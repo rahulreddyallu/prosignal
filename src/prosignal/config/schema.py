@@ -302,6 +302,10 @@ class StorageConfig(_Base):
     warn_free_disk_mb: float = Field(4096.0, ge=0)
     halt_free_disk_mb: float = Field(768.0, ge=0)
     write_batch_sessions: int = Field(25, ge=1, le=500)
+    #: How far back a backfill may probe. Bounds an unattended run rather than
+    #: expressing a data limit: NSE serves bhavcopy to at least 2017, so the
+    #: default covers roughly eleven years.
+    max_backfill_calendar_days: int = Field(4200, ge=100, le=20000)
 
     @model_validator(mode="after")
     def _check(self) -> "StorageConfig":

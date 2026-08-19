@@ -160,6 +160,12 @@ storage:
   # Writing per-session forces a full read-modify-write of the year file each
   # time, which is O(n^2) I/O across a backfill.
   write_batch_sessions: 25
+  # How far back `data ingest` may probe, in calendar days. This bounds an
+  # unattended run; it is not a statement about data availability. NSE serves
+  # bhavcopy to at least 2017-03 and 403s at 2015-03, so 4200 days (~11.5y)
+  # covers the reachable archive. At the previous 2000 a request for 2500
+  # sessions silently returned 1350.
+  max_backfill_calendar_days: 4200
 
 
 # -----------------------------------------------------------------------------
