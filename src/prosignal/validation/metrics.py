@@ -238,6 +238,15 @@ def deflated_sharpe_ratio(
         Falls back to a conservative unit variance when unavailable, which
         makes the benchmark harder to clear rather than easier.
     """
+    obs = np.asarray(list(returns), dtype="float64")
+    obs = obs[np.isfinite(obs)]
+    if obs.size < 2 or float(np.std(obs, ddof=1)) <= 0.0:
+        # A degenerate series has no Sharpe to deflate. Returning a small
+        # positive number invited it to be read as a weak-but-real result.
+        raise ValueError(
+            "deflated_sharpe_ratio needs at least two observations with "
+            "non-zero variance; a constant return series has no Sharpe ratio"
+        )
     arr = np.asarray(list(returns), dtype="float64")
     arr = arr[np.isfinite(arr)]
     n = arr.size

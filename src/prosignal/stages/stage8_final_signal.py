@@ -67,8 +67,8 @@ def run(
         "scored": len(scores.ranked_scores),
         "defended": len(defense.per_stock),
         "survived_defense": 0,
-        "triggered": 0,
         "passed_score_threshold": 0,
+        "triggered": 0,
         "passed_portfolio_limits": 0,
     }
 
@@ -114,13 +114,16 @@ def run(
         defense_res = defense.per_stock[sym]
         final_score = defense_res.score_after
 
-        if decision.status is EntryStatus.TRIGGERED:
-            gate_counts["triggered"] += 1
-
-        # score / percentile gate
+        # Score gate first, then the entry trigger. Counting the trigger before
+        # the score meant the two lines measured different populations and the
+        # funnel ran backwards: triggered=1 followed by passed_score=8. Counted
+        # in decision order it is monotonic and reads as what it is.
         if final_score < min_score or score.percentile < min_pct:
             continue
         gate_counts["passed_score_threshold"] += 1
+
+        if decision.status is EntryStatus.TRIGGERED:
+            gate_counts["triggered"] += 1
 
         plan = plans.get(sym)
         rec = _card(sym, names.get(sym), score, defense_res, decision, plan,

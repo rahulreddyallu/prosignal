@@ -156,6 +156,14 @@ def run_backtest(
     information and makes the run tractable. It is recorded in the result so the
     sample size is never overstated.
     """
+    # The live engine holds at most portfolio.max_signals_per_run positions. A
+    # backtest without that cap compounds returns across more concurrent trades
+    # than the system would ever take, which flatters the result for a reason
+    # that has nothing to do with the signal.
+    max_concurrent = int(config.params.stage8_final_signal.portfolio.max_signals_per_run.value)
+    open_until: list = []
+    skipped_capacity = 0
+
     store = DataStore(config.paths.curated, config.paths.snapshots)
     sessions = store.price_sessions()
     calendar = TradingCalendar(sessions)
@@ -266,7 +274,12 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
         # the stop. Daily bars cannot tell us which came first, and assuming
         # the favourable sequence is how a backtest inflates its win rate.
         if low <= stop:
-            exit_price, reason = stop, "stop"
+            # A gap-down opens below the stop, so the fill is the open, not the
+            # stop. Filling at the stop credits a price that was never
+            # available and flatters every stopped trade.
+            bar_open = float(bar["open"])
+            exit_price = min(bar_open, stop) if np.isfinite(bar_open) else stop
+            reason = "stop_gap" if exit_price < stop else "stop"
         elif high >= t2:
             exit_price, reason = t2, "target_2"
         elif high >= t1:

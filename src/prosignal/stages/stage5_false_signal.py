@@ -23,6 +23,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from ._cfg import fv, iv, v
@@ -125,7 +126,7 @@ def run(
 
     log.info(
         "stage 5 complete",
-        extra={"defended": len(per_stock),
+        extra={"defended_top_n": len(per_stock),
                "rejected": sum(1 for r in per_stock.values() if r.final_status == "REJECTED")},
     )
     return FalseSignalReport(
@@ -196,10 +197,16 @@ def _gap_signal(frame, cfg, params) -> CheckResult:
             iv(params.stage7_risk.atr.period_sessions), str(v(params.stage7_risk.atr.method)))
     if a.dropna().empty:
         return _nt("gap_signal", "ATR not computable")
+    atr_now = float(a.dropna().iloc[-1])
+    if not np.isfinite(atr_now) or atr_now <= 0.0:
+        # A halted or genuinely flat scrip has zero true range. Dividing by it
+        # raised ZeroDivisionError and took the whole run down; the honest
+        # answer is that this check cannot be evaluated for this name.
+        return _nt("gap_signal", "ATR is zero; gap cannot be scaled")
     prev_close = float(frame["close"].iloc[-2])
     today_open = float(frame["open"].iloc[-1])
     gap = abs(today_open - prev_close)
-    gap_atr = gap / float(a.dropna().iloc[-1])
+    gap_atr = gap / atr_now
     lim = fv(cfg.max_gap_atr_multiple)
     obs = {"gap_atr_multiple": round(gap_atr, 2), "limit": lim}
     if gap_atr > lim:

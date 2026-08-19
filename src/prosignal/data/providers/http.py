@@ -160,6 +160,7 @@ class HttpClient:
         try:
             blob_path.parent.mkdir(parents=True, exist_ok=True)
             blob_path.write_bytes(result.content)
+            self._maybe_evict()
             meta_path.write_text(
                 json.dumps(
                     {
@@ -242,6 +243,20 @@ class HttpClient:
         if not self.cache_dir.is_dir():
             return 0
         return sum(p.stat().st_size for p in self.cache_dir.rglob("*") if p.is_file())
+
+    #: Writes between eviction checks. Eviction ran only at the end of an
+    #: ingest, so an interrupted backfill left the cache unbounded: measured at
+    #: 464 MB against a 384 MB cap.
+    _EVICT_EVERY_WRITES = 200
+
+    def _maybe_evict(self) -> None:
+        self._writes_since_evict = getattr(self, "_writes_since_evict", 0) + 1
+        if self._writes_since_evict >= self._EVICT_EVERY_WRITES:
+            self._writes_since_evict = 0
+            try:
+                self.evict_lru()
+            except Exception as exc:  # eviction must never fail a fetch
+                log.warning("cache eviction skipped", extra={"error": str(exc)})
 
     def evict_lru(self, target_bytes: Optional[int] = None) -> Dict[str, int]:
         """Evict least-recently-used payloads until the cache fits its budget.

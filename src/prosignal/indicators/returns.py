@@ -178,7 +178,14 @@ def downside_deviation(
     sigma = downside.rolling(window=window, min_periods=2).std(ddof=1)
     if annualise:
         sigma = sigma * np.sqrt(sessions_per_year)
-    return sigma
+    # A window with no down days has zero downside deviation, not an undefined
+    # one. NaN here propagated into the factor and dropped the name from
+    # scoring for the crime of having had no bad days.
+    result = sigma
+    return result.fillna(0.0) if hasattr(result, "fillna") else (
+        0.0 if result != result else result
+    )
+
 
 
 def max_drawdown(prices: pd.Series, window: Optional[int] = None) -> Optional[float]:
