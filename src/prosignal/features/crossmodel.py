@@ -55,7 +55,7 @@ MIN_TRAIN_ROWS = 600
 #: the full 2,206-session panel peaked at 615 MB on a 512 MB instance. 1,500
 #: sessions still yields ~45 training periods for 14 features, which is the
 #: span the earliest validated walk-forward folds trained on.
-MAX_TRAIN_SESSIONS = 1000
+MAX_TRAIN_SESSIONS = 3000
 
 #: Refit cadence. The coefficients are a slow-moving object -- refitting daily
 #: costs 17 seconds and 300 MB to move them marginally, and invites the fit to
