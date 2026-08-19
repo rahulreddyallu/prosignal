@@ -302,6 +302,10 @@ class StorageConfig(_Base):
     warn_free_disk_mb: float = Field(4096.0, ge=0)
     halt_free_disk_mb: float = Field(768.0, ge=0)
     write_batch_sessions: int = Field(25, ge=1, le=500)
+    #: How far back a backfill may probe. Bounds an unattended run rather than
+    #: expressing a data limit: NSE serves bhavcopy to at least 2017, so the
+    #: default covers roughly eleven years.
+    max_backfill_calendar_days: int = Field(4200, ge=100, le=20000)
 
     @model_validator(mode="after")
     def _check(self) -> "StorageConfig":
@@ -783,6 +787,11 @@ class Stage4Config(_Base):
     redundancy: RedundancyConfig
     min_name_factor_coverage: TF
     data_quality_gate_penalty: TF
+    #: A filing older than this is not evidence about current profitability.
+    #: Beyond it the fundamental factors report unavailable, so Stage 4 drops
+    #: them and renormalises rather than scoring on a stale figure. 240 days
+    #: allows a missed quarter plus the 45-day disclosure lag.
+    max_fundamental_age_days: int = Field(240, ge=60, le=1095)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":

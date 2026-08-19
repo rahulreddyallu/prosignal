@@ -68,8 +68,9 @@ class IngestOptions:
     include_secondary_prices: bool = True
     #: Corporate actions / earnings are refreshed at most this often.
     reference_refresh_sessions: int = 5
-    #: Cap on how many calendar days back to probe when backfilling.
-    max_backfill_calendar_days: int = 2000
+    #: Cap on how many calendar days back to probe when backfilling. ``None``
+    #: takes ``storage.max_backfill_calendar_days``.
+    max_backfill_calendar_days: Optional[int] = None
     #: Re-pull sessions already present in the store. Needed after a provider
     #: fix, since the normal path skips any session whose index file is stored.
     #: Cheap in practice: historical payloads come straight from the HTTP cache.
@@ -377,9 +378,25 @@ class DataIngestor:
     ) -> List[dt.date]:
         """Which calendar days still need pulling, newest first."""
         have_index: set = set() if opts.refetch_stored_sessions else set(self.store.known_sessions())
-        span_days = min(
-            int(history_sessions * _DAYS_PER_SESSION) + 20, opts.max_backfill_calendar_days
-        )
+        cap = opts.max_backfill_calendar_days
+        if cap is None:
+            cap = int(self.config.params.storage.max_backfill_calendar_days)
+        needed = int(history_sessions * _DAYS_PER_SESSION) + 20
+        span_days = min(needed, cap)
+        if needed > cap:
+            # Silently returning fewer sessions than asked for is how a request
+            # for ten years quietly becomes five, with every downstream sample
+            # size wrong and nothing to show for it.
+            log.warning(
+                "backfill span capped; fewer sessions will be fetched than requested",
+                extra={
+                    "requested_sessions": history_sessions,
+                    "days_needed": needed,
+                    "cap_days": cap,
+                    "reaches": str(as_of - dt.timedelta(days=cap)),
+                    "raise": "storage.max_backfill_calendar_days",
+                },
+            )
         wanted: List[dt.date] = []
         day = as_of
         collected = 0

@@ -285,6 +285,30 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # =====================================================================
     # ledger / history
     # =====================================================================
+    @app.get("/outcomes")
+    def outcomes_summary() -> Dict[str, Any]:
+        """Resolved signals and what the market did with them.
+
+        Resolution runs on read so the record catches up without a scheduler.
+        Only signals whose full holding window has elapsed are scored.
+        """
+        from . import outcomes as _out
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        led = Path(cfg.paths.ledger)
+        path = led / "outcomes.jsonl"
+        counts = _out.resolve_pending(store, led, path, cfg)
+        rows = _out.load_outcomes(path)
+        return {
+            "resolution": counts,
+            "summary": _out.summarise(rows),
+            "calibration": _out.calibration(rows),
+            "note": (
+                "composite_score is a cross-sectional rank, not a probability. "
+                "The calibration table tests only whether a higher rank wins "
+                "more often."
+            ),
+        }
+
     @app.get("/ledger")
     def ledger(limit: int = 50) -> Dict[str, Any]:
         led = Ledger(cfg.paths.ledger)
