@@ -39,6 +39,7 @@ from .data.store import DataStore
 from .data.types import DATE, SYMBOL
 from .data.universe import UniverseSnapshot
 from .ledger import Ledger, row_from_output
+from .stages._cfg import v
 from .stages import (
     stage1_data_quality,
     stage2_regime,
@@ -299,6 +300,23 @@ def _universe(store, config, as_of) -> UniverseSnapshot:
     usable = [d for d in dates if d <= as_of]
     chosen = usable[-1] if usable else dates[0]
     survivorship = not usable
+    # The only membership list available for this date was recorded later, so it
+    # holds today's constituents: names promoted for performing well are present
+    # and names dropped for performing badly are absent. universe.pre_snapshot_policy
+    # decides whether that is acceptable. It is for a live run, where today's list
+    # IS the point-in-time list, and it is not for anything historical.
+    if survivorship:
+        policy = str(v(config.params.universe.pre_snapshot_policy)).lower()
+        if policy == "halt":
+            raise PipelineBlocked(
+                [
+                    f"no {index} membership snapshot on or before {as_of}; the "
+                    f"earliest available is {dates[0]}. Running would use today's "
+                    f"constituents for a past date, which is survivorship bias. "
+                    f"Set universe.pre_snapshot_policy to 'flag' only for live runs."
+                ],
+                stage="stage0_data",
+            )
     snap = store.read_universe_snapshot(index, chosen)
     sectors = dict(zip(snap["symbol"], snap["sector"])) if "sector" in snap.columns else {}
     names = dict(zip(snap["symbol"], snap["company_name"])) if "company_name" in snap.columns else {}
