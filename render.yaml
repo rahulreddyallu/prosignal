@@ -27,6 +27,12 @@ services:
       # the arena count bounds that fragmentation. Measured locally: RSS grew
       # monotonically 206 -> 546 MB across six pipeline stages even though no
       # stage needs the previous stage's frames.
+      # Arrow defaults to mimalloc, which keeps freed pages in its own arenas
+      # and never returns them to the OS. Measured over three repeated reads of
+      # the price table it retained 301 MB against the system allocator's 189 MB.
+      # The system allocator is also the one malloc_trim can actually reclaim.
+      - key: ARROW_DEFAULT_MEMORY_POOL
+        value: system
       - key: MALLOC_ARENA_MAX
         value: "2"
       # Python does not release small-object arenas back to the OS by default.

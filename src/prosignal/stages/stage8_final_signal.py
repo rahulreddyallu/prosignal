@@ -74,7 +74,6 @@ def run(
         "survived_defense": 0,
         "triggered": 0,
         "passed_score_threshold": 0,
-        "passed_regime_gate": 0,
         "passed_portfolio_limits": 0,
     }
 
@@ -127,7 +126,6 @@ def run(
         if final_score < min_score or score.percentile < min_pct:
             continue
         gate_counts["passed_score_threshold"] += 1
-        gate_counts["passed_regime_gate"] += 1
 
         plan = plans.get(sym)
         rec = _card(sym, names.get(sym), score, defense_res, decision, plan,

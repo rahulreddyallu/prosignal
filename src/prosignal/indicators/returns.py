@@ -1,15 +1,10 @@
 """Return and volatility primitives.
 
-Every function here is **point-in-time safe**: the value at index ``t`` uses
-only observations at or before ``t``. There is no ``center=True``, no
-``bfill()``, and no ``shift(-1)`` anywhere in this package. A single backward
-fill in an indicator is enough to make a backtest look brilliant and a live
-account lose money, and it is almost invisible once buried in a pipeline.
+Point-in-time safe: the value at ``t`` uses only observations at or before
+``t``. No ``center=True``, no ``bfill()``, no negative ``shift()``.
 
-The second discipline here is **explicit ``min_periods``**. Pandas will happily
-compute a "200-day average" from 3 observations if asked carelessly. In this
-package a window of ``n`` returns ``NaN`` until it genuinely has ``n``
-observations, because a 200-DMA seeded with a fortnight of data is not a
+Windows use explicit ``min_periods`` and return ``NaN`` until fully seeded, so
+a 200-session average is never computed from a fortnight of data.
 200-DMA -- it is a number that looks like one, which is worse than a gap.
 """
 

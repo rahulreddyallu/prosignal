@@ -37,6 +37,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import pandas as pd
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 
 from ..core.errors import DataError
 from ..core.logging import get_logger
@@ -149,6 +151,7 @@ class _PartitionedTable:
         symbols: Optional[Iterable[str]] = None,
         symbol_column: str = SYMBOL,
         columns: Optional[Sequence[str]] = None,
+        predicates: Optional[Sequence[tuple]] = None,
     ) -> pd.DataFrame:
         """Read a slice of the table.
 
@@ -181,9 +184,11 @@ class _PartitionedTable:
         # Push the symbol filter into the reader so non-matching row groups are
         # never decoded. Falls back to a post-read filter if the engine cannot
         # apply it (older pyarrow, or a column absent from this table).
-        pq_filters = (
-            [(symbol_column, "in", sorted(wanted))] if wanted is not None else None
-        )
+        pq_filters: Optional[List[tuple]] = None
+        if wanted is not None:
+            pq_filters = [(symbol_column, "in", sorted(wanted))]
+        if predicates:
+            pq_filters = (pq_filters or []) + list(predicates)
         for year in years:
             path = self._path(year)
             if not path.is_file():
@@ -240,22 +245,37 @@ class _PartitionedTable:
         return pd.to_datetime(chunk[DATE]).max().date()
 
     def distinct_dates(self) -> List[dt.date]:
-        out: List[dt.date] = []
+        """Session dates held by this table.
+
+        Uniqueness is resolved inside Arrow. Reading the column into pandas and
+        calling ``.dt.date`` first would allocate one Python date object per row
+        -- tens of millions of them across the price years -- to arrive at a list
+        of roughly a thousand.
+        """
+        out: set = set()
         for year in self.years():
             path = self._path(year)
             if not path.is_file():
                 continue
-            chunk = pd.read_parquet(path, columns=[DATE], engine="pyarrow")
-            if chunk.empty:
+            table = pq.read_table(path, columns=[DATE])
+            if table.num_rows == 0:
                 continue
-            out.extend(pd.to_datetime(chunk[DATE]).dt.normalize().dt.date.unique().tolist())
-        return sorted(set(out))
+            uniq = pc.unique(table.column(DATE).combine_chunks())
+            out.update(pd.to_datetime(uniq.to_pandas()).dt.normalize().dt.date)
+            del table, uniq
+        return sorted(out)
 
 
 class DataStore:
     """Everything the engine has persisted, addressed by feed."""
 
-    def __init__(self, curated_dir: Path, snapshot_dir: Path) -> None:
+    def __init__(
+        self,
+        curated_dir: Path,
+        snapshot_dir: Path,
+        equity_series: Sequence[str] = ("EQ",),
+    ) -> None:
+        self.equity_series = tuple(equity_series)
         self.curated = Path(curated_dir)
         self.snapshots = Path(snapshot_dir)
         self.curated.mkdir(parents=True, exist_ok=True)
@@ -287,9 +307,21 @@ class DataStore:
         end: Optional[dt.date] = None,
         columns: Optional[Sequence[str]] = None,
     ) -> pd.DataFrame:
+        """OHLCV for the cash equity series only.
+
+        NSE publishes debt instruments under the issuer's own ticker: NTPC has
+        an EQ line near Rs 358 and debenture lines (ND, N7, ...) between Rs 5 and
+        Rs 1,223. Bhavcopy carries them all, so an unfiltered read produces a
+        close series that jumps between the equity and a bond and back. Filtering
+        here rather than at each call site means no stage can accidentally price
+        an equity off its issuer's debt.
+        """
+        want = list(columns) if columns else self.PRICE_COLUMNS
+        predicates = (
+            [("series", "in", list(self.equity_series))] if self.equity_series else None
+        )
         out = self.prices.read(
-            start=start, end=end, symbols=symbols,
-            columns=list(columns) if columns else self.PRICE_COLUMNS,
+            start=start, end=end, symbols=symbols, columns=want, predicates=predicates,
         )
         return out if not out.empty else empty_ohlcv()
 

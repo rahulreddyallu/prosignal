@@ -269,7 +269,7 @@ def _earnings_map(store, calendar, as_of, cfg) -> Optional[Dict[str, int]]:
     out: Dict[str, int] = {}
     for sym, rows in future.groupby(SYMBOL):
         nxt = min(rows["earnings_date"])
-        out[str(sym)] = calendar.count_between(as_of, nxt)
+        out[str(sym)] = calendar.sessions_until(as_of, nxt)
     return out
 
 

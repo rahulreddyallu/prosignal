@@ -22,6 +22,7 @@ so a Diwali week or a long weekend can never quietly change a window length.
 from __future__ import annotations
 
 import datetime as dt
+import numpy as np
 from bisect import bisect_left, bisect_right
 from typing import Iterable, List, Optional, Sequence, Set
 
@@ -186,6 +187,28 @@ class TradingCalendar:
 
     def count_between(self, start: dt.date, end: dt.date, inclusive: bool = True) -> int:
         return len(self.sessions_between(start, end, inclusive=inclusive))
+
+    def sessions_until(self, as_of: dt.date, target: dt.date) -> int:
+        """Sessions from ``as_of`` to ``target``, including dates past the calendar.
+
+        ``count_between`` can only see sessions it holds, so for any target beyond
+        the last stored session it returns the distance to the end of the calendar
+        and not the real distance. A date three months out then measures as one
+        session away, which silently turns an earnings-proximity test into a
+        data-presence test.
+
+        Past the horizon we fall back to counting weekdays. That ignores exchange
+        holidays and so overstates the session count by roughly one per fortnight,
+        which widens the gap and errs toward keeping a stock rather than excluding
+        it on a number we cannot actually measure.
+        """
+        if target <= as_of:
+            return 0
+        last = self._sessions[-1] if self._sessions else as_of
+        if target <= last:
+            return max(0, self.count_between(as_of, target, inclusive=True) - 1)
+        known = max(0, self.count_between(as_of, last, inclusive=True) - 1)
+        return known + int(np.busday_count(last, target))
 
     def trailing_window(self, end: dt.date, sessions: int) -> List[dt.date]:
         """The ``sessions`` sessions ending at (and including) ``end``."""

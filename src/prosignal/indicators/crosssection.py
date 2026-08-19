@@ -1,17 +1,12 @@
 """Cross-sectional transforms: winsorising, standardisation, ranking, neutralising.
 
-These operate *across symbols at one point in time*, not across time for one
-symbol. Everything Stage 4 does to turn raw factor values into a comparable
-composite lives here.
-
-Order matters, and getting it wrong is the single most common way a factor
-model quietly becomes a one-stock bet:
+These operate across symbols at one point in time, not across time for one
+symbol. Stage 4 applies them in order:
 
     winsorise  ->  standardise  ->  neutralise  ->  weight
 
-Winsorising must come first. A z-score is built from a mean and a standard
-deviation, and both are wrecked by one extreme value. In the Indian midcap
-universe that is not hypothetical -- a name can legitimately double on a single
+Winsorising comes first because a z-score's mean and standard deviation are
+both destroyed by a single extreme value, and Indian midcaps can legitimately
 order announcement, and left raw it will pull the entire universe's mean and
 inflate the sigma so that every other stock's z-score collapses toward zero.
 The result is a "diversified" factor score that is really a bet on one ticker.
