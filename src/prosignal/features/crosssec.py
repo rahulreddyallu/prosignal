@@ -35,6 +35,9 @@ FEATURES: Dict[str, Tuple[int, str]] = {
     "dist_200dma":   (201, "close / 200-session mean - 1"),
     "trend_r2":      (121, "R-squared of an OLS fit on log close, 120 sessions"),
     "max_dd_120":    (121, "maximum drawdown over 120 sessions"),
+    "prox_52w":      (253, "close / 252-session high - 1 (George & Hwang 2004)"),
+    "max5_21":       (22,  "mean of the 5 largest daily returns in 21 sessions; lottery demand (Bali, Cakici & Whitelaw 2011)"),
+    "resid_mom":     (253, "momentum of market-residual returns, 252 to 21 back (Blitz, Huij & Martens 2011)"),
 }
 
 MIN_LOOKBACK = max(v[0] for v in FEATURES.values())
@@ -91,6 +94,26 @@ def _features_at(
     r60 = ret.tail(60)
     out["vol_60"] = r60.std(ddof=1) * np.sqrt(252)
     out["downside_vol"] = r60.where(r60 < 0).std(ddof=1) * np.sqrt(252)
+
+    out["prox_52w"] = last / hist.tail(252).max() - 1.0
+    out["max5_21"] = ret.tail(21).apply(lambda s: s.nlargest(5).mean(), axis=0)
+
+    # Residual momentum: strip the market component, then accumulate. Blitz,
+    # Huij & Martens (2011) find the residual carries the momentum premium with
+    # far less of the beta exposure that drives momentum crashes.
+    win = ret.tail(252)
+    out["resid_mom"] = pd.Series(np.nan, index=hist.columns, dtype="float64")
+    if len(win) >= 60 and len(bench_ret) >= len(win):
+        b = np.asarray(bench_ret[-len(win):], dtype="float64")
+        bc = b - np.nanmean(b)
+        bvar = float(np.nanmean(bc * bc))
+        # A market with no dispersion leaves beta undefined; the factor stays NaN
+        # rather than vanishing, so the column is always present for the model.
+        if bvar > 1e-12:
+            beta_m = win.mul(bc, axis=0).mean() / bvar
+            resid = win.sub(np.outer(b, beta_m.to_numpy()), fill_value=np.nan)
+            resid.columns = win.columns
+            out["resid_mom"] = resid.iloc[:-21].sum(axis=0)
 
     r120 = ret.tail(120)
     bench = bench_ret[-len(r120):] if len(bench_ret) >= len(r120) else bench_ret
