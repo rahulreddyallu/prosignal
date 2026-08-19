@@ -142,3 +142,60 @@ def test_model_abstains_rather_than_guessing_on_short_history():
     scores, model, reason = cm.fit_predict(close, tno, close.index[-1].date())
     assert scores is None and model is None
     assert "history" in reason.lower()
+
+
+def test_fundamentals_cannot_leak_a_future_filing():
+    """A filing published after the feature date must not reach the model.
+
+    This is the leakage that matters most for fundamentals: NSE disclosure lag
+    is 9-45 days, so keying on period end rather than filing date would hand
+    the model up to six weeks of foresight.
+    """
+    import datetime as dt
+
+    import pandas as pd
+
+    from prosignal.features import crossmodel as cm
+
+    close, tno = _prices(n=900, k=60)
+    as_of = close.index[400]
+    panel = pd.DataFrame({"date": [as_of], "symbol": ["S0"]})
+
+    def _fund(filing):
+        return pd.DataFrame([{
+            "symbol": "S0", "filing_date": filing, "period_end": filing,
+            "period_start": filing - pd.Timedelta(days=90), "consolidated": True,
+            "revenue": 1000.0, "other_income": 0.0, "total_income": 1000.0,
+            "expenses": 800.0, "finance_costs": 10.0, "depreciation": 20.0,
+            "profit_before_tax": 200.0, "tax_expense": 50.0, "net_profit": 150.0,
+            "paid_up_capital": 100.0, "face_value": 10.0, "shares_outstanding": 10.0,
+        }])
+
+    future = _fund(as_of + pd.Timedelta(days=30))
+    out = cm._attach_fundamentals(panel.copy(), future, close, None)
+    cols = [f + "_r" for f in cm.FUNDAMENTAL_FEATURES]
+    # A filing dated after as_of contributes nothing, so every rank is neutral.
+    assert all(float(out[c].iloc[0]) == 0.0 for c in cols)
+
+
+def test_missing_fundamentals_rank_neutral_not_dropped():
+    import pandas as pd
+
+    from prosignal.features import crossmodel as cm
+
+    close, tno = _prices(n=900, k=60)
+    panel = pd.DataFrame({"date": [close.index[400]] * 3,
+                          "symbol": ["S0", "S1", "S2"]})
+    out = cm._attach_fundamentals(panel.copy(), None, close, None)
+    assert len(out) == 3
+    for f in cm.FUNDAMENTAL_FEATURES:
+        assert (out[f + "_r"] == 0.0).all()
+
+
+def test_feature_columns_cover_price_and_fundamental_families():
+    from prosignal.features import crossmodel as cm
+    from prosignal.features.crosssec import FEATURES as PRICE_FEATURES
+
+    assert len(cm.FEATURE_COLUMNS) == len(PRICE_FEATURES) + len(cm.FUNDAMENTAL_FEATURES)
+    assert "market_cap" not in cm.FUNDAMENTAL_FEATURES  # scale, not a signal
+    assert all(c.endswith("_r") for c in cm.FEATURE_COLUMNS)

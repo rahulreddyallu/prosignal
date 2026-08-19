@@ -792,6 +792,9 @@ class Stage4Config(_Base):
     #: them and renormalises rather than scoring on a stale figure. 240 days
     #: allows a missed quarter plus the 45-day disclosure lag.
     max_fundamental_age_days: int = Field(240, ge=60, le=1095)
+    #: Quarters pulled per symbol when refreshing. Eight covers two years of
+    #: TTM plus the prior-year comparison that earnings growth needs.
+    fundamental_quarters: int = Field(12, ge=4, le=40)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":

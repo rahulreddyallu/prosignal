@@ -245,7 +245,9 @@ def run(
     # date, so nothing in training overlaps today. When there is too little
     # history the model abstains and the hand-weighted composite stands, which
     # is stated on the card rather than substituted quietly.
-    model_scores, model, model_unavailable = _cross_sectional_model(store, symbols, as_of)
+    model_scores, model, model_unavailable = _cross_sectional_model(
+        store, symbols, as_of, cfg
+    )
     if model_scores is not None:
         aligned = model_scores.reindex(composite_raw.index).dropna()
         if len(aligned) >= max(int(0.6 * len(composite_raw)), 20):
@@ -462,7 +464,7 @@ def _redundancy(frame: pd.DataFrame, cfg) -> RedundancyReport:
     )
 
 
-def _cross_sectional_model(store, symbols, as_of):
+def _cross_sectional_model(store, symbols, as_of, cfg):
     """Fit the ridge ranker on history strictly before ``as_of``.
 
     Failure is reported, never swallowed: a model that could not be fitted must
@@ -491,13 +493,24 @@ def _cross_sectional_model(store, symbols, as_of):
         turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover", aggfunc="last").sort_index()
         del px
 
+        # Value and quality: the only inputs not derived from price and volume.
+        # Read once and passed to both paths so the fit and the live scoring see
+        # the same filings.
+        fundamentals = store.read_fundamentals()
+        max_age = int(iv(cfg.max_fundamental_age_days))
+
         if cached is not None:
-            feats = cm.today_features(close, turnover, as_of)
+            feats = cm.today_features(close, turnover, as_of,
+                                      fundamentals=fundamentals,
+                                      max_fundamental_age_days=max_age)
             if feats is None:
                 return None, None, "no symbol had a complete feature set today"
             return cm.score_with(cached, feats), cached, None
 
-        scores, model, reason = cm.fit_predict(close, turnover, as_of)
+        scores, model, reason = cm.fit_predict(
+            close, turnover, as_of,
+            fundamentals=fundamentals, max_fundamental_age_days=max_age,
+        )
         if model is not None:
             cm.save_cache(cache, model, as_of)
         return scores, model, reason
