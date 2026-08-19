@@ -71,7 +71,7 @@ FEATURE_COLUMNS = [f + "_r" for f in FEATURES] + [f + "_r" for f in FUNDAMENTAL_
 #: fit chase noise. Chosen on the selection period alone and then left; on the
 #: holdout the same feature set scored IC +0.045 at this value against +0.015
 #: at 10.
-ALPHA = 20_000.0
+ALPHA = 20_000.0          # default only; stage 4 passes the configured value
 
 #: Label horizon in sessions, matching the holding period the engine plans for.
 #:
@@ -85,7 +85,7 @@ ALPHA = 20_000.0
 #: Longer horizons win twice: the cross-sectional signal is stronger and the
 #: turnover charge is smaller. The holding period below must match, or the
 #: engine would exit before the return it is forecasting has accrued.
-HORIZON = 63
+HORIZON = 63              # default only; stage 4 passes the configured value
 
 #: Minimum training rows. Below this the fit is noise and the model abstains
 #: rather than returning a confident-looking number from nothing.
@@ -223,41 +223,50 @@ def fit_predict(
     as_of: dt.date,
     fundamentals: Optional[pd.DataFrame] = None,
     max_fundamental_age_days: Optional[int] = None,
+    horizon: Optional[int] = None,
+    alpha: Optional[float] = None,
+    max_train_sessions: Optional[int] = None,
+    min_train_rows: Optional[int] = None,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
     Returns ``(scores, model, reason_unavailable)``. Scores are in [-1, 1] and
     comparable only within this run, since the fit is refitted each time.
     """
+    H = int(horizon if horizon is not None else HORIZON)
+    A = float(alpha if alpha is not None else ALPHA)
+    MAXS = int(max_train_sessions if max_train_sessions is not None else MAX_TRAIN_SESSIONS)
+    MINR = int(min_train_rows if min_train_rows is not None else MIN_TRAIN_ROWS)
+
     ts = pd.Timestamp(as_of)
     hist = close[close.index <= ts]
-    if len(hist) > MAX_TRAIN_SESSIONS + HORIZON:
-        hist = hist.iloc[-(MAX_TRAIN_SESSIONS + HORIZON):]
-    if len(hist) < MIN_LOOKBACK + HORIZON + 60:
+    if len(hist) > MAXS + H:
+        hist = hist.iloc[-(MAXS + H):]
+    if len(hist) < MIN_LOOKBACK + H + 60:
         return None, None, (
             f"{len(hist)} sessions of history; the cross-sectional model needs "
-            f"{MIN_LOOKBACK + HORIZON + 60}"
+            f"{MIN_LOOKBACK + H + 60}"
         )
 
     # Training stops one full label horizon before as_of. A row dated later
     # would have a label running past the decision date, which is the leak this
     # model exists to avoid.
-    train_close = hist.iloc[: len(hist) - HORIZON]
+    train_close = hist.iloc[: len(hist) - H]
     train_turnover = turnover.reindex(train_close.index)
-    panel = build_panel(train_close, train_turnover, horizon=HORIZON, step=21)
+    panel = build_panel(train_close, train_turnover, horizon=H, step=21)
     if not panel.empty:
         panel = _attach_fundamentals(panel, fundamentals, train_close, max_fundamental_age_days)
         panel = panel.dropna(subset=[c for c in FEATURE_COLUMNS if c in panel.columns]
                              + ["label_rank"])
-    if panel.empty or len(panel) < MIN_TRAIN_ROWS:
+    if panel.empty or len(panel) < MINR:
         return None, None, (
             f"{0 if panel.empty else len(panel)} usable training rows; "
-            f"{MIN_TRAIN_ROWS} required"
+            f"{MINR} required"
         )
 
     x = panel[FEATURE_COLUMNS].to_numpy("float64")
     y = panel["label_rank"].to_numpy("float64")
-    fit = ridge_fit(x, y, alpha=ALPHA)
+    fit = ridge_fit(x, y, alpha=A)
 
     # Features for the decision date itself, from the same builder, so training
     # and inference cannot drift apart in definition.

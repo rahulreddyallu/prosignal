@@ -37,6 +37,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from ..core.errors import DataError
+from ..core.errors import IntegrityError
 from ..core.logging import get_logger
 from ..core.memory import release_memory
 from .types import (
@@ -449,10 +450,19 @@ class DataStore:
                 adjusted = adjusted.drop(columns=["adj_factor"])
             return adjusted
         except Exception as exc:
-            # An adjustment failure must not take a run down, but it must be
-            # visible: unadjusted prices silently corrupt every return.
-            log.warning("corporate-action adjustment failed", extra={"error": str(exc)})
-            return frame
+            # Unadjusted prices read a 1:10 split as a -90% session and corrupt
+            # momentum, volatility, drawdown and beta for that name across every
+            # window spanning the ex-date -- measured, 72 of 200 index symbols.
+            # Returning them quietly produced a normal-looking watchlist with
+            # nothing on the card to say the data was wrong, so this now raises.
+            # The caller decides; it is not decided here by omission.
+            log.error("corporate-action adjustment failed", extra={"error": str(exc)})
+            raise IntegrityError(
+                f"corporate-action adjustment failed ({exc}). Prices are served "
+                f"unadjusted only when explicitly requested via "
+                f"DataStore(adjust_prices=False); a silent fallback would put a "
+                f"split artefact into every return."
+            ) from exc
 
     # =====================================================================
     # indices

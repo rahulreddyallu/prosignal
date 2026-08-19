@@ -36,6 +36,7 @@ from ..core.contracts import (
     RegimeState,
     StockScore,
 )
+from ..core.errors import PipelineError
 from ..core.logging import get_logger
 from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
@@ -57,7 +58,6 @@ STAGE_NAME = "stage4_core_score"
 #: A factor must be measurable for at least this share of the eligible universe
 #: to be used at all. Below it, median-filling the remainder means most names
 #: are ranked by a number that was never computed for them.
-_MIN_FACTOR_COVERAGE = 0.60
 log = get_logger(__name__)
 
 
@@ -144,12 +144,12 @@ def run(
                 metric = str(v(cfg.factors.value.metric))
                 series = feats[metric].reindex(symbols).astype("float64")
                 coverage = float(series.notna().mean())
-                if coverage >= _MIN_FACTOR_COVERAGE:
+                if coverage >= _min_coverage(cfg):
                     raw["value"] = series
                 else:
                     dropped["value"] = (
                         f"{metric} available for only {coverage:.0%} of the "
-                        f"eligible universe, below the {_MIN_FACTOR_COVERAGE:.0%} "
+                        f"eligible universe, below the {_min_coverage(cfg):.0%} "
                         f"floor. A factor scored on a minority of names ranks "
                         f"the rest by median fill, which is not a ranking."
                     )
@@ -248,6 +248,19 @@ def run(
     model_scores, model, model_unavailable = _cross_sectional_model(
         store, symbols, as_of, cfg
     )
+    if model_unavailable and _is_model_failure(model_unavailable) and not _model_optional(cfg):
+        # The hand-weighted composite this would fall back to was measured at
+        # -0.047%/month excess over an equal-weight benchmark, t = -0.11. Quietly
+        # substituting it produces a watchlist that looks exactly like a healthy
+        # one while being scored by something known not to work.
+        raise ModelUnavailable(
+            f"the cross-sectional model could not score this run "
+            f"({model_unavailable}). Falling back to the hand-weighted composite "
+            f"would issue signals from a scorer measured at t = -0.11 against an "
+            f"equal-weight benchmark. Set stage4_core_score.allow_composite_fallback "
+            f"to true to accept that explicitly."
+        )
+
     if model_scores is not None:
         aligned = model_scores.reindex(composite_raw.index).dropna()
         if len(aligned) >= max(int(0.6 * len(composite_raw)), 20):
@@ -397,7 +410,7 @@ def _quality_from_features(feats, symbols, cfg):
         if not bv(comp.enabled) or name not in feats.columns:
             continue
         series = feats[name].reindex(symbols).astype("float64")
-        if float(series.notna().mean()) < _MIN_FACTOR_COVERAGE:
+        if float(series.notna().mean()) < _min_coverage(cfg):
             continue
         z = standardise(winsorise(series, 2.0, 98.0), method="zscore")
         if not bv(comp.higher_is_better):
@@ -480,7 +493,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         # Cheap path: a recent fit only needs today's features, which is one
         # date of history instead of a thousand. The large read is what pushed
         # peak RSS past the instance limit, so it happens on refit days only.
-        need = (cm.MIN_LOOKBACK + 10) if cached else (cm.MAX_TRAIN_SESSIONS + cm.HORIZON + 5)
+        need = ((cm.MIN_LOOKBACK + 10) if cached
+                else int(iv(cfg.model_max_train_sessions)) + int(iv(cfg.model_horizon_sessions)) + 5)
         start = sessions[-need] if len(sessions) > need else sessions[0]
         px = store.read_prices(
             symbols=list(symbols), start=start, end=as_of,
@@ -510,6 +524,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         scores, model, reason = cm.fit_predict(
             close, turnover, as_of,
             fundamentals=fundamentals, max_fundamental_age_days=max_age,
+            horizon=int(iv(cfg.model_horizon_sessions)),
+            alpha=float(fv(cfg.model_ridge_alpha)),
+            max_train_sessions=int(iv(cfg.model_max_train_sessions)),
+            min_train_rows=int(iv(cfg.model_min_train_rows)),
         )
         if model is not None:
             cm.save_cache(cache, model, as_of)
@@ -517,3 +535,48 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
     except Exception as exc:  # a modelling failure must not take the run down
         log.warning("cross-sectional model failed", extra={"error": str(exc)})
         return None, None, f"{type(exc).__name__}: {exc}"
+
+
+class ModelUnavailable(PipelineError):
+    """The cross-sectional model could not score, and fallback is not allowed."""
+
+    code = "MODEL_UNAVAILABLE"
+
+    def __init__(self, message: str, **context) -> None:
+        super().__init__(STAGE_NAME, message, **context)
+
+
+def _min_coverage(cfg) -> float:
+    """Single source of truth for factor coverage.
+
+    A module constant used to shadow this at three call sites while a fourth
+    read the config. They agreed, so editing parameters.yaml changed one of the
+    four and nothing reported the divergence.
+    """
+    return float(fv(cfg.min_name_factor_coverage))
+
+
+def _model_optional(cfg) -> bool:
+    return bool(bv(getattr(cfg, "allow_composite_fallback", False)))
+
+
+#: Reasons that mean "not enough data yet" rather than "something broke".
+_BENIGN_REASONS = (
+    "sessions of history",
+    "usable training rows",
+    "no price rows",
+    "complete feature set",
+    "could not be computed",
+)
+
+
+def _is_model_failure(reason: str) -> bool:
+    """Distinguish a broken model from one that legitimately cannot run yet.
+
+    A fresh store with too little history is an expected state: the composite
+    scores it and the card says the model was unavailable. An exception inside
+    the model is not expected, and falling back there hands the run to a scorer
+    measured at t = -0.11 while looking exactly like a healthy result.
+    """
+    text = str(reason).lower()
+    return not any(b in text for b in _BENIGN_REASONS)

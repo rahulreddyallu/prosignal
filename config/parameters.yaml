@@ -909,6 +909,21 @@ stage4_core_score:
   # stability estimate.
   fundamental_quarters: 12
 
+  # Scoring from the hand-weighted composite when the fitted model cannot run.
+  # Measured, that composite returns -0.047%/month excess over an equal-weight
+  # benchmark at t = -0.11. Leaving this false means a model failure produces
+  # NO TRADE rather than a signal that looks healthy and is not.
+  allow_composite_fallback: false
+
+  # Cross-sectional model. model_horizon_sessions must equal
+  # stage7_risk.max_holding_sessions -- the loader enforces it -- or the model
+  # forecasts a window the engine never holds for.
+  model_horizon_sessions: 63
+  model_ridge_alpha: 20000.0
+  model_max_train_sessions: 3000
+  model_refit_every_sessions: 21
+  model_min_train_rows: 600
+
   # --- Redundancy check (master prompt Stage 4) ---
   redundancy:
     enabled: true

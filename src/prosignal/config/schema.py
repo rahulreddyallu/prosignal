@@ -795,6 +795,18 @@ class Stage4Config(_Base):
     #: Quarters pulled per symbol when refreshing. Eight covers two years of
     #: TTM plus the prior-year comparison that earnings growth needs.
     fundamental_quarters: int = Field(12, ge=4, le=40)
+    #: Permit scoring from the hand-weighted composite when the fitted model
+    #: cannot run. Default false: that composite measured -0.047%/month excess
+    #: at t = -0.11, so a silent fallback issues signals from a scorer known
+    #: not to work.
+    allow_composite_fallback: bool = False
+    #: Cross-sectional model. These lived as module constants, exempt from the
+    #: one-config-file rule and from the search-budget accounting.
+    model_horizon_sessions: int = Field(63, ge=5, le=252)
+    model_ridge_alpha: float = Field(20_000.0, gt=0)
+    model_max_train_sessions: int = Field(3000, ge=300, le=20000)
+    model_refit_every_sessions: int = Field(21, ge=1, le=252)
+    model_min_train_rows: int = Field(600, ge=100)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":
@@ -1317,6 +1329,24 @@ class ApiConfig(_Base):
 # =============================================================================
 
 
+
+def _validate_horizon_alignment(params) -> None:
+    """The model's label horizon and the engine's holding cap must agree.
+
+    They were independent numbers that happened to match. Editing either alone
+    would leave the model forecasting a 63-session return while the engine sold
+    after 21, with nothing to report the mismatch.
+    """
+    h = int(params.stage4_core_score.model_horizon_sessions)
+    m = int(params.stage7_risk.holding_period.max_holding_sessions.value)
+    if h != m:
+        raise ValueError(
+            f"stage4_core_score.model_horizon_sessions ({h}) must equal "
+            f"stage7_risk.holding_period.max_holding_sessions ({m}); the model "
+            f"would otherwise forecast a window the engine never holds for"
+        )
+
+
 class RootConfig(_Base):
     """The fully validated contents of config/parameters.yaml."""
 
@@ -1579,6 +1609,11 @@ class RootConfig(_Base):
                 int(self.validation.cpcv.n_test_groups.value),
             ),
         }
+
+    @model_validator(mode="after")
+    def _check_horizon_alignment(self) -> "RootConfig":
+        _validate_horizon_alignment(self)
+        return self
 
 
 def _cpcv_path_count(n_groups: int, n_test_groups: int) -> int:
