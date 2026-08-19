@@ -40,11 +40,23 @@ __all__ = ["CrossSectionalModel", "fit_predict", "load_cached", "save_cache",
 log = get_logger(__name__)
 
 #: Value and quality, ranked cross-sectionally like everything else. These are
-#: the only inputs not derived from price and volume, which is why they are
-#: here: on a holdout never used for selection, adding them moved rank IC from
-#: +0.023 (t 1.03) to +0.045 (t 2.04), top-decile excess from +1.22%/period to
-#: +1.45% (t 2.26 -> 2.97), and deflated Sharpe from 0.48 to 0.77. Alone they
-#: scored IC t = 2.94 -- the strongest per-factor result measured here.
+#: the only inputs not derived from price and volume.
+#:
+#: Re-measured on corporate-action-adjusted prices at the shipped horizon,
+#: holdout never used for selection:
+#:
+#:     price only            IC +0.100 (t 4.06)  excess +4.85%/period (t 5.74)
+#:     price + fundamentals  IC +0.121 (t 5.09)  excess +5.47%/period (t 6.50)
+#:     fundamentals alone    IC +0.097 (t 6.02)
+#:
+#: Diebold-Mariano p = 0.001: the fundamentals add forecasting information.
+#: Both sets clear a permuted-label placebo. The earlier figures for this
+#: comparison were computed on unadjusted prices and understated it -- on that
+#: data the same test returned p = 0.66.
+#:
+#: They also break the liquidity concentration the audit flagged: removing the
+#: liquidity family leaves IC +0.078 (t 2.93), where the price-only model
+#: collapsed without it.
 #:
 #: market_cap is excluded: it is a scale variable, already proxied by turnover,
 #: and it duplicates the liquidity family the model leans on too heavily.
