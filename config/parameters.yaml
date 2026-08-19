@@ -904,6 +904,11 @@ stage4_core_score:
   # 240 days = one missed quarter plus the measured 45-day disclosure lag.
   max_fundamental_age_days: 240
 
+  # Quarters pulled per symbol when the ingest refreshes fundamentals. Twelve
+  # covers three years, enough for TTM plus year-on-year growth and an earnings
+  # stability estimate.
+  fundamental_quarters: 12
+
   # --- Redundancy check (master prompt Stage 4) ---
   redundancy:
     enabled: true

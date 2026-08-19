@@ -668,6 +668,56 @@ class DataIngestor:
             notes=["used only for the Stage 1 cross-source agreement check"],
         )
 
+
+    def _refresh_nse_fundamentals(self, as_of: dt.date, opts: "IngestOptions") -> None:
+        """Pull quarterly results from NSE when the stored set has gone stale.
+
+        This ran only from `prosignal data fundamentals`, so a normal ingest
+        never refreshed it and the store sat at a filing date 525 days old while
+        Stage 4 scored on it. The value and quality factors are the only inputs
+        that are not derived from price and volume, so letting them decay
+        removes the engine's only independent evidence.
+
+        The per-symbol endpoint is slow and sits behind a bot shield, so this is
+        rate-limited by the shared HTTP client, skipped when the store is fresh,
+        and never fatal: a failure leaves the existing rows in place and the
+        staleness guard in Stage 4 drops the factors as it already does.
+        """
+        if opts.offline:
+            return
+        stored = self.store.read_fundamentals()
+        max_age = int(self.config.params.stage4_core_score.max_fundamental_age_days)
+        if not stored.empty:
+            newest = pd.to_datetime(stored["filing_date"], errors="coerce").max()
+            if pd.notna(newest) and (pd.Timestamp(as_of) - newest).days <= max_age // 2:
+                return  # still well inside tolerance; nothing to do
+
+        try:
+            from .providers.nse_fundamentals import NseFundamentalsProvider
+            from .providers.http import NseJsonSession
+
+            p = self.config.params.providers
+            session = NseJsonSession(
+                client=self.http, base=p.nse_json_api.base,
+                warmup_path=p.nse_json_api.warmup_path,
+            )
+            provider = NseFundamentalsProvider(
+                session=session, client=self.http,
+                max_quarters=int(self.config.params.stage4_core_score.fundamental_quarters),
+            )
+            index = str(self.config.params.universe.index_name.value)
+            dates = self.store.universe_snapshot_dates(index)
+            if not dates:
+                return
+            symbols = self.store.read_universe_snapshot(index, dates[-1])[SYMBOL].tolist()
+            frame = provider.fetch_universe(symbols)
+            if frame is not None and not frame.empty:
+                written = self.store.write_fundamentals(frame)
+                log.info("fundamentals refreshed", extra={"rows": written,
+                                                          "symbols": int(frame[SYMBOL].nunique())})
+        except Exception as exc:
+            log.warning("fundamentals refresh skipped", extra={"error": str(exc)})
+
     # =====================================================================
     # corporate actions & earnings
     # =====================================================================
@@ -806,6 +856,7 @@ class DataIngestor:
         fundamentals = self.csv.load_fundamentals()
         if not fundamentals.empty:
             self.store.write_fundamentals(fundamentals)
+        self._refresh_nse_fundamentals(as_of, opts)
         stored_fund = self.store.read_fundamentals()
         self._record_feed(
             "fundamentals",
