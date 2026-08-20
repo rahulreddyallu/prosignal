@@ -423,3 +423,47 @@ def _sharpe_by_column(block: np.ndarray) -> np.ndarray:
     with np.errstate(divide="ignore", invalid="ignore"):
         out = np.where(sd > 0, mean / sd, 0.0)
     return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def decile_profile(
+    scores: "np.ndarray",
+    forward: "np.ndarray",
+    buckets: int = 10,
+) -> Dict[str, object]:
+    """Mean forward return by score decile, and whether it climbs.
+
+    The information coefficient is a rank correlation, and a rank correlation
+    can be healthy while the top of the ranking is not the best part of it. That
+    matters here specifically: the engine trades the top decile, so a chart
+    whose peak sits at decile 6 says the thing being traded is not the thing the
+    IC is measuring.
+
+    Measured on the shipped configuration over the 36-period holdout, deciles
+    ran +1.97% at the bottom to +3.98% at the top, a spread of +2.01%, but with
+    only 6 of 9 steps increasing and decile 6 (+4.06%) above decile 9. The
+    spread is real and the monotonicity is not, and both belong in the record.
+    """
+    import numpy as _np
+    import pandas as _pd
+
+    s = _pd.Series(_np.asarray(scores, dtype="float64"))
+    f = _pd.Series(_np.asarray(forward, dtype="float64"))
+    keep = s.notna() & f.notna()
+    s, f = s[keep], f[keep]
+    if len(s) < buckets * 2:
+        return {"buckets": [], "spread": None, "monotone_steps": None,
+                "reason": f"{len(s)} observations; at least {buckets * 2} needed"}
+
+    bucket = _pd.qcut(s.rank(method="first"), buckets, labels=False)
+    means = f.groupby(bucket).mean()
+    values = [float(v) for v in means.to_numpy()]
+    steps = sum(1 for i in range(len(values) - 1) if values[i + 1] > values[i])
+    peak = int(_np.argmax(values))
+    return {
+        "buckets": values,
+        "spread": float(values[-1] - values[0]),
+        "monotone_steps": steps,
+        "max_steps": len(values) - 1,
+        "peak_bucket": peak,
+        "top_is_peak": peak == len(values) - 1,
+    }
