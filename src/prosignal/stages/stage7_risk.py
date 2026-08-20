@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 
@@ -133,6 +134,16 @@ def build_plan(
     )
     notes.extend(size_notes)
 
+    # Sizing rests on 21-session ADTV, which is the slowest-moving estimate
+    # exactly when it matters most: liquidity leaves a name in days, not
+    # months, and the trailing window keeps quoting the depth that used to be
+    # there. Comparing a short window against it surfaces the divergence to the
+    # operator. This never resizes or exits anything on its own -- it is a
+    # statement about the plan's assumption, not an instruction.
+    liquidity_ratio, liquidity_warning = _recent_liquidity(frame, adtv_inr, cfg)
+    if liquidity_warning:
+        notes.append(liquidity_warning)
+
     cb = costs.round_trip(reference_price, qty, adtv_inr=adtv_inr) if qty > 0 else None
     cost_bps = cb.total_bps_of_buy if cb else None
     impact_bps = costs.impact_bps(reference_price * qty, adtv_inr) if qty > 0 else None
@@ -177,6 +188,8 @@ def build_plan(
         exit_conditions=exits,
         estimated_round_trip_cost_bps=round(cost_bps, 1) if cost_bps else None,
         estimated_impact_bps=round(impact_bps, 1) if impact_bps else None,
+        liquidity_ratio_recent=liquidity_ratio,
+        liquidity_warning=liquidity_warning,
         notes=notes,
     )
 
@@ -215,6 +228,36 @@ _CATEGORY_FRACTION = {
     RiskCategory.REDUCED: 0.6,
     RiskCategory.MINIMUM: 0.3,
 }
+
+
+#: Sessions in the short liquidity window, and the fraction of the trailing
+#: average below which the divergence is worth the operator's attention.
+_RECENT_LIQUIDITY_SESSIONS = 5
+_LIQUIDITY_ALERT_RATIO = 0.5
+
+
+def _recent_liquidity(frame, adtv_inr, cfg) -> Tuple[Optional[float], Optional[str]]:
+    """Short-window turnover against the trailing average used for sizing."""
+    if adtv_inr is None or not np.isfinite(float(adtv_inr)) or float(adtv_inr) <= 0:
+        return None, None
+    if frame is None or "turnover" not in frame.columns:
+        return None, None
+    recent = pd.to_numeric(frame["turnover"], errors="coerce").tail(
+        _RECENT_LIQUIDITY_SESSIONS
+    ).dropna()
+    if len(recent) < _RECENT_LIQUIDITY_SESSIONS:
+        return None, None
+    ratio = float(recent.median()) / float(adtv_inr)
+    if not np.isfinite(ratio):
+        return None, None
+    if ratio >= _LIQUIDITY_ALERT_RATIO:
+        return round(ratio, 3), None
+    warning = (
+        f"LIQUIDITY: last {_RECENT_LIQUIDITY_SESSIONS} sessions traded "
+        f"{ratio:.0%} of the 21-session average this position was sized on. "
+        f"The size that fit the trailing window may not fit the market now."
+    )
+    return round(ratio, 3), warning
 
 
 def _position_size(price, risk_per_share, adtv, category, params, costs) -> Tuple[int, List[str], Dict[str, float]]:

@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import io
 import zipfile
-from typing import Dict, Iterable, List, Optional
+from typing import Tuple, Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -343,6 +344,104 @@ class NseArchivesProvider:
     # =========================================================================
     # Universe / reference data
     # =========================================================================
+    #: "Bonus 4:1" -- four new shares for every one held.
+    _BONUS = re.compile(r"bonus\s*(?:issue)?\s*(\d+)\s*:\s*(\d+)", re.I)
+    #: "Face Value Split ... From Rs 10/- Per Share To Re 1/- Per Share"
+    _SPLIT = re.compile(
+        r"from\s*(?:rs\.?|re\.?)?\s*([\d.]+)\s*/?-?\s*per\s*share\s*to\s*"
+        r"(?:rs\.?|re\.?)?\s*([\d.]+)",
+        re.I,
+    )
+
+    @classmethod
+    def parse_action_ratio(cls, subject: str) -> Optional[Tuple[str, float]]:
+        """Price adjustment factor implied by one corporate-action subject line.
+
+        The factor multiplies prices BEFORE the ex-date, so a 1:10 split gives
+        0.1. Returns None for dividends and anything unrecognised: guessing a
+        ratio is worse than not adjusting, because a wrong ratio corrupts the
+        whole series before the ex-date rather than leaving one visible jump.
+        """
+        if not subject:
+            return None
+        text = str(subject).strip()
+
+        bonus = cls._BONUS.search(text)
+        if bonus:
+            new_shares, held = float(bonus.group(1)), float(bonus.group(2))
+            if held > 0 and new_shares >= 0:
+                return "bonus", held / (new_shares + held)
+
+        if "split" in text.lower() or "sub-division" in text.lower():
+            split = cls._SPLIT.search(text)
+            if split:
+                before, after = float(split.group(1)), float(split.group(2))
+                if before > 0 and after > 0:
+                    return "split", after / before
+        return None
+
+    def fetch_corporate_actions(self, start: dt.date, end: dt.date) -> pd.DataFrame:
+        """Splits and bonuses from NSE, the issuer of record.
+
+        Several actions can share one ex-date -- BAJFINANCE split 1:2 and issued
+        a 4:1 bonus on 2025-06-16 -- and the price gaps by their product, not by
+        either one. Feeds that store a single ratio per date silently record
+        half the adjustment, which is what left a residual -80% print in the
+        adjusted series. Same-date actions are combined here.
+        """
+        url = (
+            "https://www.nseindia.com/api/corporates-corporateActions?index=equities"
+            f"&from_date={start.strftime('%d-%m-%Y')}&to_date={end.strftime('%d-%m-%Y')}"
+        )
+        response = self.client.get(
+            url, ttl_seconds=self.ttl_current, allow_404=True,
+            context="nse_archives.corporate_actions",
+        )
+        body = getattr(response, "content", None)
+        if not body:
+            return pd.DataFrame()
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            return pd.DataFrame()
+        rows = payload if isinstance(payload, list) else payload.get("data") or []
+        if not rows:
+            return pd.DataFrame()
+
+        frame = pd.DataFrame(rows)
+        if not {"symbol", "exDate", "subject"}.issubset(frame.columns):
+            return pd.DataFrame()
+
+        parsed = []
+        for _, row in frame.iterrows():
+            hit = self.parse_action_ratio(row.get("subject"))
+            if hit is None:
+                continue
+            action_type, ratio = hit
+            ex_date = pd.to_datetime(row.get("exDate"), format="%d-%b-%Y", errors="coerce")
+            if pd.isna(ex_date):
+                continue
+            parsed.append({
+                SYMBOL: normalise_symbol(str(row["symbol"])),
+                "ex_date": ex_date,
+                "action_type": action_type,
+                "ratio": float(ratio),
+                "raw_details": str(row.get("subject", "")).strip(),
+                "source": "nse_corporate_actions",
+            })
+        if not parsed:
+            return pd.DataFrame()
+
+        out = pd.DataFrame(parsed)
+        combined = (
+            out.groupby([SYMBOL, "ex_date"], as_index=False)
+            .agg(ratio=("ratio", "prod"),
+                 action_type=("action_type", lambda s: "+".join(sorted(set(s)))),
+                 raw_details=("raw_details", lambda s: " | ".join(s)),
+                 source=("source", "first"))
+        )
+        return combined
+
     def fetch_board_meetings(self, start: dt.date, end: dt.date) -> pd.DataFrame:
         """Board-meeting dates NSE has been notified of, with their purpose.
 

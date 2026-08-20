@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from ._cfg import fv, iv
@@ -105,6 +106,7 @@ def run(
     max_corr = fv(cfg.portfolio.max_pairwise_correlation)
     corr_lb = iv(cfg.portfolio.correlation_lookback_sessions)
     accepted_symbols: List[str] = []
+    accepted: List[object] = []
 
     # Stage 5 can demote a name, and the score it produces is what every gate
     # below compares against. Ordering by the pre-defense rank left a penalised
@@ -177,6 +179,24 @@ def run(
             watch.append(rec)
             continue
 
+        # Pairwise correlation and the sector cap both look at names two at a
+        # time. Five names can clear every pair and every sector and still be
+        # the same bet: all high-momentum, all high-beta, differently labelled.
+        # This looks at the basket as a whole.
+        exposure = _aggregate_exposure(accepted + [score], _EXPOSURE_FACTORS)
+        breached = [n for n, v in exposure.items() if v >= _EXPOSURE_LIMIT]
+        if breached:
+            rec.decision = Decision.WATCHLIST
+            breached_names = ", ".join(sorted(breached))
+            rec.why_this_signal_exists.append(
+                f"Downgraded to WATCH: adding this name puts the basket's mean "
+                f"{breached_names} loading at or above the {_EXPOSURE_LIMIT:+.2f} limit. "
+                f"Every pair passes and every sector passes; taken together "
+                f"they are one macro position."
+            )
+            watch.append(rec)
+            continue
+
         if len(buys) >= max_signals:
             rec.decision = Decision.WATCHLIST
             watch.append(rec)
@@ -185,6 +205,7 @@ def run(
         gate_counts["passed_portfolio_limits"] += 1
         sector_used[sector] = sector_used.get(sector, 0) + 1
         accepted_symbols.append(sym)
+        accepted.append(score)
         buys.append(rec)
 
     if buys:
@@ -348,6 +369,41 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
             if plan and plan.estimated_round_trip_cost_bps else None
         ),
     )
+
+
+#: Factors whose combined loading defines a macro bet. Momentum and beta are
+#: the two that concentrate without showing up pairwise: two names can correlate
+#: at 0.4 and still both sit in the top decile of each.
+_EXPOSURE_FACTORS = ("mom_6_1", "resid_mom", "prox_52w", "beta_120")
+
+#: Mean standardised loading at which the basket stops being diversified. Ranks
+#: run -1 to +1, so 0.75 means the average name sits in roughly the top eighth
+#: of the universe on that factor.
+_EXPOSURE_LIMIT = 0.75
+
+
+def _aggregate_exposure(scores, factors) -> Dict[str, float]:
+    """Mean loading across a candidate basket, per factor.
+
+    Reads the standardised value the model itself used, so the check cannot
+    drift from the scoring. A factor absent from the attribution is skipped
+    rather than counted as zero, which would dilute a real concentration.
+    """
+    out: Dict[str, float] = {}
+    if not scores:
+        return out
+    for name in factors:
+        values = []
+        for score in scores:
+            factor = (getattr(score, "factors", None) or {}).get(name)
+            if factor is None:
+                continue
+            loading = getattr(factor, "standardised", None)
+            if loading is not None and pd.notna(loading):
+                values.append(float(loading))
+        if values:
+            out[name] = float(np.mean(values))
+    return out
 
 
 def _max_correlation(sym, accepted, closes, lookback) -> Optional[float]:

@@ -19,6 +19,7 @@ import pandas as pd
 from ._cfg import bv, fv, iv, v
 from ..core.calendar import TradingCalendar
 from ..core.contracts import DataQualityReport, EligibilityReport
+from ..indicators.circuit import band_state, is_untradeable
 from ..core.enums import RejectionReason
 from ..core.logging import get_logger
 from ..data.store import DataStore
@@ -141,6 +142,33 @@ def run(
         if zero_vol >= iv(cfg.liquidity.reject_on_zero_volume_sessions):
             rejected[sym] = RejectionReason.ILLIQUID
             details[sym] = f"{zero_vol} zero-volume sessions in the last 21"
+            continue
+
+        # A name locked at its price band on the decision date cannot be
+        # relied on to fill at the next session's open, which is the execution
+        # assumption every downstream price in this run rests on. The band is
+        # not in the feed, so this is inferred from the bar: one price all
+        # session means one price was available. Rejecting rather than flagging
+        # because the alternative is issuing a plan whose entry may be
+        # unreachable.
+        last_bar = frame.iloc[-1]
+        # read_prices does not carry prev_close, so the band label is taken from
+        # the prior bar in this frame. Its absence only costs the label; the
+        # frozen fact comes from high == low on the bar itself.
+        prior_close = float(frame["close"].iloc[-2]) if len(frame) > 1 else float("nan")
+        state = band_state(
+            float(last_bar.get("high", float("nan"))),
+            float(last_bar.get("low", float("nan"))),
+            float(last_bar.get("close", float("nan"))),
+            prior_close,
+            float(last_bar.get("volume", float("nan"))),
+        )
+        if is_untradeable(state):
+            rejected[sym] = RejectionReason.ILLIQUID
+            details[sym] = (
+                f"session closed {state.value}: the bar offered a single price, "
+                f"so an entry at the next open cannot be assumed"
+            )
             continue
 
         if bv(cfg.liquidity.use_participation_gate):

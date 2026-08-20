@@ -92,6 +92,16 @@ def point_in_time_snapshot(
         return pd.DataFrame(columns=fundamentals.columns)
     frame["filing_date"] = frame["filing_date"].dt.date
     frame["period_end"] = frame["period_end"].dt.date
+    # A restated quarter arrives as a second filing for the same period_end.
+    # Both are legitimate history and both must stay in the store, but only one
+    # of them describes that quarter as at this date: the newest filing already
+    # public. Keeping both let a trailing-twelve-month sum count the quarter
+    # twice -- a restatement from 100 to 40 produced a TTM of 240 rather than
+    # 190 -- which inflates whichever names were revised.
+    frame = frame.sort_values(["filing_date"]).drop_duplicates(
+        subset=[SYMBOL, "period_end"], keep="last"
+    )
+
     return frame.sort_values([SYMBOL, "period_end"], ascending=[True, False])
 
 
