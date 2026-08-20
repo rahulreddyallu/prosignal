@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -193,20 +194,60 @@ def test_interest_coverage_formula():
     assert feats.iloc[0]["interest_coverage"] == pytest.approx((52.0 + 40.0) / 40.0)
 
 
+def _eight_quarters(profits):
+    """Eight filings, newest first, with the given quarterly profits."""
+    ends = [
+        dt.date(2025, 12, 31), dt.date(2025, 9, 30), dt.date(2025, 6, 30),
+        dt.date(2025, 3, 31), dt.date(2024, 12, 31), dt.date(2024, 9, 30),
+        dt.date(2024, 6, 30), dt.date(2024, 3, 31),
+    ]
+    return _filings([
+        (end + dt.timedelta(days=32), end, 100.0, p) for end, p in zip(ends, profits)
+    ])
+
+
 def test_earnings_stability_is_negated_so_higher_is_better():
     """Every quality component must point the same way, or the weighting step
     needs a per-component sign and will eventually get one wrong."""
-    steady = compute_features(_four_quarters(profit=10.0), {"X": 50.0}, dt.date(2026, 3, 1))
+    steady = compute_features(
+        _eight_quarters([10.0] * 8), {"X": 50.0}, dt.date(2026, 3, 1))
     erratic = compute_features(
-        _filings([
-            (dt.date(2026, 2, 1), dt.date(2025, 12, 31), 100.0, 30.0),
-            (dt.date(2025, 11, 1), dt.date(2025, 9, 30), 100.0, 2.0),
-            (dt.date(2025, 8, 1), dt.date(2025, 6, 30), 100.0, 25.0),
-            (dt.date(2025, 5, 1), dt.date(2025, 3, 31), 100.0, 1.0),
-        ]),
-        {"X": 50.0}, dt.date(2026, 3, 1),
-    )
+        _eight_quarters([30.0, 2.0, 25.0, 1.0, 40.0, 3.0, 5.0, 35.0]),
+        {"X": 50.0}, dt.date(2026, 3, 1))
     assert steady.iloc[0]["earnings_stability"] > erratic.iloc[0]["earnings_stability"]
+
+
+def test_a_seasonal_but_stable_company_is_not_called_unstable():
+    """The reason this is measured on trailing-twelve-month windows.
+
+    Indian earnings are genuinely seasonal -- festive-quarter retail, agri and
+    monsoon cycles. A company earning 40/10/10/20 every single year is entirely
+    predictable, but its raw quarters have a large spread. Measured on raw
+    quarters it scores as unstable, which penalises seasonality rather than
+    risk. On TTM windows every season appears once per window, so the pattern
+    cancels and the company reads as what it is.
+    """
+    seasonal = compute_features(
+        _eight_quarters([40.0, 10.0, 10.0, 20.0, 40.0, 10.0, 10.0, 20.0]),
+        {"X": 50.0}, dt.date(2026, 3, 1))
+    volatile = compute_features(
+        _eight_quarters([40.0, 10.0, 10.0, 20.0, 5.0, 60.0, 2.0, 30.0]),
+        {"X": 50.0}, dt.date(2026, 3, 1))
+
+    # Perfectly repeating seasonality means an identical TTM every window.
+    assert seasonal.iloc[0]["earnings_stability"] == pytest.approx(0.0, abs=1e-9)
+    assert volatile.iloc[0]["earnings_stability"] < seasonal.iloc[0]["earnings_stability"]
+
+    # And the raw-quarter measure, which is what this replaced, gets it wrong:
+    raw = np.array([40.0, 10.0, 10.0, 20.0])
+    assert float(np.std(raw, ddof=1)) / abs(float(np.mean(raw))) > 0.5
+
+
+def test_stability_needs_enough_quarters_to_see_variation():
+    """One TTM window has no variation to measure, so the factor is absent
+    rather than reported as perfectly stable."""
+    feats = compute_features(_four_quarters(profit=10.0), {"X": 50.0}, dt.date(2026, 3, 1))
+    assert pd.isna(feats.iloc[0]["earnings_stability"])
 
 
 def test_no_price_means_no_market_cap_and_no_yield():

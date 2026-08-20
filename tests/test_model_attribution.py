@@ -57,7 +57,7 @@ def test_every_fitted_factor_is_attributable(model_and_features):
     contrib = contributions(m, feats)
     expected = {c[:-2] if c.endswith("_r") else c for c in FEATURE_COLUMNS}
     assert set(contrib.columns) == expected
-    assert len(contrib.columns) == 24
+    assert len(contrib.columns) == len(FEATURE_COLUMNS)
 
 
 def test_standardised_features_are_the_z_scores_the_coefficients_multiply(model_and_features):
