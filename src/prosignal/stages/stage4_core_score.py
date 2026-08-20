@@ -513,10 +513,27 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         fundamentals = store.read_fundamentals()
         max_age = int(iv(cfg.max_fundamental_age_days))
 
+        # Delivered quantity as a share of traded volume. Read over the same
+        # window as the prices so the two panels align date for date; a name
+        # with no print ranks neutral rather than dropping out.
+        delivery = None
+        try:
+            dl = store.read_delivery(symbols=list(symbols), start=start, end=as_of)
+            if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
+                dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
+                delivery = dl.pivot_table(
+                    index=DATE, columns=SYMBOL, values="deliv_pct", aggfunc="last"
+                ).sort_index()
+                del dl
+        except Exception as exc:
+            log.warning("delivery unavailable for the model",
+                        extra={"error": str(exc)})
+
         if cached is not None:
             feats = cm.today_features(close, turnover, as_of,
                                       fundamentals=fundamentals,
-                                      max_fundamental_age_days=max_age)
+                                      max_fundamental_age_days=max_age,
+                                      delivery=delivery)
             if feats is None:
                 return None, None, "no symbol had a complete feature set today"
             return cm.score_with(cached, feats), cached, None
@@ -528,6 +545,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
             alpha=float(fv(cfg.model_ridge_alpha)),
             max_train_sessions=int(iv(cfg.model_max_train_sessions)),
             min_train_rows=int(iv(cfg.model_min_train_rows)),
+            delivery=delivery,
         )
         if model is not None:
             cm.save_cache(cache, model, as_of)

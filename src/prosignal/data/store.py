@@ -592,6 +592,20 @@ class DataStore:
     def read_equity_master(self) -> pd.DataFrame:
         return self.read_table("equity_master")
 
+    def write_sector_map(self, df: pd.DataFrame) -> int:
+        return self.replace_table("sector_map", df)
+
+    def read_sector_map(self) -> pd.DataFrame:
+        """symbol -> sector, pooled from the NSE index constituent files.
+
+        Current vintage: NSE publishes only today's membership. That is exactly
+        right for a live decision and mildly forward-looking in a backtest, but
+        it feeds the Stage 8 diversification cap alone and never the score, so
+        it cannot manufacture predictability the way a survivorship-biased
+        universe does.
+        """
+        return self.read_table("sector_map")
+
     def write_corporate_actions(self, df: pd.DataFrame) -> int:
         return self.write_table("corporate_actions", df, [SYMBOL, "ex_date", "action_type"])
 

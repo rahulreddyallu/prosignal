@@ -31,7 +31,7 @@ from .core.contracts import (
     RiskPlan,
     RunContext,
 )
-from .core.errors import MarketWideHalt
+from .core.errors import IntegrityError, MarketWideHalt
 from .core.logging import get_logger
 from .core.memory import release_memory
 from .costs import CostModel
@@ -297,6 +297,39 @@ def _clock():
 
 
 def _universe(store, config, as_of) -> UniverseSnapshot:
+    u = config.params.universe
+    if str(v(u.source)).lower() == "liquidity_pit":
+        return _universe_liquidity_pit(store, config, as_of)
+    return _universe_index_snapshot(store, config, as_of)
+
+
+def _universe_liquidity_pit(store, config, as_of) -> UniverseSnapshot:
+    """Trailing-turnover screen. No membership list, no survivorship risk."""
+    from .data.universe import UniverseResolver
+
+    u = config.params.universe
+    sectors = store.read_sector_map()
+    sector_map = (
+        dict(zip(sectors["symbol"], sectors["sector"]))
+        if sectors is not None and not sectors.empty and "sector" in sectors.columns
+        else {}
+    )
+    try:
+        return UniverseResolver(store, config).resolve_liquidity_pit(
+            as_of=as_of,
+            min_adtv_inr=float(v(u.pit_min_adtv_inr)),
+            lookback_sessions=int(v(u.pit_adtv_lookback_sessions)),
+            max_names=int(v(u.pit_max_names)),
+            min_history_sessions=int(v(u.min_history_sessions)),
+            min_price_inr=float(v(u.min_price_inr)),
+            manual_exclusions=list(v(u.manual_exclusions) or []),
+            sector_map=sector_map,
+        )
+    except IntegrityError as exc:
+        raise PipelineBlocked([str(exc)], stage="stage0_data") from exc
+
+
+def _universe_index_snapshot(store, config, as_of) -> UniverseSnapshot:
     index = str(config.params.universe.index_name.value)
     dates = store.universe_snapshot_dates(index)
     if not dates:

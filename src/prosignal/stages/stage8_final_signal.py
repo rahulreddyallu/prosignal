@@ -99,6 +99,7 @@ def run(
     watch: List[Recommendation] = []
 
     sector_used: Dict[str, int] = {}
+    sector_unknown: List[str] = []
     max_per_sector = iv(cfg.portfolio.max_signals_per_sector)
     max_signals = iv(cfg.portfolio.max_signals_per_run)
     max_corr = fv(cfg.portfolio.max_pairwise_correlation)
@@ -134,7 +135,16 @@ def run(
             continue
 
         # portfolio limits apply only to actual BUYs
-        sector = score.sector or "Unknown"
+        # An unknown sector is not evidence that two names share one. Pooling
+        # every unclassified name into a single "Unknown" bucket would cap the
+        # whole run at max_per_sector for a reason that is a gap in reference
+        # data, not concentration. Each unclassified name gets its own key; the
+        # pairwise correlation cap below still applies to all of them, and it is
+        # computed from prices, so it never depends on a membership file.
+        sector = score.sector or ""
+        if not sector or sector == "Unknown":
+            sector = f"Unclassified:{sym}"
+            sector_unknown.append(sym)
         if sector_used.get(sector, 0) >= max_per_sector:
             rec.decision = Decision.WATCHLIST
             rec.why_this_signal_exists.append(

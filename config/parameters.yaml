@@ -270,6 +270,52 @@ universe:
   # survivorship-biased by construction.
   #   "halt"  -> refuse to run (correct for backtests; research program section 7)
   #   "flag"  -> run but stamp SURVIVORSHIP_RISK on the output (live use only)
+  # How the tradable set is chosen.
+  #
+  #   index_snapshot  membership from a dated NSE constituent snapshot.
+  #   liquidity_pit   top names by trailing turnover as of the decision date.
+  #
+  # liquidity_pit is the default because index_snapshot cannot be made
+  # point-in-time from the data NSE publishes. NSE serves only the CURRENT
+  # constituent list, so any date before the first snapshot is scored against
+  # today's members. Measured, that is worth +5.00% per 63 sessions on its own
+  # (t=10.80, liquidity-matched, positive in all ten liquidity deciles) -- more
+  # than the entire edge the engine reports. It also manufactures factor
+  # predictability: amihud reads +0.1229 (t 9.50) on the snapshot universe and
+  # -0.0118 (t -0.83) point-in-time, because inside today's index an illiquid
+  # name in 2019 is one that was small then and grew into the index by 2026.
+  #
+  # A trailing-turnover screen needs no membership history at all: a name that
+  # collapsed simply falls out of the ranking, having been present before it
+  # did. It is survivorship-free by construction.
+  source:
+    value: "liquidity_pit"
+    status: STRUCTURAL
+    note: >-
+      Set to index_snapshot only to reproduce a pre-2026-08 backtest. Results
+      from that setting are not comparable and must not be quoted as an edge.
+
+  # Turnover floor for the point-in-time screen. Matches the Stage 3 ADTV gate,
+  # so the universe and the eligibility test agree on what liquid means.
+  pit_min_adtv_inr:
+    value: 50000000.0
+    status: OPERATIONAL
+    note: "Rs 5 Cr, the same floor Stage 3 applies."
+
+  pit_adtv_lookback_sessions:
+    value: 60
+    status: OPERATIONAL
+    note: "Median rather than mean turnover over this window; robust to one block deal."
+
+  # Upper bound on the cross-section. Binding only in later years, where the
+  # Rs 5 Cr floor admits ~930 names.
+  pit_max_names:
+    value: 750
+    status: UNVALIDATED
+    note: >-
+      Measured IC is flat between 500 and the full ADTV set; the cap exists to
+      bound the panel, not because 750 is optimal.
+
   pre_snapshot_policy:
     value: "flag"
     status: OPERATIONAL
