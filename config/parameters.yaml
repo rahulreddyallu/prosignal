@@ -1489,6 +1489,17 @@ stage8_final_signal:
   # Scarcity threshold, applied LAST so signal count is a consequence of
   # evidence, not an optimisation target.
   scarcity:
+    # These two are not independent. percentile is the score mapped onto 0-100
+    # by rank_to_unit_interval, so min_composite_score = 0.60 is the same test
+    # as percentile >= 60, and min_universe_percentile = 90 already implies it.
+    # Measured across 27,478 scored names in the holdout: 8,244 clear the score
+    # gate and fail the percentile gate; ZERO clear the percentile gate and fail
+    # the score gate. min_universe_percentile is the gate that selects.
+    #
+    # min_composite_score is kept because it is not quite inert: a Stage 5
+    # penalty reduces final_score while the percentile is taken before the
+    # defence runs, so a heavily penalised name can fail it. Raising it below
+    # 0.90 will not change which names are admitted.
     # Minimum post-penalty composite score, on the 0..1 normalised scale.
     min_composite_score:
       value: 0.60

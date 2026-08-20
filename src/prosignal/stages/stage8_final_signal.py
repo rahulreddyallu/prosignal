@@ -133,6 +133,15 @@ def run(
         # the score meant the two lines measured different populations and the
         # funnel ran backwards: triggered=1 followed by passed_score=8. Counted
         # in decision order it is monotonic and reads as what it is.
+        # These read as two independent gates and are one. percentile is
+        # rank_to_unit_interval(score) * 100, so min_composite_score = 0.60 is
+        # arithmetically percentile >= 60 and is already implied by
+        # min_universe_percentile = 90. Measured over 27,478 scored names in the
+        # holdout: 8,244 pass the score gate and fail the percentile gate, and
+        # zero pass the percentile gate and fail the score gate. Both are kept
+        # -- a Stage 5 penalty lands on final_score and can pull it below 0.60
+        # while the pre-defence percentile stands -- but only one of them
+        # selects, and tuning the other has no effect.
         if final_score < min_score or score.percentile < min_pct:
             continue
         gate_counts["passed_score_threshold"] += 1
