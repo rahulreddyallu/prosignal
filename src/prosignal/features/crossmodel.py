@@ -31,6 +31,7 @@ import json
 from ..core.logging import get_logger
 from ..core.memory import release_memory
 from .crosssec import FEATURES, MIN_LOOKBACK, build_panel
+from .fundamental_factors import available_as_of, build_fundamental_panel, winsorise
 from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
 from .linear import predict, ridge_fit
 
@@ -39,28 +40,35 @@ __all__ = ["CrossSectionalModel", "fit_predict", "load_cached", "save_cache",
 
 log = get_logger(__name__)
 
-#: Value and quality, ranked cross-sectionally like everything else. These are
-#: the only inputs not derived from price and volume.
+#: Fundamental factors, ranked cross-sectionally like everything else. These
+#: are the only inputs not derived from price and volume.
 #:
-#: Re-measured on corporate-action-adjusted prices at the shipped horizon,
-#: holdout never used for selection:
+#: The value family only. Measured on the point-in-time universe over the 18
+#: periods where statement data exists, adding each family to the price
+#: baseline in turn:
 #:
-#:     price only            IC +0.100 (t 4.06)  excess +4.85%/period (t 5.74)
-#:     price + fundamentals  IC +0.121 (t 5.09)  excess +5.47%/period (t 6.50)
-#:     fundamentals alone    IC +0.097 (t 6.02)
+#:     baseline (price)      IC +0.0568 (t 1.81)  excess +0.088% (t 0.09)
+#:     + value               IC +0.0623 (t 1.80)  excess +0.913% (t 0.91)
+#:     + quality             IC +0.0466 (t 1.59)  excess -0.287% (t -0.33)
+#:     + growth              IC +0.0505 (t 1.86)  excess -0.239% (t -0.28)
+#:     + leverage            IC +0.0541 (t 1.80)  excess +0.089% (t 0.09)
+#:     fundamentals alone    IC +0.0072 (t 0.55)
 #:
-#: Diebold-Mariano p = 0.001: the fundamentals add forecasting information.
-#: Both sets clear a permuted-label placebo. The earlier figures for this
-#: comparison were computed on unadjusted prices and understated it -- on that
-#: data the same test returned p = 0.66.
+#: Value is the only family that improves both measures; quality and growth
+#: make the model worse. None of it is significant -- 18 periods is what the
+#: statement history supports, and t = 1.80 on IC and 0.91 on excess do not
+#: establish an edge. The family is carried because it is strictly better than
+#: what it replaces, not because it is proven: the previous fundamental block
+#: was five NSE-derived columns whose data stopped in March 2025, leaving them
+#: with a standard deviation of 0.024 against 0.57 for the price factors and
+#: one of them exactly constant. Dead columns are worse than weak ones.
 #:
-#: They also break the liquidity concentration the audit flagged: removing the
-#: liquidity family leaves IC +0.078 (t 2.93), where the price-only model
-#: collapsed without it.
-#:
-#: market_cap is excluded: it is a scale variable, already proxied by turnover,
-#: and it duplicates the liquidity family the model leans on too heavily.
-FUNDAMENTAL_FEATURES = [f for f in FUND_NAMES if f != "market_cap"]
+#: Earlier releases quoted IC +0.121 (t 5.09) and Diebold-Mariano p = 0.001 for
+#: this block. Those were measured on a universe built from today's NIFTY 200
+#: membership projected backwards, which is worth +5.00% per 63 sessions on its
+#: own. They do not survive a point-in-time universe and are withdrawn.
+FUNDAMENTAL_FEATURES = ["earnings_yield", "book_to_price", "ebitda_to_ev",
+                        "fcf_yield", "sales_to_price"]
 
 FEATURE_COLUMNS = [f + "_r" for f in FEATURES] + [f + "_r" for f in FUNDAMENTAL_FEATURES]
 
@@ -196,42 +204,78 @@ def standardised_features(model: CrossSectionalModel, features: pd.DataFrame) ->
 
 
 def _attach_fundamentals(
-    panel: pd.DataFrame, fundamentals: Optional[pd.DataFrame],
+    panel: pd.DataFrame, statements: Optional[pd.DataFrame],
     close: pd.DataFrame, max_age_days: Optional[int],
 ) -> pd.DataFrame:
-    """Merge point-in-time value/quality onto each panel date.
+    """Merge point-in-time fundamentals onto each panel date.
 
-    Each date is priced with its own closes and gated on ``filing_date`` at that
-    date, so a row can only ever see filings the market had already received.
-    Names without a usable filing rank neutral rather than being dropped, which
-    is what Stage 4 does when a factor is unavailable.
+    Availability is derived from the SEBI LODR filing deadline rather than a
+    filing date, because the statement feed carries period end only. Using the
+    deadline is the conservative direction: companies file early, so the model
+    never sees a figure before the market did.
+
+    Names without a usable statement rank neutral rather than being dropped,
+    which is what Stage 4 does when a factor is unavailable. Coverage is
+    roughly two thirds of the universe -- market capitalisation needs a share
+    count, and the feed does not carry one for every name.
     """
     cols = [f + "_r" for f in FUNDAMENTAL_FEATURES]
-    if fundamentals is None or fundamentals.empty:
+
+    def _blank(frame: pd.DataFrame) -> pd.DataFrame:
         for c in cols:
-            panel[c] = 0.0
-        return panel
+            frame[c] = 0.0
+        return frame
+
+    if statements is None or statements.empty:
+        return _blank(panel)
+
+    st = statements.copy()
+    st["period_end"] = pd.to_datetime(st["period_end"])
+    if "available_on" not in st.columns:
+        st["available_on"] = available_as_of(
+            st["period_end"],
+            st["kind"] if "kind" in st.columns else "annual",
+            st["filing_date"] if "filing_date" in st.columns else None,
+        )
+    if st.empty:
+        return _blank(panel)
+
+    shares = st.dropna(subset=["Ordinary Shares Number"])[
+        ["symbol", "period_end", "available_on", "Ordinary Shares Number"]
+    ] if "Ordinary Shares Number" in st.columns else pd.DataFrame()
 
     frames = []
     for d in panel["date"].unique():
         ts = pd.Timestamp(d)
         prices = close.loc[:ts]
-        if prices.empty:
+        if prices.empty or shares.empty:
             continue
-        px = prices.iloc[-1].dropna().to_dict()
-        feats = compute_features(fundamentals, px, ts.date(), max_age_days=max_age_days)
+        sh = (shares[shares["available_on"] <= ts]
+              .sort_values("period_end").groupby("symbol").tail(1)
+              .set_index("symbol")["Ordinary Shares Number"])
+        px = prices.iloc[-1].dropna()
+        mcap = (px.reindex(sh.index) * sh).dropna()
+        if len(mcap) < 20:
+            continue
+        # Staleness is judged against each panel date, not the newest one. A
+        # single global cutoff discards every statement older than the last
+        # decision date, which silently emptied the block for the whole
+        # training window and left the five columns constant.
+        visible = st
+        if max_age_days:
+            visible = st[st["period_end"] >= ts - pd.Timedelta(days=int(max_age_days))]
+        if visible.empty:
+            continue
+        feats = build_fundamental_panel(visible, mcap, ts.date(),
+                                        enabled=FUNDAMENTAL_FEATURES)
         if feats is None or feats.empty:
             continue
-        f = feats.reset_index()
-        if "symbol" not in f.columns:
-            f = f.rename(columns={f.columns[0]: "symbol"})
+        f = feats.reset_index().rename(columns={"index": "symbol"})
         f["date"] = ts
         frames.append(f)
 
     if not frames:
-        for c in cols:
-            panel[c] = 0.0
-        return panel
+        return _blank(panel)
 
     fund = pd.concat(frames, ignore_index=True)
     keep = ["date", "symbol"] + [f for f in FUNDAMENTAL_FEATURES if f in fund.columns]
@@ -239,7 +283,8 @@ def _attach_fundamentals(
     for f in FUNDAMENTAL_FEATURES:
         col = f + "_r"
         if f in panel.columns:
-            panel[col] = panel.groupby("date")[f].transform(
+            w = panel.groupby("date")[f].transform(winsorise)
+            panel[col] = w.groupby(panel["date"]).transform(
                 lambda s: ((s.rank(pct=True, na_option="keep") - 0.5) * 2.0)
             ).fillna(0.0)
         else:

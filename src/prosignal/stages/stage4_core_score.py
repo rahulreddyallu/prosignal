@@ -533,10 +533,26 @@ _MODEL_CITE = {
     "deliv_pct": "NSE delivery data; India-specific, no standard reference",
     "deliv_trend": "NSE delivery data; India-specific, no standard reference",
     "earnings_yield": "Basu (1977)",
+    "book_to_price": "Fama & French (1992)",
+    "ebitda_to_ev": "capital-structure-neutral value; no single source",
+    "fcf_yield": "cash-based value; no single source",
+    "sales_to_price": "Barbee, Mukherji & Raines (1996)",
     "net_margin": "Novy-Marx (2013)",
     "interest_coverage": "Altman (1968)",
     "earnings_growth": "Novy-Marx (2013)",
     "earnings_stability": "Sloan (1996)",
+    "roe": "Novy-Marx (2013)",
+    "roce": "Novy-Marx (2013)",
+    "gross_margin": "Novy-Marx (2013)",
+    "ebit_margin": "Novy-Marx (2013)",
+    "accruals": "Sloan (1996)",
+    "fcf_conversion": "Sloan (1996)",
+    "revenue_growth": "Lakonishok, Shleifer & Vishny (1994)",
+    "ebitda_growth": "Lakonishok, Shleifer & Vishny (1994)",
+    "margin_expansion": "Novy-Marx (2013)",
+    "debt_to_equity": "Altman (1968)",
+    "net_debt_to_ebitda": "Altman (1968)",
+    "earnings_acceleration": "Chan, Jegadeesh & Lakonishok (1996)",
 }
 
 
@@ -573,7 +589,11 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         # Value and quality: the only inputs not derived from price and volume.
         # Read once and passed to both paths so the fit and the live scoring see
         # the same filings.
-        fundamentals = store.read_fundamentals()
+        # Statements rather than the NSE filings table: that feed stopped in
+        # March 2025 and its columns had gone constant, so the fundamental block
+        # was contributing nothing to the score while still occupying five of
+        # the model's columns.
+        fundamentals = store.read_statements()
         max_age = int(iv(cfg.max_fundamental_age_days))
 
         # Delivered quantity as a share of traded volume. Read over the same

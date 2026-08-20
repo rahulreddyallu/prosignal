@@ -55,6 +55,19 @@ def _to_naive_dates(index: pd.Index) -> pd.DatetimeIndex:
     return idx.normalize()
 
 
+#: Statement lines kept from each frame. Everything else Yahoo returns is a
+#: derived or reconciling figure that duplicates one of these.
+_INCOME_FIELDS = ["Total Revenue", "Gross Profit", "Operating Income", "EBITDA",
+                  "EBIT", "Net Income", "Interest Expense", "Pretax Income",
+                  "Basic EPS", "Diluted EPS"]
+_BALANCE_FIELDS = ["Common Stock Equity", "Total Debt", "Net Debt", "Invested Capital",
+                   "Working Capital", "Total Assets", "Tangible Book Value",
+                   "Ordinary Shares Number", "Cash And Cash Equivalents", "Inventory",
+                   "Accounts Receivable", "Accounts Payable", "Current Assets",
+                   "Current Liabilities"]
+_CASHFLOW_FIELDS = ["Operating Cash Flow", "Free Cash Flow", "Capital Expenditure"]
+
+
 class YFinanceProvider:
     """Thin, defensive wrapper over ``yfinance``."""
 
@@ -304,6 +317,55 @@ class YFinanceProvider:
     # =========================================================================
     # Earnings calendar
     # =========================================================================
+    def fetch_statements(self, symbols: Iterable[str]) -> pd.DataFrame:
+        """Annual and quarterly statements, tidied to one row per period.
+
+        Yahoo returns roughly five annual and five quarterly periods, which
+        bounds how far back a fundamental factor can be validated. A symbol
+        that fails is skipped rather than failing the run: the universe is
+        wider than the coverage of any statement feed.
+        """
+        yf = self.yf
+
+        rows: List[Dict[str, object]] = []
+        failed = 0
+        for sym in symbols:
+            try:
+                ticker = yf.Ticker(self.to_yahoo(sym))
+                sources = (
+                    (ticker.financials, _INCOME_FIELDS, "annual"),
+                    (ticker.balance_sheet, _BALANCE_FIELDS, "annual"),
+                    (ticker.cashflow, _CASHFLOW_FIELDS, "annual"),
+                    (ticker.quarterly_financials, _INCOME_FIELDS, "quarterly"),
+                )
+            except Exception:
+                failed += 1
+                continue
+            for frame, fields, kind in sources:
+                if frame is None or getattr(frame, "empty", True):
+                    continue
+                for period in frame.columns:
+                    row: Dict[str, object] = {
+                        SYMBOL: normalise_symbol(sym),
+                        "period_end": pd.Timestamp(period),
+                        "kind": kind,
+                    }
+                    populated = False
+                    for name in fields:
+                        if name in frame.index:
+                            value = frame.loc[name, period]
+                            if pd.notna(value):
+                                row[name] = float(value)
+                                populated = True
+                    if populated:
+                        rows.append(row)
+        if failed:
+            log.warning("statements unavailable for some symbols",
+                        extra={"failed": failed})
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame(rows)
+
     def fetch_earnings_dates(self, symbols: Iterable[str], limit: int = 12) -> pd.DataFrame:
         """Scheduled and historical results dates, converted to IST dates."""
         rows: List[Dict[str, object]] = []

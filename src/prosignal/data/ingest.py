@@ -669,6 +669,31 @@ class DataIngestor:
         )
 
 
+    def _refresh_statements(self, symbols) -> int:
+        """Income statement, balance sheet and cash flow per symbol.
+
+        The NSE Ind-AS feed carries true filing dates but stops at the December
+        2024 quarter and covers 186 names, and it is an income statement only --
+        no equity, debt or cash flow, so return on equity, leverage and accruals
+        are not derivable from it. This feed reaches the current quarter across
+        the whole universe and carries the balance sheet, at the cost of period
+        end without a filing date; the factor layer compensates by deriving
+        availability from the SEBI LODR deadline.
+        """
+        if not self.config.params.providers.yfinance.enabled:
+            return 0
+        try:
+            frame = self.yf.fetch_statements(symbols)
+        except Exception as exc:
+            log.warning("statement fetch failed", extra={"error": str(exc)})
+            return 0
+        if frame is None or frame.empty:
+            return 0
+        written = self.store.write_statements(frame)
+        log.info("statements refreshed",
+                 extra={"rows": written, "symbols": int(frame["symbol"].nunique())})
+        return written
+
     def _refresh_sector_map(self) -> int:
         """Pool sectors from every configured index constituent file.
 
@@ -918,6 +943,12 @@ class DataIngestor:
             self._refresh_sector_map()
         except Exception as exc:
             log.warning("sector map refresh failed", extra={"error": str(exc)})
+
+        if opts.force_reference_refresh or self._should_refresh(
+            "statements", as_of, opts.reference_refresh_sessions
+        ):
+            if self._refresh_statements(symbols):
+                self.store.update_feed_state("statements", as_of, "yfinance", 0)
 
         fundamentals = self.csv.load_fundamentals()
         if not fundamentals.empty:

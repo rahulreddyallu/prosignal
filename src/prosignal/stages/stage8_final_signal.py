@@ -106,7 +106,19 @@ def run(
     corr_lb = iv(cfg.portfolio.correlation_lookback_sessions)
     accepted_symbols: List[str] = []
 
-    for sym in survivors:
+    # Stage 5 can demote a name, and the score it produces is what every gate
+    # below compares against. Ordering by the pre-defense rank left a penalised
+    # candidate sitting above names that scored higher after the argument
+    # against it was heard, so the column and the position disagreed. Only the
+    # defended set is reordered: names outside it were never tested, and an
+    # untested name has not earned a place above a tested one.
+    def _final_of(sym: str) -> float:
+        res = defense.per_stock.get(sym)
+        return res.score_after if res is not None else float("-inf")
+
+    survivors = sorted(survivors, key=_final_of, reverse=True)
+
+    for position, sym in enumerate(survivors, start=1):
         score = by_ticker.get(sym)
         decision = entries.decisions.get(sym)
         if score is None or decision is None:
@@ -128,7 +140,8 @@ def run(
 
         plan = plans.get(sym)
         rec = _card(sym, names.get(sym), score, defense_res, decision, plan,
-                    regime, eligibility, scores, final_score, cfg)
+                    regime, eligibility, scores, final_score, cfg,
+                    position=position)
 
         if decision.status is not EntryStatus.TRIGGERED:
             watch.append(rec)
@@ -195,7 +208,7 @@ def _band(score: float, cfg) -> StrengthBand:
 
 
 def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
-          scores, final_score, cfg) -> Recommendation:
+          scores, final_score, cfg, position: int = 0) -> Recommendation:
     """Build the recommendation, including the evidence AGAINST it."""
     why: List[str] = []
     model_tier = [f for f in score.factors.values() if f.evidence_tier == "model"]
@@ -231,10 +244,17 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 f"{score.percentile:.0f}th, weight {f.weight:.0%} [{f.evidence_tier}] "
                 f"({f.citation})"
             )
-    why.append(
-        f"Score {final_score:.3f} ranks #{score.rank} of "
-        f"{scores.universe_size} eligible names."
-    )
+    if abs(final_score - defense_res.score_before) > 1e-9:
+        why.append(
+            f"Score {final_score:.3f} after Stage 5, from {defense_res.score_before:.3f} "
+            f"before. The model placed it #{score.rank} of {scores.universe_size} "
+            f"eligible names; among the defended candidates it now sits #{position}."
+        )
+    else:
+        why.append(
+            f"Score {final_score:.3f} ranks #{score.rank} of "
+            f"{scores.universe_size} eligible names, unchanged by Stage 5."
+        )
 
     cleared = [c.check for c in defense_res.passed()]
     flagged = [
@@ -299,7 +319,8 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
         last_close=decision.reference_price,
         composite_score=round(final_score, 4),
         universe_percentile=round(score.percentile, 1),
-        rank=score.rank,
+        rank=position or score.rank,
+        model_rank=score.rank,
         why_this_signal_exists=why,
         market_regime=[
             f"Bucket {regime.regime_bucket}; trend {regime.trend_regime.value}; "
