@@ -349,6 +349,10 @@ class UniverseConfig(_Base):
     min_price_inr: TF
     manual_exclusions: TLS
     pre_snapshot_policy: TS
+    source: TS
+    pit_min_adtv_inr: TF
+    pit_adtv_lookback_sessions: TI
+    pit_max_names: TI
 
     @model_validator(mode="after")
     def _check_policy(self) -> "UniverseConfig":
@@ -357,6 +361,13 @@ class UniverseConfig(_Base):
             raise ValueError(
                 f"universe.pre_snapshot_policy must be one of {sorted(allowed)}"
             )
+        sources = {"index_snapshot", "liquidity_pit"}
+        if self.source.value not in sources:
+            raise ValueError(f"universe.source must be one of {sorted(sources)}")
+        if self.pit_adtv_lookback_sessions.value < 5:
+            raise ValueError("universe.pit_adtv_lookback_sessions must be at least 5")
+        if self.pit_max_names.value < 20:
+            raise ValueError("universe.pit_max_names must be at least 20")
         return self
 
 

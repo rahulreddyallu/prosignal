@@ -35,7 +35,19 @@ FEATURES: Dict[str, Tuple[int, str]] = {
     "dist_200dma":   (201, "close / 200-session mean - 1"),
     "trend_r2":      (121, "R-squared of an OLS fit on log close, 120 sessions"),
     "max_dd_120":    (121, "maximum drawdown over 120 sessions"),
+    "prox_52w":      (253, "close / 252-session high - 1 (George & Hwang 2004)"),
+    "max5_21":       (22,  "mean of the 5 largest daily returns in 21 sessions; lottery demand (Bali, Cakici & Whitelaw 2011)"),
+    "resid_mom":     (253, "momentum of market-residual returns, 252 to 21 back (Blitz, Huij & Martens 2011)"),
+    "deliv_pct":     (61,  "mean delivered fraction of traded volume, 60 sessions"),
+    "deliv_trend":   (127, "delivered fraction, 21-session mean less 126-session mean"),
 }
+
+#: Factors that rank neutral rather than dropping the row when their input is
+#: missing. Delivery is published per session in sec_bhavdata_full and covers
+#: about 82% of the panel; requiring it would discard a fifth of the universe
+#: over a feed gap. This matches how Stage 4 treats an unavailable factor and
+#: how _attach_fundamentals treats a name with no usable filing.
+NEUTRAL_WHEN_MISSING = frozenset({"deliv_pct", "deliv_trend"})
 
 MIN_LOOKBACK = max(v[0] for v in FEATURES.values())
 
@@ -71,7 +83,11 @@ def _trend_r2(logp: np.ndarray) -> float:
 
 
 def _features_at(
-    close: pd.DataFrame, turnover: pd.DataFrame, i: int, bench_ret: np.ndarray
+    close: pd.DataFrame,
+    turnover: pd.DataFrame,
+    i: int,
+    bench_ret: np.ndarray,
+    delivery: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Features for every symbol using rows 0..i inclusive. Never touches i+1."""
     hist = close.iloc[: i + 1]
@@ -91,6 +107,26 @@ def _features_at(
     r60 = ret.tail(60)
     out["vol_60"] = r60.std(ddof=1) * np.sqrt(252)
     out["downside_vol"] = r60.where(r60 < 0).std(ddof=1) * np.sqrt(252)
+
+    out["prox_52w"] = last / hist.tail(252).max() - 1.0
+    out["max5_21"] = ret.tail(21).apply(lambda s: s.nlargest(5).mean(), axis=0)
+
+    # Residual momentum: strip the market component, then accumulate. Blitz,
+    # Huij & Martens (2011) find the residual carries the momentum premium with
+    # far less of the beta exposure that drives momentum crashes.
+    win = ret.tail(252)
+    out["resid_mom"] = pd.Series(np.nan, index=hist.columns, dtype="float64")
+    if len(win) >= 60 and len(bench_ret) >= len(win):
+        b = np.asarray(bench_ret[-len(win):], dtype="float64")
+        bc = b - np.nanmean(b)
+        bvar = float(np.nanmean(bc * bc))
+        # A market with no dispersion leaves beta undefined; the factor stays NaN
+        # rather than vanishing, so the column is always present for the model.
+        if bvar > 1e-12:
+            beta_m = win.mul(bc, axis=0).mean() / bvar
+            resid = win.sub(np.outer(b, beta_m.to_numpy()), fill_value=np.nan)
+            resid.columns = win.columns
+            out["resid_mom"] = resid.iloc[:-21].sum(axis=0)
 
     r120 = ret.tail(120)
     bench = bench_ret[-len(r120):] if len(bench_ret) >= len(r120) else bench_ret
@@ -125,6 +161,17 @@ def _features_at(
     win = hist.tail(120)
     out["max_dd_120"] = (win / win.cummax() - 1.0).min()
 
+    # Delivered fraction of traded volume. NSE settles intraday positions
+    # without delivery, so a high ratio means buyers took the stock rather than
+    # churning it -- conviction that has no clean analogue in most markets.
+    if delivery is not None and not delivery.empty:
+        dl = delivery.reindex(index=hist.index, columns=hist.columns).iloc[: i + 1]
+        out["deliv_pct"] = dl.tail(60).mean()
+        out["deliv_trend"] = dl.tail(21).mean() - dl.tail(126).mean()
+    else:
+        out["deliv_pct"] = pd.Series(np.nan, index=hist.columns, dtype="float64")
+        out["deliv_trend"] = pd.Series(np.nan, index=hist.columns, dtype="float64")
+
     frame = pd.DataFrame(out)
     return frame.replace([np.inf, -np.inf], np.nan)
 
@@ -147,6 +194,7 @@ def build_panel(
     horizon: int,
     step: int = 21,
     min_names: int = 40,
+    delivery: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
@@ -157,11 +205,12 @@ def build_panel(
     bench_full = close.mean(axis=1).pct_change().to_numpy(dtype="float64")
     rows: List[pd.DataFrame] = []
     for i in range(MIN_LOOKBACK, len(dates) - horizon, step):
-        feats = _features_at(close, turnover, i, bench_full[: i + 1])
+        feats = _features_at(close, turnover, i, bench_full[: i + 1], delivery=delivery)
         fwd = close.iloc[i + horizon] / close.iloc[i] - 1.0
         feats = feats.assign(label=fwd)
         feats = feats[np.isfinite(feats["label"]) & feats["label"].abs().lt(1.0)]
-        feats = feats.dropna(thresh=int(len(FEATURES) * 0.7))
+        required = [c for c in FEATURES if c not in NEUTRAL_WHEN_MISSING]
+        feats = feats.dropna(subset=required, thresh=int(len(required) * 0.7))
         if len(feats) < min_names:
             continue
         feats["date"] = dates[i]
@@ -179,5 +228,8 @@ def build_panel(
             panel[c] = panel[c].astype("float32")
     panel["label_rank"] = panel.groupby("date")["label"].transform(cross_sectional_rank)
     for f in FEATURES:
-        panel[f + "_r"] = panel.groupby("date")[f].transform(cross_sectional_rank)
+        r = panel.groupby("date")[f].transform(cross_sectional_rank)
+        # A neutral rank is 0.0 by construction, so a name with no delivery
+        # print contributes nothing to the score instead of being discarded.
+        panel[f + "_r"] = r.fillna(0.0) if f in NEUTRAL_WHEN_MISSING else r
     return panel

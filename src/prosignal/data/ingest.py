@@ -669,6 +669,40 @@ class DataIngestor:
         )
 
 
+    def _refresh_sector_map(self) -> int:
+        """Pool sectors from every configured index constituent file.
+
+        NIFTY 500 subsumes the midcap and smallcap lists, so the union is about
+        500 names. The point-in-time universe is wider than that and is never
+        filtered to this list -- intersecting it would reintroduce exactly the
+        survivorship bias the liquidity screen exists to remove. Names outside
+        it simply have no sector, and Stage 8 says so.
+        """
+        files = dict(self.config.params.providers.nse_archives.index_constituent_files)
+        frames = []
+        for index_name in files:
+            try:
+                frame = self.nse.fetch_index_constituents(index_name)
+            except Exception as exc:
+                log.warning("sector source unavailable",
+                            extra={"index": index_name, "error": str(exc)})
+                continue
+            if frame is not None and not frame.empty and "sector" in frame.columns:
+                frames.append(frame[["symbol", "sector"]])
+        if not frames:
+            log.warning("no sector sources reachable; Stage 8 sector cap will report unknown")
+            return 0
+        pooled = (
+            pd.concat(frames, ignore_index=True)
+            .dropna(subset=["symbol", "sector"])
+            .drop_duplicates(subset=["symbol"], keep="first")
+            .reset_index(drop=True)
+        )
+        written = self.store.write_sector_map(pooled)
+        log.info("sector map refreshed",
+                 extra={"symbols": written, "sectors": int(pooled["sector"].nunique())})
+        return written
+
     def _refresh_nse_fundamentals(self, as_of: dt.date, opts: "IngestOptions") -> None:
         """Pull quarterly results from NSE when the stored set has gone stale.
 
@@ -852,6 +886,15 @@ class DataIngestor:
                 f"{p.providers.csv_import.pledging_file} to enable it."
             ],
         )
+
+        # Sectors feed the Stage 8 diversification cap. The point-in-time
+        # universe reaches past any single index, so coverage is partial by
+        # design and Stage 8 treats an unclassified name as unclassified rather
+        # than pooling it with every other one.
+        try:
+            self._refresh_sector_map()
+        except Exception as exc:
+            log.warning("sector map refresh failed", extra={"error": str(exc)})
 
         fundamentals = self.csv.load_fundamentals()
         if not fundamentals.empty:

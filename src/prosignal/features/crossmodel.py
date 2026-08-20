@@ -227,6 +227,7 @@ def fit_predict(
     alpha: Optional[float] = None,
     max_train_sessions: Optional[int] = None,
     min_train_rows: Optional[int] = None,
+    delivery: Optional[pd.DataFrame] = None,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
@@ -253,7 +254,7 @@ def fit_predict(
     # model exists to avoid.
     train_close = hist.iloc[: len(hist) - H]
     train_turnover = turnover.reindex(train_close.index)
-    panel = build_panel(train_close, train_turnover, horizon=H, step=21)
+    panel = build_panel(train_close, train_turnover, horizon=H, step=21, delivery=delivery)
     if not panel.empty:
         panel = _attach_fundamentals(panel, fundamentals, train_close, max_fundamental_age_days)
         panel = panel.dropna(subset=[c for c in FEATURE_COLUMNS if c in panel.columns]
@@ -272,7 +273,7 @@ def fit_predict(
     # and inference cannot drift apart in definition.
     live = build_panel(hist.tail(MIN_LOOKBACK + 5),
                        turnover.reindex(hist.index).tail(MIN_LOOKBACK + 5),
-                       horizon=1, step=21)
+                       horizon=1, step=21, delivery=delivery)
     if live.empty:
         return None, None, "features could not be computed for the decision date"
     live = _attach_fundamentals(live, fundamentals, hist, max_fundamental_age_days)
@@ -305,7 +306,8 @@ def fit_predict(
 
 def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
                    fundamentals: Optional[pd.DataFrame] = None,
-                   max_fundamental_age_days: Optional[int] = None):
+                   max_fundamental_age_days: Optional[int] = None,
+                   delivery: Optional[pd.DataFrame] = None):
     """Features for the decision date only.
 
     The cheap path: one date rather than a full training panel, so a cached
@@ -315,7 +317,8 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
     hist = close[close.index <= ts].tail(MIN_LOOKBACK + 5)
     if len(hist) < MIN_LOOKBACK:
         return None
-    live = build_panel(hist, turnover.reindex(hist.index), horizon=1, step=21)
+    live = build_panel(hist, turnover.reindex(hist.index), horizon=1, step=21,
+                       delivery=delivery)
     if live.empty:
         return None
     live = _attach_fundamentals(live, fundamentals, hist, max_fundamental_age_days)

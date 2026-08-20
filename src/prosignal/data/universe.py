@@ -115,6 +115,113 @@ class UniverseResolver:
         self._apply_manual_exclusions(snap, manual_exclusions or [])
         return snap
 
+    def resolve_liquidity_pit(
+        self,
+        as_of: dt.date,
+        min_adtv_inr: float,
+        lookback_sessions: int,
+        max_names: int,
+        min_history_sessions: int,
+        min_price_inr: float,
+        manual_exclusions: Optional[Sequence[str]] = None,
+        sector_map: Optional[Dict[str, str]] = None,
+    ) -> UniverseSnapshot:
+        """The universe as a trailing-liquidity screen, with no membership list.
+
+        Every input is drawn from sessions at or before ``as_of``, so the set is
+        point-in-time by construction. A name that collapsed is present for as
+        long as it was liquid and disappears afterwards, which is what a live
+        book would have experienced. Nothing here consults an index.
+        """
+        sessions = [d for d in self.store.price_sessions() if d <= as_of]
+        if not sessions:
+            raise IntegrityError(
+                "no price sessions at or before the decision date; run "
+                "`prosignal data ingest` before resolving a universe.",
+                as_of=as_of.isoformat(),
+            )
+        window = sessions[-int(lookback_sessions):]
+        px = self.store.read_prices(
+            start=window[0], end=as_of, columns=["date", "symbol", "close", "turnover"]
+        )
+        if px.empty:
+            raise IntegrityError(
+                "no price rows in the liquidity window", as_of=as_of.isoformat()
+            )
+        px["date"] = pd.to_datetime(px["date"]).dt.normalize()
+
+        # Median, not mean: one block deal should not buy a name a seat.
+        adtv = px.groupby("symbol", observed=True)["turnover"].median()
+        last = px.sort_values("date").groupby("symbol", observed=True)["close"].last()
+        # History is measured from the listing date against the session list,
+        # which is exact and costs one small read. Counting rows per symbol
+        # across every year would rescan the whole price store on every run.
+        listed_before = self._listed_at_least(sessions, int(min_history_sessions))
+
+        eligible = adtv[adtv >= float(min_adtv_inr)].index
+        keep = [
+            s for s in eligible
+            if float(last.get(s, 0.0)) >= float(min_price_inr)
+            and s in listed_before
+        ]
+        ranked = adtv.reindex(keep).sort_values(ascending=False)
+        symbols = [str(s) for s in ranked.head(int(max_names)).index]
+        if not symbols:
+            raise IntegrityError(
+                f"the liquidity screen admitted no symbols on {as_of}: "
+                f"turnover floor Rs {float(min_adtv_inr):,.0f}, price floor "
+                f"Rs {float(min_price_inr):,.2f}, "
+                f"{int(min_history_sessions)} sessions of history required.",
+                as_of=as_of.isoformat(),
+            )
+
+        sectors = {s: (sector_map or {}).get(s, "Unknown") for s in symbols}
+        known = sum(1 for v in sectors.values() if v != "Unknown")
+        snap = UniverseSnapshot(
+            index_name="LIQUIDITY-PIT",
+            as_of=as_of,
+            symbols=symbols,
+            sector_map=sectors,
+            source=f"liquidity_pit:adtv>={float(min_adtv_inr):.0f}",
+            survivorship_risk=False,
+            note=(
+                f"point-in-time liquidity screen over {len(window)} sessions ending "
+                f"{as_of}; {len(symbols)} names; sector known for {known} "
+                f"({100.0 * known / len(symbols):.0f}%)"
+            ),
+        )
+        self._apply_listing_dates(snap, as_of)
+        self._apply_manual_exclusions(snap, manual_exclusions or [])
+        log.info(
+            "liquidity universe resolved",
+            extra={"as_of": as_of.isoformat(), "size": len(snap.symbols),
+                   "sector_coverage": round(100.0 * known / max(len(symbols), 1), 1)},
+        )
+        return snap
+
+    def _listed_at_least(self, sessions: Sequence[dt.date], min_sessions: int) -> Set[str]:
+        """Symbols listed early enough to have ``min_sessions`` of history.
+
+        A symbol absent from the master is kept: the master is a convenience
+        file, and dropping names because a reference feed is thin would silently
+        shrink the universe for a reason unrelated to liquidity.
+        """
+        if len(sessions) <= min_sessions:
+            cutoff = sessions[0]
+        else:
+            cutoff = sessions[-(min_sessions + 1)]
+        master = self.store.read_equity_master()
+        if master.empty or "listing_date" not in master.columns:
+            return set()
+        listing = (
+            master.dropna(subset=["listing_date"])
+            .assign(**{SYMBOL: lambda d: d[SYMBOL].map(normalise_symbol)})
+            .set_index(SYMBOL)["listing_date"]
+        )
+        listing = listing[~listing.index.duplicated(keep="first")]
+        early = set(listing[pd.to_datetime(listing) <= pd.Timestamp(cutoff)].index)
+        return early | (set() if master.empty else set())
+
     def snapshot_current(
         self, index_name: str, as_of: dt.date, constituents: pd.DataFrame
     ) -> None:
