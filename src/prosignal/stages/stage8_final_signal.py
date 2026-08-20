@@ -198,16 +198,41 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
           scores, final_score, cfg) -> Recommendation:
     """Build the recommendation, including the evidence AGAINST it."""
     why: List[str] = []
-    for fname, f in score.factors.items():
-        if f.raw_value is None:
-            continue
-        why.append(
-            f"{fname}: raw {f.raw_value:+.2%}, universe rank "
-            f"{score.percentile:.0f}th, weight {f.weight:.0%} [{f.evidence_tier}] "
-            f"({f.citation})"
-        )
+    model_tier = [f for f in score.factors.values() if f.evidence_tier == "model"]
+    if model_tier:
+        # Attribution from the fit. raw_value is this factor's contribution to
+        # the score and standardised is the z-score it came from, so the reader
+        # can see both how unusual the name is and how much that mattered. Only
+        # the terms that moved it are listed; the rest are near zero and would
+        # bury the ones that did.
+        shown = [f for f in score.factors.values()
+                 if f.evidence_tier == "model" and f.raw_value is not None][:6]
+        for f in shown:
+            direction = "raises" if f.raw_value >= 0 else "lowers"
+            z = f"{f.standardised:+.2f} sd" if f.standardised is not None else "n/a"
+            why.append(
+                f"{f.name}: {z} vs the universe, {direction} the score by "
+                f"{abs(f.raw_value):.4f} (coefficient {f.weight:+.5f}) ({f.citation})"
+            )
+        total = sum(abs(f.raw_value) for f in score.factors.values()
+                    if f.evidence_tier == "model" and f.raw_value is not None)
+        listed = sum(abs(f.raw_value) for f in shown)
+        if total > 0 and len(shown) < len(model_tier):
+            why.append(
+                f"These {len(shown)} of {len(model_tier)} fitted factors carry "
+                f"{listed / total:.0%} of the movement; the rest are near zero."
+            )
+    else:
+        for fname, f in score.factors.items():
+            if f.raw_value is None:
+                continue
+            why.append(
+                f"{fname}: raw {f.raw_value:+.2%}, universe rank "
+                f"{score.percentile:.0f}th, weight {f.weight:.0%} [{f.evidence_tier}] "
+                f"({f.citation})"
+            )
     why.append(
-        f"Composite {final_score:.3f} ranks #{score.rank} of "
+        f"Score {final_score:.3f} ranks #{score.rank} of "
         f"{scores.universe_size} eligible names."
     )
 

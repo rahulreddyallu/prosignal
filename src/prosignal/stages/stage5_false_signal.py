@@ -74,6 +74,7 @@ def run(
 
     bench = store.index_series(str(v(p.stage2_regime.benchmark_index)), "close", end=as_of)
     actions = store.read_corporate_actions()
+    earnings = store.read_earnings_calendar()
 
     # -- market-wide checks --------------------------------------------------
     market: List[CheckResult] = []
@@ -102,10 +103,8 @@ def run(
             checks.append(_beta_explained(frame, bench, cfg.beta_explained_move))
             checks.append(_corporate_action(frame, actions, sym, as_of, cfg.corporate_action_distortion))
 
-        # Checks with no reachable data source. Reported, never assumed to pass.
-        checks.append(_nt("insider_activity", "SEBI PIT disclosures not ingested"))
-        checks.append(_nt("earnings_distortion", "only estimated results dates available"))
-        checks.append(_nt("regulatory_shock", "regulatory events feed empty"))
+        checks.append(_earnings_distortion(earnings, sym, as_of, calendar,
+                                           cfg.earnings_distortion))
 
         total = sum(c.penalty for c in checks) + market_penalty
         hard = [c for c in checks if c.outcome is CheckOutcome.HARD_REJECT]
@@ -290,6 +289,58 @@ def _beta_explained(frame, bench, cfg) -> CheckResult:
                     f"{beta:.2f} to the index. This is market exposure, not selection.",
                     obs, thr)
     return _ok("beta_explained_move", obs)
+
+
+def _earnings_distortion(earnings, sym, as_of, calendar, cfg) -> CheckResult:
+    """Results too close on either side of the decision date.
+
+    Ahead of a print the move is a coin flip on a number nobody has; just after
+    one the drift is the market repricing that number, not the factors this
+    engine ranks on. Only company-filed dates count as confirmed -- an estimate
+    projected from past quarters cannot support a hard rejection, so a name
+    with nothing but an estimate is reported NOT_TESTABLE rather than passed.
+    """
+    if earnings is None or earnings.empty:
+        return _nt("earnings_distortion", "earnings calendar empty")
+    rows = earnings[earnings[SYMBOL] == sym]
+    if rows.empty:
+        return _nt("earnings_distortion", "no results date on file for this name")
+
+    confirmed = rows[rows["confirmed"] == True] if "confirmed" in rows.columns else rows  # noqa: E712
+    if confirmed.empty:
+        return _nt(
+            "earnings_distortion",
+            "only estimated results dates on file; an estimate cannot support a rejection",
+        )
+
+    dates = pd.to_datetime(confirmed["earnings_date"]).dt.date
+    ahead = int(iv(cfg.upcoming_earnings_sessions))
+    behind = int(iv(cfg.recent_earnings_sessions))
+
+    upcoming = [d for d in dates if d >= as_of]
+    if upcoming:
+        sessions = calendar.sessions_until(as_of, min(upcoming))
+        if sessions <= ahead:
+            return _rej(
+                "earnings_distortion",
+                f"results due in {sessions} session(s); the move will price an "
+                f"earnings number this engine has no view on",
+                {"sessions_to_results": sessions, "results_date": str(min(upcoming))},
+            )
+
+    past = [d for d in dates if d < as_of]
+    if past:
+        since = calendar.sessions_until(max(past), as_of)
+        if since <= behind:
+            return _pen(
+                "earnings_distortion",
+                fv(cfg.recent_earnings_penalty),
+                f"results {since} session(s) ago; post-earnings drift is "
+                f"repricing that print, not the ranked factors",
+                {"sessions_since_results": since, "results_date": str(max(past))},
+                threshold=behind,
+            )
+    return _ok("earnings_distortion", {"confirmed_dates": int(len(confirmed))})
 
 
 def _corporate_action(frame, actions, sym, as_of, cfg) -> CheckResult:

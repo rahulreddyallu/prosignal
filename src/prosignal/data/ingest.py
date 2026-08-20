@@ -822,8 +822,31 @@ class DataIngestor:
             except ProviderError as exc:
                 log.warning("earnings fetch failed", extra={"error": exc.message})
 
-        frames = [f for f in (yf_cal, csv_cal) if f is not None and not f.empty]
+        # Company-filed board-meeting dates. yfinance projects the next print
+        # from past quarters, which is an estimate; these are confirmed, so the
+        # Stage 5 earnings check has something it can actually test against.
+        nse_cal = pd.DataFrame()
+        if need_refresh:
+            try:
+                nse_cal = self.nse.fetch_board_meetings(
+                    as_of - dt.timedelta(days=180), as_of + dt.timedelta(days=180)
+                )
+            except Exception as exc:
+                log.warning("board-meeting fetch failed", extra={"error": str(exc)})
+
+        # NSE last so its confirmed rows win the de-duplication below.
+        frames = [f for f in (yf_cal, csv_cal, nse_cal) if f is not None and not f.empty]
         if frames:
+            # The stored frame dates as datetime64 and a freshly parsed one can
+            # arrive as plain date objects; concatenating the two produces an
+            # unordered categorical that drop_duplicates refuses to sort.
+            frames = [
+                f.assign(**{
+                    SYMBOL: f[SYMBOL].astype(str),
+                    "earnings_date": pd.to_datetime(f["earnings_date"], errors="coerce"),
+                })
+                for f in frames
+            ]
             combined = pd.concat(frames, ignore_index=True)
             combined = combined.drop_duplicates(subset=[SYMBOL, "earnings_date"], keep="last")
             self.store.write_earnings_calendar(combined)

@@ -23,6 +23,7 @@ rather than relying on a hardcoded holiday table.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import io
 import zipfile
 from typing import Dict, Iterable, List, Optional
@@ -342,6 +343,54 @@ class NseArchivesProvider:
     # =========================================================================
     # Universe / reference data
     # =========================================================================
+    def fetch_board_meetings(self, start: dt.date, end: dt.date) -> pd.DataFrame:
+        """Board-meeting dates NSE has been notified of, with their purpose.
+
+        These are filed by the company, so a results date here is confirmed
+        rather than the estimate yfinance projects from past quarters. Only
+        meetings whose purpose mentions results are kept: dividends, fund
+        raising and the rest do not distort a price the way an earnings print
+        does.
+        """
+        url = (
+            "https://www.nseindia.com/api/event-calendar"
+            f"?from_date={start.strftime('%d-%m-%Y')}&to_date={end.strftime('%d-%m-%Y')}"
+        )
+        response = self.client.get(
+            url, ttl_seconds=self.ttl_current, allow_404=True,
+            context="nse_archives.board_meetings",
+        )
+        body = getattr(response, "content", None)
+        if not body:
+            return pd.DataFrame()
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            return pd.DataFrame()
+        rows = payload.get("data") if isinstance(payload, dict) else payload
+        if not rows:
+            return pd.DataFrame()
+        frame = pd.DataFrame(rows)
+        if "symbol" not in frame.columns or "date" not in frame.columns:
+            return pd.DataFrame()
+        text = (
+            frame.get("purpose", pd.Series("", index=frame.index)).fillna("").astype(str)
+            + " "
+            + frame.get("bm_desc", pd.Series("", index=frame.index)).fillna("").astype(str)
+        )
+        frame = frame[text.str.contains("result", case=False, na=False)]
+        if frame.empty:
+            return pd.DataFrame()
+        out = pd.DataFrame({
+            "symbol": frame["symbol"].astype(str).str.strip().str.upper(),
+            "earnings_date": pd.to_datetime(
+                frame["date"], format="%d-%b-%Y", errors="coerce"
+            ),
+        }).dropna(subset=["earnings_date"])
+        out["confirmed"] = True
+        out["source"] = "nse_board_meetings"
+        return out.drop_duplicates(subset=["symbol", "earnings_date"]).reset_index(drop=True)
+
     def fetch_index_constituents(self, index_name: str) -> pd.DataFrame:
         """Current constituents of an index, with the Industry (sector) column.
 

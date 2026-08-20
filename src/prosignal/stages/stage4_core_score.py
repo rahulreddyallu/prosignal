@@ -41,6 +41,10 @@ from ..core.logging import get_logger
 from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
+from ..features.crossmodel import (
+    contributions as cm_contributions,
+    standardised_features as cm_standardised,
+)
 from ..indicators import (
     momentum_skip,
     rank_to_unit_interval,
@@ -245,7 +249,7 @@ def run(
     # date, so nothing in training overlaps today. When there is too little
     # history the model abstains and the hand-weighted composite stands, which
     # is stated on the card rather than substituted quietly.
-    model_scores, model, model_unavailable = _cross_sectional_model(
+    model_scores, model, model_unavailable, model_features = _cross_sectional_model(
         store, symbols, as_of, cfg
     )
     if model_unavailable and _is_model_failure(model_unavailable) and not _model_optional(cfg):
@@ -261,10 +265,22 @@ def run(
             f"to true to accept that explicitly."
         )
 
+    model_contrib = None
+    model_z = None
     if model_scores is not None:
         aligned = model_scores.reindex(composite_raw.index).dropna()
         if len(aligned) >= max(int(0.6 * len(composite_raw)), 20):
             composite_raw = aligned
+            # The card must explain the number it prints. Once the model ranks,
+            # the hand-weighted composite's factors no longer describe the
+            # calculation, so the evidence comes from the fitted coefficients.
+            if model is not None and model_features is not None:
+                try:
+                    model_contrib = cm_contributions(model, model_features)
+                    model_z = cm_standardised(model, model_features)
+                except Exception as exc:
+                    log.warning("model attribution unavailable",
+                                extra={"error": str(exc)})
             notes.append(
                 f"Ranking from the fitted cross-sectional model ({model.summary()}). "
                 f"Measured against the hand-weighted composite over 8.8 years of "
@@ -285,16 +301,34 @@ def run(
     scores: List[StockScore] = []
     for rank, sym in enumerate(order.index, start=1):
         factors = {}
-        for name in standardised:
-            factors[name] = FactorScore(
-                name=name,
-                raw_value=_f(raw[name].get(sym)),
-                standardised=_f(standardised[name].get(sym)),
-                weight=round(effective[name], 4),
-                available=pd.notna(raw[name].get(sym)),
-                evidence_tier=_TIER.get(name),
-                citation=_CITE.get(name),
-            )
+        if model_contrib is not None and sym in model_contrib.index:
+            # Attribution from the fit: contribution = coefficient x z-score,
+            # and the terms sum back to the score. Ordered by absolute size, so
+            # the card leads with what actually moved this name.
+            row = model_contrib.loc[sym]
+            zrow = model_z.loc[sym] if model_z is not None else None
+            for name in row.abs().sort_values(ascending=False).index:
+                contribution = _f(row.get(name))
+                factors[name] = FactorScore(
+                    name=name,
+                    raw_value=contribution,
+                    standardised=_f(zrow.get(name)) if zrow is not None else None,
+                    weight=round(float(model.coef.get(name + "_r", 0.0)), 5),
+                    available=pd.notna(row.get(name)),
+                    evidence_tier="model",
+                    citation=_MODEL_CITE.get(name),
+                )
+        else:
+            for name in standardised:
+                factors[name] = FactorScore(
+                    name=name,
+                    raw_value=_f(raw[name].get(sym)),
+                    standardised=_f(standardised[name].get(sym)),
+                    weight=round(effective[name], 4),
+                    available=pd.notna(raw[name].get(sym)),
+                    evidence_tier=_TIER.get(name),
+                    citation=_CITE.get(name),
+                )
         scores.append(
             StockScore(
                 ticker=str(sym),
@@ -477,6 +511,35 @@ def _redundancy(frame: pd.DataFrame, cfg) -> RedundancyReport:
     )
 
 
+#: Sources for the fitted factors, so a card citing them can be checked.
+_MODEL_CITE = {
+    "mom_12_1": "Jegadeesh & Titman (1993)",
+    "mom_6_1": "Jegadeesh & Titman (1993)",
+    "mom_3_1": "Jegadeesh & Titman (1993)",
+    "reversal_1m": "Jegadeesh (1990)",
+    "vol_60": "Ang, Hodrick, Xing & Zhang (2006)",
+    "downside_vol": "Ang, Chen & Xing (2006)",
+    "beta_120": "Frazzini & Pedersen (2014)",
+    "idio_vol": "Ang, Hodrick, Xing & Zhang (2006)",
+    "amihud": "Amihud (2002)",
+    "turnover_ratio": "Datar, Naik & Radcliffe (1998)",
+    "rel_strength": "Moskowitz & Grinblatt (1999)",
+    "dist_200dma": "Moskowitz & Grinblatt (1999)",
+    "trend_r2": "trend quality; no single source",
+    "max_dd_120": "tail risk; no single source",
+    "prox_52w": "George & Hwang (2004)",
+    "max5_21": "Bali, Cakici & Whitelaw (2011)",
+    "resid_mom": "Blitz, Huij & Martens (2011)",
+    "deliv_pct": "NSE delivery data; India-specific, no standard reference",
+    "deliv_trend": "NSE delivery data; India-specific, no standard reference",
+    "earnings_yield": "Basu (1977)",
+    "net_margin": "Novy-Marx (2013)",
+    "interest_coverage": "Altman (1968)",
+    "earnings_growth": "Novy-Marx (2013)",
+    "earnings_stability": "Sloan (1996)",
+}
+
+
 def _cross_sectional_model(store, symbols, as_of, cfg):
     """Fit the ridge ranker on history strictly before ``as_of``.
 
@@ -501,7 +564,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
             columns=[DATE, SYMBOL, "close", "turnover"],
         )
         if px.empty:
-            return None, None, "no price rows"
+            return None, None, "no price rows", None
         px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
         close = px.pivot_table(index=DATE, columns=SYMBOL, values="close", aggfunc="last").sort_index()
         turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover", aggfunc="last").sort_index()
@@ -535,8 +598,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
                                       max_fundamental_age_days=max_age,
                                       delivery=delivery)
             if feats is None:
-                return None, None, "no symbol had a complete feature set today"
-            return cm.score_with(cached, feats), cached, None
+                return None, None, "no symbol had a complete feature set today", None
+            return cm.score_with(cached, feats), cached, None, feats
 
         scores, model, reason = cm.fit_predict(
             close, turnover, as_of,
@@ -549,10 +612,16 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         )
         if model is not None:
             cm.save_cache(cache, model, as_of)
-        return scores, model, reason
+            live = cm.today_features(close, turnover, as_of,
+                                     fundamentals=fundamentals,
+                                     max_fundamental_age_days=max_age,
+                                     delivery=delivery)
+        else:
+            live = None
+        return scores, model, reason, live
     except Exception as exc:  # a modelling failure must not take the run down
         log.warning("cross-sectional model failed", extra={"error": str(exc)})
-        return None, None, f"{type(exc).__name__}: {exc}"
+        return None, None, f"{type(exc).__name__}: {exc}", None
 
 
 class ModelUnavailable(PipelineError):

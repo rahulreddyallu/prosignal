@@ -1128,6 +1128,13 @@ stage5_false_signal:
     action: "hard_reject"            # unless a validated PEAD signal applies
     # Also penalise if results were released very recently (post-event drift
     # window contamination) without a validated PEAD signal.
+    # Sessions before a confirmed results date within which the candidate is
+    # rejected. Stage 3 already screens on a wider window; this is the last
+    # guard for a name whose date was confirmed after that screen ran.
+    upcoming_earnings_sessions:
+      value: 5
+      status: UNVALIDATED
+      search_range: [0, 21]
     recent_earnings_sessions:
       value: 3
       status: UNVALIDATED
@@ -1145,18 +1152,6 @@ stage5_false_signal:
       value: 30
       status: UNVALIDATED
       search_range: [5, 90]
-
-  insider_activity:
-    enabled: true
-    lookback_sessions: 30
-    penalty:
-      value: 0.10
-      status: UNVALIDATED
-      search_range: [0.0, 0.3]
-
-  regulatory_shock:
-    enabled: true
-    action: "hard_reject"
 
   # ---- 5.4 Regime / market-wide ----
   regime_transition:

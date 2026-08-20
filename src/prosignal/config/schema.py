@@ -903,6 +903,7 @@ class OverextensionConfig(_Base):
 class EarningsDistortionConfig(_Base):
     enabled: bool = True
     action: str = "hard_reject"
+    upcoming_earnings_sessions: TI
     recent_earnings_sessions: TI
     recent_earnings_penalty: TF
 
@@ -911,17 +912,6 @@ class CorporateActionDistortionConfig(_Base):
     enabled: bool = True
     action: str = "hard_reject"
     lookback_sessions: TI
-
-
-class InsiderActivityConfig(_Base):
-    enabled: bool = True
-    lookback_sessions: TI
-    penalty: TF
-
-
-class RegulatoryShockConfig(_Base):
-    enabled: bool = True
-    action: str = "hard_reject"
 
 
 class RegimeTransitionCheckConfig(_Base):
@@ -965,8 +955,6 @@ class Stage5Config(_Base):
     overextension: OverextensionConfig
     earnings_distortion: EarningsDistortionConfig
     corporate_action_distortion: CorporateActionDistortionConfig
-    insider_activity: InsiderActivityConfig
-    regulatory_shock: RegulatoryShockConfig
     regime_transition: RegimeTransitionCheckConfig
     volatility_shock: VolatilityShockConfig
     momentum_crash: MomentumCrashConfig

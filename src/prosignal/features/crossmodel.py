@@ -35,7 +35,7 @@ from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
 from .linear import predict, ridge_fit
 
 __all__ = ["CrossSectionalModel", "fit_predict", "load_cached", "save_cache",
-           "score_with", "today_features"]
+           "score_with", "today_features", "contributions", "standardised_features"]
 
 log = get_logger(__name__)
 
@@ -163,6 +163,36 @@ def score_with(model: CrossSectionalModel, features: pd.DataFrame) -> pd.Series:
     raw = ((x - model.mu) / model.sd) @ coef + model.intercept
     s = pd.Series(raw, index=features["symbol"].to_numpy())
     return ((s.rank(pct=True) - 0.5) * 2.0).sort_values(ascending=False)
+
+
+def contributions(model: CrossSectionalModel, features: pd.DataFrame) -> pd.DataFrame:
+    """Per-factor contribution to each symbol's score.
+
+    The score is a sum of standardised factors times fitted coefficients, so
+    each term is directly attributable and the terms add back to the score.
+    This is what the card must cite: quoting the hand-weighted composite's
+    factors beside a number the model produced describes a calculation that did
+    not happen.
+    """
+    x = features[FEATURE_COLUMNS].to_numpy("float64")
+    z = (x - model.mu) / np.where(model.sd == 0, 1.0, model.sd)
+    coef = np.array([model.coef[c] for c in FEATURE_COLUMNS], dtype="float64")
+    return pd.DataFrame(
+        z * coef,
+        index=features["symbol"].to_numpy(),
+        columns=[c[:-2] if c.endswith("_r") else c for c in FEATURE_COLUMNS],
+    )
+
+
+def standardised_features(model: CrossSectionalModel, features: pd.DataFrame) -> pd.DataFrame:
+    """The z-scores the coefficients multiply, for the same columns."""
+    x = features[FEATURE_COLUMNS].to_numpy("float64")
+    z = (x - model.mu) / np.where(model.sd == 0, 1.0, model.sd)
+    return pd.DataFrame(
+        z,
+        index=features["symbol"].to_numpy(),
+        columns=[c[:-2] if c.endswith("_r") else c for c in FEATURE_COLUMNS],
+    )
 
 
 def _attach_fundamentals(
