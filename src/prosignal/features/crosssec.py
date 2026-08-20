@@ -20,20 +20,33 @@ import pandas as pd
 __all__ = ["FEATURES", "build_panel", "cross_sectional_rank"]
 
 #: name -> (lookback sessions needed, description)
+#:
+#: Seven factors were removed after a marginal-IC test. Each was regressed on
+#: the others in its correlation block and the residual scored against forward
+#: returns: a factor whose residual carries no information is a restatement of
+#: its neighbours, however well it scores alone.
+#:
+#:   momentum    mom_12_1 (marginal t -0.64) and mom_3_1 (-0.27) are spanned by
+#:               mom_6_1 (+1.62) and resid_mom (+1.43)
+#:   volatility  vol_60 (-0.96) and idio_vol (-0.92) are spanned by
+#:               downside_vol (-2.89)
+#:   trend       dist_200dma (-0.34), rel_strength (+0.06) and trend_r2 (+0.48)
+#:               are spanned by prox_52w (+2.70)
+#:
+#: dist_200dma is the clearest case: raw IC t 2.86, marginal t -0.34. It is a
+#: good factor and it says nothing prox_52w has not already said.
+#:
+#: Holdout after the trim, 36 periods: IC +0.0512 -> +0.0530 (t 2.24 -> 2.43)
+#: with seven fewer factors. Standardised unexpected earnings was built and
+#: measured as a replacement and rejected: selection IC +0.0479 (t 2.60),
+#: holdout -0.0003 (t -0.02).
 FEATURES: Dict[str, Tuple[int, str]] = {
-    "mom_12_1":      (294, "12-1 momentum: return over 273 sessions ending 21 back (Jegadeesh & Titman 1993)"),
     "mom_6_1":       (147, "6-1 momentum"),
-    "mom_3_1":       (84,  "3-1 momentum"),
     "reversal_1m":   (22,  "last 21-session return; short-horizon reversal (Jegadeesh 1990)"),
-    "vol_60":        (61,  "realised volatility, 60 sessions, annualised"),
     "downside_vol":  (61,  "downside deviation of daily returns, 60 sessions"),
     "beta_120":      (121, "OLS beta against the equal-weight universe, 120 sessions"),
-    "idio_vol":      (121, "residual volatility from that beta regression"),
     "amihud":        (61,  "Amihud (2002) illiquidity: mean(|ret| / turnover)"),
     "turnover_ratio":(61,  "mean turnover over 60 sessions, log"),
-    "rel_strength":  (126, "stock return minus universe return, 126 sessions"),
-    "dist_200dma":   (201, "close / 200-session mean - 1"),
-    "trend_r2":      (121, "R-squared of an OLS fit on log close, 120 sessions"),
     "max_dd_120":    (121, "maximum drawdown over 120 sessions"),
     "prox_52w":      (253, "close / 252-session high - 1 (George & Hwang 2004)"),
     "max5_21":       (22,  "mean of the 5 largest daily returns in 21 sessions; lottery demand (Bali, Cakici & Whitelaw 2011)"),
@@ -99,13 +112,10 @@ def _features_at(
     def past(k: int) -> pd.Series:
         return hist.iloc[-1 - k] if len(hist) > k else pd.Series(index=hist.columns, dtype="float64")
 
-    out["mom_12_1"] = past(21) / past(294) - 1.0
     out["mom_6_1"] = past(21) / past(147) - 1.0
-    out["mom_3_1"] = past(21) / past(84) - 1.0
     out["reversal_1m"] = last / past(21) - 1.0
 
     r60 = ret.tail(60)
-    out["vol_60"] = r60.std(ddof=1) * np.sqrt(252)
     out["downside_vol"] = r60.where(r60 < 0).std(ddof=1) * np.sqrt(252)
 
     out["prox_52w"] = last / hist.tail(252).max() - 1.0
@@ -130,17 +140,16 @@ def _features_at(
 
     r120 = ret.tail(120)
     bench = bench_ret[-len(r120):] if len(bench_ret) >= len(r120) else bench_ret
-    betas, idios = {}, {}
+    betas = {}
     for s in r120.columns:
         y = r120[s].to_numpy(dtype="float64")
         mask = np.isfinite(y) & np.isfinite(bench)
         if mask.sum() < 40:
-            betas[s], idios[s] = np.nan, np.nan
+            betas[s] = np.nan
             continue
-        b, rsd = _ols_beta_resid(y[mask], bench[mask])
-        betas[s], idios[s] = b, (rsd * np.sqrt(252) if np.isfinite(rsd) else np.nan)
+        b, _ = _ols_beta_resid(y[mask], bench[mask])
+        betas[s] = b
     out["beta_120"] = pd.Series(betas)
-    out["idio_vol"] = pd.Series(idios)
 
     t60 = tno.tail(60)
     absret = ret.tail(60).abs()
@@ -149,15 +158,6 @@ def _features_at(
     out["amihud"] = illiq
     out["turnover_ratio"] = np.log1p(t60.mean())
 
-    out["rel_strength"] = (last / past(126) - 1.0) - float(
-        np.nanmean((last / past(126) - 1.0).to_numpy(dtype="float64"))
-    )
-    out["dist_200dma"] = last / hist.tail(200).mean() - 1.0
-
-    logp = np.log(hist.tail(120))
-    out["trend_r2"] = pd.Series(
-        {s: _trend_r2(logp[s].dropna().to_numpy(dtype="float64")) for s in logp.columns}
-    )
     win = hist.tail(120)
     out["max_dd_120"] = (win / win.cummax() - 1.0).min()
 

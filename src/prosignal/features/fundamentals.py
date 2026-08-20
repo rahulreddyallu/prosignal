@@ -174,16 +174,55 @@ def _one_symbol(quarters: pd.DataFrame, price: Optional[float]) -> Optional[Dict
             out["earnings_growth"] = (recent - prior) / abs(prior)
 
     # -- earnings stability --------------------------------------------------
-    valid = profits[~np.isnan(profits)]
-    if valid.size >= 4:
-        mean = float(np.mean(valid))
+    # Measured on a trailing-twelve-month series, not on raw quarters.
+    #
+    # Indian quarterly earnings carry genuine seasonality: festive-quarter
+    # retail, agri-linked cyclicality, monsoon-driven construction. A company
+    # that earns the same amount every Q3 and every Q1 -- year after year, with
+    # no surprises -- has a large dispersion across raw quarters and would score
+    # as unstable. That penalises a predictable seasonal pattern as though it
+    # were risk, which is the opposite of what this factor is for.
+    #
+    # Each TTM window spans four consecutive quarters, so every season appears
+    # exactly once in each and the seasonal component cancels. What is left is
+    # variation in the annual earning power, which is the thing worth measuring.
+    # This also matches how earnings_growth is already built (TTM against the
+    # prior-year TTM), so the two quality components now deseasonalise the same
+    # way rather than disagreeing about what a quarter means.
+    #
+    # The windows overlap, which damps the estimate relative to independent
+    # annual observations. Non-overlapping years would need far more history
+    # than a filing feed reliably carries, and the ranking is cross-sectional:
+    # every name is damped identically, so the ordering is unaffected.
+    ttm_series = _rolling_ttm(profits)
+    if ttm_series.size >= 3:
+        mean = float(np.mean(ttm_series))
         if abs(mean) > 0:
-            cv = float(np.std(valid, ddof=1)) / abs(mean)
+            cv = float(np.std(ttm_series, ddof=1)) / abs(mean)
             # Negated so that higher is better, matching every other quality
             # component and removing a sign trap at the weighting step.
             out["earnings_stability"] = -cv
 
     return out
+
+
+def _rolling_ttm(values: np.ndarray) -> np.ndarray:
+    """Overlapping trailing-twelve-month sums, newest first.
+
+    ``values`` arrives newest first, so window ``i`` covers quarters ``i`` to
+    ``i + 3``. A window containing a missing quarter is dropped rather than
+    summed around: three quarters plus a gap is not a year, and treating it as
+    one would understate the level and overstate the variation.
+    """
+    if values.size < _TTM_QUARTERS:
+        return np.array([], dtype="float64")
+    windows = []
+    for i in range(values.size - _TTM_QUARTERS + 1):
+        chunk = values[i:i + _TTM_QUARTERS]
+        if np.isnan(chunk).any():
+            continue
+        windows.append(float(np.sum(chunk)))
+    return np.array(windows, dtype="float64")
 
 
 def _series(frame: pd.DataFrame, column: str) -> np.ndarray:
