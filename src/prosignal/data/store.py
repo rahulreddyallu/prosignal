@@ -36,6 +36,7 @@ import pandas as pd
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from .schema import SCHEMAS, validate_feed
 from ..core.errors import DataError
 from ..core.errors import IntegrityError
 from ..core.logging import get_logger
@@ -261,6 +262,22 @@ class _PartitionedTable:
         return sorted(out)
 
 
+def _validate(frame: "pd.DataFrame", schema_key: str, where: str) -> None:
+    """Gate every curated write on the feed's declared shape.
+
+    Placed at the store rather than at each provider so a new ingest path
+    cannot reach the curated files without passing the same checks. An empty
+    frame is allowed through: writers already treat it as a no-op, and
+    rejecting it here would turn a quiet day into an integrity failure.
+    """
+    if frame is None or len(frame) == 0:
+        return
+    schema = SCHEMAS.get(schema_key)
+    if schema is None:
+        return
+    validate_feed(frame, schema, context=where)
+
+
 class DataStore:
     """Everything the engine has persisted, addressed by feed."""
 
@@ -288,6 +305,7 @@ class DataStore:
     # prices
     # =====================================================================
     def write_prices(self, df: pd.DataFrame) -> int:
+        _validate(df, "prices", "write_prices")
         return self.prices.write(df)
 
     #: What the stages actually consume. The price table has 18 columns; no
@@ -468,6 +486,7 @@ class DataStore:
     # indices
     # =====================================================================
     def write_indices(self, df: pd.DataFrame) -> int:
+        _validate(df, "indices", "write_indices")
         return self.indices.write(df)
 
     def read_indices(
@@ -544,6 +563,7 @@ class DataStore:
     # delivery / open interest
     # =====================================================================
     def write_delivery(self, df: pd.DataFrame) -> int:
+        _validate(df, "delivery", "write_delivery")
         return self.delivery.write(df)
 
     def read_delivery(
@@ -620,7 +640,22 @@ class DataStore:
         return self.read_table("sector_map")
 
     def write_corporate_actions(self, df: pd.DataFrame) -> int:
-        return self.write_table("corporate_actions", df, [SYMBOL, "ex_date", "action_type"])
+        """Merge into the existing table, then collapse duplicate descriptions.
+
+        write_table dedups on its key alone, and the key includes action_type,
+        so NSE's "bonus" and yfinance's "split_or_bonus" for one event both
+        survive and the ratio is applied twice. The collapse has to happen after
+        the merge, on the combined table, not on the incoming frame.
+        """
+        from .corporate_actions import dedupe_actions
+
+        _validate(df, "corporate_actions", "write_corporate_actions")
+        self.write_table("corporate_actions", df, [SYMBOL, "ex_date", "action_type"])
+        existing = self.read_table("corporate_actions")
+        if existing.empty:
+            return 0
+        collapsed = dedupe_actions(existing)
+        return self.replace_table("corporate_actions", collapsed)
 
     def read_corporate_actions(self) -> pd.DataFrame:
         out = self.read_table("corporate_actions")

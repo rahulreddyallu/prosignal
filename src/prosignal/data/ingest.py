@@ -799,12 +799,28 @@ class DataIngestor:
             except ProviderError as exc:
                 log.warning("corporate action fetch failed", extra={"error": exc.message})
 
-        # CSV last: a hand-curated entry beats a scraped one.
-        merged = merge_action_sources(yf_actions, csv_actions)
+        # NSE is the issuer of record and the only source that reports each
+        # action separately, so a date carrying both a split and a bonus keeps
+        # both. yfinance stores one ratio per date and silently drops the
+        # second, which is what left a residual -80% print in the adjusted
+        # series for compound events.
+        nse_actions = pd.DataFrame()
+        if need_refresh:
+            try:
+                nse_actions = self.nse.fetch_corporate_actions(
+                    as_of - dt.timedelta(days=3650), as_of
+                )
+            except Exception as exc:
+                log.warning("NSE corporate action fetch failed",
+                            extra={"error": str(exc)})
+
+        # Order is precedence: yfinance is the fallback, NSE overrides it, and a
+        # hand-curated CSV overrides both.
+        merged = merge_action_sources(yf_actions, nse_actions, csv_actions)
         if not merged.empty:
             self.store.write_corporate_actions(merged)
             self.store.update_feed_state(
-                "corporate_actions", as_of, "yfinance+csv", len(merged)
+                "corporate_actions", as_of, "nse+yfinance+csv", len(merged)
             )
 
         stored = self.store.read_corporate_actions()

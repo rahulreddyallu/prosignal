@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import sys
 from typing import List, Optional
 
@@ -1065,6 +1066,20 @@ def build_parser() -> argparse.ArgumentParser:
     analyse_p = sub.add_parser("analyse", help="run individual pipeline stages")
     analyse_sub = analyse_p.add_subparsers(dest="subcommand")
 
+    shadow = analyse_sub.add_parser(
+        "shadow",
+        help="run the full pipeline and record it WITHOUT issuing anything",
+    )
+    shadow.add_argument("--date", help="decision date (YYYY-MM-DD)")
+    shadow.set_defaults(func=_cmd_analyse_shadow)
+
+    parity = analyse_sub.add_parser(
+        "parity",
+        help="diff a recorded shadow run against a replay of the same date",
+    )
+    parity.add_argument("--date", required=True, help="date to reconcile (YYYY-MM-DD)")
+    parity.set_defaults(func=_cmd_analyse_parity)
+
     regime = analyse_sub.add_parser(
         "regime", help="Stage 2 -- market regime for a date"
     )
@@ -1092,6 +1107,58 @@ def build_parser() -> argparse.ArgumentParser:
     full.set_defaults(func=cmd_analyse_run)
 
     return parser
+
+
+SHADOW_DIR = "shadow"
+
+
+def _shadow_path(config, as_of):
+    root = config.paths.curated.parent / SHADOW_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{as_of.isoformat()}.json"
+
+
+def _cmd_analyse_shadow(config, args) -> int:
+    """Run the pipeline live and record it, wired to nothing.
+
+    Shadow mode exists to answer a question the backtest cannot: did the live
+    pipeline, on the day, see what the backtest assumes it saw. It writes a
+    snapshot and returns. It does not issue, notify, or persist a
+    recommendation anywhere a reader could mistake for a decision.
+    """
+    import json as _json
+    from .parity import snapshot_run
+    from .pipeline import run_analysis
+
+    run = run_analysis(config, as_of=_resolve_arg_date(getattr(args, "date", None)))
+    as_of = dt.date.fromisoformat(str(run.output.as_of_date)[:10])
+    snapshot = snapshot_run(run)
+    snapshot["shadow"] = True
+    path = _shadow_path(config, as_of)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(_json.dumps(snapshot, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+    _print(f"shadow run recorded for {as_of} -> {path}")
+    _print("  NOT a decision: this output is wired to nothing.")
+    return 0
+
+
+def _cmd_analyse_parity(config, args) -> int:
+    """Replay a date from the settled store and diff it against the shadow run."""
+    import json as _json
+    from .parity import compare_snapshots, snapshot_run
+    from .pipeline import run_analysis
+
+    as_of = dt.date.fromisoformat(args.date)
+    path = _shadow_path(config, as_of)
+    if not path.is_file():
+        _print(f"no shadow run recorded for {as_of}. Run `analyse shadow` on the day.")
+        return 2
+    live = _json.loads(path.read_text(encoding="utf-8"))
+    replay = snapshot_run(run_analysis(config, as_of=as_of))
+    report = compare_snapshots(live, replay)
+    _print(report.render())
+    return 0 if report.clean else 1
 
 
 def main(argv: Optional[List[str]] = None) -> int:

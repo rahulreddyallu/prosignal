@@ -476,6 +476,13 @@ class RiskPlan(_Contract):
     exit_conditions: List[ExitCondition] = Field(default_factory=list)
     estimated_round_trip_cost_bps: Optional[float] = None
     estimated_impact_bps: Optional[float] = None
+
+    #: Recent turnover against the trailing average the position was sized on.
+    #: Sizing uses 21 sessions, which is exactly the window that lags when
+    #: liquidity dries up. None when either window is unavailable.
+    liquidity_ratio_recent: Optional[float] = None
+    liquidity_warning: Optional[str] = None
+
     notes: List[str] = Field(default_factory=list)
 
 

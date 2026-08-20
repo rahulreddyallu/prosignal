@@ -41,6 +41,7 @@ from ..core.logging import get_logger
 from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
+from ..features.refit_gate import review_refit
 from ..features.crossmodel import (
     contributions as cm_contributions,
     standardised_features as cm_standardised,
@@ -249,9 +250,13 @@ def run(
     # date, so nothing in training overlaps today. When there is too little
     # history the model abstains and the hand-weighted composite stands, which
     # is stated on the card rather than substituted quietly.
-    model_scores, model, model_unavailable, model_features = _cross_sectional_model(
-        store, symbols, as_of, cfg
-    )
+    (model_scores, model, model_unavailable, model_features,
+     refit_verdict) = _cross_sectional_model(store, symbols, as_of, cfg)
+    if refit_verdict is not None and not refit_verdict.accepted:
+        notes.append(
+            f"Refit held back: {refit_verdict.summary()}. The previous "
+            f"coefficients remain live and this needs manual review."
+        )
     if model_unavailable and _is_model_failure(model_unavailable) and not _model_optional(cfg):
         # The hand-weighted composite this would fall back to was measured at
         # -0.047%/month excess over an equal-weight benchmark, t = -0.11. Quietly
@@ -580,7 +585,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
             columns=[DATE, SYMBOL, "close", "turnover"],
         )
         if px.empty:
-            return None, None, "no price rows", None
+            return None, None, "no price rows", None, None
         px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
         close = px.pivot_table(index=DATE, columns=SYMBOL, values="close", aggfunc="last").sort_index()
         turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover", aggfunc="last").sort_index()
@@ -618,8 +623,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
                                       max_fundamental_age_days=max_age,
                                       delivery=delivery)
             if feats is None:
-                return None, None, "no symbol had a complete feature set today", None
-            return cm.score_with(cached, feats), cached, None, feats
+                return None, None, "no symbol had a complete feature set today", None, None
+            return cm.score_with(cached, feats), cached, None, feats, None
 
         scores, model, reason = cm.fit_predict(
             close, turnover, as_of,
@@ -631,17 +636,42 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
             delivery=delivery,
         )
         if model is not None:
-            cm.save_cache(cache, model, as_of)
+            # A refit is proposed, not installed. This is the one path where a
+            # bad upstream date reaches every future decision at once without
+            # failing anything, so the new coefficients are compared against the
+            # live ones before they replace them.
+            previous, previous_end = cm.read_cached_coefficients(cache)
+            verdict = review_refit(model.coef, previous, previous_end)
+            if verdict.accepted:
+                cm.archive_cache(cache)
+                cm.save_cache(cache, model, as_of)
+            else:
+                log.warning("refit rejected; previous coefficients stay live",
+                            extra={"verdict": verdict.summary(),
+                                   "sign_flips": verdict.sign_flips,
+                                   "magnitude_jumps": verdict.magnitude_jumps})
+                held = cm.load_cached(cache, as_of)
+                if held is not None:
+                    feats = cm.today_features(close, turnover, as_of,
+                                              fundamentals=fundamentals,
+                                              max_fundamental_age_days=max_age,
+                                              delivery=delivery)
+                    if feats is not None:
+                        return (cm.score_with(held, feats), held, None,
+                                feats, verdict)
+                # Nothing usable to hold on to, so the run cannot quietly
+                # continue on a fit that failed review.
+                return None, None, f"refit rejected: {verdict.summary()}", None, verdict
             live = cm.today_features(close, turnover, as_of,
                                      fundamentals=fundamentals,
                                      max_fundamental_age_days=max_age,
                                      delivery=delivery)
         else:
             live = None
-        return scores, model, reason, live
+        return scores, model, reason, live, None
     except Exception as exc:  # a modelling failure must not take the run down
         log.warning("cross-sectional model failed", extra={"error": str(exc)})
-        return None, None, f"{type(exc).__name__}: {exc}", None
+        return None, None, f"{type(exc).__name__}: {exc}", None, None
 
 
 class ModelUnavailable(PipelineError):

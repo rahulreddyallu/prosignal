@@ -219,7 +219,8 @@ def test_broken_feed_halts_rather_than_shrinking_the_universe(tmp_path, cfg):
     last = dates[-1]
     for symbol in symbols[:16]:
         mask = (prices[SYMBOL] == symbol) & (prices[DATE] == last)
-        prices.loc[mask, "close"] = prices.loc[mask, "close"] / 5.0
+        for _col in ("open", "high", "low", "close"):
+            prices.loc[mask, _col] = prices.loc[mask, _col] / 5.0
 
     store, cal, uni = _setup(tmp_path, prices, dates, symbols)
 
@@ -245,7 +246,8 @@ def test_failure_fraction_needs_a_population_to_be_meaningful(tmp_path, cfg):
     # Corrupt two of three names -- 67%, far above the 25% ceiling.
     for symbol in symbols[:2]:
         mask = (prices[SYMBOL] == symbol) & (prices[DATE] >= dates[-5])
-        prices.loc[mask, "close"] = prices.loc[mask, "close"] / 5.0
+        for _col in ("open", "high", "low", "close"):
+            prices.loc[mask, _col] = prices.loc[mask, _col] / 5.0
 
     store, cal, uni = _setup(tmp_path, prices, dates, symbols)
 
@@ -282,7 +284,8 @@ def test_unadjusted_split_hard_rejects_that_stock(tmp_path, cfg):
     prices = _clean_prices(symbols, dates)
 
     mask = (prices[SYMBOL] == "SPLIT") & (prices[DATE] >= dates[-5])
-    prices.loc[mask, "close"] = prices.loc[mask, "close"] / 5.0
+    for _col in ("open", "high", "low", "close"):
+        prices.loc[mask, _col] = prices.loc[mask, _col] / 5.0
 
     store, cal, uni = _setup(tmp_path, prices, dates, symbols)
     report = s1.run(_manifest(dates[-1].date()), store, cal, uni, cfg)
@@ -299,7 +302,8 @@ def test_a_declared_corporate_action_is_not_flagged(tmp_path, cfg):
     prices = _clean_prices(symbols, dates)
     split_date = dates[-5]
     mask = (prices[SYMBOL] == "SPLIT") & (prices[DATE] >= split_date)
-    prices.loc[mask, "close"] = prices.loc[mask, "close"] / 5.0
+    for _col in ("open", "high", "low", "close"):
+        prices.loc[mask, _col] = prices.loc[mask, _col] / 5.0
 
     actions = pd.DataFrame(
         [
@@ -331,7 +335,8 @@ def test_uncorroborated_spike_is_rejected_as_a_bad_tick(tmp_path, cfg):
     prices = _clean_prices(symbols, dates)
 
     mask = (prices[SYMBOL] == "TICK") & (prices[DATE] == dates[-1])
-    prices.loc[mask, "close"] = prices.loc[mask, "close"] * 1.40  # +40%, normal volume
+    for _col in ("open", "high", "low", "close"):
+        prices.loc[mask, _col] = prices.loc[mask, _col] * 1.40  # +40%, normal volume
 
     store, cal, uni = _setup(tmp_path, prices, dates, symbols)
     report = s1.run(_manifest(dates[-1].date()), store, cal, uni, cfg)
@@ -353,7 +358,8 @@ def test_the_same_move_on_heavy_volume_is_kept(tmp_path, cfg):
     prices = _clean_prices(symbols, dates)
 
     mask = (prices[SYMBOL] == "REAL") & (prices[DATE] == dates[-1])
-    prices.loc[mask, "close"] = prices.loc[mask, "close"] * 1.40
+    for _col in ("open", "high", "low", "close"):
+        prices.loc[mask, _col] = prices.loc[mask, _col] * 1.40
     prices.loc[mask, "volume"] = 500_000.0 * 6.0  # unmistakable participation
 
     store, cal, uni = _setup(tmp_path, prices, dates, symbols)

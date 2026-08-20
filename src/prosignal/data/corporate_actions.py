@@ -333,6 +333,72 @@ def detect_unexplained_jumps(
 # =============================================================================
 
 
+#: Sources ranked by authority. NSE issues the corporate action; a scraped
+#: feed reports it second-hand and sometimes a day out.
+_SOURCE_RANK = {"csv_import": 3, "nse_corporate_actions": 2, "yfinance": 1}
+
+#: Two actions for one symbol this many days apart are the same event seen by
+#: two sources, not two events. yfinance ex-dates drift by a day against NSE's
+#: -- HAL's 2023 split is 09-28 at NSE and 09-29 at Yahoo -- and applying both
+#: adjusts the series twice.
+_SAME_EVENT_DAYS = 3
+
+
+def dedupe_actions(frame: pd.DataFrame) -> pd.DataFrame:
+    """Collapse duplicate descriptions of the same corporate action.
+
+    Two independent failures are handled here, and both double-adjust a price
+    series when missed:
+
+    Same date, different label. NSE reports GAIL 2017-03-09 as "bonus" and
+    yfinance as "split_or_bonus". A key that includes the label keeps both and
+    multiplies 0.75 by itself.
+
+    Adjacent dates, same event. A source whose ex-date is a day off looks like
+    a second action the day after the first.
+
+    Dividends are exempt from both: several can genuinely share a date and none
+    of them moves the adjusted series.
+    """
+    if frame is None or frame.empty:
+        return frame if frame is not None else pd.DataFrame(columns=CORPORATE_ACTION_COLUMNS)
+
+    work = frame.copy()
+    work["ex_date"] = pd.to_datetime(work["ex_date"]).dt.normalize()
+    ratio = pd.to_numeric(work["ratio"], errors="coerce").fillna(1.0)
+    work["_rank"] = work.get("source", pd.Series("", index=work.index)).map(
+        lambda s: _SOURCE_RANK.get(str(s), 0)
+    )
+
+    neutral = work[ratio == 1.0].drop_duplicates(
+        subset=[SYMBOL, "ex_date", "action_type"], keep="last"
+    )
+
+    adjusting = work[ratio != 1.0].sort_values([SYMBOL, "ex_date", "_rank"])
+    kept: List[pd.Series] = []
+    for _, group in adjusting.groupby(SYMBOL, sort=False, observed=True):
+        cluster: List[pd.Series] = []
+
+        def _flush() -> None:
+            if cluster:
+                # Highest-authority row in the cluster; ties break to the later
+                # ex-date, which is the one the exchange actually published.
+                best = max(cluster, key=lambda r: (r["_rank"], r["ex_date"]))
+                kept.append(best)
+
+        for _, row in group.sort_values("ex_date").iterrows():
+            if cluster and (row["ex_date"] - cluster[-1]["ex_date"]).days > _SAME_EVENT_DAYS:
+                _flush()
+                cluster = []
+            cluster.append(row)
+        _flush()
+
+    adjusting_out = pd.DataFrame(kept) if kept else adjusting.head(0)
+    combined = pd.concat([adjusting_out, neutral], ignore_index=True)
+    combined = combined.drop(columns=["_rank"], errors="ignore")
+    return combined.sort_values([SYMBOL, "ex_date"]).reset_index(drop=True)
+
+
 def merge_action_sources(*frames: Optional[pd.DataFrame]) -> pd.DataFrame:
     """Combine corporate-action frames, preferring later arguments on conflict.
 
@@ -346,5 +412,4 @@ def merge_action_sources(*frames: Optional[pd.DataFrame]) -> pd.DataFrame:
     combined[SYMBOL] = combined[SYMBOL].map(normalise_symbol)
     combined["ex_date"] = pd.to_datetime(combined["ex_date"]).dt.normalize()
     combined = combined.dropna(subset=[SYMBOL, "ex_date"])
-    combined = combined.drop_duplicates(subset=[SYMBOL, "ex_date", "action_type"], keep="last")
-    return combined.sort_values([SYMBOL, "ex_date"]).reset_index(drop=True)
+    return dedupe_actions(combined)

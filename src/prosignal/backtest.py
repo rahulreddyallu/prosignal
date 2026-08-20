@@ -30,6 +30,7 @@ import pandas as pd
 from .config.loader import AppConfig
 from .core.calendar import TradingCalendar
 from .core.logging import get_logger
+from .indicators.circuit import band_state, is_untradeable
 from .costs import CostModel
 from .data.store import DataStore
 from .data.types import DATE, SYMBOL
@@ -259,6 +260,8 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
     qty = max(int(slot / entry_price), 1)
 
     mae = mfe = 0.0
+    unfilled_stop_sessions = 0
+    last_unfilled = ""
     walk = future.iloc[1:].head(max_hold)
     exit_price = None
     exit_date = None
@@ -273,6 +276,21 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
         # Pessimistic ordering: a bar touching both stop and target counts as
         # the stop. Daily bars cannot tell us which came first, and assuming
         # the favourable sequence is how a backtest inflates its win rate.
+        # A bar locked at its price band offered exactly one price all session.
+        # Filling a stop at min(open, stop) on such a day records a trade that
+        # could not have happened: the seller had no bid to hit. The position is
+        # carried forward instead, which is what actually occurs, and the
+        # unfilled attempt is recorded so it cannot be mistaken for a bar where
+        # the stop simply was not touched.
+        state = band_state(high, low, float(bar["close"]),
+                           float(bar.get("prev_close", np.nan)),
+                           float(bar.get("volume", np.nan)))
+        if is_untradeable(state):
+            if low <= stop:
+                unfilled_stop_sessions += 1
+                last_unfilled = str(state.value)
+            continue
+
         if low <= stop:
             # A gap-down opens below the stop, so the fill is the open, not the
             # stop. Filling at the stop credits a price that was never
@@ -294,6 +312,17 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
         last = walk.iloc[-1]
         exit_price, exit_date, reason = float(last["close"]), last[DATE].date(), "time_exit"
         held = len(walk)
+        if unfilled_stop_sessions:
+            # The stop was breached on a session that could not be traded and
+            # the position ran to its time exit. Naming that distinctly keeps it
+            # out of the ordinary time-exit population, where it would look like
+            # a trade that simply never hit its stop.
+            reason = "stop_unfilled_circuit"
+
+    if unfilled_stop_sessions and reason not in ("stop_unfilled_circuit",):
+        # Filled eventually, but only after a locked session. The trade is real;
+        # the note records that the exit price is later than the stop implies.
+        reason = f"{reason}_after_circuit"
 
     gross = exit_price / entry_price - 1.0
     cb = costs.round_trip(entry_price, qty, exit_price=exit_price, adtv_inr=None)

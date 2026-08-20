@@ -186,7 +186,14 @@ def test_store_write_is_idempotent(store, prices):
 def test_store_rewrite_supersedes_earlier_rows(store, prices):
     store.write_prices(prices)
     amended = prices.head(1).copy()
-    amended.loc[amended.index[0], "close"] = 999.0
+    # Keep the bar internally consistent: the store now validates OHLC
+    # invariants on write, and a close outside its own high-low range is not a
+    # revision, it is a corrupt row.
+    idx = amended.index[0]
+    amended.loc[idx, "close"] = 999.0
+    amended.loc[idx, "high"] = 1000.0
+    amended.loc[idx, "low"] = 998.0
+    amended.loc[idx, "open"] = 999.0
     store.write_prices(amended)
     out = store.read_prices(symbols=[amended.iloc[0][SYMBOL]])
     row = out[out[DATE] == amended.iloc[0][DATE]].iloc[0]

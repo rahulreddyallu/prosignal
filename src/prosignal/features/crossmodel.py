@@ -151,6 +151,47 @@ def load_cached(path, as_of: dt.date) -> Optional[CrossSectionalModel]:
         return None
 
 
+def read_cached_coefficients(path) -> Tuple[Optional[Dict[str, float]], Optional[str]]:
+    """Coefficients currently live, and the date they were trained to.
+
+    Deliberately does not go through load_cached: staleness and feature-set
+    checks are right for scoring and wrong here, where the question is only
+    what a proposed refit would be replacing.
+    """
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+        return dict(blob.get("coef") or {}), blob.get("train_end")
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, None
+
+
+def archive_cache(path, keep: int = 10) -> Optional[str]:
+    """Copy the live coefficients aside before they are overwritten.
+
+    Without this a bad refit is unrecoverable: the file it replaced is gone and
+    the only way back is a full retrain, which reproduces whatever upstream
+    problem caused the bad fit in the first place.
+    """
+    if not path.is_file():
+        return None
+    versions = path.parent / f"{path.stem}_versions"
+    versions.mkdir(parents=True, exist_ok=True)
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+        stamp = str(blob.get("fitted_for") or "unknown")
+    except (OSError, ValueError):
+        stamp = "unknown"
+    target = versions / f"{path.stem}_{stamp}.json"
+    target.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    existing = sorted(versions.glob(f"{path.stem}_*.json"))
+    for old_file in existing[:-keep]:
+        try:
+            old_file.unlink()
+        except OSError:
+            pass
+    return str(target)
+
+
 def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
