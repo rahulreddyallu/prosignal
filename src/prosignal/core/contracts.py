@@ -508,9 +508,15 @@ class Recommendation(_Contract):
     position_risk_category: RiskCategory
 
     last_close: Optional[float] = None
+    #: Score after Stage 5. This is what the gates compare against, so it is
+    #: what the card prints and what the list is ordered by.
     composite_score: float = 0.0
     universe_percentile: float = 0.0
+    #: Position among the defended candidates, ordered by composite_score.
     rank: int = 0
+    #: Position the model put it in before Stage 5 argued against it. Kept so a
+    #: penalty is visible as a demotion rather than silently rewriting history.
+    model_rank: int = 0
 
     why_this_signal_exists: List[str] = Field(default_factory=list)
     market_regime: List[str] = Field(default_factory=list)

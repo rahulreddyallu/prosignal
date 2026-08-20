@@ -59,7 +59,20 @@ def run(
     cfg = p.stage5_false_signal
     as_of = as_of or scores.as_of_date
 
-    top_n = iv(cfg.top_n_to_defend)
+    # Everything that could still become a signal has to be argued against.
+    # A fixed count was tuned when the universe held 145 eligible names, where
+    # 25 covered the top 17%. On the point-in-time universe it covers the top
+    # 4%, which silently dropped names that clear the Stage 8 score gate: they
+    # were never defended, so they could never be issued, and the funnel read
+    # "survived defense 25" when 25 was the cap rather than the attrition.
+    gate = p.stage8_final_signal.scarcity
+    min_score = fv(gate.min_composite_score)
+    min_pct = fv(gate.min_universe_percentile)
+    eligible_for_signal = [
+        sc for sc in scores.ranked_scores
+        if sc.composite_score >= min_score and sc.percentile >= min_pct
+    ]
+    top_n = max(iv(cfg.top_n_to_defend), len(eligible_for_signal))
     candidates = scores.ranked_scores[:top_n]
     if not candidates:
         return FalseSignalReport(as_of_date=as_of)

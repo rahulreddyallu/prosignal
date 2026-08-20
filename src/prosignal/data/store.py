@@ -592,6 +592,19 @@ class DataStore:
     def read_equity_master(self) -> pd.DataFrame:
         return self.read_table("equity_master")
 
+    def write_statements(self, df: pd.DataFrame) -> int:
+        return self.replace_table("statements", df)
+
+    def read_statements(self) -> pd.DataFrame:
+        """Income statement, balance sheet and cash flow by period.
+
+        Separate from `fundamentals`, which holds the NSE Ind-AS filings and
+        their true filing dates. This table carries period end only, so the
+        fundamental factor layer derives an availability date from the SEBI
+        LODR deadline rather than pretending a filing date is known.
+        """
+        return self.read_table("statements")
+
     def write_sector_map(self, df: pd.DataFrame) -> int:
         return self.replace_table("sector_map", df)
 
