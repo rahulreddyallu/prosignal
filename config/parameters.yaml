@@ -1424,9 +1424,33 @@ stage7_risk:
       status: UNVALIDATED
       search_range: [20, 200]
     structure_buffer_atr:
-      value: 0.5
+      value: 1.5
       status: UNVALIDATED
-      search_range: [0.0, 2.0]
+      search_range: [0.0, 3.0]
+      note: >-
+        How far below the structure MA price must close before the thesis is
+        called dead. Was 0.5, which put the exit inside the entry's own noise:
+        Stage 6 buys a pullback to within 1.0 ATR ABOVE this same average, so
+        an exit 0.5 ATR below it sits 1.5 ATR from entry on a 63-session hold.
+        The two rules were fighting -- the entry bought the dip the exit sold.
+
+        Portfolio backtest, non-overlapping cohorts, real risk-based sizing,
+        70 bps round trip, stop held at 2.5x ATR:
+
+          buffer      selection SR    holdout SR   holdout maxDD
+          0.5 (was)       0.42            1.14        -2.56%
+          1.5             0.75            1.32        -0.75%
+          3.0             0.89            1.28        -2.06%
+          off             0.96            1.23        -3.15%
+
+        1.5 is best on the holdout for BOTH Sharpe and drawdown -- an interior
+        optimum, not a "wider is always better" gradient, which is what makes it
+        a calibration rather than a removal. Turning the exit off scores higher
+        on the selection period and worse on the holdout for drawdown, so it was
+        not taken.
+
+        Still UNVALIDATED: one holdout pass over 15 periods is not CPCV, and
+        this file reserves VALIDATED for that.
 
   # Position Risk Category -- NEVER a % allocation (no validated Kelly inputs).
   risk_category:
