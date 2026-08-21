@@ -972,7 +972,6 @@ class ConfirmationConfig(_Base):
     volume_lookback_sessions: TI
     require_delivery_confirmation: TB
     min_delivery_pct: TF
-    reject_if_overextended: bool = True
 
 
 class PullbackTriggerConfig(_Base):
@@ -984,17 +983,21 @@ class PullbackTriggerConfig(_Base):
 
 
 class MaReclaimTriggerConfig(_Base):
+    """The reclaim trigger.
+
+    ``reference`` accepted "vwap_anchored" and the config shipped set to it,
+    with a note saying the output would say so. Nothing read the field:
+    stage6._ma_reclaim has only ever used a simple moving average, and vwap is
+    not among the columns read_prices returns. ``require_above_average_volume``
+    was likewise never read -- _ma_reclaim is not passed volumes at all, and the
+    volume bar that does apply is confirmation.volume_multiple, shared by every
+    trigger. Both are removed rather than left declaring behaviour that does not
+    exist. Restoring either means implementing it first.
+    """
+
     enabled: bool = True
-    reference: TS
     ma_sessions: TI
     lookback_sessions: TI
-    require_above_average_volume: bool = True
-
-    @model_validator(mode="after")
-    def _check(self) -> "MaReclaimTriggerConfig":
-        if self.reference.value not in {"vwap_anchored", "ma"}:
-            raise ValueError("ma_reclaim.reference must be vwap_anchored|ma")
-        return self
 
 
 class BreakoutTriggerConfig(_Base):

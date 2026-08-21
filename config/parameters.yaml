@@ -1252,7 +1252,9 @@ stage6_entry:
       value: 40.0
       status: UNVALIDATED
       search_range: [20.0, 80.0]
-    reject_if_overextended: true
+    # reject_if_overextended was declared here and never read by any stage.
+    # Removed; the distance limit that does apply is
+    # triggers.pullback.max_distance_atr.
 
   # Triggers, ordered most-confirmation-demanded first. The engine evaluates in
   # this order and stops at the first that fires. More confirmation = fewer,
@@ -1283,13 +1285,11 @@ stage6_entry:
 
     ma_reclaim:
       enabled: true
-      reference:
-        value: "vwap_anchored"       # vwap_anchored | ma
-        status: OPERATIONAL
-        note: >-
-          True intraday VWAP needs tick data. "vwap_anchored" uses the NSE
-          bhavcopy AVG_PRICE (turnover/volume) as an honest daily proxy and
-          says so in the output. Set to "ma" to use a plain moving average.
+      # This trigger compares price to a simple moving average of ma_sessions.
+      # A "reference: vwap_anchored" option was declared here and validated by
+      # the loader, but no code read it and vwap is not a column read_prices
+      # returns -- the trigger has only ever used an SMA. Removed rather than
+      # left promising a calculation that does not happen.
       ma_sessions:
         value: 20
         status: UNVALIDATED
@@ -1298,7 +1298,9 @@ stage6_entry:
         value: 10
         status: UNVALIDATED
         search_range: [3, 30]
-      require_above_average_volume: true
+      # require_above_average_volume was declared here and never read; the
+      # volume bar that actually applies is confirmation.volume_multiple below,
+      # which every trigger shares.
 
     breakout:
       enabled: true
