@@ -143,3 +143,31 @@ def live_cfg():
     if not store.price_sessions():
         pytest.skip("no ingested data; run `prosignal data ingest --full`")
     return cfg
+
+
+@pytest.fixture
+def tmp_store_config(tmp_path):
+    """A config pointed at an empty store, for manifest checks."""
+    import datetime as dt
+
+    import pandas as pd
+
+    from prosignal.config.loader import load_config
+    from prosignal.data.store import DataStore
+
+    config = load_config()
+    curated = tmp_path / "curated"
+    snapshots = tmp_path / "snapshots"
+    curated.mkdir(parents=True, exist_ok=True)
+    snapshots.mkdir(parents=True, exist_ok=True)
+    store = DataStore(curated, snapshots)
+    # one session so TradingCalendar can be built
+    sessions = [dt.date(2026, 1, 5), dt.date(2026, 1, 6)]
+    frame = pd.DataFrame({
+        "date": pd.to_datetime(sessions), "symbol": ["AAA", "AAA"],
+        "series": ["EQ", "EQ"], "open": [10.0, 11.0], "high": [11.0, 12.0],
+        "low": [9.0, 10.0], "close": [10.5, 11.5], "volume": [1000, 1000],
+        "turnover": [10500.0, 11500.0], "deliv_pct": [40.0, 41.0],
+    })
+    store.prices.write(frame)
+    return config, store, sessions[-1]
