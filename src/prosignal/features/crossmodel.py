@@ -298,17 +298,13 @@ def _attach_fundamentals(
         mcap = (px.reindex(sh.index) * sh).dropna()
         if len(mcap) < 20:
             continue
-        # Staleness is judged against each panel date, not the newest one. A
-        # single global cutoff discards every statement older than the last
-        # decision date, which silently emptied the block for the whole
-        # training window and left the five columns constant.
-        visible = st
-        if max_age_days:
-            visible = st[st["period_end"] >= ts - pd.Timedelta(days=int(max_age_days))]
-        if visible.empty:
-            continue
-        feats = build_fundamental_panel(visible, mcap, ts.date(),
-                                        enabled=FUNDAMENTAL_FEATURES)
+        # Staleness is enforced inside the TTM, per symbol, against this panel
+        # date. Filtering the statement rows here instead removed the older
+        # quarters a trailing-twelve-month sum is built from, so the names the
+        # cutoff was meant to keep current were the ones it made uncomputable.
+        feats = build_fundamental_panel(st, mcap, ts.date(),
+                                        enabled=FUNDAMENTAL_FEATURES,
+                                        max_age_days=max_age_days)
         if feats is None or feats.empty:
             continue
         f = feats.reset_index().rename(columns={"index": "symbol"})
