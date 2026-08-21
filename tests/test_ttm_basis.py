@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 
 from prosignal.features.fundamental_factors import (
+    ANNUAL_LAG_DAYS,
     FLOW_FIELDS,
     _prior,
     _ttm,
@@ -129,3 +130,32 @@ def test_the_panel_is_computed_off_quarterly_filings_in_the_blackout_window():
     assert panel["earnings_yield"].notna().mean() == pytest.approx(1.0)
     # earnings_yield must reflect the four-quarter sum, not one quarter.
     assert panel.loc["S00", "earnings_yield"] == pytest.approx(44.0 / 1000.0)
+
+
+def test_the_staleness_cutoff_spans_a_full_reporting_cycle():
+    """A 31 March year end must stay usable until its successor is filed.
+
+    Consecutive Indian annual results are 365 days apart in availability (31
+    March year end, due 60 days later). Any cutoff below that opens a window
+    each year where the current report has aged out and the next has not
+    arrived. At the previous 240 the window ran mid-December to late May and
+    the value block covered ~9% of the universe throughout it.
+    """
+    from prosignal.config.loader import load_config
+
+    configured = int(load_config().params.stage4_core_score.max_fundamental_age_days)
+    assert configured >= 365 + ANNUAL_LAG_DAYS, (
+        f"max_fundamental_age_days={configured} is shorter than one reporting "
+        f"cycle plus the filing deadline ({365 + ANNUAL_LAG_DAYS}); the value "
+        f"block will go dark for {365 + ANNUAL_LAG_DAYS - configured} days a year"
+    )
+
+
+def test_an_annual_report_survives_until_its_successor_lands():
+    annual = _rows("ACME", ["2025-03-31"], "annual",
+                   Net_Income=[400.0], Common_Stock_Equity=[2000.0])
+    # 2026-03-31 results are not public until 2026-05-30. On 2026-05-01 the only
+    # figure available is the 2025 one, 396 days old.
+    on = pd.Timestamp("2026-05-01")
+    assert _ttm(annual, "Net Income", on, max_age_days=240).empty
+    assert _ttm(annual, "Net Income", on, max_age_days=425)["ACME"] == pytest.approx(400.0)

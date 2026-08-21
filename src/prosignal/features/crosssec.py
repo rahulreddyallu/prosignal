@@ -105,7 +105,13 @@ def _features_at(
     """Features for every symbol using rows 0..i inclusive. Never touches i+1."""
     hist = close.iloc[: i + 1]
     tno = turnover.iloc[: i + 1]
-    ret = hist.pct_change()
+    # fill_method=None, matching every other module. pandas pads by default, which
+    # invents a 0% return on a session the stock did not trade and then books the
+    # whole multi-session move on the next real one. 35% of names carry an interior
+    # gap, so the pad understates downside_vol and max5_21, makes amihud read more
+    # liquid than the name is, and estimates beta against a shifted series.
+    # universe.forbid_forward_fill_across_sessions declares this must not happen.
+    ret = hist.pct_change(fill_method=None)
     out: Dict[str, pd.Series] = {}
     last = hist.iloc[-1]
 
@@ -202,7 +208,7 @@ def build_panel(
     strictly after the feature date.
     """
     dates = list(close.index)
-    bench_full = close.mean(axis=1).pct_change().to_numpy(dtype="float64")
+    bench_full = close.mean(axis=1).pct_change(fill_method=None).to_numpy(dtype="float64")
     rows: List[pd.DataFrame] = []
     for i in range(MIN_LOOKBACK, len(dates) - horizon, step):
         feats = _features_at(close, turnover, i, bench_full[: i + 1], delivery=delivery)

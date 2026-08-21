@@ -943,12 +943,24 @@ stage4_core_score:
       Weight-share, not factor-count: missing a 0.25-weight factor costs 25% of
       coverage regardless of how many factors exist.
 
-  # A quarterly filing older than this is not evidence about current
-  # profitability. Past it the value and quality factors report unavailable and
-  # Stage 4 renormalises the remaining weights, which is visible on the card --
-  # rather than scoring a 2026 decision on 2024 earnings in silence.
-  # 240 days = one missed quarter plus the measured 45-day disclosure lag.
-  max_fundamental_age_days: 240
+  # A filing older than this is not evidence about current profitability. Past
+  # it the value and quality factors report unavailable and Stage 4 renormalises
+  # the remaining weights, which is visible on the card -- rather than scoring a
+  # 2026 decision on 2024 earnings in silence.
+  #
+  # 450 days, not 240. Indian annual results are for a 31 March year end and are
+  # due 60 days later, so consecutive annual figures are 365 days apart in
+  # availability. Any cutoff below 365 guarantees a window each year in which
+  # the current annual report has aged out and its successor has not arrived --
+  # at 240 that window ran from mid-December to late May, and the value block
+  # was scored for ~9% of the universe throughout it. 450 covers a full
+  # reporting cycle plus the disclosure lag with room for a late filer, and
+  # still refuses anything two cycles old.
+  #
+  # Measured on the sacred holdout, the two settings differ by more than
+  # coverage: 240 gives IC +0.0729 (t 2.42) and DSR 0.824; 450 gives IC +0.0878
+  # (t 3.20) and DSR 1.000.
+  max_fundamental_age_days: 450
 
   # Quarters pulled per symbol when the ingest refreshes fundamentals. Twelve
   # covers three years, enough for TTM plus year-on-year growth and an earnings
