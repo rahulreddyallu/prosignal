@@ -207,11 +207,24 @@ def _check_required_feeds(manifest: RawDataManifest) -> List[str]:
         detail = record.primary_source_error or "no rows returned"
         failures.append(f"required feed '{name}' is MISSING ({detail})")
 
-    for name in manifest.stale_required():
+    stale = manifest.stale_required()
+    for name in stale:
         record = manifest.feeds[name]
         failures.append(
             f"required feed '{name}' is STALE: last data {record.last_timestamp}, "
             f"{record.age_sessions} sessions old, limit {record.max_age_sessions}"
+        )
+    if stale:
+        # The engine does not ingest. `analyse run` reads the local store and
+        # nothing else, so a store falling behind is the ordinary way this
+        # fails rather than an exotic one, and the remedy belongs in the
+        # message rather than in the reader's memory.
+        failures.append(
+            "The analysis does not fetch data. Run `prosignal data ingest` to "
+            "pull the missing sessions, then run the analysis again. If the "
+            "market was closed for those days the ingest is a no-op and this "
+            "clears anyway -- age is counted in weekdays, which cannot see an "
+            "NSE holiday."
         )
 
     return failures

@@ -188,7 +188,7 @@ class DataIngestor:
             self._ingest_secondary_prices(universe.symbols, as_of, calendar, opts)
             self._ingest_corporate_actions(universe.symbols, as_of, calendar, opts)
             self._ingest_earnings(universe.symbols, as_of, calendar, opts)
-        self._ingest_csv_feeds(as_of, calendar)
+        self._ingest_csv_feeds(as_of, calendar, opts, universe.symbols)
 
         # Keep the raw cache inside its budget after every run, so the ceiling
         # holds without anyone having to remember to run a cleanup command.
@@ -924,7 +924,8 @@ class DataIngestor:
     # =====================================================================
     # CSV-only feeds
     # =====================================================================
-    def _ingest_csv_feeds(self, as_of: dt.date, calendar: TradingCalendar) -> None:
+    def _ingest_csv_feeds(self, as_of: dt.date, calendar: TradingCalendar,
+                          opts: IngestOptions, symbols: Sequence[str]) -> None:
         p = self.config.params
 
         pledging = self.csv.load_pledging()
