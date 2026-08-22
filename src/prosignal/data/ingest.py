@@ -41,6 +41,7 @@ from .providers.http import HttpClient, NseJsonSession
 from .providers.nse_archives import INDIA_VIX_NAME, NseArchivesProvider
 from .providers.yfinance_provider import YFinanceProvider
 from .store import DataStore
+from .storelock import store_lock
 from .types import DATE, SYMBOL
 from .universe import UniverseResolver, UniverseSnapshot
 
@@ -139,6 +140,17 @@ class DataIngestor:
     ) -> IngestResult:
         opts = options or IngestOptions()
         run_id = run_id or uuid.uuid4().hex[:12]
+        # Exclusive for the whole run. The store is ~22 files rewritten one at
+        # a time over several minutes; an analysis starting midway sees some of
+        # them updated and some not, and computes features across two days.
+        # Blocking, because an ingest that finds a reader should wait it out
+        # rather than abandon the fetch -- the reverse of how the analysis
+        # treats a busy store.
+        with store_lock(self.config.paths.curated, exclusive=True,
+                        what=f"ingest {run_id}", blocking=True):
+            return self._run_locked(opts, run_id)
+
+    def _run_locked(self, opts: IngestOptions, run_id: str) -> IngestResult:
         p = self.config.params
         self._feeds = {}
 
