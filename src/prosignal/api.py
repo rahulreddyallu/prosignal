@@ -187,6 +187,61 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         payload.pop("result", None)  # status endpoint stays small for polling
         return payload
 
+    def _reference_names() -> tuple:
+        """Company names and sectors, read once per request.
+
+        The engine leaves `company_name` unset on every recommendation -- 0 of
+        52 on a live run -- while the equity master holds 2,565 of them. The
+        join belongs here rather than in the interface, which should never have
+        to know that two stores exist.
+        """
+        try:
+            store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+            master = store.read_equity_master()
+            names = (dict(zip(master["symbol"], master["company_name"]))
+                     if not master.empty else {})
+            smap = store.read_sector_map()
+            sectors = (dict(zip(smap["symbol"], smap["sector"]))
+                       if not smap.empty else {})
+            return names, sectors
+        except Exception:
+            # A missing display name must not cost the whole screen. The view
+            # falls back to the ticker.
+            log.warning("reference names unavailable; falling back to tickers")
+            return {}, {}
+
+    @app.get("/analysis/{run_id}/view")
+    def job_view(run_id: str) -> Dict[str, Any]:
+        """The screen's data: curated, named, explained.
+
+        `/results` stays exactly as it was and remains the research view's
+        source. This endpoint is the only thing the interface binds to, so a
+        change to the engine's payload shape cannot reach the interface
+        without passing through the presentation layer first.
+        """
+        from .presentation import build_view
+
+        job = jobs.get(run_id)
+        if job is None:
+            raise HTTPException(404, f"no job with id {run_id}")
+        if job.state.value == "FAILED":
+            raise HTTPException(409, {
+                "message": "analysis did not complete; no results exist",
+                "error": job.error, "run_id": run_id,
+            })
+        if job.result is None:
+            raise HTTPException(409, f"job {run_id} is {job.state.value}; no results yet")
+
+        names, sectors = _reference_names()
+        admission = cfg.params.stage6_entry.admission
+        return build_view(
+            job.result,
+            company_names=names,
+            sectors=sectors,
+            entry_rank=int(admission.entry_rank.value),
+            exit_rank=int(admission.exit_rank.value),
+        )
+
     @app.get("/analysis/{run_id}/results")
     def job_results(run_id: str) -> Dict[str, Any]:
         job = jobs.get(run_id)

@@ -306,7 +306,7 @@ def test_ledger_endpoint_exposes_run_history(client):
 def test_ui_is_served(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert '<div class="hdr-in">' in r.text
+    assert '<div class="topbar-in">' in r.text
 
 
 def test_ui_has_no_external_requests(client):
@@ -324,19 +324,20 @@ def test_ui_has_no_external_requests(client):
 def test_ui_states_are_all_reachable(client):
     """Every state the interface can enter must have real markup behind it.
 
-    These are the states a user actually hits -- not-ready, empty, failure --
-    and each has been a blank screen at some point in this project's history.
+    These are the states a user actually hits -- not-ready, empty, no
+    qualifying setup, failure -- and each has been a blank screen at some
+    point in this project's history. The wording moved when the interface was
+    rebuilt; the requirement did not.
     """
     text = client.get("/").text
     for marker in (
-        "Market data store is empty",   # store not bootstrapped
-        "No qualifying signals today",  # the designed common outcome
-        "No signals were issued",       # failure must not imply a trade
-        "Why it may be wrong",          # disconfirming evidence is not optional
-        "Not testable with current data",
+        "Market data store is empty",      # store not bootstrapped
+        "Nothing met the bar today",       # the designed common outcome
+        "could not be completed",          # failure must not imply a trade
+        "Checks that could not run",       # NOT_TESTABLE is not a pass
+        "What would move this to Buy",     # the watchlist is actionable
     ):
-        assert marker in text, f"state missing from UI: {marker}"
-
+        assert marker in text, f"no markup for the {marker!r} state"
 
 def test_ui_never_labels_the_score_a_probability(client):
     """The engine emits a rank, not a calibrated probability.
