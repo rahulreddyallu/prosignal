@@ -99,3 +99,44 @@ def test_the_configuration_matrix_scores_every_column_on_one_index():
     assert list(m.columns) == ["both", "signal_only", "noise_only"]
     assert not m.isna().any().any(), "a ragged matrix would bias the PBO ranking"
     assert m["signal_only"].mean() > m["noise_only"].mean()
+
+
+# =============================================================================
+# refusals -- each of these produced a plausible-looking number before
+# =============================================================================
+
+
+@pytest.mark.parametrize("bad", [
+    {"purge_sessions": -1},
+    {"embargo_sessions": -5},
+    {"purge_sessions": -63, "embargo_sessions": -21},
+])
+def test_a_negative_purge_or_embargo_is_refused(bad):
+    """It rounded to zero and disabled the leakage guard while reporting normally.
+
+    purge_obs = ceil(-1 / 21) = 0, and CombinatorialPurgedCV then validates a
+    horizon that is already zero, so the run completed with purged_total = 0 and
+    an IC that looked like the model working.
+    """
+    with pytest.raises(ValueError, match="non-negative"):
+        run_cpcv(_panel(), FEATURES, **{**KW, **bad})
+
+
+def test_a_fit_with_no_features_is_refused():
+    """An intercept-only fit scores an IC near zero, which reads as a weak
+    model rather than a broken call."""
+    with pytest.raises(ValueError, match="no usable feature columns"):
+        run_cpcv(_panel(), [], **KW)
+
+
+def test_features_that_are_all_absent_from_the_panel_are_refused():
+    with pytest.raises(ValueError, match="no usable feature columns"):
+        run_cpcv(_panel(), ["not_a_column_r"], **KW)
+
+
+def test_the_configuration_matrix_refuses_a_negative_purge_too():
+    with pytest.raises(ValueError, match="non-negative"):
+        configuration_matrix(
+            _panel(), {"a": FEATURES}, step_sessions=21, alpha=100.0,
+            purge_sessions=-1, min_train_dates=10, min_train_rows=200,
+        )

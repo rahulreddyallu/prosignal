@@ -120,6 +120,21 @@ def run_cpcv(
     splitting rows would put the same day on both sides of the partition.
     """
     cols = [c for c in features if c in panel.columns]
+    if purge_sessions < 0 or embargo_sessions < 0:
+        raise ValueError(
+            f"purge_sessions ({purge_sessions}) and embargo_sessions "
+            f"({embargo_sessions}) must be non-negative. A negative value is "
+            f"silently rounded to zero by the session-to-observation "
+            f"conversion below, which disables the leakage guard while the run "
+            f"reports normally."
+        )
+    if not cols:
+        raise ValueError(
+            "no usable feature columns: none of the requested features are "
+            "present in the panel. A fit with no features returns an intercept, "
+            "which scores an IC near zero and looks like a weak model rather "
+            "than a broken call."
+        )
     work = panel.dropna(subset=cols + ["label_rank", "label"]).reset_index(drop=True)
     dates = sorted(work["date"].unique())
     if len(dates) < n_groups * 2:
@@ -215,6 +230,11 @@ def configuration_matrix(
     Every configuration is scored on identical dates with an identical purged
     expanding window, so the columns are comparable by construction.
     """
+    if purge_sessions < 0:
+        raise ValueError(
+            f"purge_sessions ({purge_sessions}) must be non-negative; a negative "
+            f"value rounds to zero and disables purging without reporting it"
+        )
     purge_obs = int(np.ceil(purge_sessions / step_sessions))
     out: Dict[str, Dict[pd.Timestamp, float]] = {}
 
@@ -303,6 +323,21 @@ def run_portfolio_cpcv(
     from .portfolio_sim import phase_summary
 
     cols = [c for c in features if c in panel.columns]
+    if purge_sessions < 0 or embargo_sessions < 0:
+        raise ValueError(
+            f"purge_sessions ({purge_sessions}) and embargo_sessions "
+            f"({embargo_sessions}) must be non-negative. A negative value is "
+            f"silently rounded to zero by the session-to-observation "
+            f"conversion below, which disables the leakage guard while the run "
+            f"reports normally."
+        )
+    if not cols:
+        raise ValueError(
+            "no usable feature columns: none of the requested features are "
+            "present in the panel. A fit with no features returns an intercept, "
+            "which scores an IC near zero and looks like a weak model rather "
+            "than a broken call."
+        )
     work = panel.dropna(subset=cols + ["label_rank", "label"]).reset_index(drop=True)
     dates = sorted(work["date"].unique())
     if len(dates) < n_groups * 2:
