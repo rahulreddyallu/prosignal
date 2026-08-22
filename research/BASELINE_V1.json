@@ -118,7 +118,8 @@
     "No probability calibration. The composite is a cross-sectional rank and is reported as one.",
     "Historical extension is externally capped: NSE 403s before 2016, delivery is not re-servable before ~2021, and vendor statement coverage begins 2023-06 for the bulk of the universe.",
     "The quarterly-supersession branch of the TTM repair does not fire on this store (0 of 1284 symbols); the coverage gain came from the filter ordering and the staleness gate.",
-    "26 configuration parameters remain declared and reserved rather than implemented."
+    "26 configuration parameters remain declared and reserved rather than implemented.",
+    "Momentum's 41% IC share is one latent factor: a single sign-pinned principal component of the three shipped factors reproduces their equal-weighted IC (+0.0755 vs +0.0752). Nine literature variants span 2.57 effective dimensions. Diversification cannot come from more momentum."
   ],
   "label": "BASELINE_V1",
   "metrics": {
@@ -136,6 +137,26 @@
       "periods": 15,
       "t": 3.2,
       "top_decile_excess_per_period": 0.0345
+    },
+    "momentum_decomposition": {
+      "candidates_rejected_on_holdout": [
+        "ts_mom",
+        "mom_consist"
+      ],
+      "conclusion": "the 41% momentum share is ONE latent factor, not three",
+      "effective_dimension": 2.57,
+      "eigenvalues_above_1": 2,
+      "near_duplicates": {
+        "mom_6_1_vs_vol_adj_mom": 0.97,
+        "resid_mom_vs_mom_12_1": 0.96
+      },
+      "pc1_share_of_variance": 0.59,
+      "shipped_three": {
+        "best_single_ic": 0.0705,
+        "equal_weight_ic": 0.0752,
+        "pc1_signed_ic": 0.0755
+      },
+      "variants_tested": 9
     },
     "pbo_across_7_factor_sets": 0.443,
     "portfolio_cpcv_selection": {
