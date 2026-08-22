@@ -1741,13 +1741,21 @@ validation:
       value: 2
       status: STRUCTURAL
     purge_sessions:
-      value: 21
+      value: 63
       status: STRUCTURAL
-      note: "Label overlap purge. Must be >= your forward-return label horizon."
+      note: >-
+        Label overlap purge, in sessions. Must be at least the label horizon --
+        the loader enforces it. This was 21 against a 63-session label, which
+        left 42 sessions of every training row's label window reaching into the
+        test block. That is the exact leak purging exists to remove, and it
+        flatters every number computed through it.
     embargo_sessions:
       value: 21
       status: STRUCTURAL
-      note: "~1 business month, per published practice."
+      note: >-
+        Sessions dropped from training AFTER each test block, on top of the
+        purge. ~1 business month, per published practice. Guards against
+        residual serial correlation rather than direct label overlap.
   holdout:
     # NEVER touched during development. Used exactly once.
     reserve_most_recent_sessions:
@@ -1760,10 +1768,14 @@ validation:
       status: STRUCTURAL
       note: "Harvey, Liu & Zhu (2016). Contested, but the conservative choice."
   label:
+    # Must equal stage4_core_score.model_horizon_sessions -- the loader enforces
+    # it. Two independent numbers meant the validation harness could purge and
+    # embargo for a 21-session label while the model it was validating forecast
+    # 63.
     forward_return_sessions:
-      value: 21
+      value: 63
       status: UNVALIDATED
-      search_range: [5, 63]
+      search_range: [5, 126]
 
   # --- ANTI-OVERFITTING BUDGET, enforced at config-load time -----------------
   # The Deflated Sharpe Ratio charges you for every configuration you tried.

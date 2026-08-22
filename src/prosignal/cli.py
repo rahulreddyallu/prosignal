@@ -989,6 +989,130 @@ def cmd_data_purge_cache(cfg: AppConfig, args: argparse.Namespace) -> int:
 # =============================================================================
 
 
+
+def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Combinatorial purged cross-validation over the cross-sectional model.
+
+    Reports the DISTRIBUTION of out-of-sample estimates rather than one path.
+    Every other number this engine quotes comes from a single walk-forward
+    sequence; the spread across paths is what that cannot show.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .data.types import DATE, SYMBOL
+    from .data.universe import UniverseResolver
+    from .features import crossmodel as cm
+    from .features.crosssec import build_panel
+    from .stages._cfg import fv, iv, v
+    from .validation.harness import run_cpcv
+    from .validation.metrics import deflated_sharpe_ratio
+
+    p = cfg.params
+    val, c4 = p.validation, p.stage4_core_score
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+
+    holdout_start = sessions[-iv(val.holdout.reserve_most_recent_sessions)]
+    end = holdout_start if not args.include_holdout else sessions[-1]
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this consumes the one honest test"))
+
+    u = p.universe
+    sectors = store.read_sector_map()
+    sector_map = (dict(zip(sectors["symbol"], sectors["sector"]))
+                  if sectors is not None and not sectors.empty else {})
+    snap = UniverseResolver(store, cfg).resolve_liquidity_pit(
+        as_of=sessions[-1], min_adtv_inr=fv(u.pit_min_adtv_inr),
+        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
+        max_names=iv(u.pit_max_names), min_history_sessions=iv(u.min_history_sessions),
+        min_price_inr=fv(u.min_price_inr),
+        manual_exclusions=list(v(u.manual_exclusions) or []), sector_map=sector_map,
+    )
+    symbols = list(snap.symbols)
+
+    _rule("Building the panel")
+    px = store.read_prices(symbols=symbols, start=sessions[0], end=end,
+                           columns=[DATE, SYMBOL, "close", "turnover"])
+    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
+    close = px.pivot_table(index=DATE, columns=SYMBOL, values="close",
+                           aggfunc="last", observed=True).sort_index()
+    turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
+                              aggfunc="last", observed=True).sort_index()
+    del px
+    delivery = None
+    dl = store.read_delivery(symbols=symbols, start=sessions[0], end=end)
+    if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
+        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
+        delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
+                                  aggfunc="last", observed=True).sort_index()
+    del dl
+    horizon = iv(c4.model_horizon_sessions)
+    panel = build_panel(close, turnover, horizon=horizon, step=21, delivery=delivery)
+    panel = cm._attach_fundamentals(panel, store.read_statements(), close,
+                                    iv(c4.max_fundamental_age_days))
+    _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
+
+    def progress(n, total):
+        if n % 20 == 0 or n == total:
+            _print(f"  split {n}/{total}")
+
+    _rule(f"CPCV  N={iv(val.cpcv.n_groups)}  k={args.test_groups}")
+    result = run_cpcv(
+        panel, list(cm.FEATURE_COLUMNS), horizon_sessions=horizon, step_sessions=21,
+        alpha=fv(c4.model_ridge_alpha), n_groups=iv(val.cpcv.n_groups),
+        n_test_groups=args.test_groups,
+        purge_sessions=iv(val.cpcv.purge_sessions),
+        embargo_sessions=iv(val.cpcv.embargo_sessions),
+        progress=progress,
+    )
+
+    spread = result.path_spread()
+    _table("Out-of-sample path distribution", ["metric", "value"], [
+        ["splits fitted", f"{result.n_splits}"],
+        ["paths woven", f"{len(result.path_sharpes)} of {result.n_paths}"],
+        ["observations purged", f"{result.purged_total:,}"],
+        ["observations embargoed", f"{result.embargoed_total:,}"],
+        ["pooled rank IC", f"{result.mean_ic:+.4f}"],
+        ["path Sharpe -- min", f"{spread.get('min', float('nan')):+.2f}"],
+        ["path Sharpe -- median", f"{spread.get('median', float('nan')):+.2f}"],
+        ["path Sharpe -- max", f"{spread.get('max', float('nan')):+.2f}"],
+        ["path Sharpe -- sd", f"{spread.get('sd', float('nan')):.2f}"],
+        ["paths below zero", f"{spread.get('share_negative', float('nan')):.0%}"],
+    ])
+    trials = args.trials
+    dsr = result.deflated(n_trials=trials)
+    t_bar = fv(val.significance.t_stat_bar)
+    pbo_bar = float(val.search_budget.max_acceptable_pbo)
+    paths = np.asarray(result.path_sharpes, dtype="float64")
+    _print()
+    _print(f"  pooled top-decile excess {np.mean(result.excess):+.2%} per "
+           f"{horizon}-session period")
+    _print(f"  Deflated Sharpe {dsr.deflated_sr:.3f} charging {trials} trials -- "
+           f"{'PASS' if dsr.passes else 'FAIL'}")
+    worst = float(paths.min()) if paths.size else float("nan")
+    _print(f"  worst of {paths.size} paths: Sharpe {worst:+.2f}; "
+           f"{spread.get('share_negative', float('nan')):.0%} of paths below zero")
+    _print(f"  significance bar in config: t >= {t_bar:.1f}; "
+           f"PBO for promotion to VALIDATED: <= {pbo_bar:.0%}")
+    _print()
+    _print("  No t-statistic is quoted, for either the pooled observations or "
+           "the paths. A test date appears in many splits, and the paths are "
+           "fitted on heavily overlapping training sets over one shared "
+           "calendar, so neither is a sample of independent experiments and a t "
+           "from either is inflated. What CPCV honestly gives is the SPREAD: "
+           "where the worst path landed, and how much of the distribution sits "
+           "below zero.")
+    if result.notes:
+        _print()
+        for note in result.notes[:5]:
+            _print(f"  note: {note}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="prosignal",
@@ -1105,6 +1229,27 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--watch", type=int, default=3,
                       help="how many watchlist cards to print")
     full.set_defaults(func=cmd_analyse_run)
+
+    research_p = sub.add_parser(
+        "research", help="validation runs that do not issue signals"
+    )
+    research_sub = research_p.add_subparsers(dest="subcommand")
+    cpcv_p = research_sub.add_parser(
+        "cpcv",
+        help="combinatorial purged cross-validation -- a DISTRIBUTION of "
+             "out-of-sample estimates rather than one walk-forward path",
+    )
+    cpcv_p.add_argument("--test-groups", type=int, default=3,
+                        help="k in C(N,k). Higher k means more paths and less "
+                             "training data per split (default 3 -> 36 paths)")
+    cpcv_p.add_argument("--trials", type=int, default=24,
+                        help="configurations tried, charged against the Deflated "
+                             "Sharpe. Understating it inflates the result")
+    cpcv_p.add_argument("--include-holdout", action="store_true",
+                        help="extend the panel through the reserved holdout. "
+                             "This spends the one honest test -- do not use it "
+                             "while still choosing between models")
+    cpcv_p.set_defaults(func=cmd_research_cpcv)
 
     return parser
 

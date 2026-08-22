@@ -132,11 +132,6 @@ RESERVED: Dict[str, str] = {
 
     # -- research protocol: describes how research is conducted, not what the
     # -- engine does. There is no harness in the package that consumes them.
-    "embargo_sessions": "CPCV parameter; validation/cpcv.py takes it as an "
-                        "argument and no shipped caller passes this value",
-    "max_acceptable_pbo": "the PBO bar the research programme holds itself to; "
-                          "compute_pbo does not read it",
-    "t_stat_bar": "the significance bar applied by hand in review; no code gates on it",
     "sacred": "states that the holdout is used once. Enforced by discipline, "
               "not by the loader -- nothing can technically prevent a second look",
 

@@ -1409,6 +1409,28 @@ class RootConfig(_Base):
     def _cross_checks(self) -> "RootConfig":
         errs: List[str] = []
 
+        # Purging must cover the whole label window. At purge 21 against a
+        # 63-session label, 42 sessions of every training row's label reached
+        # into the test block -- the exact leak purging exists to remove, and it
+        # flatters every number measured through it.
+        horizon = int(self.stage4_core_score.model_horizon_sessions)
+        purge = int(self.validation.cpcv.purge_sessions.value)
+        label = int(self.validation.label.forward_return_sessions.value)
+        if purge < horizon:
+            errs.append(
+                f"validation.cpcv.purge_sessions ({purge}) is shorter than "
+                f"stage4_core_score.model_horizon_sessions ({horizon}); training "
+                f"rows would keep {horizon - purge} sessions of label overlap "
+                f"with the test block"
+            )
+        if label != horizon:
+            errs.append(
+                f"validation.label.forward_return_sessions ({label}) must equal "
+                f"stage4_core_score.model_horizon_sessions ({horizon}); the "
+                f"harness would otherwise purge for a different label than the "
+                f"model it is validating forecasts"
+            )
+
         # The admission band, the book size and the per-run cap describe the
         # same book from three angles and were independent numbers. With
         # entry_rank 8 and max_signals_per_run 5, Stage 6 admits eight names and
