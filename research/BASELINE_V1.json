@@ -121,7 +121,8 @@
     "26 configuration parameters remain declared and reserved rather than implemented.",
     "Momentum's 41% IC share is one latent factor: a single sign-pinned principal component of the three shipped factors reproduces their equal-weighted IC (+0.0755 vs +0.0752). Nine literature variants span 2.57 effective dimensions. Diversification cannot come from more momentum.",
     "Stage 6 band widths are not a meaningful lever: nested selection beats the fixed convention by +0.03 Sharpe on a distribution with sd 0.83, and the inner loop's chosen band scatters across the whole grid. Fixed at entry 8 / exit 16 on the index-construction convention rather than searched.",
-    "The 63-session horizon sits on a plateau (21-84 sessions, 11.20-11.65% annualised net) rather than at a peak. H=84 buys +0.06 Sharpe and costs 0.41pp of return; the CPCV Sharpe distribution has sd 0.83, so that is noise. Alpha accrues fastest EARLY (5.5bp/session at H=5 vs 2.3bp at H=63) -- early exit forfeits cost amortisation, not alpha."
+    "The 63-session horizon sits on a plateau (21-84 sessions, 11.20-11.65% annualised net) rather than at a peak. H=84 buys +0.06 Sharpe and costs 0.41pp of return; the CPCV Sharpe distribution has sd 0.83, so that is noise. Alpha accrues fastest EARLY (5.5bp/session at H=5 vs 2.3bp at H=63) -- early exit forfeits cost amortisation, not alpha.",
+    "Unmitigated momentum-crash exposure: worst observed 63-session top-decile excess -13.14% through the 2020 rebound, underperforming in 13 of 15 periods. The risk family AMPLIFIES it (-9.82% with, -5.43% without) because low-beta and low-drawdown tilts point away from the beaten-down names that lead a rebound. The regime gate recovers only +0.62 points. Critically, the standard walk-forward's first test date is 2022-01, so every CPCV, holdout, PBO and portfolio figure in this repository was computed on a window that EXCLUDES this crash."
   ],
   "label": "BASELINE_V1",
   "metrics": {
@@ -178,6 +179,23 @@
         "63": 0.78,
         "84": 0.84
       }
+    },
+    "momentum_crash": {
+      "conclusion": "the risk family amplifies the crash rather than mitigating it; the regime gate catches the acute phase and misses the extended rebound",
+      "event": "COVID rebound 2020-04 to 2021-06, reached with a 15-date training window",
+      "periods": 15,
+      "regime_gate": {
+        "allowed": 11,
+        "blocked": 4,
+        "protection_points": 0.0062
+      },
+      "strong_rebound_dates": {
+        "mean_excess": -0.0982,
+        "n": 4,
+        "without_risk_family": -0.0543
+      },
+      "top_decile_underperformed_in": 13,
+      "worst_63_session_excess": -0.1314
     },
     "momentum_decomposition": {
       "candidates_rejected_on_holdout": [
