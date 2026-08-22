@@ -242,6 +242,27 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             exit_rank=int(admission.exit_rank.value),
         )
 
+    @app.get("/history")
+    def history(limit: int = 30) -> Dict[str, Any]:
+        """Past runs and what moved between them.
+
+        Read from the ledger, which has recorded every completed run all along
+        -- date, names admitted, names monitored, regime and funnel. No new
+        storage was added for this; the record already existed.
+        """
+        from .ledger import Ledger
+        from .presentation import build_history
+
+        try:
+            rows = Ledger(cfg.paths.ledger).iter_rows()
+        except Exception as exc:
+            log.warning("ledger unreadable", extra={"error": str(exc)})
+            return {"days": [], "latest_changes": None,
+                    "note": "The run history could not be read."}
+        names, _ = _reference_names()
+        return build_history(rows, limit=max(1, min(int(limit), 120)),
+                             company_names=names)
+
     @app.get("/analysis/{run_id}/results")
     def job_results(run_id: str) -> Dict[str, Any]:
         job = jobs.get(run_id)

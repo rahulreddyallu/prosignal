@@ -102,6 +102,7 @@ def test_the_view_is_json_serialisable():
     "could not be completed",         # a failed run must not imply a trade
     "Checks that could not run",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the watchlist is actionable
+    "No runs recorded yet",           # history with an empty ledger
 ])
 def test_every_reachable_state_has_markup(state):
     assert state in _html(), f"no markup for the {state!r} state"
