@@ -572,7 +572,11 @@ def _suspect_map(suspects: pd.DataFrame) -> Dict[str, List[dt.date]]:
     out: Dict[str, List[dt.date]] = {}
     if suspects is None or suspects.empty:
         return out
-    for symbol, rows in suspects.groupby(SYMBOL):
+    # observed=True: SYMBOL is categorical over the whole equity master, so the
+    # default yields a group for every listed name -- 2,875 of 2,880 empty on a
+    # typical run -- and this map then reports a key for every symbol in the
+    # market rather than the handful with unexplained jumps.
+    for symbol, rows in suspects.groupby(SYMBOL, observed=True):
         out[str(symbol)] = [
             pd.Timestamp(d).date() for d in rows[DATE].tolist()
         ]

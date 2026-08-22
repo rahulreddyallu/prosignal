@@ -294,7 +294,9 @@ def _earnings_map(store, calendar, as_of, cfg) -> Optional[Dict[str, int]]:
     f = f.dropna(subset=["earnings_date"])
     future = f[f["earnings_date"] >= as_of]
     out: Dict[str, int] = {}
-    for sym, rows in future.groupby(SYMBOL):
+    # observed=True: min() over an empty group raises, which is what the default
+    # produces for every non-reporting name once SYMBOL is categorical.
+    for sym, rows in future.groupby(SYMBOL, observed=True):
         nxt = min(rows["earnings_date"])
         out[str(sym)] = calendar.sessions_until(as_of, nxt)
     return out
@@ -310,7 +312,7 @@ def _regulatory_map(store, calendar, as_of, cfg) -> Optional[Dict[str, int]]:
     f = f.dropna(subset=[col])
     past = f[f[col] <= as_of]
     out: Dict[str, int] = {}
-    for sym, rows in past.groupby(SYMBOL):
+    for sym, rows in past.groupby(SYMBOL, observed=True):
         last = max(rows[col])
         out[str(sym)] = calendar.count_between(last, as_of)
     return out

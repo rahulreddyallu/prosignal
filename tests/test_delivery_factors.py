@@ -21,7 +21,7 @@ def frames():
     )
     turnover = pd.DataFrame(rng.uniform(1e7, 6e7, size=(n, m)), index=idx, columns=close.columns)
     delivery = pd.DataFrame(rng.uniform(20.0, 80.0, size=(n, m)), index=idx, columns=close.columns)
-    bench = close.mean(axis=1).pct_change().to_numpy("float64")
+    bench = close.mean(axis=1).pct_change(fill_method=None).to_numpy("float64")
     return close, turnover, delivery, bench
 
 

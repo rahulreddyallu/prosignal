@@ -121,7 +121,7 @@ def compute_features(
         return pd.DataFrame(columns=[SYMBOL] + FEATURE_NAMES)
 
     rows: List[Dict[str, object]] = []
-    for symbol, chunk in known.groupby(SYMBOL, sort=False):
+    for symbol, chunk in known.groupby(SYMBOL, sort=False, observed=True):
         quarters = chunk.head(_GROWTH_QUARTERS)
         feat = _one_symbol(quarters, prices.get(str(symbol)))
         if feat is not None:

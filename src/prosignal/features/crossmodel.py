@@ -292,7 +292,7 @@ def _attach_fundamentals(
         if prices.empty or shares.empty:
             continue
         sh = (shares[shares["available_on"] <= ts]
-              .sort_values("period_end").groupby("symbol").tail(1)
+              .sort_values("period_end").groupby("symbol", observed=True).tail(1)
               .set_index("symbol")["Ordinary Shares Number"])
         px = prices.iloc[-1].dropna()
         mcap = (px.reindex(sh.index) * sh).dropna()

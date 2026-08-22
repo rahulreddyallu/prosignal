@@ -172,12 +172,12 @@ def apply_adjustments(
     acts[SYMBOL] = acts[SYMBOL].map(normalise_symbol)
     acts["ex_date"] = pd.to_datetime(acts["ex_date"]).dt.normalize()
     by_symbol: Dict[str, pd.DataFrame] = {
-        sym: grp for sym, grp in acts.groupby(SYMBOL)
+        sym: grp for sym, grp in acts.groupby(SYMBOL, observed=True)
     }
 
     cols = [c for c in price_columns if c in out.columns]
     pieces: List[pd.DataFrame] = []
-    for sym, grp in out.groupby(SYMBOL, sort=False):
+    for sym, grp in out.groupby(SYMBOL, sort=False, observed=True):
         sym_actions = by_symbol.get(sym)
         chunk = grp.copy()
         if sym_actions is not None and not sym_actions.empty:

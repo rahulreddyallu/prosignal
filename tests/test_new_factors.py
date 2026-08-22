@@ -23,7 +23,7 @@ def frames():
         index=idx, columns=[f"S{i}" for i in range(m)],
     )
     turnover = pd.DataFrame(rng.uniform(1e7, 5e7, size=(n, m)), index=idx, columns=close.columns)
-    bench = close.mean(axis=1).pct_change().to_numpy("float64")
+    bench = close.mean(axis=1).pct_change(fill_method=None).to_numpy("float64")
     return close, turnover, bench
 
 
@@ -62,7 +62,7 @@ def test_resid_mom_strips_the_market_component(frames):
     steps = rng.normal(0.0015, 0.011, size=len(idx))
     mkt = 100.0 * np.exp(np.cumsum(steps))
     close = pd.DataFrame({c: mkt * (1.0 + 0.05 * k) for k, c in enumerate(close.columns)}, index=idx)
-    bench = close.mean(axis=1).pct_change().to_numpy("float64")
+    bench = close.mean(axis=1).pct_change(fill_method=None).to_numpy("float64")
     f = _features_at(close, turnover, len(close) - 1, bench)
     assert (close.iloc[-22] / close.iloc[-253] - 1.0).mean() > 0.15
     assert f["resid_mom"].abs().max() < 0.05

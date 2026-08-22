@@ -587,8 +587,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         if px.empty:
             return None, None, "no price rows", None, None
         px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
-        close = px.pivot_table(index=DATE, columns=SYMBOL, values="close", aggfunc="last").sort_index()
-        turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover", aggfunc="last").sort_index()
+        close = px.pivot_table(index=DATE, columns=SYMBOL, values="close",
+                               aggfunc="last", observed=True).sort_index()
+        turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
+                                  aggfunc="last", observed=True).sort_index()
         del px
 
         # Value and quality: the only inputs not derived from price and volume.
@@ -610,7 +612,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
             if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
                 dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
                 delivery = dl.pivot_table(
-                    index=DATE, columns=SYMBOL, values="deliv_pct", aggfunc="last"
+                    index=DATE, columns=SYMBOL, values="deliv_pct",
+                    aggfunc="last", observed=True
                 ).sort_index()
                 del dl
         except Exception as exc:

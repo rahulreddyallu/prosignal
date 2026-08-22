@@ -235,7 +235,7 @@ def _ttm(frame: pd.DataFrame, field_name: str, as_of: pd.Timestamp,
     cutoff = (as_of - pd.Timedelta(days=int(max_age_days))) if max_age_days else None
 
     out: Dict[str, float] = {}
-    for symbol, rows in usable.groupby("symbol", sort=False):
+    for symbol, rows in usable.groupby("symbol", sort=False, observed=True):
         rows = rows.sort_values("period_end")
         if cutoff is not None and rows["period_end"].max() < cutoff:
             continue                      # every filing this name has is stale
@@ -279,7 +279,7 @@ def _prior(frame: pd.DataFrame, field_name: str, as_of: pd.Timestamp,
     cutoff = (as_of - pd.Timedelta(days=int(max_age_days))) if max_age_days else None
 
     out: Dict[str, float] = {}
-    for symbol, rows in usable.groupby("symbol", sort=False):
+    for symbol, rows in usable.groupby("symbol", sort=False, observed=True):
         rows = rows.sort_values("period_end")
         if cutoff is not None and rows["period_end"].max() < cutoff:
             continue
