@@ -103,6 +103,9 @@ def test_the_view_is_json_serialisable():
     "Checks that could not run",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the near misses stay actionable
     "No runs recorded yet",           # history with an empty ledger
+    "has not been scanned yet",       # store moved on, results did not
+    "What happened next",             # a past run, followed forward
+    "Clear the run history?",         # destructive action is confirmed
 ])
 def test_every_reachable_state_has_markup(state):
     assert state in _html(), f"no markup for the {state!r} state"
@@ -163,8 +166,9 @@ def test_the_interface_has_one_results_tab():
     to look for something already in front of the reader."""
     html = _html()
     tabs = re.findall(r'data-view="([a-z]+)"', html)
-    assert tabs == ["overview", "history", "method"], tabs
+    assert tabs == ["overview", "history"], tabs
     assert "viewMonitored" not in html and "viewResearch" not in html
+    assert "viewMethod" not in html
 
 
 def test_the_card_layout_does_not_depend_on_the_company_name():
@@ -204,6 +208,52 @@ def test_every_card_uses_one_type_scale():
     """There was a larger 'featured' variant for the top name. Five cards that
     differ in size read as five different components."""
     assert "featured" not in _html()
+
+
+def test_a_stale_result_is_never_shown_as_todays():
+    """A previous session's shortlist under today's heading is not stale data,
+    it is the wrong answer presented confidently. The screen compares the run's
+    date with the newest session the store holds and refuses to render."""
+    html = _html()
+    assert "function isCurrent" in html
+    body = html[html.index("function viewOverview"):html.index("function marketBlock")]
+    assert "isCurrent(v)" in body, "the results view does not gate on freshness"
+
+
+def test_anything_toggled_by_hidden_has_a_hidden_rule():
+    """`display` on a class beats the user-agent's `[hidden] { display: none }`.
+    Setting `.hidden` on such an element changes the property and nothing on
+    screen -- the scan button reported `hidden === true` with a computed
+    display of `flex`, and stayed visible on every tab.
+    """
+    html = _html()
+    css = html[html.index("<style>"):html.index("</style>")]
+    body = html[html.index("<script>"):]
+
+    assert re.search(r"\.hidden\s*=", body), (
+        "nothing is toggled by .hidden any more; this guard is now stale"
+    )
+    # Every class in the stylesheet that declares its own display and is also
+    # referenced from the JS needs the rule spelled out.
+    assert re.search(r"\.btn\[hidden\]\s*\{\s*display:\s*none", css), (
+        ".btn sets display and is toggled with .hidden, but has no "
+        "[hidden] rule -- the toggle would be silently inert"
+    )
+
+
+def test_clearing_history_asks_first():
+    html = _html()
+    assert "window.confirm" in html
+    assert "Clear the run history?" in html
+
+
+def test_clearing_history_says_the_record_is_kept():
+    """The ledger backs the deflated-Sharpe trial count. A user clearing a
+    screen must not be silently invalidating that."""
+    html = _html()
+    block = html[html.index("async function confirmWipe"):]
+    block = block[:block.index("\n}")]
+    assert "research record is kept" in block or "record is kept" in block
 
 
 def test_the_five_slot_rule_is_not_reimplemented_in_the_interface():
