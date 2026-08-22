@@ -192,7 +192,14 @@ def run_analysis(
     # ---- Stage 6 ----------------------------------------------------------
     step(6)
     t = _clock()
-    entries = stage6_entry.run(defended, frames, config, resolved)
+    # Stage 6 admits on rank with hysteresis, so it needs two things this run
+    # does not otherwise carry: where each name sits in the model's ranking, and
+    # what the previous run committed to. The engine holds no live position
+    # state -- the ledger is the record of the open book.
+    ranks = {s.ticker: s.rank for s in scores.ranked_scores}
+    open_book = Ledger(config.paths.ledger).open_book(before=resolved)
+    entries = stage6_entry.run(defended, frames, config, resolved,
+                               ranks=ranks, held=open_book)
     timings[stage6_entry.STAGE_NAME] = t()
 
     # ---- Stage 7 ----------------------------------------------------------
@@ -377,11 +384,17 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
 
     calendar = TradingCalendar(store.price_sessions())
     feeds: Dict[str, FeedRecord] = {}
+    # delivery_data is REQUIRED. deliv_pct carries the largest coefficient in the
+    # fitted model (+0.0233 of 17 factors) and crosssec treats it as neutral-when-
+    # missing, so an outage does not fail anything: every name scores as if its
+    # delivered share were exactly average. Measured, that silently replaces 33%
+    # of the top decile and costs 18% of IC while the run reports no flag at all.
+    # A feed the model leans on that hardest cannot be optional.
     checks = [
         ("equity_ohlcv", store.prices.max_date(), True, 1),
         ("index_ohlcv", store.indices.max_date(), True, 1),
         ("india_vix", store.indices.max_date(), True, 1),
-        ("delivery_data", store.delivery.max_date(), False, 2),
+        ("delivery_data", store.delivery.max_date(), True, 2),
     ]
     for name, last, required, max_age in checks:
         age = calendar.age_in_sessions(last, as_of) if last else None
@@ -392,11 +405,51 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
             last_timestamp=last, age_sessions=age, max_age_sessions=max_age,
             required=required,
         )
-    for name in ("index_membership", "equity_master"):
+
+    # These two were stamped OK with age 0 unconditionally, which meant
+    # missing_required() and stale_required() could never see them however empty
+    # the store was -- a required feed that reports itself healthy by
+    # construction is not a check. Their real state is read from the store.
+    master = store.read_table("equity_master")
+    feeds["equity_master"] = FeedRecord(
+        feed="equity_master",
+        status=FeedStatus.OK if master is not None and not master.empty else FeedStatus.MISSING,
+        source=SourceName.NSE_ARCHIVES if master is not None and not master.empty else None,
+        last_timestamp=as_of, age_sessions=0, max_age_sessions=25, required=True,
+    )
+    # The fundamental block. Two different tables, and the distinction is the
+    # whole point: "fundamentals" is the NSE Ind-AS filings feed, which carries
+    # true filing dates; "statements" carries period end only, and the factor
+    # layer derives availability from the SEBI LODR deadline instead. Stage 1
+    # reads these to decide what it can honestly claim about filing-date
+    # alignment, and previously found neither -- so it reported the block
+    # absent on every run while the model scored five fundamental factors.
+    for name, frame in (("fundamentals", store.read_fundamentals()),
+                        ("statements", store.read_statements())):
+        rows = 0 if frame is None or frame.empty else len(frame)
         feeds[name] = FeedRecord(
-            feed=name, status=FeedStatus.OK, source=SourceName.NSE_ARCHIVES,
-            last_timestamp=as_of, age_sessions=0, max_age_sessions=25, required=True,
+            feed=name,
+            status=FeedStatus.OK if rows else FeedStatus.MISSING,
+            source=SourceName.NSE_ARCHIVES if rows else None,
+            last_timestamp=as_of, age_sessions=0, max_age_sessions=None,
+            required=False, row_count=rows,
+            symbols_covered=0 if not rows or "symbol" not in frame.columns
+                            else int(frame["symbol"].nunique()),
         )
+
+    # Membership is only required when the universe is built from a membership
+    # list. Under universe.source = liquidity_pit nothing reads it, so demanding
+    # it would halt runs over a feed the decision never touches.
+    uses_membership = str(v(config.params.universe.source)).lower() != "liquidity_pit"
+    snapshots = store.universe_snapshot_dates(str(v(config.params.universe.index_name)))
+    feeds["index_membership"] = FeedRecord(
+        feed="index_membership",
+        status=FeedStatus.OK if snapshots else FeedStatus.MISSING,
+        source=SourceName.NSE_ARCHIVES if snapshots else None,
+        last_timestamp=snapshots[-1] if snapshots else None,
+        age_sessions=calendar.age_in_sessions(snapshots[-1], as_of) if snapshots else None,
+        max_age_sessions=25, required=uses_membership,
+    )
     return RawDataManifest(
         run_id=run_id, as_of_date=as_of, generated_at=dt.datetime.now(),
         snapshot_id=f"store-{as_of.isoformat()}", feeds=feeds,

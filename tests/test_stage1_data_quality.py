@@ -565,8 +565,41 @@ def test_absent_fundamentals_and_pledging_are_reported_as_unverifiable(tmp_path,
 
     assert report.pit_audit["fundamentals_filing_date"] is False
     assert report.pit_audit["pledging_disclosure_date"] is False
-    assert any("quality factor is dropped" in f for f in report.pit_audit_failures)
+    assert any("neither the NSE filings table nor the statement feed" in f
+               for f in report.pit_audit_failures)
     assert any("NOT_TESTABLE" in f for f in report.pit_audit_failures)
+
+
+def test_statements_without_filing_dates_pass_the_check_but_say_which(tmp_path, cfg):
+    """Weaker evidence is not absent evidence.
+
+    "fundamentals" is the NSE Ind-AS feed and carries true filing dates;
+    "statements" carries period end only, so availability comes from the SEBI
+    LODR deadline. Reporting the block missing while the model scores five
+    fundamental factors off it was the misleading direction -- the deadline is
+    later than a typical filing, so it understates what the market knew.
+    """
+    from prosignal.core.contracts import FeedRecord
+    from prosignal.core.enums import FeedStatus
+
+    dates = _sessions()
+    symbols = ["AAA"]
+    store, cal, uni = _setup(tmp_path, _clean_prices(symbols, dates), dates, symbols)
+    manifest = _manifest(dates[-1].date())
+    manifest.feeds["statements"] = FeedRecord(
+        feed="statements", status=FeedStatus.OK, row_count=22256,
+        symbols_covered=1284, required=False,
+    )
+
+    report = s1.run(manifest, store, cal, uni, cfg)
+
+    assert report.pit_audit["fundamentals_filing_date"] is True
+    assert not any("neither the NSE filings table" in f
+                   for f in report.pit_audit_failures)
+    assert any("SEBI LODR deadline" in f for f in report.market_wide_soft_flags), (
+        "the run must say the value factors key off a deadline rather than a "
+        "filing date, not stay silent about it"
+    )
 
 
 # =============================================================================

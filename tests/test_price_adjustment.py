@@ -27,8 +27,9 @@ def _panel(cfg, adjust):
     px = store.read_prices(symbols=syms, start=s[0], end=s[-1],
                            columns=["date", "symbol", "close"])
     px["date"] = pd.to_datetime(px["date"])
-    wide = px.pivot_table(index="date", columns="symbol", values="close", aggfunc="last")
-    return wide.sort_index().pct_change().stack().dropna()
+    wide = px.pivot_table(index="date", columns="symbol", values="close",
+                          aggfunc="last", observed=True)
+    return wide.sort_index().pct_change(fill_method=None).stack().dropna()
 
 
 def test_adjustment_removes_the_phantom_split_crashes(live_cfg):
@@ -93,8 +94,10 @@ def test_the_label_is_close_to_close_but_entry_is_the_next_open(live_cfg, sessio
     px = store.read_prices(symbols=syms, start=sessions[-260], end=sessions[-1],
                            columns=["date", "symbol", "open", "close"])
     px["date"] = pd.to_datetime(px["date"])
-    close = px.pivot_table(index="date", columns="symbol", values="close", aggfunc="last")
-    open_ = px.pivot_table(index="date", columns="symbol", values="open", aggfunc="last")
+    close = px.pivot_table(index="date", columns="symbol", values="close",
+                           aggfunc="last", observed=True)
+    open_ = px.pivot_table(index="date", columns="symbol", values="open",
+                           aggfunc="last", observed=True)
     gap = (open_.shift(-1) / close - 1.0).stack().dropna()
 
     # A typical overnight gap is small. If the median absolute gap ever exceeds

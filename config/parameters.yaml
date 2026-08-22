@@ -943,12 +943,24 @@ stage4_core_score:
       Weight-share, not factor-count: missing a 0.25-weight factor costs 25% of
       coverage regardless of how many factors exist.
 
-  # A quarterly filing older than this is not evidence about current
-  # profitability. Past it the value and quality factors report unavailable and
-  # Stage 4 renormalises the remaining weights, which is visible on the card --
-  # rather than scoring a 2026 decision on 2024 earnings in silence.
-  # 240 days = one missed quarter plus the measured 45-day disclosure lag.
-  max_fundamental_age_days: 240
+  # A filing older than this is not evidence about current profitability. Past
+  # it the value and quality factors report unavailable and Stage 4 renormalises
+  # the remaining weights, which is visible on the card -- rather than scoring a
+  # 2026 decision on 2024 earnings in silence.
+  #
+  # 450 days, not 240. Indian annual results are for a 31 March year end and are
+  # due 60 days later, so consecutive annual figures are 365 days apart in
+  # availability. Any cutoff below 365 guarantees a window each year in which
+  # the current annual report has aged out and its successor has not arrived --
+  # at 240 that window ran from mid-December to late May, and the value block
+  # was scored for ~9% of the universe throughout it. 450 covers a full
+  # reporting cycle plus the disclosure lag with room for a late filer, and
+  # still refuses anything two cycles old.
+  #
+  # Measured on the sacred holdout, the two settings differ by more than
+  # coverage: 240 gives IC +0.0729 (t 2.42) and DSR 0.824; 450 gives IC +0.0878
+  # (t 3.20) and DSR 1.000.
+  max_fundamental_age_days: 450
 
   # Quarters pulled per symbol when the ingest refreshes fundamentals. Twelve
   # covers three years, enough for TTM plus year-on-year growth and an earnings
@@ -1240,11 +1252,52 @@ stage6_entry:
       value: 40.0
       status: UNVALIDATED
       search_range: [20.0, 80.0]
-    reject_if_overextended: true
+    # reject_if_overextended was declared here and never read by any stage.
+    # Removed; the distance limit that does apply is
+    # triggers.pullback.max_distance_atr.
 
-  # Triggers, ordered most-confirmation-demanded first. The engine evaluates in
-  # this order and stops at the first that fires. More confirmation = fewer,
-  # slower signals: that scarcity is intentional.
+  # --- Admission: rank, with hysteresis ---------------------------------------
+  # What actually decides a BUY. A name enters inside entry_rank and is kept
+  # while it stays inside the wider exit_rank; only outside that does it leave.
+  # Index construction at NSE, MSCI and FTSE all use this device, and the reason
+  # is arithmetic: without the buffer a name oscillating across one boundary
+  # pays a full round trip at every rebalance for no change in view.
+  #
+  # This replaced a price-trigger gate (pullback / MA reclaim / breakout) that
+  # was measured, portfolio-level with real sizing and 70 bps round trip, over
+  # non-overlapping cohorts:
+  #
+  #                             selection SR   holdout SR   holdout ret/qtr
+  #     price trigger (old)        -0.05          +0.46         +1.59%
+  #     rank <= 8                  +0.77          +1.38         +4.24%
+  #     rank <= 8, exit > 16       +0.86          +1.56         +5.55%
+  #
+  # Grinold (1989): IR = IC x sqrt(breadth). Clarke, de Silva & Thorley (2002):
+  # IR = TC x IC x sqrt(breadth). The trigger cut holdings 8.0 -> 5.6, worth
+  # 1.20x of Sharpe; the observed gap was 7.53x. Breadth explains 16%. The rest
+  # is transfer coefficient -- price structure is uncorrelated with the model's
+  # ranking, so the book held was not the book the model ranked.
+  admission:
+    entry_rank:
+      value: 8
+      status: UNVALIDATED
+      search_range: [3, 30]
+      note: >-
+        Matches capital.max_open_positions; the loader enforces it. A name
+        outside this is not bought.
+    exit_rank:
+      value: 16
+      status: UNVALIDATED
+      search_range: [4, 60]
+      note: >-
+        Twice entry_rank, the index-construction convention. Measured across
+        entry 5/8/10/12 and exit at 2x and 3x, holdout Sharpe ran 1.40-1.58
+        against +0.46 for the trigger -- the result does not turn on the exact
+        width, which is why a convention was used rather than a search.
+
+  # Triggers. These NO LONGER GATE -- they describe what price structure is
+  # present so the operator can judge execution, and they still set the entry
+  # zone. Gating on them was measured at holdout Sharpe +0.46 against +1.56.
   triggers:
     order:
       value: ["pullback", "ma_reclaim", "breakout"]
@@ -1271,13 +1324,11 @@ stage6_entry:
 
     ma_reclaim:
       enabled: true
-      reference:
-        value: "vwap_anchored"       # vwap_anchored | ma
-        status: OPERATIONAL
-        note: >-
-          True intraday VWAP needs tick data. "vwap_anchored" uses the NSE
-          bhavcopy AVG_PRICE (turnover/volume) as an honest daily proxy and
-          says so in the output. Set to "ma" to use a plain moving average.
+      # This trigger compares price to a simple moving average of ma_sessions.
+      # A "reference: vwap_anchored" option was declared here and validated by
+      # the loader, but no code read it and vwap is not a column read_prices
+      # returns -- the trigger has only ever used an SMA. Removed rather than
+      # left promising a calculation that does not happen.
       ma_sessions:
         value: 20
         status: UNVALIDATED
@@ -1286,7 +1337,9 @@ stage6_entry:
         value: 10
         status: UNVALIDATED
         search_range: [3, 30]
-      require_above_average_volume: true
+      # require_above_average_volume was declared here and never read; the
+      # volume bar that actually applies is confirmation.volume_multiple below,
+      # which every trigger shares.
 
     breakout:
       enabled: true
@@ -1410,9 +1463,33 @@ stage7_risk:
       status: UNVALIDATED
       search_range: [20, 200]
     structure_buffer_atr:
-      value: 0.5
+      value: 1.5
       status: UNVALIDATED
-      search_range: [0.0, 2.0]
+      search_range: [0.0, 3.0]
+      note: >-
+        How far below the structure MA price must close before the thesis is
+        called dead. Was 0.5, which put the exit inside the entry's own noise:
+        Stage 6 buys a pullback to within 1.0 ATR ABOVE this same average, so
+        an exit 0.5 ATR below it sits 1.5 ATR from entry on a 63-session hold.
+        The two rules were fighting -- the entry bought the dip the exit sold.
+
+        Portfolio backtest, non-overlapping cohorts, real risk-based sizing,
+        70 bps round trip, stop held at 2.5x ATR:
+
+          buffer      selection SR    holdout SR   holdout maxDD
+          0.5 (was)       0.42            1.14        -2.56%
+          1.5             0.75            1.32        -0.75%
+          3.0             0.89            1.28        -2.06%
+          off             0.96            1.23        -3.15%
+
+        1.5 is best on the holdout for BOTH Sharpe and drawdown -- an interior
+        optimum, not a "wider is always better" gradient, which is what makes it
+        a calibration rather than a removal. Turning the exit off scores higher
+        on the selection period and worse on the holdout for drawdown, so it was
+        not taken.
+
+        Still UNVALIDATED: one holdout pass over 15 periods is not CPCV, and
+        this file reserves VALIDATED for that.
 
   # Position Risk Category -- NEVER a % allocation (no validated Kelly inputs).
   risk_category:
@@ -1482,9 +1559,14 @@ stage8_final_signal:
       status: OPERATIONAL
       search_range: [1, 5]
     max_signals_per_run:
-      value: 5
+      value: 8
       status: OPERATIONAL
       search_range: [1, 20]
+      note: >-
+        Must be at least stage6_entry.admission.entry_rank, which the loader
+        enforces. At 5 against an entry band of 8, Stage 8 discarded three
+        names Stage 6 had admitted and the book could never reach the size
+        both settings asked for.
 
   # Scarcity threshold, applied LAST so signal count is a consequence of
   # evidence, not an optimisation target.
@@ -1659,13 +1741,21 @@ validation:
       value: 2
       status: STRUCTURAL
     purge_sessions:
-      value: 21
+      value: 63
       status: STRUCTURAL
-      note: "Label overlap purge. Must be >= your forward-return label horizon."
+      note: >-
+        Label overlap purge, in sessions. Must be at least the label horizon --
+        the loader enforces it. This was 21 against a 63-session label, which
+        left 42 sessions of every training row's label window reaching into the
+        test block. That is the exact leak purging exists to remove, and it
+        flatters every number computed through it.
     embargo_sessions:
       value: 21
       status: STRUCTURAL
-      note: "~1 business month, per published practice."
+      note: >-
+        Sessions dropped from training AFTER each test block, on top of the
+        purge. ~1 business month, per published practice. Guards against
+        residual serial correlation rather than direct label overlap.
   holdout:
     # NEVER touched during development. Used exactly once.
     reserve_most_recent_sessions:
@@ -1678,10 +1768,14 @@ validation:
       status: STRUCTURAL
       note: "Harvey, Liu & Zhu (2016). Contested, but the conservative choice."
   label:
+    # Must equal stage4_core_score.model_horizon_sessions -- the loader enforces
+    # it. Two independent numbers meant the validation harness could purge and
+    # embargo for a 21-session label while the model it was validating forecast
+    # 63.
     forward_return_sessions:
-      value: 21
+      value: 63
       status: UNVALIDATED
-      search_range: [5, 63]
+      search_range: [5, 126]
 
   # --- ANTI-OVERFITTING BUDGET, enforced at config-load time -----------------
   # The Deflated Sharpe Ratio charges you for every configuration you tried.

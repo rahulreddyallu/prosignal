@@ -434,7 +434,7 @@ class NseArchivesProvider:
 
         out = pd.DataFrame(parsed)
         combined = (
-            out.groupby([SYMBOL, "ex_date"], as_index=False)
+            out.groupby([SYMBOL, "ex_date"], as_index=False, observed=True)
             .agg(ratio=("ratio", "prod"),
                  action_type=("action_type", lambda s: "+".join(sorted(set(s)))),
                  raw_details=("raw_details", lambda s: " | ".join(s)),

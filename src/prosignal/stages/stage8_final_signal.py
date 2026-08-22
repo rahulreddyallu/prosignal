@@ -192,19 +192,32 @@ def run(
         # time. Five names can clear every pair and every sector and still be
         # the same bet: all high-momentum, all high-beta, differently labelled.
         # This looks at the basket as a whole.
+        # Aggregate exposure is REPORTED, not gated. It used to reject, and
+        # measured under rank admission that rejected 5 of 8 names and cut the
+        # book to 3.9 on the selection period:
+        #
+        #                        selection SR   holdout SR   selection maxDD
+        #   no gate                  +0.86         +1.56        -10.00%
+        #   gate at 0.75 (was)       +0.45         +1.45         -9.76%
+        #
+        # Drawdown barely moved at any limit tested, so the constraint bought no
+        # risk reduction and paid for it in breadth -- Grinold again, on a book
+        # the gate cut nearly in half. The deeper problem is that it was fighting
+        # the model: momentum is 41% of this model's IC, so the top names load
+        # high on momentum by construction, and capping mean momentum loading
+        # rejects the basket for being what the model is designed to produce.
+        # The operator is still told, which is the part that had value.
         exposure = _aggregate_exposure(accepted + [score], _EXPOSURE_FACTORS)
         breached = [n for n, v in exposure.items() if v >= _EXPOSURE_LIMIT]
         if breached:
-            rec.decision = Decision.WATCHLIST
-            breached_names = ", ".join(sorted(breached))
             rec.why_this_signal_exists.append(
-                f"Downgraded to WATCH: adding this name puts the basket's mean "
-                f"{breached_names} loading at or above the {_EXPOSURE_LIMIT:+.2f} limit. "
-                f"Every pair passes and every sector passes; taken together "
-                f"they are one macro position."
+                f"Concentration note: with this name the basket's mean "
+                f"{', '.join(sorted(breached))} loading reaches "
+                f"{_EXPOSURE_LIMIT:+.2f} or more. Every pair passes and every "
+                f"sector passes; taken together they are one macro position. "
+                f"This is reported, not blocked -- blocking it was measured at "
+                f"selection Sharpe +0.45 against +0.86."
             )
-            watch.append(rec)
-            continue
 
         if len(buys) >= max_signals:
             rec.decision = Decision.WATCHLIST

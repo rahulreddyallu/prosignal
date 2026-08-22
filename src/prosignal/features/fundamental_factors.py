@@ -38,6 +38,23 @@ __all__ = [
 QUARTERLY_LAG_DAYS = 45
 ANNUAL_LAG_DAYS = 60
 
+#: Fields measured OVER a period. A trailing-twelve-month figure is the sum of
+#: four quarters; taking the newest single quarter instead understates the
+#: annual figure roughly fourfold, which silently rescales every ratio built on
+#: it. Everything not listed here is a balance-sheet level, where the newest
+#: observation IS the current value and summing would be meaningless.
+FLOW_FIELDS = frozenset({
+    "Net Income", "Total Revenue", "EBITDA", "EBIT", "Gross Profit",
+    "Interest Expense", "Operating Cash Flow", "Free Cash Flow",
+})
+
+#: How far past a TTM window's newest period end the figure is still usable.
+#: Applied per symbol to the assembled figure rather than to the raw statement
+#: rows: filtering rows by age first removes the older quarters the TTM needs,
+#: which leaves the window incomplete for exactly the names it was meant to
+#: keep current.
+DEFAULT_MAX_AGE_DAYS = 240
+
 
 @dataclass(frozen=True)
 class FactorSpec:
@@ -193,26 +210,96 @@ def sector_neutralise(s: pd.Series, sectors: pd.Series) -> pd.Series:
 
 
 def _ttm(frame: pd.DataFrame, field_name: str, as_of: pd.Timestamp,
-         min_periods: int = 1) -> pd.Series:
-    """Trailing figure per symbol using only rows available at ``as_of``."""
+         max_age_days: Optional[int] = DEFAULT_MAX_AGE_DAYS) -> pd.Series:
+    """Trailing-twelve-month figure per symbol, from rows available at ``as_of``.
+
+    Flows are summed over four quarters; levels take the newest observation.
+    Where four quarters newer than the last annual report are not yet filed the
+    annual figure stands, so the two are never mixed within one ratio -- a
+    quarter's revenue over a full market capitalisation is not a sales yield.
+
+    This is what makes quarterly filings usable. Preferring annual reports and
+    falling back only when none exist at all leaves the block scored off the
+    handful of companies on a non-March year end for the five months between an
+    annual report ageing out and the next one landing.
+    """
     usable = frame[frame["available_on"] <= as_of]
     if usable.empty or field_name not in usable.columns:
         return pd.Series(dtype="float64")
     usable = usable.dropna(subset=[field_name])
     if usable.empty:
         return pd.Series(dtype="float64")
-    latest = usable.sort_values("period_end").groupby("symbol").tail(1)
-    return latest.set_index("symbol")[field_name]
+
+    is_flow = field_name in FLOW_FIELDS
+    kinds = usable["kind"] if "kind" in usable.columns else None
+    cutoff = (as_of - pd.Timedelta(days=int(max_age_days))) if max_age_days else None
+
+    out: Dict[str, float] = {}
+    for symbol, rows in usable.groupby("symbol", sort=False, observed=True):
+        rows = rows.sort_values("period_end")
+        if cutoff is not None and rows["period_end"].max() < cutoff:
+            continue                      # every filing this name has is stale
+        if not is_flow or kinds is None:
+            out[symbol] = float(rows.iloc[-1][field_name])
+            continue
+
+        annual = rows[rows["kind"] == "annual"]
+        quarterly = rows[rows["kind"] == "quarterly"]
+        newest_annual = annual["period_end"].max() if not annual.empty else None
+
+        # Four quarters that post-date the last annual report supersede it.
+        fresher = (quarterly[quarterly["period_end"] > newest_annual]
+                   if newest_annual is not None else quarterly)
+        if len(fresher) >= 4:
+            out[symbol] = float(fresher.tail(4)[field_name].sum())
+        elif not annual.empty:
+            out[symbol] = float(annual.iloc[-1][field_name])
+        elif len(quarterly) >= 4:
+            out[symbol] = float(quarterly.tail(4)[field_name].sum())
+    return pd.Series(out, dtype="float64")
 
 
-def _prior(frame: pd.DataFrame, field_name: str, as_of: pd.Timestamp) -> pd.Series:
-    """The figure one period before the latest available one."""
+def _prior(frame: pd.DataFrame, field_name: str, as_of: pd.Timestamp,
+           max_age_days: Optional[int] = DEFAULT_MAX_AGE_DAYS) -> pd.Series:
+    """The comparable figure one year earlier, on the same basis as :func:`_ttm`.
+
+    Growth is a ratio of two figures, so both must be the same kind of thing. A
+    TTM sum over a single prior quarter would read as 300% growth from
+    arithmetic alone.
+    """
     usable = frame[frame["available_on"] <= as_of]
     if usable.empty or field_name not in usable.columns:
         return pd.Series(dtype="float64")
-    usable = usable.dropna(subset=[field_name]).sort_values("period_end")
-    prior = usable.groupby("symbol").tail(2).groupby("symbol").head(1)
-    return prior.set_index("symbol")[field_name]
+    usable = usable.dropna(subset=[field_name])
+    if usable.empty:
+        return pd.Series(dtype="float64")
+
+    is_flow = field_name in FLOW_FIELDS
+    kinds = usable["kind"] if "kind" in usable.columns else None
+    cutoff = (as_of - pd.Timedelta(days=int(max_age_days))) if max_age_days else None
+
+    out: Dict[str, float] = {}
+    for symbol, rows in usable.groupby("symbol", sort=False, observed=True):
+        rows = rows.sort_values("period_end")
+        if cutoff is not None and rows["period_end"].max() < cutoff:
+            continue
+        if not is_flow or kinds is None:
+            if len(rows) >= 2:
+                out[symbol] = float(rows.iloc[-2][field_name])
+            continue
+
+        annual = rows[rows["kind"] == "annual"]
+        quarterly = rows[rows["kind"] == "quarterly"]
+        newest_annual = annual["period_end"].max() if not annual.empty else None
+        fresher = (quarterly[quarterly["period_end"] > newest_annual]
+                   if newest_annual is not None else quarterly)
+        if len(fresher) >= 8:
+            out[symbol] = float(fresher.tail(8).head(4)[field_name].sum())
+        elif len(annual) >= 2:
+            out[symbol] = float(annual.iloc[-2][field_name])
+        elif len(quarterly) >= 8:
+            out[symbol] = float(quarterly.tail(8).head(4)[field_name].sum())
+    return pd.Series(out, dtype="float64")
 
 
 def _safe_div(a: pd.Series, b: pd.Series, floor: float = 1e-6) -> pd.Series:
@@ -226,6 +313,7 @@ def build_fundamental_panel(
     market_cap: pd.Series,
     as_of: dt.date,
     enabled: Optional[Sequence[str]] = None,
+    max_age_days: Optional[int] = DEFAULT_MAX_AGE_DAYS,
 ) -> pd.DataFrame:
     """Raw fundamental factor values for one decision date.
 
@@ -243,13 +331,13 @@ def build_fundamental_panel(
     if f.empty:
         return pd.DataFrame()
 
-    ann = f[f.get("kind", "annual") == "annual"]
-    if ann.empty:
-        ann = f
-
+    # Annual and quarterly filings are both used. _ttm decides per symbol which
+    # basis is current and puts four quarters on the same footing as a year, so
+    # restricting to annual reports here would discard the only fresh figures
+    # available for most of the year without making anything more comparable.
     want = set(enabled) if enabled is not None else {s.name for s in FUNDAMENTAL_FACTORS if s.enabled}
-    g = lambda name: _ttm(ann, name, ts)
-    p = lambda name: _prior(ann, name, ts)
+    g = lambda name: _ttm(f, name, ts, max_age_days)
+    p = lambda name: _prior(f, name, ts, max_age_days)
     mc = market_cap.dropna()
     out: Dict[str, pd.Series] = {}
 

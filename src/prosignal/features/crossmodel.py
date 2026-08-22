@@ -128,14 +128,23 @@ class CrossSectionalModel:
         )
 
 
-def load_cached(path, as_of: dt.date) -> Optional[CrossSectionalModel]:
-    """Coefficients from a recent fit, or None when absent or stale."""
+def load_cached(path, as_of: dt.date,
+                refit_every_sessions: Optional[int] = None) -> Optional[CrossSectionalModel]:
+    """Coefficients from a recent fit, or None when absent or stale.
+
+    ``refit_every_sessions`` comes from the config. It defaulted to the module
+    constant and nothing passed it, so stage4_core_score.model_refit_every_sessions
+    was declared, validated on every startup and ignored -- editing it changed
+    nothing. The two happened to agree at 21, which is why it was invisible.
+    """
     try:
         if not path.is_file():
             return None
+        every = int(refit_every_sessions if refit_every_sessions is not None
+                    else REFIT_EVERY_SESSIONS)
         blob = json.loads(path.read_text(encoding="utf-8"))
         fitted = dt.date.fromisoformat(blob["fitted_for"])
-        if (as_of - fitted).days > REFIT_EVERY_SESSIONS * 2:
+        if (as_of - fitted).days > every * 2:
             return None
         if sorted(blob["coef"]) != sorted(FEATURE_COLUMNS):
             return None                      # feature set changed; refit
@@ -292,23 +301,19 @@ def _attach_fundamentals(
         if prices.empty or shares.empty:
             continue
         sh = (shares[shares["available_on"] <= ts]
-              .sort_values("period_end").groupby("symbol").tail(1)
+              .sort_values("period_end").groupby("symbol", observed=True).tail(1)
               .set_index("symbol")["Ordinary Shares Number"])
         px = prices.iloc[-1].dropna()
         mcap = (px.reindex(sh.index) * sh).dropna()
         if len(mcap) < 20:
             continue
-        # Staleness is judged against each panel date, not the newest one. A
-        # single global cutoff discards every statement older than the last
-        # decision date, which silently emptied the block for the whole
-        # training window and left the five columns constant.
-        visible = st
-        if max_age_days:
-            visible = st[st["period_end"] >= ts - pd.Timedelta(days=int(max_age_days))]
-        if visible.empty:
-            continue
-        feats = build_fundamental_panel(visible, mcap, ts.date(),
-                                        enabled=FUNDAMENTAL_FEATURES)
+        # Staleness is enforced inside the TTM, per symbol, against this panel
+        # date. Filtering the statement rows here instead removed the older
+        # quarters a trailing-twelve-month sum is built from, so the names the
+        # cutoff was meant to keep current were the ones it made uncomputable.
+        feats = build_fundamental_panel(st, mcap, ts.date(),
+                                        enabled=FUNDAMENTAL_FEATURES,
+                                        max_age_days=max_age_days)
         if feats is None or feats.empty:
             continue
         f = feats.reset_index().rename(columns={"index": "symbol"})

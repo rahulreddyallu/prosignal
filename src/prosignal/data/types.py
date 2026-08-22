@@ -270,7 +270,8 @@ def to_wide(
         raise DataError(f"cannot pivot on missing field {field!r}")
     if df.empty:
         return pd.DataFrame(index=pd.DatetimeIndex([], name=DATE))
-    wide = df.pivot_table(index=DATE, columns=SYMBOL, values=field, aggfunc="last")
+    wide = df.pivot_table(index=DATE, columns=SYMBOL, values=field,
+                          aggfunc="last", observed=True)
     wide = wide.sort_index()
     if symbols is not None:
         wanted = [normalise_symbol(s) for s in symbols]

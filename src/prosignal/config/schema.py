@@ -966,13 +966,29 @@ class Stage5Config(_Base):
 # =============================================================================
 
 
+class AdmissionConfig(_Base):
+    """Rank bands with hysteresis. See parameters.yaml for the measurement."""
+
+    entry_rank: TI
+    exit_rank: TI
+
+    @model_validator(mode="after")
+    def _check(self) -> "AdmissionConfig":
+        if int(self.exit_rank.value) <= int(self.entry_rank.value):
+            raise ValueError(
+                "stage6_entry.admission.exit_rank must be wider than entry_rank; "
+                "equal bands are no hysteresis at all and a name on the boundary "
+                "pays a round trip at every rebalance"
+            )
+        return self
+
+
 class ConfirmationConfig(_Base):
     require_volume_confirmation: bool = True
     volume_multiple: TF
     volume_lookback_sessions: TI
     require_delivery_confirmation: TB
     min_delivery_pct: TF
-    reject_if_overextended: bool = True
 
 
 class PullbackTriggerConfig(_Base):
@@ -984,17 +1000,21 @@ class PullbackTriggerConfig(_Base):
 
 
 class MaReclaimTriggerConfig(_Base):
+    """The reclaim trigger.
+
+    ``reference`` accepted "vwap_anchored" and the config shipped set to it,
+    with a note saying the output would say so. Nothing read the field:
+    stage6._ma_reclaim has only ever used a simple moving average, and vwap is
+    not among the columns read_prices returns. ``require_above_average_volume``
+    was likewise never read -- _ma_reclaim is not passed volumes at all, and the
+    volume bar that does apply is confirmation.volume_multiple, shared by every
+    trigger. Both are removed rather than left declaring behaviour that does not
+    exist. Restoring either means implementing it first.
+    """
+
     enabled: bool = True
-    reference: TS
     ma_sessions: TI
     lookback_sessions: TI
-    require_above_average_volume: bool = True
-
-    @model_validator(mode="after")
-    def _check(self) -> "MaReclaimTriggerConfig":
-        if self.reference.value not in {"vwap_anchored", "ma"}:
-            raise ValueError("ma_reclaim.reference must be vwap_anchored|ma")
-        return self
 
 
 class BreakoutTriggerConfig(_Base):
@@ -1028,6 +1048,7 @@ class EntryZoneConfig(_Base):
 
 
 class Stage6Config(_Base):
+    admission: AdmissionConfig
     confirmation: ConfirmationConfig
     triggers: TriggersConfig
     entry_zone: EntryZoneConfig
@@ -1387,6 +1408,51 @@ class RootConfig(_Base):
     @model_validator(mode="after")
     def _cross_checks(self) -> "RootConfig":
         errs: List[str] = []
+
+        # Purging must cover the whole label window. At purge 21 against a
+        # 63-session label, 42 sessions of every training row's label reached
+        # into the test block -- the exact leak purging exists to remove, and it
+        # flatters every number measured through it.
+        horizon = int(self.stage4_core_score.model_horizon_sessions)
+        purge = int(self.validation.cpcv.purge_sessions.value)
+        label = int(self.validation.label.forward_return_sessions.value)
+        if purge < horizon:
+            errs.append(
+                f"validation.cpcv.purge_sessions ({purge}) is shorter than "
+                f"stage4_core_score.model_horizon_sessions ({horizon}); training "
+                f"rows would keep {horizon - purge} sessions of label overlap "
+                f"with the test block"
+            )
+        if label != horizon:
+            errs.append(
+                f"validation.label.forward_return_sessions ({label}) must equal "
+                f"stage4_core_score.model_horizon_sessions ({horizon}); the "
+                f"harness would otherwise purge for a different label than the "
+                f"model it is validating forecasts"
+            )
+
+        # The admission band, the book size and the per-run cap describe the
+        # same book from three angles and were independent numbers. With
+        # entry_rank 8 and max_signals_per_run 5, Stage 6 admits eight names and
+        # Stage 8 silently drops three of them -- a smaller book than either
+        # setting asks for, and nothing reports the disagreement.
+        entry = int(self.stage6_entry.admission.entry_rank.value)
+        book = int(self.capital.max_open_positions.value)
+        per_run = int(self.stage8_final_signal.portfolio.max_signals_per_run.value)
+        if entry != book:
+            errs.append(
+                f"stage6_entry.admission.entry_rank ({entry}) must equal "
+                f"capital.max_open_positions ({book}); the entry band IS the "
+                f"book size, and two different numbers mean one of them is "
+                f"never reached"
+            )
+        if per_run < entry:
+            errs.append(
+                f"stage8_final_signal.portfolio.max_signals_per_run ({per_run}) "
+                f"is below stage6_entry.admission.entry_rank ({entry}), so "
+                f"Stage 8 would discard names Stage 6 admitted and the book "
+                f"could never reach its own target size"
+            )
 
         # The universe index must have a constituent file we know how to fetch.
         idx = self.universe.index_name.value
