@@ -99,6 +99,7 @@ def test_an_empty_delivery_panel_stops_the_model_rather_than_zeroing_it():
         class model_ridge_alpha: value = 20000.0
         class model_max_train_sessions: value = 3000
         class model_min_train_rows: value = 600
+        class model_refit_every_sessions: value = 21
         class min_name_factor_coverage: value = 0.60
 
     # The outer handler converts this to a reason string; what matters is that a

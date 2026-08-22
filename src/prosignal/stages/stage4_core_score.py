@@ -572,7 +572,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
     cache = store.curated / "crosssec_model.json"
     try:
         sessions = store.price_sessions()
-        cached = cm.load_cached(cache, as_of)
+        refit_every = iv(cfg.model_refit_every_sessions)
+        cached = cm.load_cached(cache, as_of, refit_every)
 
         # Cheap path: a recent fit only needs today's features, which is one
         # date of history instead of a thousand. The large read is what pushed
@@ -676,7 +677,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
                             extra={"verdict": verdict.summary(),
                                    "sign_flips": verdict.sign_flips,
                                    "magnitude_jumps": verdict.magnitude_jumps})
-                held = cm.load_cached(cache, as_of)
+                held = cm.load_cached(cache, as_of, refit_every)
                 if held is not None:
                     feats = cm.today_features(close, turnover, as_of,
                                               fundamentals=fundamentals,

@@ -128,14 +128,23 @@ class CrossSectionalModel:
         )
 
 
-def load_cached(path, as_of: dt.date) -> Optional[CrossSectionalModel]:
-    """Coefficients from a recent fit, or None when absent or stale."""
+def load_cached(path, as_of: dt.date,
+                refit_every_sessions: Optional[int] = None) -> Optional[CrossSectionalModel]:
+    """Coefficients from a recent fit, or None when absent or stale.
+
+    ``refit_every_sessions`` comes from the config. It defaulted to the module
+    constant and nothing passed it, so stage4_core_score.model_refit_every_sessions
+    was declared, validated on every startup and ignored -- editing it changed
+    nothing. The two happened to agree at 21, which is why it was invisible.
+    """
     try:
         if not path.is_file():
             return None
+        every = int(refit_every_sessions if refit_every_sessions is not None
+                    else REFIT_EVERY_SESSIONS)
         blob = json.loads(path.read_text(encoding="utf-8"))
         fitted = dt.date.fromisoformat(blob["fitted_for"])
-        if (as_of - fitted).days > REFIT_EVERY_SESSIONS * 2:
+        if (as_of - fitted).days > every * 2:
             return None
         if sorted(blob["coef"]) != sorted(FEATURE_COLUMNS):
             return None                      # feature set changed; refit
