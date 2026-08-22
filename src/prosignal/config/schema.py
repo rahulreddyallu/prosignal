@@ -966,6 +966,23 @@ class Stage5Config(_Base):
 # =============================================================================
 
 
+class AdmissionConfig(_Base):
+    """Rank bands with hysteresis. See parameters.yaml for the measurement."""
+
+    entry_rank: TI
+    exit_rank: TI
+
+    @model_validator(mode="after")
+    def _check(self) -> "AdmissionConfig":
+        if int(self.exit_rank.value) <= int(self.entry_rank.value):
+            raise ValueError(
+                "stage6_entry.admission.exit_rank must be wider than entry_rank; "
+                "equal bands are no hysteresis at all and a name on the boundary "
+                "pays a round trip at every rebalance"
+            )
+        return self
+
+
 class ConfirmationConfig(_Base):
     require_volume_confirmation: bool = True
     volume_multiple: TF
@@ -1031,6 +1048,7 @@ class EntryZoneConfig(_Base):
 
 
 class Stage6Config(_Base):
+    admission: AdmissionConfig
     confirmation: ConfirmationConfig
     triggers: TriggersConfig
     entry_zone: EntryZoneConfig
@@ -1390,6 +1408,29 @@ class RootConfig(_Base):
     @model_validator(mode="after")
     def _cross_checks(self) -> "RootConfig":
         errs: List[str] = []
+
+        # The admission band, the book size and the per-run cap describe the
+        # same book from three angles and were independent numbers. With
+        # entry_rank 8 and max_signals_per_run 5, Stage 6 admits eight names and
+        # Stage 8 silently drops three of them -- a smaller book than either
+        # setting asks for, and nothing reports the disagreement.
+        entry = int(self.stage6_entry.admission.entry_rank.value)
+        book = int(self.capital.max_open_positions.value)
+        per_run = int(self.stage8_final_signal.portfolio.max_signals_per_run.value)
+        if entry != book:
+            errs.append(
+                f"stage6_entry.admission.entry_rank ({entry}) must equal "
+                f"capital.max_open_positions ({book}); the entry band IS the "
+                f"book size, and two different numbers mean one of them is "
+                f"never reached"
+            )
+        if per_run < entry:
+            errs.append(
+                f"stage8_final_signal.portfolio.max_signals_per_run ({per_run}) "
+                f"is below stage6_entry.admission.entry_rank ({entry}), so "
+                f"Stage 8 would discard names Stage 6 admitted and the book "
+                f"could never reach its own target size"
+            )
 
         # The universe index must have a constituent file we know how to fetch.
         idx = self.universe.index_name.value

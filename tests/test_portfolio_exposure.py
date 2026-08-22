@@ -64,13 +64,21 @@ def test_an_empty_basket_is_not_an_exposure():
     assert _aggregate_exposure([], _EXPOSURE_FACTORS) == {}
 
 
-def test_the_gate_only_ever_removes_names():
-    """It downgrades to WATCHLIST. It can never promote or loosen."""
+def test_aggregate_exposure_reports_and_never_decides():
+    """It annotates. It can neither promote nor reject.
+
+    It used to downgrade to WATCHLIST. Measured under rank admission that
+    rejected 5 of 8 names and cut the selection-period book to 3.9, taking
+    Sharpe from +0.86 to +0.45 while drawdown barely moved -- a constraint
+    fighting the model, since momentum is 41% of this model's IC and the top
+    names load high on it by construction. What survives is the reporting.
+    """
     import inspect
 
     from prosignal.stages import stage8_final_signal as s8
     source = inspect.getsource(s8.run)
     block = source[source.index("_aggregate_exposure"):]
     block = block[:block.index("if len(buys)")]
-    assert "Decision.WATCHLIST" in block
-    assert "buys.append" not in block
+    assert "buys.append" not in block, "the check must never promote a name"
+    assert "Decision.WATCHLIST" not in block, "the check must never reject a name"
+    assert "why_this_signal_exists.append" in block, "it must still say so"

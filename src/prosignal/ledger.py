@@ -105,6 +105,32 @@ class Ledger:
             last = row
         return last
 
+    def open_book(self, before: Optional[dt.date] = None) -> List[str]:
+        """Names the most recent recorded run issued as BUY.
+
+        The engine holds no live position state -- every run rebuilds its view
+        from the store. The ledger is the only record of what the previous run
+        committed to, and Stage 6's exit band needs it: a name is kept while it
+        stays inside the wider band, which cannot be evaluated without knowing
+        whether it was held.
+
+        Returns the empty list when nothing has been recorded yet, which is the
+        correct starting state rather than an error -- a first run holds
+        nothing.
+        """
+        latest, latest_date = [], None
+        for row in self.iter_rows():
+            raw = row.get("date")
+            try:
+                when = dt.date.fromisoformat(str(raw)[:10])
+            except (TypeError, ValueError):
+                continue
+            if before is not None and when >= before:
+                continue
+            if latest_date is None or when >= latest_date:
+                latest_date, latest = when, list(row.get("signals_generated") or [])
+        return latest
+
     def signals_for(self, ticker: str) -> List[Dict[str, Any]]:
         """Every run that produced a signal for one ticker -- the audit question."""
         return [r for r in self.iter_rows() if ticker in (r.get("signals_generated") or [])]

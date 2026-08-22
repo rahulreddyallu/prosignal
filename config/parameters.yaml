@@ -1256,9 +1256,48 @@ stage6_entry:
     # Removed; the distance limit that does apply is
     # triggers.pullback.max_distance_atr.
 
-  # Triggers, ordered most-confirmation-demanded first. The engine evaluates in
-  # this order and stops at the first that fires. More confirmation = fewer,
-  # slower signals: that scarcity is intentional.
+  # --- Admission: rank, with hysteresis ---------------------------------------
+  # What actually decides a BUY. A name enters inside entry_rank and is kept
+  # while it stays inside the wider exit_rank; only outside that does it leave.
+  # Index construction at NSE, MSCI and FTSE all use this device, and the reason
+  # is arithmetic: without the buffer a name oscillating across one boundary
+  # pays a full round trip at every rebalance for no change in view.
+  #
+  # This replaced a price-trigger gate (pullback / MA reclaim / breakout) that
+  # was measured, portfolio-level with real sizing and 70 bps round trip, over
+  # non-overlapping cohorts:
+  #
+  #                             selection SR   holdout SR   holdout ret/qtr
+  #     price trigger (old)        -0.05          +0.46         +1.59%
+  #     rank <= 8                  +0.77          +1.38         +4.24%
+  #     rank <= 8, exit > 16       +0.86          +1.56         +5.55%
+  #
+  # Grinold (1989): IR = IC x sqrt(breadth). Clarke, de Silva & Thorley (2002):
+  # IR = TC x IC x sqrt(breadth). The trigger cut holdings 8.0 -> 5.6, worth
+  # 1.20x of Sharpe; the observed gap was 7.53x. Breadth explains 16%. The rest
+  # is transfer coefficient -- price structure is uncorrelated with the model's
+  # ranking, so the book held was not the book the model ranked.
+  admission:
+    entry_rank:
+      value: 8
+      status: UNVALIDATED
+      search_range: [3, 30]
+      note: >-
+        Matches capital.max_open_positions; the loader enforces it. A name
+        outside this is not bought.
+    exit_rank:
+      value: 16
+      status: UNVALIDATED
+      search_range: [4, 60]
+      note: >-
+        Twice entry_rank, the index-construction convention. Measured across
+        entry 5/8/10/12 and exit at 2x and 3x, holdout Sharpe ran 1.40-1.58
+        against +0.46 for the trigger -- the result does not turn on the exact
+        width, which is why a convention was used rather than a search.
+
+  # Triggers. These NO LONGER GATE -- they describe what price structure is
+  # present so the operator can judge execution, and they still set the entry
+  # zone. Gating on them was measured at holdout Sharpe +0.46 against +1.56.
   triggers:
     order:
       value: ["pullback", "ma_reclaim", "breakout"]
@@ -1520,9 +1559,14 @@ stage8_final_signal:
       status: OPERATIONAL
       search_range: [1, 5]
     max_signals_per_run:
-      value: 5
+      value: 8
       status: OPERATIONAL
       search_range: [1, 20]
+      note: >-
+        Must be at least stage6_entry.admission.entry_rank, which the loader
+        enforces. At 5 against an entry band of 8, Stage 8 discarded three
+        names Stage 6 had admitted and the book could never reach the size
+        both settings asked for.
 
   # Scarcity threshold, applied LAST so signal count is a consequence of
   # evidence, not an optimisation target.

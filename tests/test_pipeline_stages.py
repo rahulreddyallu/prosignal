@@ -16,7 +16,7 @@ import pytest
 
 from prosignal.core.calendar import TradingCalendar
 from prosignal.core.contracts import DataQualityReport, StockDataFlags
-from prosignal.core.enums import EntryStatus, GateResult, RejectionReason
+from prosignal.core.enums import EntryStatus, TriggerType, GateResult, RejectionReason
 from prosignal.costs import CostModel
 from prosignal.data.store import DataStore
 from prosignal.data.types import DATE, SYMBOL
@@ -375,10 +375,59 @@ def test_breakout_trigger_fires_on_a_real_breakout(cfg):
         DATE: dates, "open": base, "high": base * 1.001, "low": base * 0.999,
         "close": base, "volume": vols, "turnover": base * vols,
     })
-    rep = stage6_entry.run(["B"], {"B": frame}, cfg, dates[-1].date())
+    # Admission is by rank now; the trigger describes the price structure and
+    # sets the entry zone but no longer decides. Rank 1 is inside any band.
+    rep = stage6_entry.run(["B"], {"B": frame}, cfg, dates[-1].date(),
+                           ranks={"B": 1}, held=[])
     d = rep.decisions["B"]
     assert d.status is EntryStatus.TRIGGERED
+    # Some structure is recognised. Which one is an ordering detail -- the
+    # triggers are tried pullback, reclaim, breakout and the first match wins.
+    assert d.trigger_type is not TriggerType.NONE
     assert d.entry_zone is not None and d.entry_zone[0] < d.entry_zone[1]
+
+
+def test_a_breakout_outside_the_entry_band_is_not_bought(cfg):
+    """The trigger firing is not a reason to buy. Rank is."""
+    n = 200
+    dates = _dates(n)
+    base = np.full(n, 100.0)
+    base[-1] = 118.0
+    vols = np.full(n, 100_000.0)
+    vols[-1] = 900_000.0
+    frame = pd.DataFrame({
+        DATE: dates, "open": base, "high": base * 1.001, "low": base * 0.999,
+        "close": base, "volume": vols, "turnover": base * vols,
+    })
+    entry = int(cfg.params.stage6_entry.admission.entry_rank.value)
+    rep = stage6_entry.run(["B"], {"B": frame}, cfg, dates[-1].date(),
+                           ranks={"B": entry + 5}, held=[])
+    d = rep.decisions["B"]
+    assert d.status is EntryStatus.WATCHLIST
+    assert d.trigger_type is not TriggerType.NONE   # still detected, still reported
+
+
+def test_a_held_name_survives_between_the_two_bands(cfg):
+    """Hysteresis: inside the exit band a held name stays, an unheld one does not."""
+    n = 200
+    dates = _dates(n)
+    base = np.full(n, 100.0) * (1 + np.arange(n) * 0.001)
+    frame = pd.DataFrame({
+        DATE: dates, "open": base, "high": base * 1.001, "low": base * 0.999,
+        "close": base, "volume": np.full(n, 100_000.0), "turnover": base * 100_000.0,
+    })
+    adm = cfg.params.stage6_entry.admission
+    between = (int(adm.entry_rank.value) + int(adm.exit_rank.value)) // 2
+
+    held = stage6_entry.run(["B"], {"B": frame}, cfg, dates[-1].date(),
+                            ranks={"B": between}, held=["B"])
+    fresh = stage6_entry.run(["B"], {"B": frame}, cfg, dates[-1].date(),
+                             ranks={"B": between}, held=[])
+    assert held.decisions["B"].status is EntryStatus.TRIGGERED
+    assert fresh.decisions["B"].status is EntryStatus.WATCHLIST, (
+        "without hysteresis a name drifting across one boundary is bought and "
+        "sold at every rebalance for no change in view"
+    )
 
 
 # =============================================================================

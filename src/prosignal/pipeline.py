@@ -192,7 +192,14 @@ def run_analysis(
     # ---- Stage 6 ----------------------------------------------------------
     step(6)
     t = _clock()
-    entries = stage6_entry.run(defended, frames, config, resolved)
+    # Stage 6 admits on rank with hysteresis, so it needs two things this run
+    # does not otherwise carry: where each name sits in the model's ranking, and
+    # what the previous run committed to. The engine holds no live position
+    # state -- the ledger is the record of the open book.
+    ranks = {s.ticker: s.rank for s in scores.ranked_scores}
+    open_book = Ledger(config.paths.ledger).open_book(before=resolved)
+    entries = stage6_entry.run(defended, frames, config, resolved,
+                               ranks=ranks, held=open_book)
     timings[stage6_entry.STAGE_NAME] = t()
 
     # ---- Stage 7 ----------------------------------------------------------
