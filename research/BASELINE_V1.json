@@ -120,7 +120,8 @@
     "The quarterly-supersession branch of the TTM repair does not fire on this store (0 of 1284 symbols); the coverage gain came from the filter ordering and the staleness gate.",
     "26 configuration parameters remain declared and reserved rather than implemented.",
     "Momentum's 41% IC share is one latent factor: a single sign-pinned principal component of the three shipped factors reproduces their equal-weighted IC (+0.0755 vs +0.0752). Nine literature variants span 2.57 effective dimensions. Diversification cannot come from more momentum.",
-    "Stage 6 band widths are not a meaningful lever: nested selection beats the fixed convention by +0.03 Sharpe on a distribution with sd 0.83, and the inner loop's chosen band scatters across the whole grid. Fixed at entry 8 / exit 16 on the index-construction convention rather than searched."
+    "Stage 6 band widths are not a meaningful lever: nested selection beats the fixed convention by +0.03 Sharpe on a distribution with sd 0.83, and the inner loop's chosen band scatters across the whole grid. Fixed at entry 8 / exit 16 on the index-construction convention rather than searched.",
+    "The 63-session horizon sits on a plateau (21-84 sessions, 11.20-11.65% annualised net) rather than at a peak. H=84 buys +0.06 Sharpe and costs 0.41pp of return; the CPCV Sharpe distribution has sd 0.83, so that is noise. Alpha accrues fastest EARLY (5.5bp/session at H=5 vs 2.3bp at H=63) -- early exit forfeits cost amortisation, not alpha."
   ],
   "label": "BASELINE_V1",
   "metrics": {
@@ -138,6 +139,45 @@
       "periods": 15,
       "t": 3.2,
       "top_decile_excess_per_period": 0.0345
+    },
+    "horizon_surface": {
+      "conclusion": "63 is not uniquely optimal; it sits on a flat 21-84 plateau spanning 0.45pp of annualised net return. Gross IC alone would nominate H=189, which is the WORST horizon net of costs.",
+      "gross_ic": {
+        "126": 0.0847,
+        "189": 0.0874,
+        "21": 0.0513,
+        "42": 0.0712,
+        "63": 0.0769,
+        "84": 0.0805
+      },
+      "method": "signal dates held fixed; one score per date measured against every horizon",
+      "net_annualised_at_portfolio": {
+        "126": 0.0993,
+        "189": 0.0729,
+        "21": 0.1165,
+        "42": 0.1145,
+        "63": 0.1161,
+        "84": 0.112
+      },
+      "per_session_alpha_bp": {
+        "126": 2.0,
+        "189": 1.5,
+        "21": 2.5,
+        "5": 5.5,
+        "63": 2.3
+      },
+      "plateau_sessions": [
+        21,
+        84
+      ],
+      "portfolio_sharpe": {
+        "126": 0.86,
+        "189": 0.81,
+        "21": 0.44,
+        "42": 0.63,
+        "63": 0.78,
+        "84": 0.84
+      }
     },
     "momentum_decomposition": {
       "candidates_rejected_on_holdout": [
