@@ -9,11 +9,13 @@ never feeds anything back into it.
 
 from .selection import SLOTS, Slate, select_slate
 from .evidence import EVIDENCE_CATEGORIES, build_evidence
+from .history import build_history, changes, load_days
 from .narrative import build_narrative
 from .viewmodel import build_view
 
 __all__ = [
     "SLOTS", "Slate", "select_slate",
     "EVIDENCE_CATEGORIES", "build_evidence",
+    "build_history", "changes", "load_days",
     "build_narrative", "build_view",
 ]
