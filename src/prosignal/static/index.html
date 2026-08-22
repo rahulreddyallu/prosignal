@@ -327,6 +327,15 @@ details .body{padding-top:var(--s3)}
 }
 .hide{display:none!important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Tier separator. Deliberately quiet -- it is a reading aid, not a gate; every
+   name below it still cleared scoring and the false-signal defence. */
+.tier-sep td{padding:var(--s3) var(--s3);background:transparent;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.tier-sep:hover td{background:transparent}
+.tier-l{display:inline-block;font-size:.7rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--fg-3);margin-right:.6rem;font-weight:600}
+.tier-n{font-size:.75rem;color:var(--fg-3);line-height:1.45}
 </style>
 </head>
 <body>
@@ -674,13 +683,18 @@ function scanner(rows){
       <span class="tiny muted">${rows.length} name${rows.length===1?"":"s"} · tap a row for evidence</span>
     </div>
     <p class="tiny muted" style="margin:0 0 var(--s4);max-width:78ch;line-height:1.5">
-      <b>${nb} buy</b> · the model's top ${nb} by <b>Rank</b>, which is the only
-      thing admission uses. The rest are <b>watchlist</b>: they cleared scoring
-      and the false-signal defence but sit outside the entry band, so they are
-      ranked evidence rather than positions. <b>Score</b> is a percentile within
-      today's eligible universe <i>after</i> Stage&nbsp;5 penalties, so a
-      penalised name can show a lower score than one the model ranked below it
-      — sort by Rank to see the model's own ordering.
+      <b>${nb} buy</b> · admission runs on <b>Rank</b> and nothing else. A new
+      name enters inside the entry band; a name already held is kept until it
+      leaves a wider exit band. That hysteresis is why a held name at rank 13
+      can be a buy while a new one at rank 9 is not — without it, a name
+      drifting across a single boundary would be bought and sold at every
+      rebalance for no change in view.
+      The rest are <b>watchlist</b>: they cleared scoring and the false-signal
+      defence but sit outside the band, so they are ranked evidence rather than
+      positions. <b>Score</b> is a percentile within today's eligible universe
+      <i>after</i> Stage&nbsp;5 penalties, so a penalised name can show a lower
+      score than one the model ranked below it. Gaps in Rank are names that did
+      not survive the defence.
     </p>`;
   const tw=el("div","tw"); const tbl=el("table");
   tbl.innerHTML=`<thead><tr>${COLS.map(c=>
@@ -708,8 +722,32 @@ function paint(tbl,rows){
     s.textContent = s.dataset.car===sortKey ? (sortAsc?"▲":"▼") : "");
 
   const tb=tbl.querySelector("tbody"); tb.innerHTML="";
+  /* Tier boundary. The alpha is concentrated at the top of the ranking and
+     decays with depth -- measured on the sacred holdout, per 63-session period
+     and net of an 86bp round trip:
+
+         top 10   +5.28%          ranks 11-44   +2.14%
+
+     Ranks 31-44 contributed -0.11% over the selection period. The list is not
+     truncated, because the two periods disagree about the very top: selection
+     put ranks 1-3 at +1.72% (t 0.87) while the holdout put them at +9.15%, and
+     cutting to five names would be fitting to the holdout -- the error that
+     killed the factor trim and both momentum candidates. Tiering shows the
+     concentration without hard-coding a cut the evidence cannot defend. */
+  const TIER1=10;
+  let tiered=false;
   sorted.forEach(c=>{
     const buy=/BUY/i.test(c.decision);
+    if(sortKey==="model_rank"&&sortAsc&&!tiered&&c.model_rank>TIER1){
+      tiered=true;
+      const sep=el("tr","tier-sep");
+      sep.innerHTML=`<td colspan="${COLS.length}">
+        <span class="tier-l">Beyond rank ${TIER1}</span>
+        <span class="tier-n">holdout excess +2.14% net per 63-session period,
+          against +5.28% for the top ${TIER1}. Ranks 31-44 measured -0.11% over
+          the selection period. 14 holdout periods.</span></td>`;
+      tb.appendChild(sep);
+    }
     const tr=el("tr","main"); tr.tabIndex=0;
     tr.innerHTML=`
       <td class="c-model_rank r num muted">${c.model_rank}</td>

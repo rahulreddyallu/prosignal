@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "prosignal",
+      "runtimeExecutable": "/Users/rahulreddyallu/Desktop/Pro Stock Signal BOT/.venv/bin/python",
+      "runtimeArgs": ["-m", "uvicorn", "prosignal.api:create_app", "--factory"],
+      "autoPort": true
+    }
+  ]
+}
