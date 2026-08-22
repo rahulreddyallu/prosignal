@@ -745,8 +745,27 @@ class DataStore:
 
         This is the authoritative trading calendar -- derived from data, never
         from a hardcoded holiday table.
+
+        With one correction. NSE's archive occasionally serves an index file
+        for a date the market never opened; this store holds two, Sunday
+        2023-06-04 and Saturday 2023-11-04, each carrying 106 index rows and no
+        equity prices at all. Left in, they are counted by everything measured
+        in sessions -- the 63-session purge, the 63-session forward return, every
+        feature lookback -- so a window nominally spanning 63 trading days spans
+        62 and one day that never traded.
+
+        A weekend date is therefore admitted only if equity prices exist for it.
+        That keeps a genuine special session (NSE has held them, including a
+        Saturday disaster-recovery session) while dropping the artifacts, and it
+        cannot silently discard a weekday: weekdays are admitted regardless, so
+        a missing-price weekday such as 2026-02-05 stays visible as a gap to be
+        refetched rather than being quietly erased from the calendar.
         """
-        return self.indices.distinct_dates()
+        sessions = self.indices.distinct_dates()
+        if not any(d.weekday() >= 5 for d in sessions):
+            return sessions
+        priced = set(self.prices.distinct_dates())
+        return [d for d in sessions if d.weekday() < 5 or d in priced]
 
     def price_sessions(self) -> List[dt.date]:
         return self.prices.distinct_dates()
