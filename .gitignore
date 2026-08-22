@@ -66,3 +66,4 @@ Thumbs.db
 # runtime state
 data/jobs.sqlite3
 .claude/
+data/curated/.store.lock

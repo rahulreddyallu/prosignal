@@ -36,6 +36,7 @@ from .core.logging import get_logger
 from .core.memory import release_memory
 from .costs import CostModel
 from .data.store import DataStore
+from .data.storelock import store_lock
 from .data.types import DATE, SYMBOL
 from .data.universe import UniverseSnapshot
 from .ledger import Ledger, row_from_output
@@ -99,6 +100,19 @@ def run_analysis(
     timings: Dict[str, float] = {}
     step = _stepper(progress)
 
+    # A shared lock for the whole run. Every file the stages read has to come
+    # from one moment: prices at Friday and delivery at Tuesday are each valid
+    # and describe no day that existed. Readers do not block each other; only a
+    # writing ingest excludes them, and then the analysis says so rather than
+    # waiting out a multi-minute rewrite.
+    lock = store_lock(config.paths.curated, exclusive=False, what="analysis")
+    with lock:
+        return _run_analysis_locked(config, as_of, progress, manifest, started,
+                                    run_id, timings, step)
+
+
+def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
+                         timings, step) -> AnalysisRun:
     store = DataStore(config.paths.curated, config.paths.snapshots)
     sessions = store.price_sessions()
     if not sessions:
