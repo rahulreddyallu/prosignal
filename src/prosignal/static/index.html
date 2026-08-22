@@ -244,7 +244,7 @@ tr.detail>td{padding:0;border-bottom:1px solid var(--border);background:var(--su
    lets the table fit; both factors remain in the expanded panel. */
 @media (max-width:1023px){
   table{min-width:0}
-  .c-rank,.c-momentum_12_1,.c-value{display:none}
+  .c-score{display:none}
   /* auto-fit's intrinsic minimum inside a table cell is (tracks x min track),
      so the 8-cell levels grid silently widens the whole table. Pin the count. */
   .levels{grid-template-columns:repeat(4,1fr)}
@@ -260,7 +260,7 @@ tr.detail>td{padding:0;border-bottom:1px solid var(--border);background:var(--su
      Fitting also means the evidence prose renders at natural width instead of
      inside a sideways-scrolling container. */
   table{min-width:0}
-  .c-rank,.c-last_close,.c-stop,.c-target_1,.c-rr,.c-momentum_12_1,.c-value{display:none}
+  .c-score,.c-last_close,.c-stop,.c-target_1{display:none}
   tbody td,thead th{padding-left:8px;padding-right:8px}
   .co{max-width:90px}
   .meter-t{display:none}
@@ -327,6 +327,15 @@ details .body{padding-top:var(--s3)}
 }
 .hide{display:none!important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Tier separator. Deliberately quiet -- it is a reading aid, not a gate; every
+   name below it still cleared scoring and the false-signal defence. */
+.tier-sep td{padding:var(--s3) var(--s3);background:transparent;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.tier-sep:hover td{background:transparent}
+.tier-l{display:inline-block;font-size:.7rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--fg-3);margin-right:.6rem;font-weight:600}
+.tier-n{font-size:.75rem;color:var(--fg-3);line-height:1.45}
 </style>
 </head>
 <body>
@@ -379,7 +388,7 @@ const ago=iso=>{try{const m=Math.round((Date.now()-new Date(iso))/60000);
   if(m<1)return"just now";if(m<60)return m+" min ago";
   const h=Math.round(m/60);return h<24?h+" hr ago":Math.round(h/24)+" d ago"}catch(e){return""}};
 
-let poll=null, DATA=null, sortKey="rank", sortAsc=true, openRow=null;
+let poll=null, DATA=null, sortKey="model_rank", sortAsc=true, openRow=null;
 /* BUSY guards against a race: boot() is async, so a user who clicks Run before
    /ready resolves would otherwise have the progress view overwritten by the
    idle screen when the readiness fetch lands. */
@@ -634,28 +643,59 @@ function noTrade(d){
 }
 
 /* ---------- scanner ------------------------------------------------------ */
+/* Columns show what the decision actually used.
+   `model_rank` is the position the model put the name in, and it is what
+   Stage 6 admits on: inside entry_rank a name is bought, outside exit_rank a
+   held name is dropped. The old `#` was the display position after Stage 5
+   penalties re-sorted the table, so the BUYs appeared scattered through rows
+   ordered by a different quantity -- rank 1 sitting eighth.
+
+   Three columns were removed rather than repaired:
+     R:R      target_1 is entry + t1_r_multiple x risk, so this was 1.50 on
+              every one of 52 cards. A column with one distinct value is not
+              information.
+     Mom      looked up "momentum_12_1"
+     Value    looked up "value"
+              Both are hand-composite factor names the fitted model replaced.
+              Present in 0 of 52 cards, so both rendered as a dash always.
+
+   The model's own attribution is on the expanded card, which names the six
+   factors carrying the movement and their coefficients. */
 const COLS=[
-  {k:"rank",  t:"#",        r:true,  v:c=>c.rank},
+  {k:"model_rank",t:"Rank", r:true,  v:c=>c.model_rank},
   {k:"ticker",t:"Stock",    r:false, v:c=>c.ticker},
   {k:"decision",t:"Signal", r:false, v:c=>c.decision},
   {k:"score", t:"Score",    r:true,  v:c=>c.score},
   {k:"last_close",t:"Price",r:true,  v:c=>c.last_close},
   {k:"stop",  t:"Stop",     r:true,  v:c=>c.stop},
   {k:"target_1",t:"Target", r:true,  v:c=>c.target_1},
-  {k:"rr",    t:"R:R",      r:true,  v:c=>rr(c)},
-  {k:"momentum_12_1",t:"Mom",r:true, v:c=>fv(c,"momentum_12_1")},
-  {k:"value", t:"Value",    r:true,  v:c=>fv(c,"value")},
 ];
-const fv=(c,k)=>{const x=(c.factors||{})[k];return x&&x.available?x.raw:null};
-const rr=c=>(c.target_1&&c.stop&&c.last_close&&c.last_close>c.stop)
-  ?(c.target_1-c.last_close)/(c.last_close-c.stop):null;
 
 function scanner(rows){
   const card=el("div","card card-p");
-  card.innerHTML=`<div class="spread" style="margin-bottom:var(--s4)">
+  /* The BUY / WATCHLIST split confused every reader of the old table, because
+     the rows were numbered by post-penalty position while admission ran on
+     model rank. Both are shown now, and the rule is stated rather than left to
+     be inferred from which rows happen to be green. */
+  const nb=rows.filter(r=>/BUY/i.test(r.decision||"")).length;
+  card.innerHTML=`<div class="spread" style="margin-bottom:var(--s3)">
       <h2>Signals</h2>
       <span class="tiny muted">${rows.length} name${rows.length===1?"":"s"} · tap a row for evidence</span>
-    </div>`;
+    </div>
+    <p class="tiny muted" style="margin:0 0 var(--s4);max-width:78ch;line-height:1.5">
+      <b>${nb} buy</b> · admission runs on <b>Rank</b> and nothing else. A new
+      name enters inside the entry band; a name already held is kept until it
+      leaves a wider exit band. That hysteresis is why a held name at rank 13
+      can be a buy while a new one at rank 9 is not — without it, a name
+      drifting across a single boundary would be bought and sold at every
+      rebalance for no change in view.
+      The rest are <b>watchlist</b>: they cleared scoring and the false-signal
+      defence but sit outside the band, so they are ranked evidence rather than
+      positions. <b>Score</b> is a percentile within today's eligible universe
+      <i>after</i> Stage&nbsp;5 penalties, so a penalised name can show a lower
+      score than one the model ranked below it. Gaps in Rank are names that did
+      not survive the defence.
+    </p>`;
   const tw=el("div","tw"); const tbl=el("table");
   tbl.innerHTML=`<thead><tr>${COLS.map(c=>
     `<th class="s c-${c.k} ${c.r?"r":""}" data-k="${c.k}">${c.t}<span class="car" data-car="${c.k}"></span></th>`
@@ -664,7 +704,7 @@ function scanner(rows){
   paint(tbl,rows);
   tbl.querySelectorAll("th.s").forEach(th=>{
     th.onclick=()=>{const k=th.dataset.k;
-      if(sortKey===k) sortAsc=!sortAsc; else{sortKey=k;sortAsc=(k==="rank"||k==="ticker")}
+      if(sortKey===k) sortAsc=!sortAsc; else{sortKey=k;sortAsc=(k==="model_rank"||k==="ticker")}
       openRow=null; paint(tbl,rows)};
   });
   return card;
@@ -682,12 +722,35 @@ function paint(tbl,rows){
     s.textContent = s.dataset.car===sortKey ? (sortAsc?"▲":"▼") : "");
 
   const tb=tbl.querySelector("tbody"); tb.innerHTML="";
+  /* Tier boundary. The alpha is concentrated at the top of the ranking and
+     decays with depth -- measured on the sacred holdout, per 63-session period
+     and net of an 86bp round trip:
+
+         top 10   +5.28%          ranks 11-44   +2.14%
+
+     Ranks 31-44 contributed -0.11% over the selection period. The list is not
+     truncated, because the two periods disagree about the very top: selection
+     put ranks 1-3 at +1.72% (t 0.87) while the holdout put them at +9.15%, and
+     cutting to five names would be fitting to the holdout -- the error that
+     killed the factor trim and both momentum candidates. Tiering shows the
+     concentration without hard-coding a cut the evidence cannot defend. */
+  const TIER1=10;
+  let tiered=false;
   sorted.forEach(c=>{
     const buy=/BUY/i.test(c.decision);
+    if(sortKey==="model_rank"&&sortAsc&&!tiered&&c.model_rank>TIER1){
+      tiered=true;
+      const sep=el("tr","tier-sep");
+      sep.innerHTML=`<td colspan="${COLS.length}">
+        <span class="tier-l">Beyond rank ${TIER1}</span>
+        <span class="tier-n">holdout excess +2.14% net per 63-session period,
+          against +5.28% for the top ${TIER1}. Ranks 31-44 measured -0.11% over
+          the selection period. 14 holdout periods.</span></td>`;
+      tb.appendChild(sep);
+    }
     const tr=el("tr","main"); tr.tabIndex=0;
-    const R=rr(c), m=fv(c,"momentum_12_1"), val=fv(c,"value");
     tr.innerHTML=`
-      <td class="c-rank r num muted">${c.rank}</td>
+      <td class="c-model_rank r num muted">${c.model_rank}</td>
       <td class="c-ticker"><div class="row" style="gap:7px"><span class="chev">›</span>
         <div style="min-width:0"><div class="tk">${esc(c.ticker)}</div>
         <div class="co">${esc(c.company_name||c.sector||"")}</div></div></div></td>
@@ -697,10 +760,7 @@ function paint(tbl,rows){
         <b class="num">${Math.round(c.score*100)}</b></div></td>
       <td class="c-last_close r num">${inr(c.last_close)}</td>
       <td class="c-stop r num muted">${inr(c.stop)}</td>
-      <td class="c-target_1 r num">${inr(c.target_1)}</td>
-      <td class="c-rr r num">${R?R.toFixed(1)+"×":"—"}</td>
-      <td class="c-momentum_12_1 r num ${m>0?"":"muted"}" style="${m>0?"color:var(--up)":""}">${m==null?"—":pct(m*100)}</td>
-      <td class="c-value r num muted">${val==null?"—":pct(val*100,2)}</td>`;
+      <td class="c-target_1 r num">${inr(c.target_1)}</td>`;
     /* The evidence panel is built on first expand, not upfront. Building all
        of them eagerly cost ~75 DOM nodes per row -- 15k nodes for a 200-name
        list -- for markup the user may never open. */

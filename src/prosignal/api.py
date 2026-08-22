@@ -441,7 +441,13 @@ def _card(rec) -> Dict[str, Any]:
         "target_2": rec.target_2,
         "score": rec.composite_score,
         "percentile": rec.universe_percentile,
+        # Both, and they are different things. `rank` is the display position
+        # after Stage 5 penalties re-sort the survivors; `model_rank` is where
+        # the model put the name, and it is the only input to admission. The
+        # table numbers by model_rank -- serialising only `rank` rendered the
+        # column as "undefined".
         "rank": rec.rank,
+        "model_rank": rec.model_rank,
         "risk_category": rec.position_risk_category.value if rec.position_risk_category else None,
         "holding_period": rec.expected_holding_period,
         "why": rec.why_this_signal_exists,
