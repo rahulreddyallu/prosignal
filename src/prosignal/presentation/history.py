@@ -39,6 +39,11 @@ class Day:
     allows_new_positions: bool = True
     universe: Optional[int] = None
     logged_at: Optional[str] = None
+    #: Per-name detail as it stood that day: the close the signal was formed
+    #: on, the stop and the targets. Keyed by ticker. The ledger has carried
+    #: this since October 2023, which is why past days can be followed up
+    #: without having recorded anything new for the purpose.
+    detail: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def buy_count(self) -> int:
@@ -61,7 +66,8 @@ def _regime_label(state: Dict[str, Any]) -> str:
     return trend or "Unknown"
 
 
-def load_days(records: Iterable[Any], *, limit: int = 30) -> List[Day]:
+def load_days(records: Iterable[Any], *, limit: int = 30,
+              since: Optional[str] = None) -> List[Day]:
     """Collapse the ledger to one entry per date, newest first.
 
     A date is run many times -- the store had 98 rows for its newest date --
@@ -76,6 +82,8 @@ def load_days(records: Iterable[Any], *, limit: int = 30) -> List[Day]:
         if not date or row.get("error"):
             continue
         stamp = str(row.get("logged_at") or "")
+        if since and stamp <= since:
+            continue
         held = best.get(str(date))
         if held is None or stamp >= held[0]:
             best[str(date)] = (stamp, row)
@@ -85,9 +93,15 @@ def load_days(records: Iterable[Any], *, limit: int = 30) -> List[Day]:
         _, row = best[date]
         regime = row.get("regime_state") or {}
         gates = row.get("gate_counts") or {}
+        detail = {
+            str(entry.get("ticker")): entry
+            for entry in (row.get("stocks_scored") or [])
+            if isinstance(entry, dict) and entry.get("ticker")
+        }
         days.append(Day(
             date=date,
             run_id=row.get("run_id"),
+            detail=detail,
             buys=[str(t) for t in (row.get("signals_generated") or [])],
             watch=[str(t) for t in (row.get("watchlist_generated") or [])],
             regime=_regime_label(regime),
@@ -155,6 +169,25 @@ def _slate(day: Day, slots: int) -> Dict[str, str]:
     return out
 
 
+def slate_picks(day: Day, slots: int = 5) -> List[Dict[str, Any]]:
+    """That day's screen, with the levels it was showing at the time."""
+    picks: List[Dict[str, Any]] = []
+    for position, (ticker, status) in enumerate(_slate(day, slots).items(), 1):
+        entry = day.detail.get(ticker) or {}
+        picks.append({
+            "position": position,
+            "ticker": ticker,
+            "status": status,
+            "signal_price": entry.get("last_close"),
+            "stop": entry.get("stop"),
+            "target_1": entry.get("target_1"),
+            "target_2": entry.get("target_2"),
+            "strength": entry.get("strength_band"),
+            "sector": entry.get("sector") if entry.get("sector") != "Unknown" else None,
+        })
+    return picks
+
+
 def _plural(items: Sequence[str], one: str, many: str) -> str:
     return one if len(items) == 1 else many
 
@@ -183,13 +216,20 @@ def build_history(
     limit: int = 30,
     slots: int = 5,
     company_names: Optional[Dict[str, str]] = None,
+    since: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The History view's data."""
     names = company_names or {}
-    days = load_days(records, limit=limit)
+    days = load_days(records, limit=limit, since=since)
     if not days:
-        return {"days": [], "latest_changes": None,
-                "note": "No completed runs have been recorded yet."}
+        return {
+            "days": [], "latest_changes": None, "cleared_at": since,
+            "note": (
+                "History was cleared. Runs from here on will be recorded and "
+                "will appear on this page."
+                if since else "No completed runs have been recorded yet."
+            ),
+        }
 
     def label(ticker: str) -> Dict[str, str]:
         full = names.get(ticker) or ticker
@@ -223,5 +263,6 @@ def build_history(
     return {
         "days": out_days,
         "latest_changes": latest,
+        "cleared_at": since,
         "note": "",
     }

@@ -186,6 +186,10 @@ button { font: inherit; color: inherit; }
 .btn:hover:not(:disabled) { filter: brightness(1.08); box-shadow: var(--shadow-lift); }
 .btn:active:not(:disabled) { transform: translateY(1px); box-shadow: var(--shadow); }
 .btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+/* `display` on the class beats the user-agent's [hidden] { display: none },
+   so setting .hidden on a .btn changed the property and nothing on screen.
+   Every element that sets its own display needs this said explicitly. */
+.btn[hidden] { display: none; }
 .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
 .btn.ghost:hover:not(:disabled) { background: var(--surface-2); filter: none; }
 .btn.sm { padding: 7px 14px; font-size: 13px; }
@@ -468,7 +472,6 @@ td.r { text-align: right; }
   <div class="nav-in" role="tablist">
     <button role="tab" data-view="overview" aria-current="page">Today</button>
     <button role="tab" data-view="history">History</button>
-    <button role="tab" data-view="method">Methodology</button>
   </div>
 </nav>
 
@@ -515,7 +518,8 @@ const $  = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const state = { view: null, run: null, tab: "overview", busy: false,
-                error: null, notReady: false, history: undefined };
+                error: null, notReady: false, history: undefined,
+                latestSession: null };
 
 /* ---------------------------------------------------------------- theme */
 const THEME_KEY = "signal.theme";
@@ -648,6 +652,7 @@ async function checkReady() {
     if (!r.ok) { state.notReady = true; return; }
     const j = await r.json();
     state.notReady = !j.ready;
+    state.latestSession = (j.checks && j.checks.latest_session) || null;
   } catch (e) { state.notReady = false; }
 }
 
@@ -707,34 +712,57 @@ function render() {
   }
 
   renderChrome(v);
-  const body =
-    state.tab === "history" ? viewHistory(v) :
-    state.tab === "method"  ? viewMethod(v)  :
-                              viewOverview(v);
+  const body = state.tab === "history" ? viewHistory(v) : viewOverview(v);
   $("#view").innerHTML = body;
   wire();
 }
 
 function renderChrome(v) {
-  const d = v.data || {};
+  const d = (v && v.data) || {};
   const fresh = d.complete !== false;
   $("#mkt-status").innerHTML =
     '<span class="dot ' + (fresh ? "live" : "stale") + '"></span>' +
-    (v.as_of ? esc(v.as_of) : "—");
-  $("#mkt-fresh").textContent = "Analysed " + when(v.generated_at);
+    (v && v.as_of ? esc(v.as_of) : esc(state.latestSession || "—"));
+  $("#mkt-fresh").textContent = v ? "Analysed " + when(v.generated_at) : "";
 
   const titles = {
     overview: ["Today's opportunities", "The names the engine ranks highest today, and the case for each."],
-    history: ["History", "Previous scans and how the shortlist has changed."],
-    method: ["Methodology", "What the engine measures, how it ranks, and where it stops."],
+    history: ["History", "Past runs, and what the market did afterwards."],
   };
-  const [t, s] = titles[state.tab] || titles.overview;
-  $("#page-title").textContent = t;
-  $("#page-sub").textContent = s;
+  const [title, sub] = titles[state.tab] || titles.overview;
+  $("#page-title").textContent = title;
+  $("#page-sub").textContent = sub;
+
+  // The scan button is an action, not a decoration. It belongs at the top only
+  // when pressing it is the thing to do -- there is no run for the newest
+  // session yet. Once the session is scanned, offering "scan again" at the top
+  // of the results invites re-running an analysis that would return the same
+  // answer from the same data.
+  const btn = $("#scan");
+  const onResults = state.tab === "overview";
+  const needsScan = onResults && !state.busy && !isCurrent(v);
+  btn.hidden = !needsScan;
+  if (needsScan) {
+    btn.textContent = state.latestSession
+      ? "Scan " + state.latestSession
+      : "Scan Market";
+  }
+  $("#page-sub").textContent = onResults && isCurrent(v)
+    ? "Ranked from the close of " + esc(v.as_of) + "."
+    : sub;
 
   $("#foot").innerHTML =
-    (v.disclaimer ? esc(v.disclaimer) + "<br><br>" : "") +
-    (v.confidence_note ? esc(v.confidence_note) : "");
+    (v && v.disclaimer ? esc(v.disclaimer) + "<br><br>" : "") +
+    (v && v.confidence_note ? esc(v.confidence_note) : "");
+}
+
+/* Whether the loaded results describe the newest session the store holds.
+   Anything older is a previous day's answer and must not be presented as
+   today's -- that is the difference between stale and wrong. */
+function isCurrent(v) {
+  if (!v || !v.as_of) return false;
+  if (!state.latestSession) return true;   // nothing to compare against
+  return String(v.as_of) === String(state.latestSession);
 }
 
 function renderError() {
@@ -746,6 +774,25 @@ function renderError() {
 
 /* -------------------------------------------------------------- overview */
 function viewOverview(v) {
+  // No results for the newest session: show the one action, and nothing else.
+  // A previous day's shortlist rendered under today's heading is not stale
+  // data, it is the wrong answer presented confidently.
+  if (!isCurrent(v)) {
+    const stale = v && v.as_of;
+    return '<div class="box empty">' +
+      '<h3>' + (stale ? "This session has not been scanned yet"
+                      : "No scan has run yet") + '</h3>' +
+      '<p>' + (stale
+        ? "The most recent results are from " + esc(v.as_of) +
+          ". Market data is stored through " + esc(state.latestSession || "—") +
+          ", so those are a previous session's answer and are not shown here."
+        : "The engine ranks every eligible name against the market on the day, " +
+          "then narrows to the setups that clear each risk check.") + '</p>' +
+      '<button class="btn" onclick="document.getElementById(\'scan\').click()">' +
+      (state.latestSession ? "Scan " + esc(state.latestSession) : "Scan Market") +
+      '</button></div>';
+  }
+
   const s = v.summary || {};
   if (s.withheld) {
     return marketBlock(v) +
@@ -770,22 +817,45 @@ function viewOverview(v) {
       '<div class="count">' + counts.join(" ") + '</div>' +
       '<div class="note">' + esc(s.note || "") + '</div>' +
     '</div>' +
-    '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>';
+    '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>' +
+    '<div style="margin-top:var(--sp-6);text-align:center">' +
+      '<button class="btn ghost sm" onclick="document.getElementById(\'scan\').click()">' +
+      'Re-run this scan</button>' +
+      '<p class="prose muted" style="font-size:12.5px;margin-top:8px">' +
+      'The data has not changed since this ran, so a re-run returns the same ' +
+      'ranking.</p></div>';
 }
 
 function marketBlock(v) {
   const m = v.market || {};
+  const j = v.journey || [];
+  const step = (k) => (j.find((x) => x.key === k) || {}).count;
+  const universe = step("universe_considered");
+  const eligible = step("passed_eligibility");
+  const survived = step("survived_defense");
+
   const rows = (m.readings || []).filter((r) => r.value).map((r) =>
     '<div class="reading"><span class="k">' + esc(r.label) + '</span>' +
     '<span class="v">' + esc(r.value) +
     (r.detail ? '<small>' + esc(r.detail) + '</small>' : "") + '</span></div>').join("");
+
+  // The narrowing, in one line. It is the most concrete thing the run
+  // produced about the market and it was previously on a separate screen.
+  const narrowing = (universe && eligible)
+    ? '<div class="reading"><span class="k">Names examined</span>' +
+      '<span class="v num">' + universe.toLocaleString("en-IN") +
+      '<small>' + eligible.toLocaleString("en-IN") + ' tradable' +
+      (survived ? ', ' + survived + ' cleared every risk check' : '') +
+      '</small></span></div>'
+    : "";
+
   const warn = m.allows_new_positions === false
     ? '<span class="pill watch">New positions paused</span>' : "";
   return '<div class="market">' +
     '<div><h2>Market environment</h2>' +
       '<div class="headline">' + esc(m.headline || "—") + " " + warn + '</div>' +
       '<p>' + esc(m.summary || "") + '</p></div>' +
-    '<div class="readings">' + rows + '</div></div>';
+    '<div class="readings">' + rows + narrowing + '</div></div>';
 }
 
 function cardHTML(p) {
@@ -820,82 +890,160 @@ function viewHistory(v) {
   if (h === null) return '<div class="box"><div class="skel" style="height:220px"></div></div>';
   if (!h || !h.days || !h.days.length) {
     return '<div class="box empty"><h3>No runs recorded yet</h3>' +
-      '<p>' + esc((h && h.note) || "Once a scan completes it is recorded, and this " +
-      "page will show what changed between one day and the next.") + '</p></div>';
+      '<p>' + esc((h && h.note) || "Once a scan completes it is recorded here, " +
+      "with what the market did afterwards.") + '</p></div>';
   }
 
   const lc = h.latest_changes || {};
-  const group = (items, label, cls) => (items && items.length)
-    ? '<div style="margin-bottom:var(--sp-3)"><div class="k" style="color:var(--ink-3);' +
+  const group = (items, label) => (items && items.length)
+    ? '<div style="margin-bottom:var(--sp-3)"><div style="color:var(--ink-3);' +
       'font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">' +
       label + '</div><div class="chips">' + items.map((x) =>
       '<span class="chip">' + esc(x.company) + '</span>').join("") + '</div></div>'
     : "";
 
   const changed = lc.available
-    ? '<div class="box" style="margin-bottom:var(--sp-6)">' +
+    ? '<div class="box" style="margin-bottom:var(--sp-5)">' +
         '<h3 style="font-size:15px;margin-bottom:var(--sp-2)">Since ' +
           esc(lc.compared_with) + '</h3>' +
         '<p class="prose muted" style="margin-bottom:var(--sp-4)">' +
           esc(lc.summary) + '</p>' +
-        group(lc.promoted, "Moved to buy") +
-        group(lc.demoted, "Moved to watch") +
-        group(lc.entered, "New to the shortlist") +
-        group(lc.left, "No longer shown") +
+        group(lc.promoted, "Moved to buy") + group(lc.demoted, "Moved to watch") +
+        group(lc.entered, "New to the shortlist") + group(lc.left, "No longer shown") +
         '<p class="prose muted" style="font-size:12.5px;margin-top:var(--sp-3)">' +
           esc(lc.reason_note || "") + '</p>' +
       '</div>'
-    : '<div class="box" style="margin-bottom:var(--sp-6)"><p class="prose muted">' +
-      esc(lc.reason || "") + '</p></div>';
+    : "";
 
   const rows = h.days.map((d) => {
     const shown = (d.shown || []).map((x) =>
       '<span class="pill ' + (x.status === "BUY" ? "buy" : "watch") + '" ' +
       'style="margin:0 4px 4px 0">' + esc(x.ticker) + '</span>').join("");
-    return '<tr><td class="num">' + esc(d.date) + '</td>' +
+    return '<tr data-date="' + esc(d.date) + '">' +
+      '<td class="num">' + esc(d.date) + '</td>' +
       '<td class="num">' + d.buy_count + '</td>' +
       '<td class="num">' + d.watch_count + '</td>' +
       '<td>' + esc(d.regime) + '</td>' +
-      '<td style="white-space:normal;min-width:240px">' + shown + '</td></tr>';
+      '<td style="white-space:normal;min-width:230px">' + shown + '</td></tr>';
   }).join("");
 
   return changed +
+    '<div style="display:flex;align-items:center;gap:var(--sp-3);' +
+      'margin-bottom:var(--sp-3);flex-wrap:wrap">' +
+      '<span class="prose muted" style="font-size:13px;flex:1">' +
+      'Open a date to see what that run said and what the market did since.</span>' +
+      '<button class="btn ghost sm" id="wipe">Clear history</button></div>' +
     '<div class="tablewrap"><table><thead><tr>' +
     '<th>Date</th><th>Buy</th><th>Watch</th><th>Market</th><th>Shortlist</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
-/* ----------------------------------------------------------- methodology */
-function viewMethod(v) {
-  const S = (h, b) => '<div class="panel-section"><h2>' + h + '</h2>' +
-                      '<div class="box"><div class="prose muted">' + b + '</div></div></div>';
-  return '<div style="margin-top:0">' +
-    S("What the engine measures",
-      "Every listed name is ranked against every other name on the same day across " +
-      "momentum, position within the 52-week range, participation (including the " +
-      "share of trading taken to delivery, which is specific to Indian markets), " +
-      "valuation, and risk. A reading is always relative to the market that day, " +
-      "never to a fixed threshold.") +
-    S("How a name qualifies",
-      "The model produces a ranking. A name is opened only if it sits inside the " +
-      "top band and clears a set of checks for gaps, news spikes, overextension, " +
-      "corporate actions and earnings distortion. Admission uses a band with " +
-      "hysteresis: a name enters at a tighter rank than the one at which it is " +
-      "dropped, so a position is not opened and closed on noise.") +
-    S("Buy against Watch",
-      "Buy means the name is inside the entry band and cleared every check that " +
-      "could run. Watch means it was ranked and tracked but not admitted. Watch is " +
-      "not a failure grade — it is the set of names closest to qualifying, and each " +
-      "one carries what would have to change.") +
-    S("What the score is not",
-      "The ranking is a position within the day's eligible universe. It is not a " +
-      "probability, and no out-of-sample calibration exists that would let it be " +
-      "read as one. Nothing on this screen should be interpreted as a likelihood " +
-      "of profit.") +
-    S("Where it stops",
-      "This engine issues opinions. It does not place orders, hold positions, or " +
-      "connect to a broker. Position sizes, entry zones and exit levels are what " +
-      "the strategy defines, not instructions.") + '</div>';
+async function confirmWipe() {
+  const ok = window.confirm(
+    "Clear the run history?\n\n" +
+    "This screen will start again from your next scan.\n\n" +
+    "The underlying research record is kept -- the trial count used to test " +
+    "whether the strategy beats luck depends on it, so it is hidden here " +
+    "rather than deleted."
+  );
+  if (!ok) return;
+  try {
+    const r = await fetch("/history", { method: "DELETE" });
+    if (!r.ok) throw new Error(await readErr(r));
+    const j = await r.json();
+    say(j.message || "History cleared.");
+    state.history = undefined;
+    await loadHistory();
+  } catch (e) {
+    state.error = e.message || String(e);
+    render();
+  }
+}
+
+/* ------------------------------------------------------------ past day */
+async function openDay(date) {
+  lastFocus = document.activeElement;
+  $("#panel-rank").textContent = "Run of " + date;
+  $("#panel-title").textContent = "What happened next";
+  $("#panel-tick").textContent = "";
+  $("#panel-body").innerHTML = '<div class="skel" style="height:200px"></div>';
+  $("#panel").classList.add("open");
+  $("#scrim").classList.add("open");
+  $("#panel").focus();
+  document.body.style.overflow = "hidden";
+
+  let d;
+  try {
+    const r = await fetch("/history/" + encodeURIComponent(date));
+    if (!r.ok) throw new Error(await readErr(r));
+    d = await r.json();
+  } catch (e) {
+    $("#panel-body").innerHTML =
+      '<div class="err"><h3>That run could not be loaded</h3><p>' +
+      esc(e.message || String(e)) + '</p></div>';
+    return;
+  }
+  $("#panel-tick").textContent = d.regime || "";
+  $("#panel-body").innerHTML = dayHTML(d);
+}
+
+function pctHTML(value) {
+  if (value == null) return '<span class="v-neu">—</span>';
+  const cls = value > 0 ? "v-pos" : value < 0 ? "v-neg" : "v-neu";
+  return '<span class="' + cls + ' num">' + (value > 0 ? "+" : "") +
+         value.toFixed(2) + '%</span>';
+}
+
+function dayHTML(d) {
+  if (!d.picks || !d.picks.length) {
+    return '<div class="prose muted">' + esc((d.summary || {}).text || "") + '</div>';
+  }
+  const s = d.summary || {};
+  const rows = d.picks.map((p) => {
+    const o = p.outcome || {};
+    // Colour and a word, never colour alone.
+    const state = o.resolved === "target" ? '<span class="pill buy">Target met</span>'
+                : o.resolved === "stop"   ? '<span class="pill watch">Stop touched</span>'
+                : o.resolved === "unknown" ? '<span class="chip">Both touched</span>'
+                : '<span class="chip">Open</span>';
+    return '<div class="ev-row" style="padding:var(--sp-4)">' +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;' +
+        'gap:var(--sp-3);align-items:start">' +
+        '<div style="min-width:0">' +
+          '<div style="font-weight:600;overflow-wrap:anywhere">' + esc(p.company) + '</div>' +
+          '<div style="color:var(--ink-3);font-size:12.5px">' + esc(p.ticker) +
+            ' · flagged as ' + (p.status === "BUY" ? "Buy" : "Watch") + '</div>' +
+        '</div>' +
+        '<div style="text-align:right">' + pctHTML(o.change_pct) +
+          '<div style="color:var(--ink-3);font-size:12px">' +
+          (o.sessions || 0) + ' sessions</div></div>' +
+      '</div>' +
+      '<div class="sig" style="border-bottom:0;padding-top:var(--sp-3)">' +
+        '<span class="v-neu">' + money(o.signal_price) + ' → ' + money(o.last_price) +
+        '  ·  peak ' + (o.peak_gain_pct == null ? "—" : o.peak_gain_pct.toFixed(2) + "%") +
+        '  ·  trough ' + (o.worst_drop_pct == null ? "—" : o.worst_drop_pct.toFixed(2) + "%") +
+        '</span></div>' +
+      '<div style="margin-top:6px">' + state + '</div>' +
+      (o.note ? '<p class="prose muted" style="font-size:12.5px;margin-top:8px">' +
+        esc(o.note) + '</p>' : "") +
+    '</div>';
+  }).join("");
+
+  return '<div class="section">' +
+      '<h3>Since this run</h3>' +
+      '<p class="prose">' + esc(s.text || "") + '</p>' +
+      (s.tracked ? '<div class="levels" style="margin-top:var(--sp-3)">' +
+        '<div class="level"><div class="k">Average</div><div class="v num">' +
+          (s.average_change_pct > 0 ? "+" : "") + s.average_change_pct + '%</div></div>' +
+        '<div class="level"><div class="k">Targets met</div><div class="v num">' +
+          s.targets_hit + ' of ' + s.tracked + '</div></div>' +
+        '<div class="level"><div class="k">Stops touched</div><div class="v num">' +
+          s.stops_hit + ' of ' + s.tracked + '</div></div>' +
+      '</div>' : "") +
+    '</div>' +
+    '<div class="section"><h3>What it said that day</h3>' +
+      '<div class="ev">' + rows + '</div></div>' +
+    '<div class="callout">' + esc(d.disclaimer || "") + '</div>';
 }
 
 /* ----------------------------------------------------------------- panel */
@@ -999,10 +1147,10 @@ function wire() {
     const p = (state.view.picks || []).find((x) => String(x.position) === el.dataset.pos);
     if (p) openPanel(p);
   }));
-  $$("tbody tr[data-tick]").forEach((el) => el.addEventListener("click", () => {
-    const p = (state.view.monitored || []).find((x) => x.ticker === el.dataset.tick);
-    if (p) openPanel(p);
-  }));
+  $$("tbody tr[data-date]").forEach((el) =>
+    el.addEventListener("click", () => openDay(el.dataset.date)));
+  const wipe = $("#wipe");
+  if (wipe) wipe.addEventListener("click", confirmWipe);
 }
 
 $("#scan").addEventListener("click", scan);

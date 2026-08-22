@@ -242,6 +242,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             exit_rank=int(admission.exit_rank.value),
         )
 
+    def _ledger_rows():
+        from .ledger import Ledger
+        return Ledger(cfg.paths.ledger).iter_rows()
+
     @app.get("/history")
     def history(limit: int = 30) -> Dict[str, Any]:
         """Past runs and what moved between them.
@@ -250,18 +254,112 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         -- date, names admitted, names monitored, regime and funnel. No new
         storage was added for this; the record already existed.
         """
-        from .ledger import Ledger
         from .presentation import build_history
+        from .presentation.clearmark import read_mark
 
         try:
-            rows = Ledger(cfg.paths.ledger).iter_rows()
+            rows = _ledger_rows()
         except Exception as exc:
             log.warning("ledger unreadable", extra={"error": str(exc)})
             return {"days": [], "latest_changes": None,
                     "note": "The run history could not be read."}
         names, _ = _reference_names()
         return build_history(rows, limit=max(1, min(int(limit), 120)),
-                             company_names=names)
+                             company_names=names,
+                             since=read_mark(cfg.paths.ledger))
+
+    @app.delete("/history")
+    def clear_history() -> Dict[str, Any]:
+        """Hide everything recorded so far, and start again from here.
+
+        This sets a watermark rather than deleting rows. The ledger is the
+        permanent record every run is written to -- `fail_run_if_unwritable`
+        is true precisely because an unlogged run corrupts the
+        deflated-Sharpe trial count -- so removing rows to clear a screen
+        would silently invalidate the statistic that decides whether the
+        strategy is distinguishable from luck. The screen clears; the record
+        underneath stays whole, and the clear is reversible.
+        """
+        from .presentation.clearmark import set_mark
+
+        stamp = set_mark(cfg.paths.ledger)
+        log.info("history cleared", extra={"cleared_at": stamp})
+        return {
+            "cleared_at": stamp,
+            "message": (
+                "History cleared. Runs from here on will be recorded and will "
+                "appear on this page."
+            ),
+            "note": (
+                "The underlying research ledger is preserved -- the "
+                "deflated-Sharpe trial count depends on it, so it is hidden "
+                "from this screen rather than deleted."
+            ),
+        }
+
+    @app.get("/history/{date}")
+    def history_day(date: str) -> Dict[str, Any]:
+        """One past run, and what the market did afterwards.
+
+        The levels are the ones written down that day. Nothing is re-derived,
+        so this is a record of what the engine said and what followed -- not a
+        backtest, and the response says so.
+        """
+        import datetime as _dt
+
+        from .presentation.clearmark import read_mark
+        from .presentation.history import load_days, slate_picks
+        from .presentation.outcome import outcomes_for, summarise
+
+        try:
+            as_of = _dt.date.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(400, f"{date!r} is not a date")
+
+        days = [d for d in load_days(_ledger_rows(), limit=400,
+                                     since=read_mark(cfg.paths.ledger))
+                if d.date == date]
+        if not days:
+            raise HTTPException(404, f"no run recorded for {date}")
+        day = days[0]
+        picks = slate_picks(day)
+        if not picks:
+            return {"date": date, "regime": day.regime, "picks": [],
+                    "summary": {"tracked": 0,
+                                "text": "This run produced no shortlist."},
+                    "is_backtest": False}
+
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        prices = store.read_prices(
+            symbols=[p["ticker"] for p in picks], start=as_of,
+            columns=["date", "symbol", "high", "low", "close"],
+        )
+        outcomes = outcomes_for(picks, as_of, prices)
+        names, _ = _reference_names()
+
+        def company(ticker: str) -> str:
+            full = names.get(ticker) or ticker
+            for suffix in (" Limited", " Ltd.", " Ltd", " LIMITED"):
+                if full.endswith(suffix):
+                    return full[: -len(suffix)].strip()
+            return full
+
+        merged = []
+        for pick, out in zip(picks, outcomes):
+            merged.append({**pick, "company": company(pick["ticker"]),
+                           "outcome": out.__dict__})
+        return {
+            "date": date,
+            "regime": day.regime,
+            "allows_new_positions": day.allows_new_positions,
+            "picks": merged,
+            "summary": summarise(outcomes),
+            "disclaimer": (
+                "What the engine said on this date, followed forward at the "
+                "levels it recorded. No position sizing, no costs and no "
+                "portfolio -- this is a record, not a backtest."
+            ),
+        }
 
     @app.get("/analysis/{run_id}/results")
     def job_results(run_id: str) -> Dict[str, Any]:
