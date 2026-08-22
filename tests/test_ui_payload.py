@@ -101,7 +101,7 @@ def test_the_view_is_json_serialisable():
     "No recommendation was produced", # withheld on bad data
     "could not be completed",         # a failed run must not imply a trade
     "Checks that could not run",      # NOT_TESTABLE is not a pass
-    "What would move this to Buy",    # the watchlist is actionable
+    "What would move this to Buy",    # the near misses stay actionable
     "No runs recorded yet",           # history with an empty ledger
 ])
 def test_every_reachable_state_has_markup(state):
@@ -154,6 +154,56 @@ def test_both_themes_define_every_colour_token():
                if not t.startswith(("--r-", "--sp-", "--font", "--mono", "--maxw"))}
     missing = sorted(colours - darkset)
     assert not missing, f"tokens with no dark-theme value: {missing}"
+
+
+def test_the_interface_has_one_results_tab():
+    """Watchlist and Research were separate screens showing the same run from
+    two more angles. Near misses already appear on the one screen whenever
+    fewer than five names qualify, so a second list of them was a second place
+    to look for something already in front of the reader."""
+    html = _html()
+    tabs = re.findall(r'data-view="([a-z]+)"', html)
+    assert tabs == ["overview", "history", "method"], tabs
+    assert "viewMonitored" not in html and "viewResearch" not in html
+
+
+def test_the_card_layout_does_not_depend_on_the_company_name():
+    """A flex row let a long name push the price and the status badge to a
+    different place on every card. The identity column is now a track that
+    wraps inside itself."""
+    html = _html()
+    block = html[html.index(".card-top {"):html.index(".card-id {")]
+    assert "grid-template-columns: minmax(0, 1fr) auto" in block
+    assert "flex-wrap" not in block
+
+
+def test_the_card_is_the_same_on_mobile_and_desktop():
+    """Only padding and gap may change below 640px. Anything that repositions
+    the price or the status badge would make the two read as different
+    components -- which is what a flex row that reflowed on long names did.
+    """
+    html = _html()
+    mobile = html[html.index("@media (max-width: 640px)"):]
+    mobile = mobile[:mobile.index("\n}")]
+
+    allowed = {"padding", "padding-left", "padding-right", "padding-top",
+               "padding-bottom", "gap", "margin", "width", "justify-content",
+               "border-left"}
+    for rule in re.findall(r"([^{}]+)\{([^{}]*)\}", mobile):
+        selector, body = rule[0].strip(), rule[1]
+        if ".card" not in selector:
+            continue
+        props = {d.split(":")[0].strip() for d in body.split(";") if ":" in d}
+        offending = sorted(props - allowed)
+        assert not offending, (
+            f"mobile restyles {selector!r} beyond spacing: {offending}"
+        )
+
+
+def test_every_card_uses_one_type_scale():
+    """There was a larger 'featured' variant for the top name. Five cards that
+    differ in size read as five different components."""
+    assert "featured" not in _html()
 
 
 def test_the_five_slot_rule_is_not_reimplemented_in_the_interface():
