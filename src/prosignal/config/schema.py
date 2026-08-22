@@ -865,7 +865,6 @@ class LiquidityDistortionConfig(_Base):
 class GapSignalConfig(_Base):
     enabled: bool = True
     max_gap_atr_multiple: TF
-    require_next_session_confirmation: bool = True
     penalty: TF
 
 
@@ -873,7 +872,6 @@ class NewsSpikeConfig(_Base):
     enabled: bool = True
     move_sigma: TF
     volume_multiple: TF
-    persistence_sessions: TI
     penalty: TF
 
 

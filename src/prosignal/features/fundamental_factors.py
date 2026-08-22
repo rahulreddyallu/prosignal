@@ -218,10 +218,15 @@ def _ttm(frame: pd.DataFrame, field_name: str, as_of: pd.Timestamp,
     annual figure stands, so the two are never mixed within one ratio -- a
     quarter's revenue over a full market capitalisation is not a sales yield.
 
-    This is what makes quarterly filings usable. Preferring annual reports and
-    falling back only when none exist at all leaves the block scored off the
-    handful of companies on a non-March year end for the five months between an
-    annual report ageing out and the next one landing.
+    Measured on this store, the four-quarter branch does NOT currently fire:
+    quarterly rows span 2024-12 onward while annual rows reach 2026-06, so no
+    symbol has four quarters newer than its newest annual, and every flow
+    resolves to the annual figure. Free Cash Flow and Operating Cash Flow are
+    absent from quarterly rows entirely. The branch is kept because it is the
+    correct rule and will fire when quarterly coverage deepens -- but the
+    coverage repair in this module came from removing the annual-only
+    pre-filter and moving the staleness gate per symbol, NOT from quarterly
+    supersession. Saying otherwise would credit a mechanism that never ran.
     """
     usable = frame[frame["available_on"] <= as_of]
     if usable.empty or field_name not in usable.columns:
