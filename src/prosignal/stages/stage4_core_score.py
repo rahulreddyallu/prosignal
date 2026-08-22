@@ -606,19 +606,42 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         # Delivered quantity as a share of traded volume. Read over the same
         # window as the prices so the two panels align date for date; a name
         # with no print ranks neutral rather than dropping out.
-        delivery = None
-        try:
-            dl = store.read_delivery(symbols=list(symbols), start=start, end=as_of)
-            if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
-                dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
-                delivery = dl.pivot_table(
-                    index=DATE, columns=SYMBOL, values="deliv_pct",
-                    aggfunc="last", observed=True
-                ).sort_index()
-                del dl
-        except Exception as exc:
-            log.warning("delivery unavailable for the model",
-                        extra={"error": str(exc)})
+        #
+        # A name with no print and the whole feed being gone are different
+        # things and used to be handled the same way. deliv_pct carries the
+        # largest coefficient in the fit, and crosssec lists it as
+        # neutral-when-missing, so swallowing a read failure here scored every
+        # name as though its delivered share were exactly average: measured,
+        # that replaces a third of the top decile and costs 18% of the IC while
+        # the run reports nothing. Per-name gaps stay neutral; an empty or
+        # unreadable panel is a failure and is raised, which the outer handler
+        # turns into a non-benign reason and Stage 4 into ModelUnavailable.
+        dl = store.read_delivery(symbols=list(symbols), start=start, end=as_of)
+        if dl is None or dl.empty or "deliv_pct" not in dl.columns:
+            raise PipelineError(
+                STAGE_NAME,
+                "the delivery panel is empty or has no deliv_pct column. "
+                "deliv_pct is the model's largest coefficient and ranks neutral "
+                "when absent, so continuing would score every name as average on "
+                "it and report a normal-looking watchlist. Run "
+                "`prosignal data ingest` to refresh sec_bhavdata_full.",
+            )
+        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
+        delivery = dl.pivot_table(
+            index=DATE, columns=SYMBOL, values="deliv_pct",
+            aggfunc="last", observed=True
+        ).sort_index()
+        del dl
+
+        covered = float(delivery.notna().any(axis=0).mean()) if not delivery.empty else 0.0
+        floor = fv(cfg.min_name_factor_coverage)
+        if covered < floor:
+            raise PipelineError(
+                STAGE_NAME,
+                f"delivery covers {covered:.0%} of the universe, below the "
+                f"{floor:.0%} floor. Below it the factor ranks most of the "
+                f"universe neutral, which is not a ranking.",
+            )
 
         if cached is not None:
             feats = cm.today_features(close, turnover, as_of,

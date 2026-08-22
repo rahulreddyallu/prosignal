@@ -63,6 +63,18 @@ def _clean_quality():
 # =============================================================================
 
 
+def _composite_only(config):
+    """Opt these tests into the hand-weighted composite.
+
+    They exercise composite behaviour -- factor ranking, the quality drop, the
+    redundancy report -- on fixtures with nowhere near enough history to fit
+    the cross-sectional model. Stage 4 refuses to fall back silently, which is
+    the point of allow_composite_fallback, so a composite test has to say so.
+    """
+    config.params.stage4_core_score.allow_composite_fallback = True
+    return config
+
+
 def test_delivery_stt_is_charged_on_both_legs(cfg):
     cb = CostModel(cfg).round_trip(1000.0, 100)
     stt_cfg = cfg.params.costs
@@ -205,6 +217,7 @@ def _score(tmp_path, cfg, symbols, seeds, regime):
 
 
 def test_higher_momentum_ranks_higher(tmp_path, cfg, monkeypatch):
+    _composite_only(cfg)
     from prosignal.stages import stage2_regime
     dates = _dates()
     syms = ["STRONG", "MID", "WEAK"]
@@ -230,6 +243,7 @@ def test_higher_momentum_ranks_higher(tmp_path, cfg, monkeypatch):
 
 
 def test_quality_is_dropped_without_point_in_time_fundamentals(tmp_path, cfg):
+    _composite_only(cfg)
     from prosignal.stages import stage2_regime
     dates = _dates()
     store, cal, uni = _setup(tmp_path, ["AAA", "BBB"], dates, turnover=1e10)
@@ -248,6 +262,7 @@ def test_quality_is_dropped_without_point_in_time_fundamentals(tmp_path, cfg):
 
 
 def test_redundancy_is_measured_not_assumed(tmp_path, cfg):
+    _composite_only(cfg)
     from prosignal.stages import stage2_regime
     dates = _dates()
     syms = [f"S{i}" for i in range(6)]

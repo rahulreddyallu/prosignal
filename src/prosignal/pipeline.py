@@ -410,6 +410,26 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
         source=SourceName.NSE_ARCHIVES if master is not None and not master.empty else None,
         last_timestamp=as_of, age_sessions=0, max_age_sessions=25, required=True,
     )
+    # The fundamental block. Two different tables, and the distinction is the
+    # whole point: "fundamentals" is the NSE Ind-AS filings feed, which carries
+    # true filing dates; "statements" carries period end only, and the factor
+    # layer derives availability from the SEBI LODR deadline instead. Stage 1
+    # reads these to decide what it can honestly claim about filing-date
+    # alignment, and previously found neither -- so it reported the block
+    # absent on every run while the model scored five fundamental factors.
+    for name, frame in (("fundamentals", store.read_fundamentals()),
+                        ("statements", store.read_statements())):
+        rows = 0 if frame is None or frame.empty else len(frame)
+        feeds[name] = FeedRecord(
+            feed=name,
+            status=FeedStatus.OK if rows else FeedStatus.MISSING,
+            source=SourceName.NSE_ARCHIVES if rows else None,
+            last_timestamp=as_of, age_sessions=0, max_age_sessions=None,
+            required=False, row_count=rows,
+            symbols_covered=0 if not rows or "symbol" not in frame.columns
+                            else int(frame["symbol"].nunique()),
+        )
+
     # Membership is only required when the universe is built from a membership
     # list. Under universe.source = liquidity_pit nothing reads it, so demanding
     # it would halt runs over a feed the decision never touches.

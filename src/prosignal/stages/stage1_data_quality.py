@@ -166,7 +166,8 @@ def run(
             raise MarketWideHalt([reason], stage=STAGE_NAME)
 
     # -- 6. point-in-time audit ---------------------------------------------
-    pit_audit, pit_failures = _pit_audit(manifest, universe, params)
+    pit_audit, pit_failures, pit_soft = _pit_audit(manifest, universe, params)
+    market_soft_flags.extend(pit_soft)
     market_soft_flags.extend(pit_failures)
 
     report = DataQualityReport(
@@ -441,7 +442,7 @@ def _check_source_agreement(
 
 def _pit_audit(
     manifest: RawDataManifest, universe: UniverseSnapshot, params
-) -> Tuple[Dict[str, bool], List[str]]:
+) -> Tuple[Dict[str, bool], List[str], List[str]]:
     """Record which point-in-time guarantees actually held for this run.
 
     A guarantee that cannot be verified is recorded as ``False`` with an
@@ -452,6 +453,10 @@ def _pit_audit(
     switches = params.pit_audit
     audit: Dict[str, bool] = {}
     failures: List[str] = []
+    #: Guarantees that hold on weaker evidence than the strongest available.
+    #: Distinct from a failure: the check passed, but on a proxy, and the run
+    #: should say which.
+    soft: List[str] = []
 
     if switches.enforce_historical_membership:
         ok = not manifest.survivorship_risk
@@ -478,14 +483,33 @@ def _pit_audit(
             )
 
     if switches.enforce_fundamentals_filing_date:
-        record = manifest.feeds.get("fundamentals")
-        ok = bool(record and record.row_count > 0)
+        # Two tables, and which one is present changes what can honestly be
+        # claimed. "fundamentals" is the NSE Ind-AS feed and carries true filing
+        # dates. "statements" carries period end only, so availability is
+        # derived from the SEBI LODR deadline -- 45 days quarterly, 60 annual --
+        # which errs toward showing the model less than the market had, never
+        # more. The second is weaker evidence, not absent evidence, and saying
+        # the block is missing while it scores five factors is the misleading
+        # direction.
+        filings = manifest.feeds.get("fundamentals")
+        statements = manifest.feeds.get("statements")
+        has_filings = bool(filings and filings.row_count > 0)
+        has_statements = bool(statements and statements.row_count > 0)
+        ok = has_filings or has_statements
         audit["fundamentals_filing_date"] = ok
         if not ok:
             failures.append(
-                "point-in-time fundamentals are absent, so filing-date "
-                "alignment cannot be enforced. The Stage 4 quality factor is "
-                "dropped rather than computed from current-vintage data."
+                "no fundamental data at all: neither the NSE filings table nor "
+                "the statement feed has rows, so the value factors cannot be "
+                "computed and Stage 4 drops them rather than approximating."
+            )
+        elif not has_filings:
+            soft.append(
+                f"true filing dates are unavailable, so the value factors key "
+                f"off the SEBI LODR deadline instead ({statements.row_count:,} "
+                f"statement rows, {statements.symbols_covered:,} symbols). The "
+                f"deadline is later than a typical filing, so this understates "
+                f"what the market knew rather than overstating it."
             )
 
     if switches.enforce_pledging_disclosure_date:
@@ -516,7 +540,7 @@ def _pit_audit(
         # audit trail carries it rather than relying on it being remembered.
         audit["no_forward_fill"] = True
 
-    return audit, failures
+    return audit, failures, soft
 
 
 # =============================================================================
