@@ -249,16 +249,30 @@ def detect_unexplained_jumps(
     min_ratio_gap: float = 0.30,
     tolerance: float = 0.03,
     lookback_sessions: Optional[int] = None,
+    max_circuit_move: float = 0.20,
 ) -> pd.DataFrame:
     """Find overnight price ratios that look like an unadjusted corporate action.
 
-    The test: ``close_t / close_{t-1}`` sits within ``tolerance`` of a clean
-    split/bonus fraction, the move is at least ``min_ratio_gap`` away from 1.0,
-    and no corporate action is recorded within a session of that date.
+    Two independent rules, because they catch different things.
+
+    CLEAN FACTOR. ``close_t / close_{t-1}`` sits within ``tolerance`` of a
+    plausible split or bonus fraction and is at least ``min_ratio_gap`` from
+    1.0. This is the signature of an unadjusted split: a 5:1 reads as -80%.
+
+    BEYOND THE CIRCUIT. The move exceeds ``max_circuit_move``, the widest daily
+    band the exchange permits. NSE caps a scrip at 20%, so a larger overnight
+    move is not something the market can produce -- it is a corporate action or
+    bad data, whatever ratio it happens to land on.
+
+    The second rule exists because the first cannot see a demerger. When
+    Vedanta separated on 2026-04-30 the parent fell 62.6%, a ratio of 0.374.
+    The nearest clean factor is 0.40 and 0.374 is 6.4% away, outside any sane
+    tolerance -- because a demerger's ratio is the market value of what was
+    spun out, not a clean fraction. It passed Stage 1 with no flags while
+    corrupting every feature that looks back past it.
 
     Returns one row per suspect ``(symbol, date)``. Stage 1 turns these into
-    hard rejections -- an unadjusted 5:1 split reads as a -80% single-session
-    return, which would otherwise poison a 12-1 momentum score for a year.
+    hard rejections.
     """
     empty = pd.DataFrame(
         columns=[SYMBOL, DATE, "ratio", "nearest_clean_factor", "prev_close", "close"]
@@ -279,7 +293,12 @@ def detect_unexplained_jumps(
         return empty
 
     frame["ratio"] = frame["close"] / frame["prev_close"]
-    suspects = frame[(frame["ratio"] - 1.0).abs() >= min_ratio_gap].copy()
+    # Strictly beyond the band: a move sitting exactly ON the circuit limit is
+    # the market hitting its cap, which is legitimate and common.
+    beyond_circuit = (frame["ratio"] - 1.0).abs() > (max_circuit_move + 1e-9)
+    frame["beyond_circuit"] = beyond_circuit
+    suspects = frame[((frame["ratio"] - 1.0).abs() >= min_ratio_gap)
+                     | beyond_circuit].copy()
     if suspects.empty:
         return empty
 
@@ -300,7 +319,11 @@ def detect_unexplained_jumps(
         rel_errors.append(err)
     suspects["nearest_clean_factor"] = nearest_vals
     suspects["relative_error"] = rel_errors
-    suspects = suspects[suspects["relative_error"] <= tolerance]
+    # Keep a row if it matches a clean factor OR the move is beyond anything
+    # the exchange permits. Requiring both would reinstate the demerger blind
+    # spot, since a demerger matches no clean factor by construction.
+    suspects = suspects[(suspects["relative_error"] <= tolerance)
+                        | suspects["beyond_circuit"]]
     if suspects.empty:
         return empty
 

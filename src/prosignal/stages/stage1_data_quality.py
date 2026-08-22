@@ -125,7 +125,7 @@ def run(
         actions,
         min_ratio_gap=float(params.unexplained_split_min_ratio_gap.value),
         tolerance=float(params.unexplained_split_ratio_tolerance.value),
-        lookback_sessions=int(params.continuity_window_sessions.value),
+        lookback_sessions=int(params.unexplained_jump_lookback_sessions.value),
     )
     suspect_symbols = _suspect_map(suspects)
 

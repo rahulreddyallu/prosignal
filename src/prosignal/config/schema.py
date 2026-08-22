@@ -497,6 +497,7 @@ class Stage1Config(_Base):
     unexplained_split_min_ratio_gap: TF
     max_consecutive_missing_sessions: TI
     continuity_window_sessions: TI
+    unexplained_jump_lookback_sessions: TI
     max_universe_failure_fraction: TF
     min_universe_for_failure_fraction: TI
     pit_audit: PitAuditConfig = Field(default_factory=PitAuditConfig)
@@ -1406,6 +1407,22 @@ class RootConfig(_Base):
     @model_validator(mode="after")
     def _cross_checks(self) -> "RootConfig":
         errs: List[str] = []
+
+        # The unexplained-jump scan must cover the longest feature lookback.
+        # It used to share continuity_window_sessions at 60 while prox_52w and
+        # resid_mom look back 253, so an unadjusted corporate action between 61
+        # and 253 sessions back was invisible to Stage 1 and fully consumed by
+        # the model. VEDL's 2026-04-30 demerger passed with no flags.
+        from ..features.crosssec import MIN_LOOKBACK
+
+        scan = int(self.stage1_data_quality.unexplained_jump_lookback_sessions.value)
+        if scan < MIN_LOOKBACK:
+            errs.append(
+                f"stage1_data_quality.unexplained_jump_lookback_sessions ({scan}) "
+                f"is shorter than the model's longest feature lookback "
+                f"({MIN_LOOKBACK}); a corporate action in the gap would corrupt "
+                f"features that validation never inspects"
+            )
 
         # Purging must cover the whole label window. At purge 21 against a
         # 63-session label, 42 sessions of every training row's label reached

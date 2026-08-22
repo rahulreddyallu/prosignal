@@ -215,18 +215,37 @@ def test_clean_series_produces_no_false_positives(prices):
     assert detect_unexplained_jumps(prices, None, min_ratio_gap=0.3, tolerance=0.03).empty
 
 
-def test_large_but_not_clean_move_is_ignored():
-    """A genuine -45% crash is not a split and must not be flagged as one.
+def test_a_legitimate_large_move_is_ignored():
+    """A real move that clears no clean factor must not be flagged as a split.
 
-    0.55 sits between the nearest real corporate-action factors (0.5 from a
-    1:1 bonus and 0.6 from a 2:3 bonus), so a well-calibrated detector leaves
-    it alone.
+    This test used to inject -45% (ratio 0.55) and assert it was ignored, on
+    the reasoning that a genuine crash is not a split. That premise does not
+    hold in this market: NSE caps a scrip at 20% a session, so -45% overnight
+    is not something the market can produce -- it is a corporate action or bad
+    data. Asserting it be ignored is precisely how VEDL's 2026-04-30 demerger
+    (ratio 0.374, no clean factor within 6.4%) passed validation while
+    corrupting every lookback feature.
+
+    The intent survives with a move the market can actually make: -18% sits
+    inside the circuit and near no corporate-action ratio, so it is left alone.
     """
+    sessions = make_sessions(30, end=dt.date(2026, 8, 14))
+    prices = synthetic_prices(["AAA"], sessions)
+    broken = _inject_unadjusted_split(prices, "AAA", sessions[20], 0.82)
+    found = detect_unexplained_jumps(broken, None, min_ratio_gap=0.3, tolerance=0.03)
+    assert found.empty
+
+
+def test_a_move_the_market_cannot_make_is_flagged_whatever_its_ratio():
+    """The other half of the same calibration, and the VEDL case in miniature."""
     sessions = make_sessions(30, end=dt.date(2026, 8, 14))
     prices = synthetic_prices(["AAA"], sessions)
     broken = _inject_unadjusted_split(prices, "AAA", sessions[20], 0.55)
     found = detect_unexplained_jumps(broken, None, min_ratio_gap=0.3, tolerance=0.03)
-    assert found.empty
+    assert len(found) == 1, (
+        "-45% in one session is beyond any NSE circuit band; it cannot be a "
+        "market move regardless of whether it matches a clean split fraction"
+    )
 
 
 def test_shipped_tolerance_cannot_bridge_two_candidate_ratios(cfg):
