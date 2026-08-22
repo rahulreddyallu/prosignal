@@ -110,6 +110,13 @@ def inert_parameters(config_path: Path, package_root: Path) -> List[str]:
     return sorted(k for k in declared if k not in consumed)
 
 
+#: A limitation worth stating: this check is by NAME, so a parameter read in one
+#: place and ignored in another reads as live. stage5_false_signal.news_spike.
+#: volume_multiple was exactly that -- live in Stage 6's confirmation block and
+#: silently unread inside _news_spike, which made that check fire 2.7x its own
+#: specification. Name-level liveness catches parameters nothing reads; it does
+#: not catch a parameter the wrong module reads.
+#:
 #: Parameters declared in parameters.yaml that nothing reads, each with the
 #: reason it is allowed to stay. The test suite asserts this set matches what
 #: :func:`inert_parameters` finds, in both directions:
@@ -160,9 +167,6 @@ RESERVED: Dict[str, str] = {
     "outlier_action": "Stage 5 has no outlier branch to act on",
     "stale_data_action": "Stage 5 re-affirms nothing; staleness is decided in "
                          "Stage 1 against the manifest",
-    "persistence_sessions": "the news-spike check tests one session, not a run "
-                            "of them",
-    "require_next_session_confirmation": "the gap check does not wait a session",
     "execution_realism_hard_reject_participation": "Stage 5 does not compare "
                                                    "implied fill size to ADTV; "
                                                    "Stage 7 caps participation "

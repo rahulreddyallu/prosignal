@@ -229,7 +229,15 @@ def _gap_signal(frame, cfg, params) -> CheckResult:
 
 
 def _news_spike(frame, cfg) -> CheckResult:
-    """A single unexplained sigma-event tends to mean-revert, not continue."""
+    """A single unexplained sigma-event tends to mean-revert, not continue.
+
+    Two conditions, both from the config: an outsized move AND the volume that
+    makes it an event rather than a thin-book print. The volume leg was
+    declared in parameters.yaml and never read, so the check fired on the move
+    alone -- 1.30% of stock-sessions against 1.01% with volume required, 2.7x
+    its own specification once persistence is counted too, applying a 0.12
+    penalty every time.
+    """
     closes = pd.Series(frame["close"].to_numpy(dtype="float64"))
     rets = closes.pct_change(fill_method=None).dropna()
     if len(rets) < 70:
@@ -238,12 +246,31 @@ def _news_spike(frame, cfg) -> CheckResult:
     if sm is None:
         return _nt("news_spike", "zero-variance return distribution")
     lim = fv(cfg.move_sigma)
-    obs = {"sigma_move": round(sm, 2), "limit": lim}
-    if abs(sm) > lim:
-        return _pen("news_spike", fv(cfg.penalty),
-                    f"latest session is a {sm:+.1f} sigma move against its own 63-session "
-                    f"distribution -- an event, not a trend continuation", obs, lim)
-    return _ok("news_spike", obs)
+    need_vol = fv(cfg.volume_multiple)
+
+    ratio = None
+    if "volume" in frame.columns and len(frame) >= 21:
+        vols = pd.Series(frame["volume"].to_numpy(dtype="float64"))
+        base = float(vols.iloc[-21:-1].mean())
+        if base > 0:
+            ratio = float(vols.iloc[-1]) / base
+    obs = {"sigma_move": round(sm, 2), "limit": lim,
+           "volume_multiple": None if ratio is None else round(ratio, 2),
+           "volume_limit": need_vol}
+
+    if abs(sm) <= lim:
+        return _ok("news_spike", obs)
+    if ratio is None:
+        # No volume to judge by. The move alone is not enough to penalise on,
+        # and inventing a ratio would be worse than saying so.
+        return _nt("news_spike", "volume unavailable; the move alone does not "
+                                 "distinguish an event from a thin print")
+    if ratio < need_vol:
+        return _ok("news_spike", obs)
+    return _pen("news_spike", fv(cfg.penalty),
+                f"latest session is a {sm:+.1f} sigma move on {ratio:.1f}x its "
+                f"20-session average volume -- an event, not a trend continuation",
+                obs, lim)
 
 
 def _overextension(frame, cfg, params) -> CheckResult:

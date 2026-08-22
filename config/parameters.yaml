@@ -1061,7 +1061,10 @@ stage5_false_signal:
       status: UNVALIDATED
       search_range: [0.5, 4.0]
     # If price closed back inside the gap, the move did not hold.
-    require_next_session_confirmation: true
+    # require_next_session_confirmation was declared here and never read. It is
+    # REMOVED rather than implemented: confirming a gap with the NEXT session
+    # needs tomorrow's data at today's decision, which is not a thing a live
+    # run can do. The parameter described a backtest-only behaviour.
     penalty:
       value: 0.12
       status: UNVALIDATED
@@ -1078,11 +1081,13 @@ stage5_false_signal:
       value: 2.5
       status: UNVALIDATED
       search_range: [1.5, 6.0]
-    # Require the move to persist this many sessions before it counts.
-    persistence_sessions:
-      value: 3
-      status: UNVALIDATED
-      search_range: [1, 10]
+    # persistence_sessions was declared here and never read. It is REMOVED
+    # rather than implemented, because its two documented rationales
+    # contradict each other: the config comment asked for the move to persist
+    # before it counts, while the check's own docstring penalises a spike
+    # precisely BECAUSE a single unexplained sigma-event mean-reverts. A move
+    # that persists is a trend, which is the opposite of what this check is
+    # looking for. Implementing it would have been guessing at intent.
     penalty:
       value: 0.12
       status: UNVALIDATED

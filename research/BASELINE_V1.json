@@ -122,7 +122,8 @@
     "Momentum's 41% IC share is one latent factor: a single sign-pinned principal component of the three shipped factors reproduces their equal-weighted IC (+0.0755 vs +0.0752). Nine literature variants span 2.57 effective dimensions. Diversification cannot come from more momentum.",
     "Stage 6 band widths are not a meaningful lever: nested selection beats the fixed convention by +0.03 Sharpe on a distribution with sd 0.83, and the inner loop's chosen band scatters across the whole grid. Fixed at entry 8 / exit 16 on the index-construction convention rather than searched.",
     "The 63-session horizon sits on a plateau (21-84 sessions, 11.20-11.65% annualised net) rather than at a peak. H=84 buys +0.06 Sharpe and costs 0.41pp of return; the CPCV Sharpe distribution has sd 0.83, so that is noise. Alpha accrues fastest EARLY (5.5bp/session at H=5 vs 2.3bp at H=63) -- early exit forfeits cost amortisation, not alpha.",
-    "Unmitigated momentum-crash exposure: worst observed 63-session top-decile excess -13.14% through the 2020 rebound, underperforming in 13 of 15 periods. The risk family AMPLIFIES it (-9.82% with, -5.43% without) because low-beta and low-drawdown tilts point away from the beaten-down names that lead a rebound. The regime gate recovers only +0.62 points. Critically, the standard walk-forward's first test date is 2022-01, so every CPCV, holdout, PBO and portfolio figure in this repository was computed on a window that EXCLUDES this crash."
+    "Unmitigated momentum-crash exposure: worst observed 63-session top-decile excess -13.14% through the 2020 rebound, underperforming in 13 of 15 periods. The risk family AMPLIFIES it (-9.82% with, -5.43% without) because low-beta and low-drawdown tilts point away from the beaten-down names that lead a rebound. The regime gate recovers only +0.62 points. Critically, the standard walk-forward's first test date is 2022-01, so every CPCV, holdout, PBO and portfolio figure in this repository was computed on a window that EXCLUDES this crash.",
+    "Liveness is checked by NAME, so a parameter read in one module and ignored in another reads as live. news_spike.volume_multiple was exactly that -- live in Stage 6, unread inside _news_spike -- which made that check fire 2.7x its own specification and apply a 0.12 penalty on 1.30% of stock-sessions instead of 0.48%. Name-level liveness catches what nothing reads; it does not catch what the wrong module reads."
   ],
   "label": "BASELINE_V1",
   "metrics": {
@@ -216,6 +217,29 @@
         "pc1_signed_ic": 0.0755
       },
       "variants_tested": 9
+    },
+    "parameter_audit": {
+      "implemented": [
+        "stage4_core_score.model_refit_every_sessions",
+        "stage5_false_signal.news_spike.volume_multiple"
+      ],
+      "masked_defects_found": 3,
+      "news_spike_firing_rate": {
+        "move_only_as_shipped": 0.013,
+        "overfire_multiple": 2.7,
+        "with_volume": 0.0101,
+        "with_volume_and_persistence": 0.0048
+      },
+      "removed_as_unimplementable": [
+        "stage5_false_signal.news_spike.persistence_sessions",
+        "stage5_false_signal.gap_signal.require_next_session_confirmation"
+      ],
+      "removed_earlier": [
+        "ma_reclaim.reference",
+        "ma_reclaim.require_above_average_volume",
+        "confirmation.reject_if_overextended"
+      ],
+      "reserved_after_triage": 24
     },
     "pbo_across_7_factor_sets": 0.443,
     "portfolio_cpcv_selection": {
