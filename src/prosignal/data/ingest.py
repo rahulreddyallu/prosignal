@@ -188,7 +188,7 @@ class DataIngestor:
             self._ingest_secondary_prices(universe.symbols, as_of, calendar, opts)
             self._ingest_corporate_actions(universe.symbols, as_of, calendar, opts)
             self._ingest_earnings(universe.symbols, as_of, calendar, opts)
-        self._ingest_csv_feeds(as_of, calendar)
+        self._ingest_csv_feeds(as_of, calendar, opts, universe.symbols)
 
         # Keep the raw cache inside its budget after every run, so the ceiling
         # holds without anyone having to remember to run a cleanup command.
@@ -830,11 +830,32 @@ class DataIngestor:
             else None
         )
         notes: List[str] = []
-        if yf_actions.empty and csv_actions.empty:
+        # What matters is COVERAGE, not whether a source answered this run. The
+        # store holds thousands of actions and applies them on the read path, so
+        # a refresh returning nothing is not the same as having no protection --
+        # the old message said it was, and also never checked nse_actions.
+        refreshed = [n for n, f in (("yfinance", yf_actions), ("NSE", nse_actions),
+                                    ("CSV", csv_actions)) if not f.empty]
+        if not refreshed:
             notes.append(
-                "no corporate-action source available; the unexplained-jump "
-                "detector is the only protection against an unadjusted split"
+                f"no source answered this run; the store's {len(stored):,} "
+                f"stored actions are still applied on read. An action with an "
+                f"ex-date since {last} would be missing."
+                if not stored.empty else
+                "no corporate-action source answered and the store is EMPTY: "
+                "prices are unadjusted and every lookback feature is unsafe"
             )
+        else:
+            notes.append(f"refreshed from {', '.join(refreshed)}")
+        # An unadjusted action inside the feature lookback corrupts the feature,
+        # so the scan window is what bounds the exposure, not the refresh.
+        scan = int(self.config.params.stage1_data_quality
+                   .unexplained_jump_lookback_sessions.value)
+        notes.append(
+            f"Stage 1 scans {scan} sessions for unexplained discontinuities and "
+            f"hard-rejects any name carrying one, which covers the model's "
+            f"longest feature lookback."
+        )
         self._record_feed(
             "corporate_actions",
             FeedStatus.OK if not stored.empty else FeedStatus.MISSING,
@@ -924,7 +945,8 @@ class DataIngestor:
     # =====================================================================
     # CSV-only feeds
     # =====================================================================
-    def _ingest_csv_feeds(self, as_of: dt.date, calendar: TradingCalendar) -> None:
+    def _ingest_csv_feeds(self, as_of: dt.date, calendar: TradingCalendar,
+                          opts: IngestOptions, symbols: Sequence[str]) -> None:
         p = self.config.params
 
         pledging = self.csv.load_pledging()

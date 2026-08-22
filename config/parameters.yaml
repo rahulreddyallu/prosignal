@@ -546,6 +546,23 @@ stage1_data_quality:
     status: UNVALIDATED
     search_range: [20, 252]
 
+  # Window for the unexplained-jump scan. NOT the same concern as continuity,
+  # and it used to share continuity_window_sessions, which is how an unadjusted
+  # demerger 78 sessions back passed Stage 1 with no flags while corrupting
+  # every feature that looks back 253.
+  #
+  # A corporate action anywhere inside the feature lookback corrupts the
+  # feature, so this must cover the LONGEST lookback the model consumes. The
+  # loader enforces it against crosssec.MIN_LOOKBACK rather than trusting the
+  # number here to be maintained.
+  unexplained_jump_lookback_sessions:
+    value: 260
+    status: STRUCTURAL
+    note: >-
+      Must be at least the model's longest feature lookback (prox_52w and
+      resid_mom at 253 sessions). Shorter, and a split outside the window is
+      invisible to validation and fully consumed by the features.
+
   # --- Market-wide halt conditions ---
   # If more than this fraction of the universe fails stock-level data quality,
   # something is wrong with the FEED, not with the stocks -> halt the run.

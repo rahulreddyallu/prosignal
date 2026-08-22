@@ -377,12 +377,43 @@ def _universe_index_snapshot(store, config, as_of) -> UniverseSnapshot:
     )
 
 
+def _sessions_behind(last: Optional[dt.date], today: Optional[dt.date] = None) -> int:
+    """Trading sessions between a feed's last row and TODAY.
+
+    The staleness gate used to measure the store against a calendar built from
+    the store, which is circular: age came back 0 for every feed on every run,
+    stale_required() was permanently empty, and a store frozen for a month
+    reported itself fresh. `analyse run` performs no ingest, so that is the
+    normal way for the store to fall behind rather than an exotic one.
+
+    Counted as weekdays, which overstates by roughly one session per NSE
+    holiday in the window. Overstating is the safe direction: it flags early
+    rather than late, and the caller allows a tolerance rather than this
+    function guessing at a holiday calendar it does not have.
+    """
+    if last is None:
+        return 0
+    today = today or dt.date.today()
+    if last >= today:
+        return 0
+    days = 0
+    cursor = last
+    while cursor < today:
+        cursor += dt.timedelta(days=1)
+        if cursor.weekday() < 5:
+            days += 1
+    return days
+
+
 def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManifest:
     """Describe what the store actually holds, for runs that skip a fresh ingest."""
     from .core.contracts import FeedRecord
     from .core.enums import FeedStatus, SourceName
 
     calendar = TradingCalendar(store.price_sessions())
+    # Wall-clock staleness applies to a LIVE run only. A deliberate historical
+    # analysis is legitimately behind today and must not be failed for it.
+    live = as_of >= calendar.last if calendar.last else False
     feeds: Dict[str, FeedRecord] = {}
     # delivery_data is REQUIRED. deliv_pct carries the largest coefficient in the
     # fitted model (+0.0233 of 17 factors) and crosssec treats it as neutral-when-
@@ -397,13 +428,29 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
         ("delivery_data", store.delivery.max_date(), True, 2),
     ]
     for name, last, required, max_age in checks:
-        age = calendar.age_in_sessions(last, as_of) if last else None
+        if last is None:
+            status, age = FeedStatus.MISSING, None
+        else:
+            age = (_sessions_behind(last) if live
+                   else calendar.age_in_sessions(last, as_of))
+            # No holiday allowance. Weekday counting overstates by about one
+            # session per NSE holiday in the window, and that is the direction
+            # to err: a false positive costs an ingest, a false negative issues
+            # signals from stale prices. FeedRecord.is_stale compares this same
+            # raw age, so an allowance applied here and not there would have the
+            # status and the property disagree.
+            status = FeedStatus.STALE if age > max_age else FeedStatus.OK
         feeds[name] = FeedRecord(
             feed=name,
-            status=FeedStatus.OK if last else FeedStatus.MISSING,
+            status=status,
             source=SourceName.NSE_ARCHIVES if last else None,
             last_timestamp=last, age_sessions=age, max_age_sessions=max_age,
             required=required,
+            notes=([f"age is weekdays since {last} counted against today "
+                    f"({dt.date.today()}), not sessions in the local store. An "
+                    f"NSE holiday in the window reads as one extra session; "
+                    f"running `prosignal data ingest` settles it either way."]
+                   if live else []),
         )
 
     # These two were stamped OK with age 0 unconditionally, which meant
