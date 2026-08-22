@@ -261,10 +261,17 @@ def phase_summary(
     pooled = pd.concat([r.periods for r in usable], ignore_index=True)
     r = pooled["ret"].to_numpy(dtype="float64")
     sd = float(r.std(ddof=1))
-    per_phase = [x.metrics() for x in usable]
+    # Annualise by the horizon actually held, not by a constant. sqrt(4) is
+    # correct only at H=63; at H=21 there are twelve periods a year and the
+    # factor is sqrt(12), so a fixed 4 understates a short horizon by 1.73x and
+    # overstates a long one. That error made Sharpe look like it rose
+    # monotonically with horizon; corrected, it peaks near 63 and falls away.
+    periods_per_year = 252.0 / float(params.horizon_sessions)
+    per_phase = [x.metrics(periods_per_year=periods_per_year) for x in usable]
     return {
         "mean_return": float(r.mean()),
-        "sharpe": float(r.mean() / sd * np.sqrt(4.0)) if sd > 0 else 0.0,
+        "sharpe": float(r.mean() / sd * np.sqrt(periods_per_year)) if sd > 0 else 0.0,
+        "periods_per_year": periods_per_year,
         "max_drawdown": float(np.mean([m["max_drawdown"] for m in per_phase])),
         "worst_phase_sharpe": float(min(m["sharpe"] for m in per_phase)),
         "hit_rate": float((r > 0).mean()),

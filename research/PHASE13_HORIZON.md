@@ -47,33 +47,58 @@ participation:
 
 | H | return/period | **ann. net** | Sharpe | max DD | new names/rebalance |
 |---|---|---|---|---|---|
-| 21 | +0.92% | **+11.65%** | +0.44 | −8.8% | 3.1 |
-| 42 | +1.82% | **+11.45%** | +0.63 | −8.0% | 4.5 |
-| **63** | +2.78% | **+11.61%** | +0.78 | −10.6% | 5.6 |
-| 84 | +3.60% | **+11.20%** | +0.84 | −9.5% | 6.1 |
-| 126 | +4.85% | +9.93% | +0.86 | −7.7% | 6.8 |
-| 189 | +5.42% | +7.29% | +0.81 | −5.3% | 7.1 |
+| 21 | +0.92% | **+11.65%** | +0.75 | −8.8% | 3.1 |
+| 42 | +1.82% | **+11.45%** | +0.77 | −8.0% | 4.5 |
+| **63** | +2.78% | **+11.61%** | **+0.78** | −10.6% | 5.6 |
+| 84 | +3.60% | **+11.20%** | +0.73 | −9.5% | 6.1 |
+| 126 | +4.85% | +9.93% | +0.61 | −7.7% | 6.8 |
+| 189 | +5.42% | +7.29% | +0.47 | −5.3% | 7.1 |
 
 **Annualised net return is flat from 21 to 84 sessions — 11.20% to 11.65%, a
 spread of 0.45 percentage points.** That is the performance plateau §43 asks
 for, and it is evidence of robustness rather than a tuned value.
 
-Sharpe improves with horizon to about 126 (0.44 → 0.86) as the return per
-rebalance grows against roughly constant per-period volatility. Drawdown
-improves too. Past 126 the gross alpha has decayed enough that net return
-falls away.
+Sharpe peaks at 63 and falls away on both sides — 0.75, 0.77, **0.78**, 0.73,
+0.61, 0.47.
+
+**Correction.** An earlier version of this table reported Sharpe rising
+monotonically to 0.86 at H=126 and concluded that longer horizons were better
+risk-adjusted. That was an annualisation bug in `phase_summary`, which
+hardcoded `sqrt(4)` — correct only at H=63. At H=21 there are twelve periods a
+year and the factor is `sqrt(12)`, so short horizons were understated by 1.73×
+and long ones overstated. Corrected, the Sharpe plateau matches the return
+plateau instead of contradicting it.
 
 Note that the gross IC table would have chosen H = 189, and net of costs
 H = 189 is the **worst** horizon tested. The confound was real.
 
 ## Should the horizon change?
 
-H = 84 buys +0.06 of Sharpe and costs 0.41 points of annualised return against
-H = 63. The CPCV distribution of portfolio Sharpe has **sd 0.83 across splits**.
-A 0.06 difference is noise, and H = 126 rests on 15 independent observations
-against 31 at H = 63.
+Corrected, **63 has the highest Sharpe of every horizon tested** and sits at the
+top of the return plateau. H = 84 costs 0.05 of Sharpe and 0.41 points of
+return; H = 21 costs 0.03 of Sharpe.
 
-**No change. 63 stays.**
+**No change. 63 stays**, and now for a positive reason rather than a tie.
+
+### Would a shorter horizon buy statistical power?
+
+It is the obvious idea: H = 21 triples the independent observations, from 31 to
+93, and the value block from 11 to 36. Tested end to end, it does not work:
+
+| H | indep obs | selection IC | holdout IC | holdout t | holdout excess | DSR |
+|---|---|---|---|---|---|---|
+| 21 | 93 | +0.0616 | +0.0584 | +2.04 | +0.65% | **0.003** |
+| 63 | 31 | +0.0876 | +0.0878 | +3.20 | +3.45% | **0.994** |
+
+The signal is genuinely weaker at 21 sessions and the difference is
+cost-independent — holdout IC 0.0584 against 0.0878. Gross annualised
+top-decile excess is 7.8% at H = 21 against 13.8% at H = 63.
+
+The portfolio-level equivalence above is real but does not mean what it appears
+to. With buffer bands only 3.1 of 8 names turn over per rebalance at H = 21, so
+the book is not running a 21-day strategy — hysteresis stretches the effective
+hold well past the nominal horizon. **More observations of a weaker signal is
+not more evidence.**
 
 ## Gap 4: what early exit actually forfeits
 

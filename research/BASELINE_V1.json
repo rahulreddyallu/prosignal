@@ -145,7 +145,8 @@
     "The 63-session horizon sits on a plateau (21-84 sessions, 11.20-11.65% annualised net) rather than at a peak. H=84 buys +0.06 Sharpe and costs 0.41pp of return; the CPCV Sharpe distribution has sd 0.83, so that is noise. Alpha accrues fastest EARLY (5.5bp/session at H=5 vs 2.3bp at H=63) -- early exit forfeits cost amortisation, not alpha.",
     "Unmitigated momentum-crash exposure: worst observed 63-session top-decile excess -13.14% through the 2020 rebound, underperforming in 13 of 15 periods. The risk family AMPLIFIES it (-9.82% with, -5.43% without) because low-beta and low-drawdown tilts point away from the beaten-down names that lead a rebound. The regime gate recovers only +0.62 points. Critically, the standard walk-forward's first test date is 2022-01, so every CPCV, holdout, PBO and portfolio figure in this repository was computed on a window that EXCLUDES this crash.",
     "Liveness is checked by NAME, so a parameter read in one module and ignored in another reads as live. news_spike.volume_multiple was exactly that -- live in Stage 6, unread inside _news_spike -- which made that check fire 2.7x its own specification and apply a 0.12 penalty on 1.30% of stock-sessions instead of 0.48%. Name-level liveness catches what nothing reads; it does not catch what the wrong module reads.",
-    "Upstox does not close n=11: its fundamentals carry no filing dates (period-end labels only) and about four years of history, which is what the current feed already has. Its daily candles reach 2000 but its instrument master excludes delisted stocks with no archived versions, and the measured disappearance rate of 4.3%/yr means a 26-year reconstruction would be missing 68% of the companies that actually traded. The extension was refused."
+    "Upstox does not close n=11: its fundamentals carry no filing dates (period-end labels only) and about four years of history, which is what the current feed already has. Its daily candles reach 2000 but its instrument master excludes delisted stocks with no archived versions, and the measured disappearance rate of 4.3%/yr means a 26-year reconstruction would be missing 68% of the companies that actually traded. The extension was refused.",
+    "Shortening the horizon does NOT buy statistical power. H=21 triples independent observations (31->93, value block 11->36) and collapses the holdout: IC 0.0878 -> 0.0584, excess 3.45% -> 0.65%, DSR 0.994 -> 0.003. The portfolio-level equivalence is an artefact of buffer bands stretching the effective hold past the nominal horizon. n=11 cannot be closed this way."
   ],
   "label": "BASELINE_V1",
   "metrics": {
@@ -165,7 +166,7 @@
       "top_decile_excess_per_period": 0.0345
     },
     "horizon_surface": {
-      "conclusion": "63 is not uniquely optimal; it sits on a flat 21-84 plateau spanning 0.45pp of annualised net return. Gross IC alone would nominate H=189, which is the WORST horizon net of costs.",
+      "conclusion": "63 has the highest Sharpe of every horizon tested and sits at the top of a flat 21-84 return plateau. An earlier version reported Sharpe rising to 0.86 at H=126; that was an annualisation bug (hardcoded sqrt(4), correct only at H=63).",
       "gross_ic": {
         "126": 0.0847,
         "189": 0.0874,
@@ -195,12 +196,29 @@
         84
       ],
       "portfolio_sharpe": {
-        "126": 0.86,
-        "189": 0.81,
-        "21": 0.44,
-        "42": 0.63,
+        "126": 0.61,
+        "189": 0.47,
+        "21": 0.75,
+        "42": 0.77,
         "63": 0.78,
-        "84": 0.84
+        "84": 0.73
+      },
+      "shorter_horizon_test": {
+        "H21": {
+          "dsr": 0.003,
+          "holdout_excess": 0.0065,
+          "holdout_ic": 0.0584,
+          "holdout_t": 2.04,
+          "independent_obs": 93
+        },
+        "H63": {
+          "dsr": 0.994,
+          "holdout_excess": 0.0345,
+          "holdout_ic": 0.0878,
+          "holdout_t": 3.2,
+          "independent_obs": 31
+        },
+        "verdict": "rejected -- the signal is genuinely weaker at 21 sessions and the difference is cost-independent. More observations of a weaker signal is not more evidence."
       }
     },
     "momentum_crash": {
