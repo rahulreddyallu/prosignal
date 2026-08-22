@@ -244,3 +244,104 @@ def configuration_matrix(
     if frame.empty:
         raise ValueError("no date was scored by every configuration")
     return frame
+
+
+@dataclass
+class PortfolioCpcvResult:
+    """Book-level performance across CPCV splits, not just ranking quality."""
+
+    n_splits: int
+    split_metrics: List[Dict[str, float]] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
+
+    def spread(self, key: str = "sharpe") -> Dict[str, float]:
+        vals = np.asarray([m[key] for m in self.split_metrics if key in m],
+                          dtype="float64")
+        vals = vals[np.isfinite(vals)]
+        if vals.size == 0:
+            return {}
+        return {
+            "min": float(vals.min()),
+            "p25": float(np.percentile(vals, 25)),
+            "median": float(np.median(vals)),
+            "p75": float(np.percentile(vals, 75)),
+            "max": float(vals.max()),
+            "mean": float(vals.mean()),
+            "sd": float(vals.std(ddof=1)) if vals.size > 1 else 0.0,
+            "share_negative": float((vals < 0).mean()),
+            "n": int(vals.size),
+        }
+
+
+def run_portfolio_cpcv(
+    panel: pd.DataFrame,
+    features: Sequence[str],
+    prices: Dict[str, pd.DataFrame],
+    portfolio_params,
+    *,
+    step_sessions: int,
+    alpha: float,
+    n_groups: int,
+    n_test_groups: int,
+    purge_sessions: int,
+    embargo_sessions: int,
+    min_train_rows: int = 2000,
+    progress: Optional[Callable[[int, int], None]] = None,
+) -> PortfolioCpcvResult:
+    """Fit on each CPCV training set, then trade the test blocks.
+
+    The ranking is what CPCV normally scores. This scores the BOOK: the same
+    splits, but each test block is walked with position sizing, the stop, the
+    invalidation level, the buffer bands and costs. That is the only level at
+    which risk-based sizing is visible, and it is where two of this audit's
+    conclusions reversed.
+
+    Each split contributes one set of portfolio metrics. Test blocks inside a
+    split may not be contiguous; the simulator is restricted to the dates the
+    split actually holds out, so a cohort never trades through a training block.
+    """
+    from .portfolio_sim import phase_summary
+
+    cols = [c for c in features if c in panel.columns]
+    work = panel.dropna(subset=cols + ["label_rank", "label"]).reset_index(drop=True)
+    dates = sorted(work["date"].unique())
+    if len(dates) < n_groups * 2:
+        raise ValueError(
+            f"{len(dates)} panel dates cannot support {n_groups} CPCV groups"
+        )
+    purge_obs = int(np.ceil(purge_sessions / step_sessions))
+    embargo_obs = int(np.ceil(embargo_sessions / step_sessions))
+    cv = CombinatorialPurgedCV(
+        n_groups=n_groups, n_test_groups=n_test_groups,
+        label_horizon=purge_obs, embargo=embargo_obs,
+    )
+    by_date = {d: g for d, g in work.groupby("date")}
+    result = PortfolioCpcvResult(n_splits=cv.n_splits)
+
+    for n, split in enumerate(cv.split(len(dates)), start=1):
+        if progress:
+            progress(n, cv.n_splits)
+        train = work[work["date"].isin([dates[i] for i in split.train_idx])]
+        if len(train) < min_train_rows:
+            continue
+        fit = ridge_fit(train[cols].to_numpy("float64"),
+                        train["label_rank"].to_numpy("float64"), alpha=alpha)
+        test_dates = [dates[i] for i in split.test_idx]
+        rankings = []
+        for d in test_dates:
+            te = by_date[d]
+            pred = predict(fit, te[cols].to_numpy("float64"))
+            s = pd.Series(pred, index=te["symbol"].to_numpy()).sort_values(ascending=False)
+            rankings.append((pd.Timestamp(d), s))
+        if len(rankings) < 4:
+            continue
+        metrics = phase_summary(rankings, prices, portfolio_params,
+                                step_sessions=step_sessions,
+                                dates_allowed=[pd.Timestamp(d) for d in test_dates])
+        if metrics:
+            metrics["split_id"] = split.split_id
+            result.split_metrics.append(metrics)
+
+    log.info("portfolio cpcv complete",
+             extra={"splits": cv.n_splits, "scored": len(result.split_metrics)})
+    return result

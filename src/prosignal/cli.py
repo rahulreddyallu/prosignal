@@ -1113,6 +1113,182 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _portfolio_inputs(cfg: AppConfig, store, sessions, symbols, end):
+    """Aligned OHLCV panels plus ATR, the structure MA and ADTV."""
+    import numpy as np
+    import pandas as pd
+
+    from .data.types import DATE, SYMBOL
+    from .stages._cfg import fv, iv
+
+    c7 = cfg.params.stage7_risk
+    px = store.read_prices(symbols=symbols, start=sessions[0], end=end,
+                           columns=[DATE, SYMBOL, "open", "high", "low", "close", "volume"])
+    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
+    panels = {
+        col: px.pivot_table(index=DATE, columns=SYMBOL, values=col,
+                            aggfunc="last", observed=True).sort_index()
+        for col in ("open", "high", "low", "close", "volume")
+    }
+    del px
+    close, high, low = panels["close"], panels["high"], panels["low"]
+    prev = close.shift(1)
+    true_range = pd.concat(
+        [(high - low).stack(), (high - prev).abs().stack(), (low - prev).abs().stack()],
+        axis=1,
+    ).max(axis=1).unstack()
+    period = iv(c7.atr.period_sessions)
+    panels["atr"] = true_range.ewm(alpha=1.0 / period, adjust=False,
+                                   min_periods=period).mean()
+    panels["ma"] = close.rolling(iv(c7.thesis_invalidation.structure_ma_sessions)).mean()
+    panels["adtv"] = (close * panels["volume"]).rolling(21).mean()
+    return panels
+
+
+def _portfolio_params(cfg: AppConfig):
+    """The shipped stage settings, with the real cost model attached.
+
+    Cost is a function of position size and the name's liquidity, not a
+    constant: impact is square-root in participation, so the same rupee
+    position costs ~86 bps against a Rs 20 crore ADTV and ~135 bps against
+    Rs 5 crore. Passing a flat number understates exactly the thin names a
+    screen surfaces.
+    """
+    from .costs import CostModel
+    from .stages._cfg import fv, iv
+    from .validation.portfolio_sim import PortfolioParams
+
+    cap, c6, c7 = cfg.params.capital, cfg.params.stage6_entry, cfg.params.stage7_risk
+    model = CostModel(cfg)
+
+    def cost_bps(price: float, quantity: float, adtv: float) -> float:
+        if price <= 0 or quantity <= 0:
+            return 0.0
+        return float(
+            model.round_trip(price, int(max(quantity, 1)),
+                             adtv_inr=adtv if adtv > 0 else None).total_bps_of_buy
+        )
+
+    return PortfolioParams(
+        cost_fn=cost_bps,
+        capital=fv(cap.total_capital_inr),
+        max_positions=iv(cap.max_open_positions),
+        risk_per_trade_pct=fv(cap.risk_per_trade_pct),
+        max_participation_of_adtv=fv(cap.max_participation_of_adtv),
+        stop_atr_multiple=fv(c7.stop_loss.atr_multiple),
+        min_stop_distance_pct=fv(c7.stop_loss.min_stop_distance_pct),
+        max_stop_distance_pct=fv(c7.stop_loss.max_stop_distance_pct),
+        invalidation_ma_sessions=iv(c7.thesis_invalidation.structure_ma_sessions),
+        invalidation_buffer_atr=fv(c7.thesis_invalidation.structure_buffer_atr),
+        horizon_sessions=iv(cfg.params.stage4_core_score.model_horizon_sessions),
+        entry_rank=iv(c6.admission.entry_rank),
+        exit_rank=iv(c6.admission.exit_rank),
+    )
+
+
+def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """CPCV over the BOOK, not the ranking.
+
+    An IC says the ordering is right. It says nothing about what a book built
+    on that ordering returns after sizing, a stop, an invalidation level and
+    costs -- and sizing is risk_budget/risk_per_share, so those interact.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .data.types import DATE, SYMBOL
+    from .data.universe import UniverseResolver
+    from .features import crossmodel as cm
+    from .features.crosssec import build_panel
+    from .stages._cfg import fv, iv, v
+    from .validation.harness import run_portfolio_cpcv
+
+    p = cfg.params
+    val, c4 = p.validation, p.stage4_core_score
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = (sessions[-1] if args.include_holdout
+           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+
+    u = p.universe
+    sectors = store.read_sector_map()
+    sector_map = (dict(zip(sectors["symbol"], sectors["sector"]))
+                  if sectors is not None and not sectors.empty else {})
+    snap = UniverseResolver(store, cfg).resolve_liquidity_pit(
+        as_of=sessions[-1], min_adtv_inr=fv(u.pit_min_adtv_inr),
+        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
+        max_names=iv(u.pit_max_names), min_history_sessions=iv(u.min_history_sessions),
+        min_price_inr=fv(u.min_price_inr),
+        manual_exclusions=list(v(u.manual_exclusions) or []), sector_map=sector_map,
+    )
+    symbols = list(snap.symbols)
+
+    _rule("Building panels")
+    panels = _portfolio_inputs(cfg, store, sessions, symbols, end)
+    turnover_panel = (panels["close"] * panels["volume"])
+    delivery = None
+    dl = store.read_delivery(symbols=symbols, start=sessions[0], end=end)
+    if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
+        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
+        delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
+                                  aggfunc="last", observed=True).sort_index()
+    del dl
+    horizon = iv(c4.model_horizon_sessions)
+    panel = build_panel(panels["close"], turnover_panel, horizon=horizon,
+                        step=21, delivery=delivery)
+    panel = cm._attach_fundamentals(panel, store.read_statements(), panels["close"],
+                                    iv(c4.max_fundamental_age_days))
+    params = _portfolio_params(cfg)
+    _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
+    sample = params.cost_bps(300.0, 400, 2e8)
+    thin = params.cost_bps(300.0, 400, 5e7)
+    _print(f"  book: {params.max_positions} slots, entry rank {params.entry_rank}, "
+           f"exit rank {params.exit_rank}, stop {params.stop_atr_multiple:g}x ATR")
+    _print(f"  cost: size- and liquidity-dependent -- {sample:.0f} bps on a "
+           f"Rs 1.2L position at Rs 20cr ADTV, {thin:.0f} bps at Rs 5cr")
+
+    def progress(n, total):
+        if n % 20 == 0 or n == total:
+            _print(f"  split {n}/{total}")
+
+    _rule(f"Portfolio CPCV  N={iv(val.cpcv.n_groups)}  k={args.test_groups}")
+    result = run_portfolio_cpcv(
+        panel, list(cm.FEATURE_COLUMNS), panels, params,
+        step_sessions=21, alpha=fv(c4.model_ridge_alpha),
+        n_groups=iv(val.cpcv.n_groups), n_test_groups=args.test_groups,
+        purge_sessions=iv(val.cpcv.purge_sessions),
+        embargo_sessions=iv(val.cpcv.embargo_sessions),
+        progress=progress,
+    )
+    sharpe = result.spread("sharpe")
+    ret = result.spread("mean_return")
+    dd = result.spread("max_drawdown")
+    if not sharpe:
+        _print("  no split produced a tradeable book; nothing to report")
+        return 1
+    _table("Book performance across CPCV splits",
+           ["metric", "min", "p25", "median", "p75", "max"],
+           [["Sharpe"] + [f"{sharpe[k]:+.2f}" for k in ("min", "p25", "median", "p75", "max")],
+            ["return/period"] + [f"{ret[k]:+.2%}" for k in ("min", "p25", "median", "p75", "max")],
+            ["max drawdown"] + [f"{dd[k]:+.1%}" for k in ("min", "p25", "median", "p75", "max")]])
+    _print()
+    _print(f"  splits scored          {sharpe['n']} of {result.n_splits}")
+    _print(f"  splits with Sharpe < 0 {sharpe['share_negative']:.0%}")
+    _print(f"  mean names held        {np.mean([m['avg_names'] for m in result.split_metrics]):.1f}")
+    _print()
+    _print("  Each split trades only the dates it holds out, with purging and "
+           "embargo applied, so a cohort never runs through a training block. "
+           "The spread is the report; no t-statistic is quoted, because splits "
+           "share training data and calendar and are not independent trials.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="prosignal",
@@ -1250,6 +1426,19 @@ def build_parser() -> argparse.ArgumentParser:
                              "This spends the one honest test -- do not use it "
                              "while still choosing between models")
     cpcv_p.set_defaults(func=cmd_research_cpcv)
+
+    port_p = research_sub.add_parser(
+        "portfolio",
+        help="CPCV over the BOOK -- sizing, stop, invalidation, buffer bands "
+             "and costs, not just the ranking",
+    )
+    port_p.add_argument("--test-groups", type=int, default=2,
+                        help="k in C(N,k). Lower than the ranking default: a "
+                             "book needs contiguous test dates to trade")
+    port_p.add_argument("--include-holdout", action="store_true",
+                        help="extend through the reserved holdout. Spends the "
+                             "one honest test")
+    port_p.set_defaults(func=cmd_research_portfolio)
 
     return parser
 
