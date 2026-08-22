@@ -380,3 +380,142 @@ def run_portfolio_cpcv(
     log.info("portfolio cpcv complete",
              extra={"splits": cv.n_splits, "scored": len(result.split_metrics)})
     return result
+
+
+@dataclass
+class NestedResult:
+    """Outer-loop performance WITH the cost of parameter selection included.
+
+    A parameter chosen on the same data that reports the result is not a
+    parameter, it is a fitted value, and the number it produces is in-sample
+    however many folds surround it. Nested validation is the only construction
+    that prices selection: the inner loop chooses, the outer loop reports, and
+    the outer never sees the choice being made.
+    """
+
+    outer_splits: int
+    #: one row per outer split: chosen parameters and the outer-test metrics
+    rows: List[Dict[str, object]] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
+
+    def spread(self, key: str) -> Dict[str, float]:
+        vals = np.asarray([r[key] for r in self.rows if key in r and
+                           np.isfinite(r[key])], dtype="float64")
+        if vals.size == 0:
+            return {}
+        return {"min": float(vals.min()), "median": float(np.median(vals)),
+                "max": float(vals.max()), "mean": float(vals.mean()),
+                "sd": float(vals.std(ddof=1)) if vals.size > 1 else 0.0,
+                "share_negative": float((vals < 0).mean()), "n": int(vals.size)}
+
+    def chosen_counts(self, key: str) -> Dict[object, int]:
+        """How often each parameter value won. A stable winner is evidence; a
+        scatter across the grid means the inner loop is reading noise."""
+        out: Dict[object, int] = {}
+        for r in self.rows:
+            out[r.get(key)] = out.get(r.get(key), 0) + 1
+        return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+
+def nested_band_search(
+    panel: pd.DataFrame,
+    features: Sequence[str],
+    prices: Dict[str, pd.DataFrame],
+    make_params: Callable[[int, int], object],
+    grid: Sequence[tuple],
+    *,
+    step_sessions: int,
+    alpha: float,
+    n_groups: int,
+    n_test_groups: int,
+    purge_sessions: int,
+    embargo_sessions: int,
+    inner_fraction: float = 0.3,
+    min_train_rows: int = 2000,
+    progress: Optional[Callable[[int, int], None]] = None,
+) -> NestedResult:
+    """Choose Stage 6 bands inside each outer training set, report outside it.
+
+    ``grid`` is a sequence of (entry_rank, exit_rank) pairs, fixed in advance.
+    Within each outer split the training dates are cut again: the earlier part
+    fits the model, the later ``inner_fraction`` selects the band. The chosen
+    band is then applied to the outer test block, which nothing in the
+    selection has touched.
+    """
+    from .portfolio_sim import phase_summary
+
+    cols = [c for c in features if c in panel.columns]
+    if purge_sessions < 0 or embargo_sessions < 0:
+        raise ValueError("purge_sessions and embargo_sessions must be non-negative")
+    if not cols:
+        raise ValueError("no usable feature columns")
+    if not grid:
+        raise ValueError("the parameter grid is empty; nothing to select")
+    work = panel.dropna(subset=cols + ["label_rank", "label"]).reset_index(drop=True)
+    dates = sorted(work["date"].unique())
+    purge_obs = int(np.ceil(purge_sessions / step_sessions))
+    cv = CombinatorialPurgedCV(
+        n_groups=n_groups, n_test_groups=n_test_groups,
+        label_horizon=purge_obs,
+        embargo=int(np.ceil(embargo_sessions / step_sessions)),
+    )
+    by_date = {d: g for d, g in work.groupby("date")}
+    result = NestedResult(outer_splits=cv.n_splits)
+
+    def _rank(fit, ds):
+        out = []
+        for d in ds:
+            te = by_date[d]
+            p = predict(fit, te[cols].to_numpy("float64"))
+            s = pd.Series(p, index=te["symbol"].to_numpy()).sort_values(ascending=False)
+            out.append((pd.Timestamp(d), s))
+        return out
+
+    for n, split in enumerate(cv.split(len(dates)), start=1):
+        if progress:
+            progress(n, cv.n_splits)
+        train_dates = [dates[i] for i in split.train_idx]
+        test_dates = [dates[i] for i in split.test_idx]
+        cut = int(len(train_dates) * (1.0 - inner_fraction))
+        # The inner validation block is purged from the inner fit for the same
+        # reason the outer one is: its labels reach backwards.
+        fit_dates = train_dates[: max(cut - purge_obs, 0)]
+        inner_dates = train_dates[cut:]
+        if len(fit_dates) < 20 or len(inner_dates) < 4 or len(test_dates) < 4:
+            continue
+        inner_fit_rows = work[work["date"].isin(fit_dates)]
+        if len(inner_fit_rows) < min_train_rows:
+            continue
+        inner_fit = ridge_fit(inner_fit_rows[cols].to_numpy("float64"),
+                              inner_fit_rows["label_rank"].to_numpy("float64"), alpha=alpha)
+        inner_rank = _rank(inner_fit, inner_dates)
+
+        best, best_sharpe = None, -np.inf
+        for entry, exit_ in grid:
+            m = phase_summary(inner_rank, prices, make_params(entry, exit_),
+                              step_sessions=step_sessions,
+                              dates_allowed=[pd.Timestamp(d) for d in inner_dates])
+            if m and np.isfinite(m.get("sharpe", np.nan)) and m["sharpe"] > best_sharpe:
+                best, best_sharpe = (entry, exit_), m["sharpe"]
+        if best is None:
+            continue
+
+        outer_rows = work[work["date"].isin(train_dates)]
+        if len(outer_rows) < min_train_rows:
+            continue
+        outer_fit = ridge_fit(outer_rows[cols].to_numpy("float64"),
+                              outer_rows["label_rank"].to_numpy("float64"), alpha=alpha)
+        outer = phase_summary(_rank(outer_fit, test_dates), prices,
+                              make_params(*best), step_sessions=step_sessions,
+                              dates_allowed=[pd.Timestamp(d) for d in test_dates])
+        if not outer:
+            continue
+        result.rows.append({
+            "split_id": split.split_id, "entry_rank": best[0], "exit_rank": best[1],
+            "inner_sharpe": float(best_sharpe), "sharpe": outer["sharpe"],
+            "mean_return": outer["mean_return"], "max_drawdown": outer["max_drawdown"],
+        })
+
+    log.info("nested band search complete",
+             extra={"outer_splits": cv.n_splits, "scored": len(result.rows)})
+    return result

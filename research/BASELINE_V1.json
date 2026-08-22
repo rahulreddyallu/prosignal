@@ -119,7 +119,8 @@
     "Historical extension is externally capped: NSE 403s before 2016, delivery is not re-servable before ~2021, and vendor statement coverage begins 2023-06 for the bulk of the universe.",
     "The quarterly-supersession branch of the TTM repair does not fire on this store (0 of 1284 symbols); the coverage gain came from the filter ordering and the staleness gate.",
     "26 configuration parameters remain declared and reserved rather than implemented.",
-    "Momentum's 41% IC share is one latent factor: a single sign-pinned principal component of the three shipped factors reproduces their equal-weighted IC (+0.0755 vs +0.0752). Nine literature variants span 2.57 effective dimensions. Diversification cannot come from more momentum."
+    "Momentum's 41% IC share is one latent factor: a single sign-pinned principal component of the three shipped factors reproduces their equal-weighted IC (+0.0755 vs +0.0752). Nine literature variants span 2.57 effective dimensions. Diversification cannot come from more momentum.",
+    "Stage 6 band widths are not a meaningful lever: nested selection beats the fixed convention by +0.03 Sharpe on a distribution with sd 0.83, and the inner loop's chosen band scatters across the whole grid. Fixed at entry 8 / exit 16 on the index-construction convention rather than searched."
   ],
   "label": "BASELINE_V1",
   "metrics": {
@@ -191,6 +192,65 @@
       "paths": 36,
       "pooled_excess_per_period": 0.0263,
       "pooled_ic": 0.062
+    },
+    "stage6_nested_validation": {
+      "conclusion": "band width does not matter in this range; the inner loop's winner scatters, which is evidence of noise not signal. Convention retained.",
+      "fixed_convention_8_16": {
+        "median_sharpe": 0.77,
+        "sd": 0.85,
+        "share_splits_negative": 0.22
+      },
+      "grid": [
+        [
+          5,
+          10
+        ],
+        [
+          5,
+          15
+        ],
+        [
+          8,
+          16
+        ],
+        [
+          8,
+          24
+        ],
+        [
+          10,
+          20
+        ],
+        [
+          10,
+          30
+        ],
+        [
+          12,
+          24
+        ]
+      ],
+      "inner_winner_scatter": {
+        "entry_rank": {
+          "10": 21,
+          "5": 6,
+          "8": 18
+        },
+        "exit_rank": {
+          "15": 6,
+          "16": 9,
+          "20": 2,
+          "24": 9,
+          "30": 19
+        }
+      },
+      "nested": {
+        "median_sharpe": 0.8,
+        "sd": 0.83,
+        "share_splits_negative": 0.2
+      },
+      "outer_splits": 45,
+      "selection_optimism": 0.02
     }
   },
   "stage_logic": {
