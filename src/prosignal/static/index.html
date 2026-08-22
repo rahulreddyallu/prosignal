@@ -1,815 +1,1057 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="auto">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>Prosignal — Equity Research Terminal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Signal — Equity Research</title>
 <style>
-/* ============================================================================
-   DESIGN SYSTEM
-   One place for every primitive. Components below compose these and never
-   introduce their own colours, radii or shadows.
-   ========================================================================= */
-:root{
-  /* surface — warm neutrals rather than pure grey; pure #fff/#000 reads clinical */
-  --bg:#FAFAF9; --surface:#FFFFFF; --surface-2:#F5F5F4; --surface-sunken:#FAFAF9;
-  --border:#E7E5E4; --border-strong:#D6D3D1;
+/* ==========================================================================
+   TOKENS
+   Every colour in the interface resolves through this block. A component that
+   invents its own is a component that breaks in one of the two themes, and
+   dark mode here is designed rather than inverted -- the ground is a cool
+   near-black, the surfaces lift toward slate, and the accent is lightened so
+   it still reads against them.
+   ========================================================================== */
+:root {
+  --ground:        #F6F5F2;   /* warm off-white, not paper-white */
+  --surface:       #FFFFFF;
+  --surface-2:     #FAF9F7;
+  --surface-sunk:  #EFEEEA;
+  --line:          #E2E0DA;
+  --line-strong:   #CFCCC4;
 
-  /* ink -- four steps is enough; more invites inconsistency.
-     Every step clears WCAG AA (4.5:1) on --surface. The lightest step carries
-     column headers, company names and eyebrow labels: the text that tells you
-     WHICH number you are reading. It was #A8A29E at 2.52:1, which is a real
-     legibility failure in a product made of small numbers, not a checkbox. */
-  --ink:#1C1917; --ink-2:#44403C; --ink-3:#5F5955; --ink-4:#7C756F;
+  --ink:           #1B1D1F;
+  --ink-2:         #55595E;
+  --ink-3:         #85898F;
 
-  /* one accent, used only for primary action and active state */
-  --accent:#4338CA; --accent-hover:#3730A3; --accent-soft:#EEF2FF; --accent-ink:#3730A3;
+  --accent:        #12615F;   /* petrol */
+  --accent-ink:    #FFFFFF;
+  --accent-soft:   #E4EFEE;
+  --accent-line:   #B9D4D2;
 
-  /* market semantics ONLY. Muted deliberately — saturated green/red on a light
-     ground reads as an alert, and most of this screen is not an alert. */
-  --up:#047857; --up-soft:#ECFDF5;
-  --down:#B91C1C; --down-soft:#FEF2F2;
-  --warn:#B45309; --warn-soft:#FFFBEB;
+  --buy:           #1F6B43;
+  --buy-soft:      #E6F0EA;
+  --buy-line:      #BCD8C8;
 
-  /* 8px scale */
-  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
-  --r-sm:6px; --r:10px; --r-lg:14px;
+  --watch:         #8A6212;
+  --watch-soft:    #F6EFDF;
+  --watch-line:    #E2D2AC;
 
-  /* shadows: barely present. Elevation comes from border + ground contrast. */
-  --sh-1:0 1px 2px rgba(28,25,23,.04), 0 1px 1px rgba(28,25,23,.03);
-  --sh-2:0 4px 12px rgba(28,25,23,.06), 0 1px 3px rgba(28,25,23,.04);
-  --ring:0 0 0 3px rgba(67,56,202,.14);
+  --neg:           #A33A32;
+  --neg-soft:      #F7E9E7;
 
-  --font:-apple-system,BlinkMacSystemFont,"Inter","SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
-  --t:160ms cubic-bezier(.4,0,.2,1);
-  --maxw:1180px;
+  --focus:         #12615F;
+
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+
+  --shadow: 0 1px 2px rgba(24,26,28,.05), 0 4px 12px rgba(24,26,28,.04);
+  --shadow-lift: 0 2px 4px rgba(24,26,28,.06), 0 12px 28px rgba(24,26,28,.08);
+
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --maxw: 1160px;
 }
-@media (prefers-color-scheme:dark){
-  :root{
-    --bg:#0C0A09; --surface:#1C1917; --surface-2:#292524; --surface-sunken:#171412;
-    --border:#292524; --border-strong:#44403C;
-    /* same rule inverted: the lightest step must still clear 4.5:1 on the dark
-       surface, where #78716C only reached 3.57:1. */
-    --ink:#FAFAF9; --ink-2:#D6D3D1; --ink-3:#B0A9A3; --ink-4:#928B85;
-    --accent:#818CF8; --accent-hover:#A5B4FC; --accent-soft:#1E1B4B; --accent-ink:#C7D2FE;
-    --up:#34D399; --up-soft:#052E23; --down:#F87171; --down-soft:#3B0A0A;
-    --warn:#FBBF24; --warn-soft:#3A2A05;
-    --sh-1:none; --sh-2:0 4px 16px rgba(0,0,0,.4);
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:       #101214;
+    --surface:      #17191C;
+    --surface-2:    #1C1F22;
+    --surface-sunk: #0C0E10;
+    --line:         #2A2E33;
+    --line-strong:  #3A3F45;
+
+    --ink:          #ECEDEE;
+    --ink-2:        #A2A7AD;
+    --ink-3:        #71767C;
+
+    --accent:       #4FB3AE;
+    --accent-ink:   #06201F;
+    --accent-soft:  #16302F;
+    --accent-line:  #244846;
+
+    --buy:          #64C08C;
+    --buy-soft:     #14291D;
+    --buy-line:     #24432F;
+
+    --watch:        #D6AC5A;
+    --watch-soft:   #2A2113;
+    --watch-line:   #453620;
+
+    --neg:          #E08078;
+    --neg-soft:     #2B1917;
+
+    --focus:        #4FB3AE;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
+    --shadow-lift: 0 2px 4px rgba(0,0,0,.5), 0 12px 28px rgba(0,0,0,.45);
   }
 }
-*,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{
-  margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
-  font-size:14px;line-height:1.5;letter-spacing:-.006em;
-  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
-}
-.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
-
-/* ---- app shell --------------------------------------------------------- */
-.hdr{
-  position:sticky;top:0;z-index:50;background:rgba(250,250,249,.82);
-  backdrop-filter:saturate(180%) blur(12px);-webkit-backdrop-filter:saturate(180%) blur(12px);
-  border-bottom:1px solid var(--border);
-}
-@media (prefers-color-scheme:dark){.hdr{background:rgba(12,10,9,.82)}}
-.hdr-in{max-width:var(--maxw);margin:0 auto;padding:0 var(--s5);height:56px;
-  display:flex;align-items:center;gap:var(--s4)}
-.brand{display:flex;align-items:baseline;gap:var(--s2);margin-right:auto;min-width:0}
-.brand b{font-size:14px;font-weight:600;letter-spacing:-.02em}
-.brand span{font-size:11px;color:var(--ink-4);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis}
-main{max-width:var(--maxw);margin:0 auto;padding:var(--s5) var(--s5) var(--s8)}
-
-/* ---- primitives -------------------------------------------------------- */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
-  box-shadow:var(--sh-1)}
-.card-p{padding:var(--s5)}
-.stack{display:flex;flex-direction:column;gap:var(--s4)}
-.row{display:flex;align-items:center;gap:var(--s3)}
-.spread{display:flex;align-items:center;justify-content:space-between;gap:var(--s3)}
-
-.eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
-  color:var(--ink-4)}
-h1{font-size:19px;font-weight:600;letter-spacing:-.02em;margin:0}
-h2{font-size:13px;font-weight:600;letter-spacing:-.01em;margin:0;color:var(--ink)}
-.muted{color:var(--ink-3)}
-.tiny{font-size:11.5px;line-height:1.55}
-.mono{font-family:var(--mono);font-size:11px}
-
-button{font:inherit;cursor:pointer;border-radius:var(--r-sm);border:1px solid transparent;
-  transition:background var(--t),border-color var(--t),color var(--t),box-shadow var(--t);
-  white-space:nowrap}
-button:focus-visible{outline:none;box-shadow:var(--ring)}
-button:disabled{opacity:.45;cursor:not-allowed}
-.btn{background:var(--accent);color:#fff;padding:8px 16px;font-size:13px;font-weight:550}
-.btn:hover:not(:disabled){background:var(--accent-hover)}
-.btn-ghost{background:transparent;color:var(--ink-2);border-color:var(--border-strong);
-  padding:7px 13px;font-size:12.5px}
-.btn-ghost:hover:not(:disabled){background:var(--surface-2);color:var(--ink)}
-.btn-warn{background:var(--warn);color:#fff;padding:8px 16px;font-size:13px;font-weight:550}
-.btn-warn:hover:not(:disabled){filter:brightness(.94)}
-
-.tag{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 8px;
-  border-radius:5px;font-size:11px;font-weight:550;letter-spacing:-.005em;
-  border:1px solid transparent;white-space:nowrap}
-.tag-buy{background:var(--up-soft);color:var(--up)}
-.tag-watch{background:var(--warn-soft);color:var(--warn)}
-.tag-none{background:var(--surface-2);color:var(--ink-3);border-color:var(--border)}
-.tag-live{background:var(--up-soft);color:var(--up)}
-.dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
-
-/* ---- header status ----------------------------------------------------- */
-.status{display:flex;align-items:center;gap:var(--s3);font-size:11.5px;
-  color:var(--ink-3);white-space:nowrap;flex:none}
-.status .sep{width:1px;height:14px;background:var(--border)}
-/* 860px, not 720: when the store is empty a second button appears in the
-   header, and at 768px the date and session count were wrapping onto two
-   lines each. Shed the metadata before the header can break. */
-@media (max-width:860px){.status .hide-sm{display:none}}
-/* Only the empty-store case puts two buttons in the header, and only then does
-   the readiness pill stop fitting on a phone. Shed it in that case alone --
-   the not-ready card below states the same thing at full length. */
-@media (max-width:560px){body.needs-build .status{display:none}}
-@media (max-width:560px){.brand span{display:none}}
-
-/* ---- market context strip --------------------------------------------- */
-.ctx{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));
-  border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)}
-.ctx>div{padding:var(--s3) var(--s4);border-right:1px solid var(--border)}
-.ctx>div:last-child{border-right:none}
-.ctx dt{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--ink-4);margin:0 0 3px}
-.ctx dd{margin:0;font-size:13.5px;font-weight:550;letter-spacing:-.01em}
-.ctx dd small{font-weight:450;color:var(--ink-3);font-size:11.5px}
-@media (max-width:640px){.ctx>div{border-right:none;border-bottom:1px solid var(--border)}
-  .ctx>div:last-child{border-bottom:none}}
-
-/* ---- headline decision ------------------------------------------------- */
-.verdict{display:flex;align-items:flex-start;gap:var(--s5);flex-wrap:wrap}
-.verdict-main{flex:1 1 300px;min-width:0}
-.verdict h1{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
-.verdict-n{font-size:30px;font-weight:600;letter-spacing:-.03em;line-height:1.1}
-
-/* ---- funnel ------------------------------------------------------------ */
-.funnel{display:flex;flex-direction:column;gap:7px}
-.fn{display:grid;grid-template-columns:132px 1fr 46px;align-items:center;gap:var(--s3)}
-.fn-l{font-size:11.5px;color:var(--ink-3);text-align:right;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fn-bar{height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden}
-.fn-bar i{display:block;height:100%;background:var(--accent);opacity:.82;border-radius:3px;
-  transform-origin:left;animation:grow 420ms cubic-bezier(.4,0,.2,1) both}
-.fn-bar.zero i{background:var(--ink-4);opacity:.35}
-.fn-v{font-size:12px;font-weight:600;text-align:right}
-@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-@media (max-width:560px){.fn{grid-template-columns:104px 1fr 40px}}
-@media (min-width:1024px){.tw{overflow:visible}thead th{top:56px}}
-
-
-/* ---- scanner table ----------------------------------------------------- */
-.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 calc(var(--s5) * -1);
-  padding:0 var(--s5)}
-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:760px}
-/* top:0 not 56px -- overflow-x:auto forces overflow-y:auto, which makes .tw a
-   scroll container, so a 56px offset lands the header on top of row 1. The
-   viewport-relative sticky header is restored at >=1024px where the table fits
-   and .tw no longer needs to scroll. */
-thead th{position:sticky;top:0;z-index:5;background:var(--surface);
-  text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--ink-4);padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap;
-  user-select:none}
-thead th.s{cursor:pointer}
-thead th.s:hover{color:var(--ink-2)}
-thead th.r,td.r{text-align:right}
-thead th .car{opacity:.45;font-size:9px;margin-left:3px}
-tbody tr{transition:background var(--t)}
-tbody tr.main{cursor:pointer}
-tbody tr.main:hover{background:var(--surface-2)}
-/* A background tint alone was a ~1.05:1 focus indicator -- effectively
-   invisible. WCAG 2.2 wants 3:1 against adjacent colour, so pair the tint with
-   a real outline drawn inside the row's own bounds. */
-tbody tr.main:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;
-  background:var(--accent-soft)}
-tbody td{padding:11px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
-tbody tr.open td{border-bottom-color:transparent;background:var(--surface-2)}
-.tk{font-weight:600;letter-spacing:-.01em}
-.co{font-size:11px;color:var(--ink-4);margin-top:1px;
-  max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chev{display:inline-block;transition:transform var(--t);color:var(--ink-4);font-size:10px}
-tr.open .chev{transform:rotate(90deg)}
-
-/* score meter — restrained, not a rainbow */
-.meter{display:flex;align-items:center;gap:8px;justify-content:flex-end}
-.meter-t{width:44px;height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden;flex:none}
-.meter-t i{display:block;height:100%;background:var(--accent);opacity:.8;border-radius:2px}
-.meter b{font-weight:600;min-width:26px;text-align:right}
-
-/* expandable detail */
-tr.detail>td{padding:0;border-bottom:1px solid var(--border);background:var(--surface-2)}
-.det{padding:var(--s4) var(--s5) var(--s5);display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:var(--s5)}
-/* balanced 2x2 rather than a ragged 3+1 -- and the wider column gives the
-   research citations room to set on two lines instead of four */
-@media (min-width:900px){.det{grid-template-columns:1fr 1fr}}
-.det section{min-width:0}
-.det h3{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--ink-4);margin:0 0 var(--s2)}
-.det ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
-.det li{font-size:11.5px;line-height:1.5;color:var(--ink-2);padding-left:15px;position:relative}
-.det li::before{position:absolute;left:0;top:0;font-size:10px}
-.ev-for li::before{content:"✓";color:var(--up)}
-.ev-against li::before{content:"!";color:var(--warn);font-weight:700}
-.ev-unknown li::before{content:"?";color:var(--ink-4)}
-.ev-exit li::before{content:"→";color:var(--ink-4)}
-
-/* trade levels */
-.levels{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:1px;
-  background:var(--border);border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
-.levels div{background:var(--surface);padding:9px 11px}
-.levels dt{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
-  color:var(--ink-4);margin:0 0 2px}
-.levels dd{margin:0;font-size:13px;font-weight:600;letter-spacing:-.01em}
-.levels dd.pos{color:var(--up)} .levels dd.neg{color:var(--down)}
-
-/* Mobile: drop the table's horizontal scroll entirely rather than making the
-   user swipe sideways. The expandable row already carries stop, target, R:R
-   and every factor, so hiding those columns loses nothing -- and it keeps the
-   evidence prose, which lives inside this same scroll container, readable
-   without horizontal scrolling. */
-/* Tablet tier. Between 761px and 1023px all ten columns force the table into
-   horizontal scroll, which drags the evidence panel into a scroll container
-   with it. Dropping rank (implicit in sort order) and the two factor columns
-   lets the table fit; both factors remain in the expanded panel. */
-@media (max-width:1023px){
-  table{min-width:0}
-  .c-score{display:none}
-  /* auto-fit's intrinsic minimum inside a table cell is (tracks x min track),
-     so the 8-cell levels grid silently widens the whole table. Pin the count. */
-  .levels{grid-template-columns:repeat(4,1fr)}
-  tbody td,thead th{padding-left:8px;padding-right:8px}
+:root[data-theme="dark"] {
+  --ground:#101214; --surface:#17191C; --surface-2:#1C1F22; --surface-sunk:#0C0E10;
+  --line:#2A2E33; --line-strong:#3A3F45;
+  --ink:#ECEDEE; --ink-2:#A2A7AD; --ink-3:#71767C;
+  --accent:#4FB3AE; --accent-ink:#06201F; --accent-soft:#16302F; --accent-line:#244846;
+  --buy:#64C08C; --buy-soft:#14291D; --buy-line:#24432F;
+  --watch:#D6AC5A; --watch-soft:#2A2113; --watch-line:#453620;
+  --neg:#E08078; --neg-soft:#2B1917;
+  --focus:#4FB3AE;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
+  --shadow-lift: 0 2px 4px rgba(0,0,0,.5), 0 12px 28px rgba(0,0,0,.45);
 }
 
-@media (max-width:760px){
-  /* Make the table genuinely FIT rather than scroll. Everything hidden here
-     -- rank, price, stop, target, R:R and the factor columns -- is present in
-     full inside the expandable panel one tap away, where it sits next to the
-     entry and invalidation levels it belongs with. A scanner on a phone
-     answers "which names, how strong"; the numbers follow on the tap.
-     Fitting also means the evidence prose renders at natural width instead of
-     inside a sideways-scrolling container. */
-  table{min-width:0}
-  .c-score,.c-last_close,.c-stop,.c-target_1{display:none}
-  tbody td,thead th{padding-left:8px;padding-right:8px}
-  .co{max-width:90px}
-  .meter-t{display:none}
-  .det{padding:var(--s4) var(--s3) var(--s4);grid-template-columns:1fr}
-  .levels{grid-template-columns:1fr 1fr}
+/* ========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+h1,h2,h3,h4 { margin: 0; font-weight: 600; letter-spacing: -0.011em; text-wrap: balance; }
+p { margin: 0; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+      clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
+/* --------------------------------------------------------------- shell */
+.shell { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--sp-5); }
+
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--ground) 88%, transparent);
+  backdrop-filter: saturate(1.6) blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-in {
+  max-width: var(--maxw); margin: 0 auto; padding: var(--sp-3) var(--sp-5);
+  display: flex; align-items: center; gap: var(--sp-5);
+}
+.brand { display: flex; align-items: baseline; gap: var(--sp-2); font-weight: 600;
+         letter-spacing: -0.02em; font-size: 16px; }
+.brand span { color: var(--ink-3); font-weight: 450; font-size: 12px;
+              letter-spacing: .04em; text-transform: uppercase; }
+.topbar-meta { margin-left: auto; display: flex; align-items: center;
+               gap: var(--sp-4); font-size: 12.5px; color: var(--ink-2); }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+       margin-right: 6px; vertical-align: 1px; }
+.dot.live { background: var(--buy); }
+.dot.closed { background: var(--ink-3); }
+.dot.stale { background: var(--watch); }
+
+.iconbtn { background: transparent; border: 1px solid var(--line); width: 32px;
+           height: 32px; border-radius: var(--r-sm); cursor: pointer;
+           display: grid; place-items: center; color: var(--ink-2); }
+.iconbtn:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ------------------------------------------------------------------ nav */
+.nav { border-bottom: 1px solid var(--line); background: var(--ground); }
+.nav-in { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--sp-5);
+          display: flex; gap: var(--sp-1); overflow-x: auto;
+          scrollbar-width: none; }
+.nav-in::-webkit-scrollbar { display: none; }
+.nav button {
+  background: none; border: 0; padding: var(--sp-3) var(--sp-3);
+  color: var(--ink-2); cursor: pointer; font-size: 14px; white-space: nowrap;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 450;
+}
+.nav button:hover { color: var(--ink); }
+.nav button[aria-current="page"] { color: var(--ink); font-weight: 550;
+                                   border-bottom-color: var(--accent); }
+
+/* --------------------------------------------------------------- scan */
+.scanbar { display: flex; align-items: flex-end; gap: var(--sp-5);
+           padding: var(--sp-7) 0 var(--sp-5); flex-wrap: wrap; }
+.scanbar h1 { font-size: clamp(24px, 3.4vw, 34px); letter-spacing: -0.025em; }
+.scanbar .sub { color: var(--ink-2); font-size: 14.5px; margin-top: 6px; max-width: 60ch; }
+.scanbar .grow { flex: 1 1 260px; }
+
+.btn {
+  appearance: none; border: 1px solid var(--accent); background: var(--accent);
+  color: var(--accent-ink); border-radius: var(--r-md);
+  padding: 11px 22px; font-size: 14.5px; font-weight: 550; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 9px; letter-spacing: -0.005em;
+  transition: transform .12s ease, box-shadow .16s ease, filter .16s ease;
+  box-shadow: var(--shadow);
+}
+.btn:hover:not(:disabled) { filter: brightness(1.08); box-shadow: var(--shadow-lift); }
+.btn:active:not(:disabled) { transform: translateY(1px); box-shadow: var(--shadow); }
+.btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+.btn.ghost:hover:not(:disabled) { background: var(--surface-2); filter: none; }
+.btn.sm { padding: 7px 14px; font-size: 13px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { width: 14px; height: 14px; border-radius: 50%;
+           border: 2px solid currentColor; border-right-color: transparent;
+           animation: spin .7s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+  .btn { transition: none; }
 }
 
-/* Small phones (320-360px: iPhone SE, older Android). Four pixels of overflow
-   here is enough to put the whole table into horizontal scroll and drag the
-   evidence prose with it, so trim the company name and the badge. 375px and up
-   keep the roomier treatment. */
-@media (max-width:360px){
-  .co{max-width:64px}
-  .tag{font-size:10px;padding:0 6px;height:20px}
-  tbody td,thead th{padding-left:6px;padding-right:6px}
+/* ----------------------------------------------------------- market strip */
+.market {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: var(--sp-5);
+  display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr);
+  gap: var(--sp-5); align-items: start; box-shadow: var(--shadow);
 }
+.market h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+             color: var(--ink-3); font-weight: 550; margin-bottom: var(--sp-2); }
+.market .headline { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+.market .headline .pill { font-size: 12px; vertical-align: 3px; margin-left: 8px; }
+.market p { color: var(--ink-2); font-size: 14px; margin-top: 6px; max-width: 52ch; }
+.readings { display: grid; gap: var(--sp-2); }
+.reading { display: flex; justify-content: space-between; align-items: baseline;
+           gap: var(--sp-3); padding: 9px 0; border-bottom: 1px solid var(--line); }
+.reading:last-child { border-bottom: 0; }
+.reading .k { color: var(--ink-2); font-size: 13.5px; }
+.reading .v { font-weight: 550; font-size: 13.5px; text-align: right; }
+.reading .v small { display: block; color: var(--ink-3); font-weight: 400;
+                    font-size: 12px; }
 
-/* ---- states ------------------------------------------------------------ */
-.state{text-align:center;padding:var(--s7) var(--s5)}
-.state h2{font-size:15px;margin-bottom:var(--s2)}
-.state p{margin:0 auto;max-width:440px;color:var(--ink-3);font-size:12.5px;line-height:1.6}
-.state .glyph{width:38px;height:38px;margin:0 auto var(--s4);border-radius:10px;
-  background:var(--surface-2);border:1px solid var(--border);
-  display:grid;place-items:center;color:var(--ink-4);font-size:16px}
+/* ------------------------------------------------------------- slate */
+.slate-head { display: flex; align-items: baseline; gap: var(--sp-3);
+              margin: var(--sp-7) 0 var(--sp-4); flex-wrap: wrap; }
+.slate-head h2 { font-size: 20px; letter-spacing: -0.02em; }
+.slate-head .count { color: var(--ink-2); font-size: 14px; }
+.slate-head .note { flex-basis: 100%; color: var(--ink-3); font-size: 13px; }
 
-.err{border-color:color-mix(in srgb,var(--down) 32%,var(--border))}
-.err .glyph{background:var(--down-soft);border-color:transparent;color:var(--down)}
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
+        font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+        padding: 3px 9px; border-radius: 100px; border: 1px solid transparent; }
+.pill.buy   { background: var(--buy-soft);   color: var(--buy);   border-color: var(--buy-line); }
+.pill.watch { background: var(--watch-soft); color: var(--watch); border-color: var(--watch-line); }
+.pill.info  { background: var(--accent-soft);color: var(--accent);border-color: var(--accent-line); }
+.pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%;
+                background: currentColor; }
 
-/* progress */
-.prog{display:flex;flex-direction:column;gap:var(--s2)}
-.prog-track{height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden}
-.prog-track i{display:block;height:100%;background:var(--accent);border-radius:2px;
-  transition:width 320ms cubic-bezier(.4,0,.2,1)}
-.steps{list-style:none;margin:var(--s3) 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
-.steps li{font-size:12px;color:var(--ink-4);display:flex;align-items:center;gap:8px;
-  transition:color var(--t)}
-.steps li.done{color:var(--ink-3)} .steps li.now{color:var(--ink);font-weight:550}
-.steps .mk{width:13px;text-align:center;font-size:10px;flex:none}
-.steps li.done .mk{color:var(--up)}
+.cards { display: grid; gap: var(--sp-3); }
 
-/* skeleton */
-.sk{background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface) 50%,var(--surface-2) 75%);
-  background-size:200% 100%;animation:sh 1.4s ease-in-out infinite;border-radius:5px;height:11px}
-@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
-
-/* disclosure */
-details{border-top:1px solid var(--border);padding-top:var(--s3);margin-top:var(--s3)}
-summary{cursor:pointer;font-size:11.5px;color:var(--ink-3);list-style:none;
-  display:flex;align-items:center;gap:6px;user-select:none}
-summary::-webkit-details-marker{display:none}
-summary::before{content:"›";display:inline-block;transition:transform var(--t);
-  color:var(--ink-4);font-size:13px}
-details[open] summary::before{transform:rotate(90deg)}
-summary:hover{color:var(--ink-2)}
-summary:focus-visible{outline:none;box-shadow:var(--ring);border-radius:var(--r-sm)}
-details .body{padding-top:var(--s3)}
-
-.foot{margin-top:var(--s6);padding-top:var(--s4);border-top:1px solid var(--border);
-  display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center;
-  font-size:11px;color:var(--ink-4)}
-
-@media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: var(--sp-5);
+  display: grid; gap: var(--sp-3); text-align: left; width: 100%;
+  cursor: pointer; position: relative; overflow: hidden;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
 }
-.hide{display:none!important}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
+                background: var(--line-strong); }
+.card.is-buy::before   { background: var(--buy); }
+.card.is-watch::before { background: var(--watch); }
+.card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-lift);
+              transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) { .card:hover { transform: none; } }
 
-/* Tier separator. Deliberately quiet -- it is a reading aid, not a gate; every
-   name below it still cleared scoring and the false-signal defence. */
-.tier-sep td{padding:var(--s3) var(--s3);background:transparent;
-  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.tier-sep:hover td{background:transparent}
-.tier-l{display:inline-block;font-size:.7rem;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--fg-3);margin-right:.6rem;font-weight:600}
-.tier-n{font-size:.75rem;color:var(--fg-3);line-height:1.45}
+.card.featured { padding: var(--sp-6); gap: var(--sp-4); }
+.card-top { display: flex; align-items: flex-start; gap: var(--sp-4); flex-wrap: wrap; }
+.card-id { min-width: 0; flex: 1 1 auto; }
+.card-id .rank { color: var(--ink-3); font-size: 12px; font-weight: 550;
+                 letter-spacing: .06em; text-transform: uppercase; }
+.card-id .name { font-size: 18px; font-weight: 600; letter-spacing: -0.02em;
+                 margin-top: 2px; overflow-wrap: anywhere; }
+.card.featured .card-id .name { font-size: 24px; }
+.card-id .tick { color: var(--ink-3); font-size: 12.5px; letter-spacing: .05em;
+                 margin-top: 1px; }
+.card-price { text-align: right; margin-left: auto; }
+.card-price .p { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
+.card.featured .card-price .p { font-size: 24px; }
+.card-price .s { color: var(--ink-2); font-size: 12.5px; margin-top: 2px; }
+.card-status { display: flex; flex-direction: column; align-items: flex-end;
+               gap: 6px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12.5px; color: var(--ink-2); background: var(--surface-sunk);
+        border: 1px solid var(--line); border-radius: 100px; padding: 3px 10px; }
+.card .thesis { color: var(--ink-2); font-size: 14px; line-height: 1.6;
+                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                overflow: hidden; }
+.card.featured .thesis { -webkit-line-clamp: 3; font-size: 14.5px; }
+.card-foot { display: flex; align-items: center; justify-content: space-between;
+             gap: var(--sp-3); flex-wrap: wrap; }
+.confirm { font-size: 12.5px; color: var(--ink-3); }
+.more { color: var(--accent); font-size: 13.5px; font-weight: 550; }
+
+/* ------------------------------------------------------------- progress */
+.progress { background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--r-lg); padding: var(--sp-6);
+            box-shadow: var(--shadow); }
+.progress h3 { font-size: 16px; }
+.progress .stage { color: var(--ink-2); font-size: 14px; margin-top: 4px; }
+.track { display: flex; gap: 4px; margin: var(--sp-5) 0 var(--sp-3); }
+.seg { height: 4px; flex: 1; border-radius: 2px; background: var(--surface-sunk);
+       overflow: hidden; position: relative; }
+.seg.done { background: var(--accent); }
+.seg.now::after { content: ""; position: absolute; inset: 0;
+                  background: var(--accent); transform-origin: left;
+                  animation: fill 1.6s ease-in-out infinite; }
+@keyframes fill { 0% { transform: scaleX(.05); opacity: .55; }
+                  50% { transform: scaleX(.85); opacity: 1; }
+                  100% { transform: scaleX(.05); opacity: .55; } }
+@media (prefers-reduced-motion: reduce) {
+  .seg.now::after { animation: none; transform: scaleX(.5); }
+}
+.progress .steps { color: var(--ink-3); font-size: 12.5px; }
+
+/* --------------------------------------------------------------- journey */
+.journey { display: grid; gap: 0; }
+.jstep { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4);
+         padding: var(--sp-4) 0; border-bottom: 1px solid var(--line);
+         align-items: baseline; }
+.jstep:last-child { border-bottom: 0; }
+.jstep .l { font-weight: 500; font-size: 14.5px; }
+.jstep .d { color: var(--ink-2); font-size: 13px; margin-top: 3px; max-width: 62ch; }
+.jstep .n { font-size: 19px; font-weight: 600; text-align: right; }
+.jstep .rm { color: var(--ink-3); font-size: 12px; font-weight: 400;
+             display: block; text-align: right; }
+.jstep.final .n { color: var(--accent); }
+
+/* ---------------------------------------------------------------- panel */
+.scrim { position: fixed; inset: 0; background: rgba(12,14,16,.45);
+         z-index: 50; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+.scrim.open { opacity: 1; pointer-events: auto; }
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%);
+  background: var(--ground); border-left: 1px solid var(--line);
+  z-index: 51; transform: translateX(100%); transition: transform .24s cubic-bezier(.4,0,.2,1);
+  display: flex; flex-direction: column; box-shadow: var(--shadow-lift);
+}
+.panel.open { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .panel, .scrim { transition: none; }
+}
+.panel-head { padding: var(--sp-5); border-bottom: 1px solid var(--line);
+              display: flex; gap: var(--sp-4); align-items: flex-start;
+              background: var(--surface); }
+.panel-body { overflow-y: auto; padding: var(--sp-5); display: grid;
+              gap: var(--sp-6); }
+.section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+              color: var(--ink-3); font-weight: 550; margin-bottom: var(--sp-3); }
+.prose { font-size: 14.5px; line-height: 1.65; color: var(--ink); }
+.prose.muted { color: var(--ink-2); }
+
+.ev { display: grid; gap: var(--sp-2); }
+.ev-row { border: 1px solid var(--line); border-radius: var(--r-md);
+          background: var(--surface); overflow: hidden; }
+.ev-sum { display: flex; align-items: center; gap: var(--sp-3);
+          padding: 12px var(--sp-4); cursor: pointer; list-style: none; }
+.ev-sum::-webkit-details-marker { display: none; }
+.ev-sum .lab { font-weight: 500; font-size: 14px; }
+.ev-sum .vd { margin-left: auto; font-size: 12.5px; font-weight: 600; }
+.ev-sum .car { color: var(--ink-3); transition: transform .18s ease; font-size: 11px; }
+details[open] .ev-sum .car { transform: rotate(90deg); }
+.ev-detail { padding: 0 var(--sp-4) var(--sp-4); border-top: 1px solid var(--line);
+             padding-top: var(--sp-3); }
+.ev-detail .d { color: var(--ink-2); font-size: 13.5px; margin-bottom: var(--sp-3); }
+.sig { padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px;
+       line-height: 1.5; }
+.sig:last-child { border-bottom: 0; }
+.sig .sl { color: var(--ink-2); }
+.sig .sv { font-weight: 550; white-space: nowrap; }
+.v-pos { color: var(--buy); } .v-neg { color: var(--neg); } .v-neu { color: var(--ink-2); }
+
+.levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr));
+          gap: var(--sp-2); }
+.level { background: var(--surface); border: 1px solid var(--line);
+         border-radius: var(--r-md); padding: var(--sp-3); }
+.level .k { color: var(--ink-3); font-size: 11.5px; text-transform: uppercase;
+            letter-spacing: .05em; }
+.level .v { font-size: 16px; font-weight: 600; margin-top: 3px; }
+
+.callout { background: var(--surface-2); border: 1px solid var(--line);
+           border-left: 3px solid var(--accent); border-radius: var(--r-md);
+           padding: var(--sp-4); font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+.callout.watch { border-left-color: var(--watch); }
+
+details.adv { border: 1px solid var(--line); border-radius: var(--r-md);
+              background: var(--surface); }
+details.adv > summary { padding: 12px var(--sp-4); cursor: pointer;
+                        font-size: 13.5px; color: var(--ink-2); list-style: none; }
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary::before { content: "▸ "; color: var(--ink-3); }
+details.adv[open] > summary::before { content: "▾ "; }
+details.adv .adv-body { padding: 0 var(--sp-4) var(--sp-4); }
+.raw { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+       background: var(--surface-sunk); border: 1px solid var(--line);
+       border-radius: var(--r-sm); padding: var(--sp-3); overflow-x: auto;
+       white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+
+/* ----------------------------------------------------------------- table */
+.tablewrap { overflow-x: auto; border: 1px solid var(--line);
+             border-radius: var(--r-lg); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 11px var(--sp-4); text-align: left; white-space: nowrap; }
+th { background: var(--surface-2); color: var(--ink-3); font-weight: 550;
+     font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em;
+     border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+td { border-bottom: 1px solid var(--line); }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+td.r { text-align: right; }
+
+/* ----------------------------------------------------------------- misc */
+.panel-section { margin-top: var(--sp-7); }
+.panel-section > h2 { font-size: 18px; letter-spacing: -0.02em;
+                      margin-bottom: var(--sp-2); }
+.panel-section > .lead { color: var(--ink-2); font-size: 14px;
+                         margin-bottom: var(--sp-4); max-width: 68ch; }
+.box { background: var(--surface); border: 1px solid var(--line);
+       border-radius: var(--r-lg); padding: var(--sp-5); box-shadow: var(--shadow); }
+
+.empty { text-align: center; padding: var(--sp-8) var(--sp-5); }
+.empty h3 { font-size: 17px; margin-bottom: var(--sp-2); }
+.empty p { color: var(--ink-2); font-size: 14.5px; max-width: 48ch;
+           margin: 0 auto var(--sp-5); }
+
+.err { border-left: 3px solid var(--neg); background: var(--neg-soft);
+       border-radius: var(--r-md); padding: var(--sp-5); }
+.err h3 { font-size: 15.5px; margin-bottom: 6px; }
+.err p { color: var(--ink-2); font-size: 14px; margin-bottom: var(--sp-4); }
+
+.foot { color: var(--ink-3); font-size: 12px; line-height: 1.6;
+        border-top: 1px solid var(--line); margin-top: var(--sp-8);
+        padding: var(--sp-5) 0 var(--sp-8); max-width: 78ch; }
+
+.skel { background: linear-gradient(90deg, var(--surface-sunk) 25%,
+        var(--surface-2) 37%, var(--surface-sunk) 63%);
+        background-size: 400% 100%; animation: sk 1.4s ease infinite;
+        border-radius: var(--r-sm); }
+@keyframes sk { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
+/* ------------------------------------------------------------ responsive */
+@media (max-width: 860px) {
+  .market { grid-template-columns: 1fr; gap: var(--sp-4); }
+  .topbar-meta .hide-sm { display: none; }
+}
+@media (max-width: 640px) {
+  body { font-size: 14.5px; }
+  .shell, .topbar-in, .nav-in { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+  .scanbar { padding-top: var(--sp-5); gap: var(--sp-4); }
+  .scanbar .btn { width: 100%; justify-content: center; }
+  .card, .card.featured { padding: var(--sp-4); }
+  .card-price { text-align: left; margin-left: 0; }
+  .card-top { gap: var(--sp-2); }
+  .card-status { align-items: flex-start; flex-direction: row; }
+  .panel { width: 100%; border-left: 0; }
+  .jstep { grid-template-columns: 1fr auto; }
+}
 </style>
 </head>
 <body>
 
-<header class="hdr">
-  <div class="hdr-in">
-    <div class="brand">
-      <b>Prosignal</b>
-      <span>NSE equities · end-of-day research</span>
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand">Signal <span>Equity Research</span></div>
+    <div class="topbar-meta">
+      <span id="mkt-status"><span class="dot closed"></span>Loading</span>
+      <span class="hide-sm" id="mkt-fresh"></span>
+      <button class="iconbtn" id="theme" aria-label="Switch between light and dark theme" title="Theme">◐</button>
     </div>
-    <div class="status" id="status"></div>
-    <button class="btn" id="run">Run analysis</button>
-    <button class="btn-warn hide" id="build">Build data store</button>
   </div>
 </header>
 
-<main id="app">
-  <div class="stack" id="boot">
-    <div class="ctx" id="ctxSkel">
-      <div><dt>Regime</dt><dd><div class="sk" style="width:70%"></div></dd></div>
-      <div><dt>Trend</dt><dd><div class="sk" style="width:56%"></div></dd></div>
-      <div><dt>Volatility</dt><dd><div class="sk" style="width:64%"></div></dd></div>
-      <div><dt>Breadth</dt><dd><div class="sk" style="width:48%"></div></dd></div>
-    </div>
-    <div class="card card-p"><div class="sk" style="width:180px;height:24px"></div>
-      <div class="sk" style="width:70%;margin-top:14px"></div></div>
+<nav class="nav" aria-label="Sections">
+  <div class="nav-in" role="tablist">
+    <button role="tab" data-view="overview" aria-current="page">Overview</button>
+    <button role="tab" data-view="monitored">Watchlist</button>
+    <button role="tab" data-view="research">Research</button>
+    <button role="tab" data-view="history">History</button>
+    <button role="tab" data-view="method">Methodology</button>
   </div>
+</nav>
+
+<main class="shell" id="main">
+  <div class="scanbar">
+    <div class="grow">
+      <h1 id="page-title">Today's opportunities</h1>
+      <p class="sub" id="page-sub">Run a scan to rank the market and surface the strongest setups.</p>
+    </div>
+    <button class="btn" id="scan">Scan Market</button>
+  </div>
+
+  <div id="live" role="status" aria-live="polite" class="sr"></div>
+  <div id="view"></div>
+
+  <div class="foot" id="foot"></div>
 </main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel" role="dialog" aria-modal="true" aria-labelledby="panel-title" tabindex="-1">
+  <div class="panel-head">
+    <div style="flex:1;min-width:0">
+      <div class="card-id">
+        <div class="rank" id="panel-rank"></div>
+        <div class="name" id="panel-title"></div>
+        <div class="tick" id="panel-tick"></div>
+      </div>
+    </div>
+    <button class="iconbtn" id="panel-close" aria-label="Close details">✕</button>
+  </div>
+  <div class="panel-body" id="panel-body"></div>
+</aside>
 
 <script>
 "use strict";
-const STEPS=["Loading market data","Validating data quality","Assessing market regime",
- "Screening eligibility","Scoring the universe","Running false-signal defense",
- "Checking entry triggers","Building risk plans","Applying decision gates"];
+/* ==========================================================================
+   The interface binds to /analysis/{id}/view and never to /results.
+   That endpoint is the presentation layer's output: names already joined,
+   evidence already grouped, prose already written from the engine's own
+   values. Anything this file had to compute would be a second, divergent
+   implementation of a decision the backend already made.
+   ========================================================================== */
+const $  = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
-const $=s=>document.querySelector(s);
-const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;
-  if(h!==undefined)n.innerHTML=h;return n};
-const esc=s=>String(s??"").replace(/[&<>"']/g,c=>
-  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const state = { view: null, run: null, tab: "overview", busy: false,
+                error: null, notReady: false };
 
-/* formatting — one definition each, used everywhere */
-const inr=v=>v==null?"—":"₹"+Number(v).toLocaleString("en-IN",
-  {minimumFractionDigits:2,maximumFractionDigits:2});
-const pct=(v,d=1)=>v==null?"—":(v>0?"+":"")+Number(v).toFixed(d)+"%";
-const pctPlain=(v,d=0)=>v==null?"—":Number(v).toFixed(d)+"%";
-const clock=iso=>{try{return new Date(iso).toLocaleTimeString("en-IN",
-  {hour:"numeric",minute:"2-digit",hour12:true})}catch(e){return"—"}};
-const ago=iso=>{try{const m=Math.round((Date.now()-new Date(iso))/60000);
-  if(m<1)return"just now";if(m<60)return m+" min ago";
-  const h=Math.round(m/60);return h<24?h+" hr ago":Math.round(h/24)+" d ago"}catch(e){return""}};
-
-let poll=null, DATA=null, sortKey="model_rank", sortAsc=true, openRow=null;
-/* BUSY guards against a race: boot() is async, so a user who clicks Run before
-   /ready resolves would otherwise have the progress view overwritten by the
-   idle screen when the readiness fetch lands. */
-let BUSY=false;
-
-/* ---------- readiness ---------------------------------------------------- */
-async function boot(){
-  let d;
-  try{ d=await (await fetch("/ready")).json(); }
-  catch(e){ return fail("Cannot reach the analysis service.",
-    "The backend is not responding. Check that the server process is running."); }
-  const c=d.checks||{};
-  $("#status").innerHTML =
-    `<span class="tag ${d.ready?"tag-live":"tag-none"}"><i class="dot"></i>${d.ready?"Ready":"Not ready"}</span>`+
-    `<span class="sep hide-sm"></span>`+
-    `<span class="hide-sm num">${esc(c.latest_session||"—")}</span>`+
-    `<span class="sep hide-sm"></span>`+
-    `<span class="hide-sm num">${esc(c.price_sessions??"—")} sessions</span>`;
-  $("#run").disabled=!d.ready;
-  $("#build").classList.toggle("hide",!!d.ready);
-  document.body.classList.toggle("needs-build",!d.ready);
-  if(BUSY) return;
-  if(!d.ready) notReady(c);
-  else if(!DATA) idle(c);
+/* ---------------------------------------------------------------- theme */
+const THEME_KEY = "signal.theme";
+function applyTheme(t) {
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+  try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
 }
-
-function notReady(c){
-  $("#app").innerHTML="";
-  const card=el("div","card state");
-  card.innerHTML=`<div class="glyph">◴</div>
-    <h2>Market data store is empty</h2>
-    <p>${esc(c.price_data||"")}</p>
-    <p style="margin-top:12px">${esc(c.remedy||"")}</p>`;
-  $("#app").append(card);
-}
-
-function idle(c){
-  $("#app").innerHTML="";
-  const card=el("div","card state");
-  card.innerHTML=`<div class="glyph">↳</div>
-    <h2>Ready to analyse</h2>
-    <p>${esc(c.price_sessions??0)} sessions held · ${esc(c.analysable_dates??0)} analysable dates ·
-       ${esc(c.universe||"")}. Run an analysis to evaluate today's universe.</p>`;
-  $("#app").append(card);
-}
-
-/* ---------- run ---------------------------------------------------------- */
-$("#run").onclick=async()=>{
-  BUSY=true; $("#run").disabled=true; DATA=null; openRow=null; showProgress(0,"Starting");
-  try{
-    const res=await fetch("/analysis/run",{method:"POST"});
-    const j=await res.json();
-    if(!j.id) throw new Error(j.detail||j.message||"The service did not return a run id.");
-    watch(j.id,false);
-  }catch(e){ reset();
-    fail("Could not start the analysis.",e.message||String(e)); }
-};
-$("#build").onclick=async()=>{
-  BUSY=true; $("#build").disabled=true; $("#run").disabled=true;
-  showProgress(0,"Fetching from NSE — keep this tab open");
-  try{
-    const res=await fetch("/admin/bootstrap",{method:"POST"});
-    const j=await res.json();
-    if(!j.id) throw new Error(j.detail||j.message||"The service did not return a job id.");
-    watch(j.id,true);
-  }catch(e){ reset();
-    fail("Could not start the data build.",e.message||String(e)); }
-};
-
-function showProgress(step,label,build){
-  $("#app").innerHTML="";
-  const card=el("div","card card-p");
-  const pctv=Math.round(100*step/STEPS.length);
-  card.innerHTML=`<div class="spread" style="margin-bottom:14px">
-      <h2>${build?"Building data store":"Analysis running"}</h2>
-      <span class="tiny muted num" id="ppct">${build?"":pctv+"%"}</span></div>
-    <div class="prog"><div class="prog-track"><i id="pfill" style="width:${build?12:pctv}%"></i></div></div>
-    <ul class="steps" id="psteps"></ul>`;
-  $("#app").append(card);
-  drawSteps(step,label,build);
-}
-function drawSteps(step,label,build){
-  const ul=$("#psteps"); if(!ul)return;
-  if(build){ ul.innerHTML=`<li class="now"><span class="mk">▸</span>${esc(label)}</li>`; return; }
-  ul.innerHTML=STEPS.map((s,i)=>{
-    const cls=i<step?"done":(i===step?"now":"");
-    const mk=i<step?"✓":(i===step?"▸":"·");
-    return `<li class="${cls}"><span class="mk">${mk}</span>${esc(s)}</li>`;
-  }).join("");
-}
-
-function watch(id,build){
-  clearInterval(poll);
-  poll=setInterval(async()=>{
-    let j;
-    try{ j=await (await fetch(`/analysis/${id}`)).json(); }
-    catch(e){ clearInterval(poll); reset();
-      return fail("Lost contact with the analysis service.",String(e),id); }
-    const st=j.progress.step;
-    const w=build?Math.max(j.progress.pct,12):Math.round(100*st/STEPS.length);
-    const f=$("#pfill"); if(f) f.style.width=w+"%";
-    const lab=$("#ppct"); if(lab&&!build) lab.textContent=w+"%";
-    drawSteps(st,j.progress.label,build);
-    if(j.state==="COMPLETED"){ clearInterval(poll); reset();
-      build?afterBuild(j):load(id); }
-    else if(j.state==="FAILED"||j.state==="CANCELLED"){ clearInterval(poll); reset();
-      fail(j.state==="CANCELLED"?"Analysis cancelled.":"Analysis could not complete.",
-           j.error,id); }
-  },700);
-}
-function reset(){ BUSY=false; $("#run").disabled=false; $("#build").disabled=false; }
-
-function afterBuild(j){
-  const r=j.result||{};
-  $("#app").innerHTML="";
-  const card=el("div","card state");
-  card.innerHTML=`<div class="glyph">${r.complete?"✓":"◴"}</div>
-    <h2>${r.complete?"Data store ready":"Chunk complete"}</h2>
-    <p class="num">${esc(r.sessions_in_store??0)} of ${esc(r.sessions_required??0)} sessions.
-       ${esc(r.next_step||"")}</p>`;
-  if(!r.complete){
-    const b=el("button","btn"); b.textContent="Fetch next chunk"; b.style.marginTop="18px";
-    b.onclick=()=>$("#build").click(); card.append(b);
-  }
-  $("#app").append(card); boot();
-}
-
-function fail(title,detail,id){
-  $("#app").innerHTML="";
-  const card=el("div","card state err");
-  card.innerHTML=`<div class="glyph">!</div><h2>${esc(title)}</h2>
-    <p>${esc(detail||"")}</p>
-    <p style="margin-top:12px"><strong>No signals were issued.</strong>
-       A partial or failed analysis never produces a trade recommendation.</p>
-    ${id?`<p class="mono muted" style="margin-top:12px">Run ${esc(id)}</p>`:""}`;
-  $("#app").append(card);
-}
-
-/* ---------- results ------------------------------------------------------ */
-async function load(id){
-  try{ DATA=await (await fetch(`/analysis/${id}/results`)).json(); }
-  catch(e){ return fail("Results could not be loaded.",String(e),id); }
-  render();
-}
-
-function render(){
-  const d=DATA, r=d.regime, f=d.funnel||{};
-  const buys=d.recommendations||[], watch=d.watchlist||[];
-  const app=$("#app"); app.innerHTML="";
-  const wrap=el("div","stack");
-
-  /* market context */
-  const ctx=el("div","ctx");
-  ctx.innerHTML=`
-    <div><dt>Regime</dt><dd>${esc(r.bucket)}</dd></div>
-    <div><dt>Trend</dt><dd>${esc(r.trend)}</dd></div>
-    <div><dt>Volatility</dt><dd>${esc(r.volatility)}</dd></div>
-    <div><dt>Breadth</dt><dd class="num">${r.breadth_pct==null?"—":pctPlain(r.breadth_pct)}
-       <small>${esc(r.breadth_state||"")}</small></dd></div>
-    <div><dt>New entries</dt><dd>${r.allow_new_entries?"Allowed":"Blocked"}</dd></div>`;
-  wrap.append(ctx);
-
-  /* verdict */
-  const v=el("div","card card-p");
-  const hasSignals=buys.length>0;
-  v.innerHTML=`<div class="verdict">
-      <div class="verdict-main">
-        <div class="eyebrow">Decision · ${esc(d.as_of_date)}</div>
-        <div class="verdict-n" style="margin-top:6px">${
-          hasSignals?`${buys.length} buy candidate${buys.length>1?"s":""}`:"No trade"}</div>
-        <p class="tiny muted" style="margin:8px 0 0;max-width:520px">${
-          hasSignals
-            ? `${watch.length} additional name${watch.length===1?"":"s"} on the watchlist.`
-            : esc((d.no_trade&&d.no_trade.reason)||"")}</p>
-      </div>
-      <div style="flex:1 1 300px;max-width:380px">
-        <div class="eyebrow" style="margin-bottom:8px">Universe funnel</div>
-        <div class="funnel" id="fn"></div>
-      </div>
-    </div>`;
-  wrap.append(v);
-  app.append(wrap);
-
-  /* funnel bars */
-  const top=Math.max(...Object.values(f).map(Number),1);
-  const LBL={universe_considered:"Universe",passed_eligibility:"Eligible",
-    survived_defense:"Survived defense",triggered:"Entry triggered",
-    passed_portfolio_limits:"Final signals"};
-  const fn=$("#fn");
-  Object.entries(LBL).forEach(([k,label],i)=>{
-    if(f[k]===undefined)return;
-    const n=Number(f[k]);
-    const row=el("div","fn");
-    row.innerHTML=`<div class="fn-l">${label}</div>
-      <div class="fn-bar ${n===0?"zero":""}"><i style="width:${Math.max(n/top*100,1.5)}%;
-        animation-delay:${i*45}ms"></i></div>
-      <div class="fn-v num">${n}</div>`;
-    fn.append(row);
+(function () {
+  let t = "auto";
+  try { t = localStorage.getItem(THEME_KEY) || "auto"; } catch (e) {}
+  applyTheme(t);
+  $("#theme").addEventListener("click", () => {
+    let cur = "auto";
+    try { cur = localStorage.getItem(THEME_KEY) || "auto"; } catch (e) {}
+    applyTheme(cur === "auto" ? "light" : cur === "light" ? "dark" : "auto");
   });
+})();
 
-  /* signals */
-  const all=[...buys,...watch];
-  if(all.length) wrap.append(scanner(all));
-  else wrap.append(noTrade(d));
+/* ------------------------------------------------------------- helpers */
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+  (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 
-  /* footnote */
-  const foot=el("div","foot");
-  foot.innerHTML=`<span>Analysed ${clock(d.generated_at)} · ${ago(d.generated_at)}</span>
-    <span>·</span><span class="mono">${esc(d.run_id)}</span>
-    <span>·</span><span class="mono">${esc(d.config_version||"")}</span>`;
-  wrap.append(foot);
-
-  const note=el("details");
-  note.innerHTML=`<summary>Methodology and limitations</summary>
-    <div class="body stack" style="gap:10px">
-      <p class="tiny muted" style="margin:0">${esc(d.probability_note||"")}</p>
-      <p class="tiny muted" style="margin:0">${esc(d.disclaimer||"")}</p>
-      ${(d.data_quality_flags||[]).map(x=>
-        `<p class="tiny muted" style="margin:0">Data quality — ${esc(x)}</p>`).join("")}
-    </div>`;
-  wrap.append(note);
+function money(v) {
+  if (v == null || !isFinite(v)) return "—";
+  return "₹" + Number(v).toLocaleString("en-IN",
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-
-/* ---------- no-trade state ---------------------------------------------- */
-function noTrade(d){
-  const nt=d.no_trade||{}, f=d.funnel||{};
-  const card=el("div","card");
-  card.innerHTML=`<div class="state" style="padding:var(--s6) var(--s5) var(--s5)">
-      <div class="glyph">◇</div>
-      <h2>No qualifying signals today</h2>
-      <p class="num">${f.universe_considered??0} analysed ·
-         ${f.passed_eligibility??0} eligible ·
-         ${f.survived_defense??0} survived defense ·
-         0 met every gate</p>
-      <p style="margin-top:10px">This is expected behaviour. The strategy issues a
-         signal only when every gate is satisfied, and returns no trade on most days
-         by design.</p>
-    </div>`;
-  if((nt.closest||[]).length){
-    const t=el("div","tw"); t.style.marginTop="var(--s2)";
-    t.innerHTML=`<table><thead><tr>
-        <th style="width:34px">#</th><th>Closest candidate</th>
-        <th class="r">Score</th><th>Stopped at</th></tr></thead>
-      <tbody>${nt.closest.map(c=>`<tr>
-        <td class="num muted">${c.rank}</td>
-        <td class="tk">${esc(c.ticker)}</td>
-        <td class="r num">${(c.score*100).toFixed(0)}</td>
-        <td class="muted">${esc(c.gate_failed)}</td></tr>`).join("")}</tbody></table>`;
-    card.append(t);
-  }
-  return card;
+function when(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleString("en-IN",
+    { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
+function say(msg) { $("#live").textContent = msg; }
 
-/* ---------- scanner ------------------------------------------------------ */
-/* Columns show what the decision actually used.
-   `model_rank` is the position the model put the name in, and it is what
-   Stage 6 admits on: inside entry_rank a name is bought, outside exit_rank a
-   held name is dropped. The old `#` was the display position after Stage 5
-   penalties re-sorted the table, so the BUYs appeared scattered through rows
-   ordered by a different quantity -- rank 1 sitting eighth.
-
-   Three columns were removed rather than repaired:
-     R:R      target_1 is entry + t1_r_multiple x risk, so this was 1.50 on
-              every one of 52 cards. A column with one distinct value is not
-              information.
-     Mom      looked up "momentum_12_1"
-     Value    looked up "value"
-              Both are hand-composite factor names the fitted model replaced.
-              Present in 0 of 52 cards, so both rendered as a dash always.
-
-   The model's own attribution is on the expanded card, which names the six
-   factors carrying the movement and their coefficients. */
-const COLS=[
-  {k:"model_rank",t:"Rank", r:true,  v:c=>c.model_rank},
-  {k:"ticker",t:"Stock",    r:false, v:c=>c.ticker},
-  {k:"decision",t:"Signal", r:false, v:c=>c.decision},
-  {k:"score", t:"Score",    r:true,  v:c=>c.score},
-  {k:"last_close",t:"Price",r:true,  v:c=>c.last_close},
-  {k:"stop",  t:"Stop",     r:true,  v:c=>c.stop},
-  {k:"target_1",t:"Target", r:true,  v:c=>c.target_1},
+/* --------------------------------------------------------------- stages
+   Nine real pipeline stages. The engine reports which one it is on, so the
+   indicator reflects backend state rather than a timer pretending to. */
+const STAGES = [
+  "Preparing today's market data",
+  "Validating data quality",
+  "Mapping broader market conditions",
+  "Screening for tradable names",
+  "Ranking the market",
+  "Testing against false signals",
+  "Checking entry criteria",
+  "Building risk and exit plans",
+  "Selecting the highest-conviction names",
 ];
 
-function scanner(rows){
-  const card=el("div","card card-p");
-  /* The BUY / WATCHLIST split confused every reader of the old table, because
-     the rows were numbered by post-penalty position while admission ran on
-     model rank. Both are shown now, and the rule is stated rather than left to
-     be inferred from which rows happen to be green. */
-  const nb=rows.filter(r=>/BUY/i.test(r.decision||"")).length;
-  card.innerHTML=`<div class="spread" style="margin-bottom:var(--s3)">
-      <h2>Signals</h2>
-      <span class="tiny muted">${rows.length} name${rows.length===1?"":"s"} · tap a row for evidence</span>
-    </div>
-    <p class="tiny muted" style="margin:0 0 var(--s4);max-width:78ch;line-height:1.5">
-      <b>${nb} buy</b> · admission runs on <b>Rank</b> and nothing else. A new
-      name enters inside the entry band; a name already held is kept until it
-      leaves a wider exit band. That hysteresis is why a held name at rank 13
-      can be a buy while a new one at rank 9 is not — without it, a name
-      drifting across a single boundary would be bought and sold at every
-      rebalance for no change in view.
-      The rest are <b>watchlist</b>: they cleared scoring and the false-signal
-      defence but sit outside the band, so they are ranked evidence rather than
-      positions. <b>Score</b> is a percentile within today's eligible universe
-      <i>after</i> Stage&nbsp;5 penalties, so a penalised name can show a lower
-      score than one the model ranked below it. Gaps in Rank are names that did
-      not survive the defence.
-    </p>`;
-  const tw=el("div","tw"); const tbl=el("table");
-  tbl.innerHTML=`<thead><tr>${COLS.map(c=>
-    `<th class="s c-${c.k} ${c.r?"r":""}" data-k="${c.k}">${c.t}<span class="car" data-car="${c.k}"></span></th>`
-  ).join("")}</tr></thead><tbody></tbody>`;
-  tw.append(tbl); card.append(tw);
-  paint(tbl,rows);
-  tbl.querySelectorAll("th.s").forEach(th=>{
-    th.onclick=()=>{const k=th.dataset.k;
-      if(sortKey===k) sortAsc=!sortAsc; else{sortKey=k;sortAsc=(k==="model_rank"||k==="ticker")}
-      openRow=null; paint(tbl,rows)};
-  });
-  return card;
-}
+/* ----------------------------------------------------------------- scan */
+async function scan() {
+  if (state.busy) return;
+  state.busy = true; state.error = null;
+  const btn = $("#scan");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Scanning';
+  say("Market scan started.");
+  renderProgress(0);
 
-function paint(tbl,rows){
-  const col=COLS.find(c=>c.k===sortKey)||COLS[0];
-  const sorted=[...rows].sort((a,b)=>{
-    let x=col.v(a),y=col.v(b);
-    if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1;
-    if(typeof x==="string")return sortAsc?x.localeCompare(y):y.localeCompare(x);
-    return sortAsc?x-y:y-x;
-  });
-  tbl.querySelectorAll("[data-car]").forEach(s=>
-    s.textContent = s.dataset.car===sortKey ? (sortAsc?"▲":"▼") : "");
+  try {
+    const start = await fetch("/analysis/run", { method: "POST" });
+    if (!start.ok) throw new Error(await readErr(start));
+    const { id } = await start.json();
 
-  const tb=tbl.querySelector("tbody"); tb.innerHTML="";
-  /* Tier boundary. The alpha is concentrated at the top of the ranking and
-     decays with depth -- measured on the sacred holdout, per 63-session period
-     and net of an 86bp round trip:
-
-         top 10   +5.28%          ranks 11-44   +2.14%
-
-     Ranks 31-44 contributed -0.11% over the selection period. The list is not
-     truncated, because the two periods disagree about the very top: selection
-     put ranks 1-3 at +1.72% (t 0.87) while the holdout put them at +9.15%, and
-     cutting to five names would be fitting to the holdout -- the error that
-     killed the factor trim and both momentum candidates. Tiering shows the
-     concentration without hard-coding a cut the evidence cannot defend. */
-  const TIER1=10;
-  let tiered=false;
-  sorted.forEach(c=>{
-    const buy=/BUY/i.test(c.decision);
-    if(sortKey==="model_rank"&&sortAsc&&!tiered&&c.model_rank>TIER1){
-      tiered=true;
-      const sep=el("tr","tier-sep");
-      sep.innerHTML=`<td colspan="${COLS.length}">
-        <span class="tier-l">Beyond rank ${TIER1}</span>
-        <span class="tier-n">holdout excess +2.14% net per 63-session period,
-          against +5.28% for the top ${TIER1}. Ranks 31-44 measured -0.11% over
-          the selection period. 14 holdout periods.</span></td>`;
-      tb.appendChild(sep);
+    let last = -1;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 900));
+      const s = await fetch("/analysis/" + id);
+      if (!s.ok) throw new Error(await readErr(s));
+      const job = await s.json();
+      const step = (job.progress && job.progress.step) || 0;
+      if (step !== last) { renderProgress(step); last = step; }
+      if (job.state === "COMPLETED") break;
+      if (job.state === "FAILED") throw new Error(job.error || "The scan did not finish.");
+      if (job.state === "CANCELLED") throw new Error("The scan was cancelled.");
     }
-    const tr=el("tr","main"); tr.tabIndex=0;
-    tr.innerHTML=`
-      <td class="c-model_rank r num muted">${c.model_rank}</td>
-      <td class="c-ticker"><div class="row" style="gap:7px"><span class="chev">›</span>
-        <div style="min-width:0"><div class="tk">${esc(c.ticker)}</div>
-        <div class="co">${esc(c.company_name||c.sector||"")}</div></div></div></td>
-      <td class="c-decision"><span class="tag ${buy?"tag-buy":"tag-watch"}">${esc(c.decision)}</span></td>
-      <td class="c-score r"><div class="meter">
-        <span class="meter-t"><i style="width:${Math.round(c.score*100)}%"></i></span>
-        <b class="num">${Math.round(c.score*100)}</b></div></td>
-      <td class="c-last_close r num">${inr(c.last_close)}</td>
-      <td class="c-stop r num muted">${inr(c.stop)}</td>
-      <td class="c-target_1 r num">${inr(c.target_1)}</td>`;
-    /* The evidence panel is built on first expand, not upfront. Building all
-       of them eagerly cost ~75 DOM nodes per row -- 15k nodes for a 200-name
-       list -- for markup the user may never open. */
-    const det=el("tr","detail hide");
-    det.innerHTML=`<td colspan="${COLS.length}"></td>`;
-    const toggle=()=>{
-      const isOpen=!det.classList.contains("hide");
-      tb.querySelectorAll("tr.detail").forEach(x=>x.classList.add("hide"));
-      tb.querySelectorAll("tr.main").forEach(x=>x.classList.remove("open"));
-      if(!isOpen){
-        if(!det.dataset.built){ det.firstChild.innerHTML=detail(c); det.dataset.built="1"; }
-        det.classList.remove("hide"); tr.classList.add("open");
-      }
-    };
-    tr.onclick=toggle;
-    tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}};
-    tb.append(tr,det);
+
+    const r = await fetch("/analysis/" + id + "/view");
+    if (!r.ok) throw new Error(await readErr(r));
+    state.view = await r.json();
+    state.run = id;
+    say("Scan complete. " + state.view.summary.buy + " qualifying, "
+        + state.view.summary.watch + " monitored.");
+  } catch (e) {
+    state.error = e.message || String(e);
+    say("The scan could not be completed.");
+  } finally {
+    state.busy = false;
+    btn.disabled = false;
+    btn.textContent = "Scan Market";
+    render();
+  }
+}
+
+async function bootstrap() {
+  const btn = $("#boot");
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Fetching';
+  const note = $("#boot-note");
+  note.textContent = "Fetching from NSE. This takes a few minutes per block.";
+  try {
+    const r = await fetch("/admin/bootstrap", { method: "POST" });
+    if (!r.ok) throw new Error(await readErr(r));
+    const { id } = await r.json();
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 1500));
+      const s = await fetch("/analysis/" + id);
+      if (!s.ok) throw new Error(await readErr(s));
+      const job = await s.json();
+      if (job.progress && job.progress.label) note.textContent = job.progress.label;
+      if (job.state === "COMPLETED") break;
+      if (job.state === "FAILED") throw new Error(job.error || "The build did not finish.");
+    }
+    await checkReady();
+    render();
+  } catch (e) {
+    note.textContent = e.message || String(e);
+    btn.disabled = false;
+    btn.textContent = "Build data store";
+  }
+}
+
+async function checkReady() {
+  try {
+    const r = await fetch("/ready");
+    if (!r.ok) { state.notReady = true; return; }
+    const j = await r.json();
+    state.notReady = !j.ready;
+  } catch (e) { state.notReady = false; }
+}
+
+async function readErr(res) {
+  try {
+    const j = await res.json();
+    const d = j.detail;
+    if (typeof d === "string") return d;
+    if (d && d.message) return d.message;
+  } catch (e) {}
+  return "The service returned an error (" + res.status + ").";
+}
+
+function renderProgress(step) {
+  const total = STAGES.length;
+  const segs = STAGES.map((_, i) =>
+    '<div class="seg ' + (i < step ? "done" : i === step ? "now" : "") + '"></div>').join("");
+  $("#view").innerHTML =
+    '<div class="progress">' +
+      '<h3>Scanning the market</h3>' +
+      '<div class="stage">' + esc(STAGES[Math.min(step, total - 1)]) + '</div>' +
+      '<div class="track">' + segs + '</div>' +
+      '<div class="steps">Step ' + Math.min(step + 1, total) + ' of ' + total + '</div>' +
+    '</div>';
+}
+
+/* ---------------------------------------------------------------- render */
+function render() {
+  $$(".nav button").forEach((b) => {
+    if (b.dataset.view === state.tab) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
   });
+
+  if (state.error) return renderError();
+  if (state.busy) return;
+
+  if (state.notReady) {
+    $("#view").innerHTML =
+      '<div class="box empty"><h3>Market data store is empty</h3>' +
+      '<p>There is not enough price history stored to rank anything yet. ' +
+      'Building it fetches from NSE in chunks and can be resumed — each press ' +
+      'adds another block of sessions.</p>' +
+      '<button class="btn" id="boot">Build data store</button>' +
+      '<p id="boot-note" style="margin-top:var(--sp-4);font-size:13px"></p></div>';
+    $("#boot").addEventListener("click", bootstrap);
+    return;
+  }
+
+  const v = state.view;
+  if (!v) {
+    $("#view").innerHTML =
+      '<div class="box empty"><h3>No scan has run yet</h3>' +
+      '<p>The engine ranks the market against a model fitted on point-in-time ' +
+      'data, then narrows to the setups that clear every risk check.</p>' +
+      '<button class="btn" onclick="document.getElementById(\'scan\').click()">Scan Market</button></div>';
+    return;
+  }
+
+  renderChrome(v);
+  const body =
+    state.tab === "overview"  ? viewOverview(v)  :
+    state.tab === "monitored" ? viewMonitored(v) :
+    state.tab === "research"  ? viewResearch(v)  :
+    state.tab === "history"   ? viewHistory(v)   :
+                                viewMethod(v);
+  $("#view").innerHTML = body;
+  wire();
 }
 
-function detail(c){
-  const lv=`<div class="levels">
-    <div><dt>Last close</dt><dd class="num">${inr(c.last_close)}</dd></div>
-    <div><dt>Entry</dt><dd class="num">${c.entry_zone
-      ?inr(c.entry_zone[0])+" – "+inr(c.entry_zone[1]):"No trigger"}</dd></div>
-    <div><dt>Stop</dt><dd class="num neg">${inr(c.stop)}</dd></div>
-    <div><dt>Target 1</dt><dd class="num pos">${inr(c.target_1)}</dd></div>
-    <div><dt>Target 2</dt><dd class="num pos">${inr(c.target_2)}</dd></div>
-    <div><dt>Invalidation</dt><dd class="num">${inr(c.invalidation)}</dd></div>
-    <div><dt>Risk</dt><dd>${esc(c.risk_category||"—")}</dd></div>
-    <div><dt>Hold</dt><dd style="font-size:12px">${esc(c.holding_period||"—")}</dd></div>
-  </div>`;
-  const list=(cls,items)=>items&&items.length
-    ? `<ul class="${cls}">${items.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`
-    : `<p class="tiny muted" style="margin:0">None</p>`;
-  return `<div class="det">
-    <section style="grid-column:1/-1">${lv}
-      ${c.cost_note?`<p class="tiny muted" style="margin:10px 0 0">${esc(c.cost_note)}</p>`:""}
-    </section>
-    <section><h3>Why this signal exists</h3>${list("ev-for",c.why)}</section>
-    <section><h3>Why it may be wrong</h3>${list("ev-against",
-      (c.against&&c.against.length)?c.against
-        :["No disconfirming evidence among the checks that could run. That is not the same as no risk."])}</section>
-    <section><h3>Not testable with current data</h3>${list("ev-unknown",c.not_testable)}</section>
-    <section><h3>Exit hierarchy</h3>${list("ev-exit",(c.exits||[]).slice(0,4))}</section>
-  </div>`;
+function renderChrome(v) {
+  const d = v.data || {};
+  const fresh = d.complete !== false;
+  $("#mkt-status").innerHTML =
+    '<span class="dot ' + (fresh ? "live" : "stale") + '"></span>' +
+    (v.as_of ? esc(v.as_of) : "—");
+  $("#mkt-fresh").textContent = "Analysed " + when(v.generated_at);
+
+  const titles = {
+    overview: ["Today's opportunities", "The names the engine ranks highest today, and the case for each."],
+    monitored: ["Watchlist", "Ranked names that did not qualify, and what each would need to."],
+    research: ["Research", "How the market narrowed from the full universe to this shortlist."],
+    history: ["History", "Previous scans and how the shortlist has changed."],
+    method: ["Methodology", "What the engine measures, how it ranks, and where it stops."],
+  };
+  const [t, s] = titles[state.tab] || titles.overview;
+  $("#page-title").textContent = t;
+  $("#page-sub").textContent = s;
+
+  $("#foot").innerHTML =
+    (v.disclaimer ? esc(v.disclaimer) + "<br><br>" : "") +
+    (v.confidence_note ? esc(v.confidence_note) : "");
 }
 
-boot();
+function renderError() {
+  $("#view").innerHTML =
+    '<div class="box err"><h3>This scan could not be completed</h3>' +
+    '<p>' + esc(state.error) + '</p>' +
+    '<button class="btn sm" onclick="document.getElementById(\'scan\').click()">Try again</button></div>';
+}
+
+/* -------------------------------------------------------------- overview */
+function viewOverview(v) {
+  const s = v.summary || {};
+  if (s.withheld) {
+    return marketBlock(v) +
+      '<div class="box empty" style="margin-top:var(--sp-5)">' +
+      '<h3>No recommendation was produced</h3><p>' + esc(s.withheld) + '</p></div>';
+  }
+  if (!v.picks || !v.picks.length) {
+    return marketBlock(v) +
+      '<div class="box empty" style="margin-top:var(--sp-5)">' +
+      '<h3>Nothing met the bar today</h3>' +
+      '<p>No name qualified, and none came close enough to be worth monitoring. ' +
+      'That is a result, not a failure to find one.</p></div>';
+  }
+
+  const counts = [];
+  if (s.buy)   counts.push('<span class="pill buy">' + s.buy + ' Buy</span>');
+  if (s.watch) counts.push('<span class="pill watch">' + s.watch + ' Watch</span>');
+
+  const [first, ...rest] = v.picks;
+  return marketBlock(v) +
+    '<div class="slate-head">' +
+      '<h2>Today\'s shortlist</h2>' +
+      '<div class="count">' + counts.join(" ") + '</div>' +
+      '<div class="note">' + esc(s.note || "") + '</div>' +
+    '</div>' +
+    '<div class="cards">' +
+      cardHTML(first, true) +
+      rest.map((p) => cardHTML(p, false)).join("") +
+    '</div>';
+}
+
+function marketBlock(v) {
+  const m = v.market || {};
+  const rows = (m.readings || []).filter((r) => r.value).map((r) =>
+    '<div class="reading"><span class="k">' + esc(r.label) + '</span>' +
+    '<span class="v">' + esc(r.value) +
+    (r.detail ? '<small>' + esc(r.detail) + '</small>' : "") + '</span></div>').join("");
+  const warn = m.allows_new_positions === false
+    ? '<span class="pill watch">New positions paused</span>' : "";
+  return '<div class="market">' +
+    '<div><h2>Market environment</h2>' +
+      '<div class="headline">' + esc(m.headline || "—") + " " + warn + '</div>' +
+      '<p>' + esc(m.summary || "") + '</p></div>' +
+    '<div class="readings">' + rows + '</div></div>';
+}
+
+function cardHTML(p, featured) {
+  const isBuy = p.status === "BUY";
+  const chips = (p.highlights || []).map((h) => '<span class="chip">' + esc(h) + '</span>').join("");
+  const c = p.confirmation || {};
+  return '<button class="card ' + (featured ? "featured " : "") +
+    (isBuy ? "is-buy" : "is-watch") + '" data-pos="' + p.position + '">' +
+    '<div class="card-top">' +
+      '<div class="card-id">' +
+        '<div class="rank">' + (featured ? "Highest ranked" : "Rank " + (p.rank ?? "—")) + '</div>' +
+        '<div class="name">' + esc(p.company) + '</div>' +
+        '<div class="tick">' + esc(p.ticker) + (p.sector ? " · " + esc(p.sector) : "") + '</div>' +
+      '</div>' +
+      '<div class="card-price">' +
+        '<div class="p num">' + money(p.price) + '</div>' +
+        '<div class="s">' + esc(p.strength || "") + '</div>' +
+      '</div>' +
+      '<div class="card-status">' +
+        '<span class="pill ' + (isBuy ? "buy" : "watch") + '">' + (isBuy ? "Buy" : "Watch") + '</span>' +
+      '</div>' +
+    '</div>' +
+    (chips ? '<div class="chips">' + chips + '</div>' : "") +
+    (p.thesis ? '<div class="thesis">' + esc(p.thesis) + '</div>' : "") +
+    '<div class="card-foot">' +
+      '<span class="confirm">' + (c.judged ? c.agree + " of " + c.judged + " areas support this" : "") + '</span>' +
+      '<span class="more">View analysis →</span>' +
+    '</div></button>';
+}
+
+/* ------------------------------------------------------------- monitored */
+function viewMonitored(v) {
+  const rows = v.monitored || [];
+  if (!rows.length) {
+    return '<div class="box empty"><h3>Nothing is being monitored</h3>' +
+      '<p>No name scored close enough to the entry band to be worth tracking.</p></div>';
+  }
+  return '<div class="panel-section" style="margin-top:0">' +
+    '<p class="lead">Every name the engine ranked but did not admit, in model order. ' +
+    'The first few of these appear on the Overview when there are fewer than five ' +
+    'qualifying setups.</p>' +
+    '<div class="tablewrap"><table><thead><tr>' +
+    '<th>Rank</th><th>Company</th><th>Ticker</th><th class="r">Price</th>' +
+    '<th>Strength</th><th>Support</th></tr></thead><tbody>' +
+    rows.map((p) => {
+      const c = p.confirmation || {};
+      return '<tr data-tick="' + esc(p.ticker) + '">' +
+        '<td class="num">' + (p.rank ?? "—") + '</td>' +
+        '<td>' + esc(p.company) + '</td>' +
+        '<td style="color:var(--ink-3)">' + esc(p.ticker) + '</td>' +
+        '<td class="r num">' + money(p.price) + '</td>' +
+        '<td>' + esc(p.strength || "—") + '</td>' +
+        '<td class="num">' + (c.judged ? c.agree + "/" + c.judged : "—") + '</td></tr>';
+    }).join("") +
+    '</tbody></table></div></div>';
+}
+
+/* -------------------------------------------------------------- research */
+function viewResearch(v) {
+  const steps = (v.journey || []).map((s, i, arr) =>
+    '<div class="jstep' + (i === arr.length - 1 ? " final" : "") + '">' +
+      '<div><div class="l">' + esc(s.label) + '</div>' +
+      '<div class="d">' + esc(s.detail || "") + '</div></div>' +
+      '<div><div class="n num">' + s.count + '</div>' +
+      (s.removed ? '<span class="rm num">−' + s.removed + '</span>' : "") + '</div>' +
+    '</div>').join("");
+  const d = v.data || {};
+  return '<div class="panel-section" style="margin-top:0">' +
+    '<h2>How the shortlist was reached</h2>' +
+    '<p class="lead">Each step removes names for a stated reason. The counts are ' +
+    'the engine\'s own, taken from the run that produced this screen.</p>' +
+    '<div class="box"><div class="journey">' + steps + '</div></div></div>' +
+    '<div class="panel-section"><h2>This run</h2>' +
+    '<div class="box"><div class="readings">' +
+      row("Market date", d.as_of) + row("Completed", when(d.generated_at)) +
+      row("Engine version", d.engine_version) + row("Configuration", d.config_version) +
+      row("Data quality", d.complete ? "No issues reported"
+          : (d.flags || []).length + " issue(s) flagged") +
+    '</div></div></div>';
+}
+
+function row(k, val) {
+  return '<div class="reading"><span class="k">' + esc(k) + '</span>' +
+         '<span class="v">' + esc(val == null ? "—" : val) + '</span></div>';
+}
+
+/* --------------------------------------------------------------- history */
+function viewHistory(v) {
+  return '<div class="box empty"><h3>History is not kept yet</h3>' +
+    '<p>Comparing today\'s shortlist with yesterday\'s needs completed scans to be ' +
+    'stored across restarts. Runs currently live only for the life of the server ' +
+    'process, so no honest comparison can be drawn.</p></div>';
+}
+
+/* ----------------------------------------------------------- methodology */
+function viewMethod(v) {
+  const S = (h, b) => '<div class="panel-section"><h2>' + h + '</h2>' +
+                      '<div class="box"><div class="prose muted">' + b + '</div></div></div>';
+  return '<div style="margin-top:0">' +
+    S("What the engine measures",
+      "Every listed name is ranked against every other name on the same day across " +
+      "momentum, position within the 52-week range, participation (including the " +
+      "share of trading taken to delivery, which is specific to Indian markets), " +
+      "valuation, and risk. A reading is always relative to the market that day, " +
+      "never to a fixed threshold.") +
+    S("How a name qualifies",
+      "The model produces a ranking. A name is opened only if it sits inside the " +
+      "top band and clears a set of checks for gaps, news spikes, overextension, " +
+      "corporate actions and earnings distortion. Admission uses a band with " +
+      "hysteresis: a name enters at a tighter rank than the one at which it is " +
+      "dropped, so a position is not opened and closed on noise.") +
+    S("Buy against Watch",
+      "Buy means the name is inside the entry band and cleared every check that " +
+      "could run. Watch means it was ranked and tracked but not admitted. Watch is " +
+      "not a failure grade — it is the set of names closest to qualifying, and each " +
+      "one carries what would have to change.") +
+    S("What the score is not",
+      "The ranking is a position within the day's eligible universe. It is not a " +
+      "probability, and no out-of-sample calibration exists that would let it be " +
+      "read as one. Nothing on this screen should be interpreted as a likelihood " +
+      "of profit.") +
+    S("Where it stops",
+      "This engine issues opinions. It does not place orders, hold positions, or " +
+      "connect to a broker. Position sizes, entry zones and exit levels are what " +
+      "the strategy defines, not instructions.") + '</div>';
+}
+
+/* ----------------------------------------------------------------- panel */
+let lastFocus = null;
+function openPanel(pick) {
+  lastFocus = document.activeElement;
+  $("#panel-rank").textContent =
+    (pick.status === "BUY" ? "Qualifying setup" : "Monitored") +
+    (pick.rank ? " · Rank " + pick.rank : "");
+  $("#panel-title").textContent = pick.company;
+  $("#panel-tick").textContent = pick.ticker + (pick.sector ? " · " + pick.sector : "");
+  $("#panel-body").innerHTML = panelHTML(pick);
+  $("#panel").classList.add("open");
+  $("#scrim").classList.add("open");
+  $("#panel").focus();
+  document.body.style.overflow = "hidden";
+}
+function closePanel() {
+  $("#panel").classList.remove("open");
+  $("#scrim").classList.remove("open");
+  document.body.style.overflow = "";
+  if (lastFocus) lastFocus.focus();
+}
+
+function panelHTML(p) {
+  const isBuy = p.status === "BUY";
+  const ev = (p.evidence || []).map((c) => {
+    const cls = ["Strong","Supportive","Contained"].includes(c.verdict) ? "v-pos"
+              : ["Weak","Soft","Elevated"].includes(c.verdict) ? "v-neg" : "v-neu";
+    // The whole reading on one line. Splitting it into label and value meant
+    // stripping the label back out of a sentence that already contained it,
+    // and the category detail then repeated the first row verbatim.
+    const sigs = (c.signals || []).map((s) =>
+      '<div class="sig"><span class="' +
+      (s.oriented_sd > .35 ? "v-pos" : s.oriented_sd < -.35 ? "v-neg" : "v-neu") +
+      '">' + esc(s.reading) + '</span></div>').join("");
+    return '<details class="ev-row"><summary class="ev-sum">' +
+      '<span class="car">▶</span><span class="lab">' + esc(c.label) + '</span>' +
+      '<span class="vd ' + cls + '">' + esc(c.verdict) + '</span></summary>' +
+      '<div class="ev-detail">' +
+      (sigs ? sigs : '<div class="d">' + esc(c.detail) + '</div>') +
+      '</div></details>';
+  }).join("");
+
+  const L = p.levels || {};
+  const lv = [
+    L.entry ? ["Entry zone", money(L.entry[0]) + " – " + money(L.entry[1])] : null,
+    L.stop != null ? ["Initial stop", money(L.stop)] : null,
+    L.invalidation != null ? ["Invalidation", money(L.invalidation)] : null,
+    L.target_1 != null ? ["First target", money(L.target_1)] : null,
+  ].filter(Boolean).map(([k, val]) =>
+    '<div class="level"><div class="k">' + k + '</div><div class="v num">' + val + '</div></div>').join("");
+
+  const t = p.technical || {};
+  return [
+    '<div class="section"><h3>Why this name</h3>' +
+      '<p class="prose">' + esc(p.thesis || "") + '</p></div>',
+    p.what_would_change
+      ? '<div class="section"><h3>' + (isBuy ? "What would close this" : "What would move this to Buy") +
+        '</h3><div class="callout' + (isBuy ? "" : " watch") + '">' +
+        esc(p.what_would_change) + '</div></div>' : "",
+    ev ? '<div class="section"><h3>Evidence</h3><div class="ev">' + ev + '</div></div>' : "",
+    (p.technical && p.technical.not_testable && p.technical.not_testable.length)
+      ? '<div class="section"><h3>Checks that could not run</h3>' +
+        '<div class="callout watch">' +
+        esc(p.technical.not_testable.join("; ")) +
+        ' — these did not pass. The data needed to test them is not available, ' +
+        'so this name rests on partial evidence.</div></div>' : "",
+    lv ? '<div class="section"><h3>Levels the strategy defines</h3>' +
+         '<div class="levels">' + lv + '</div>' +
+         (p.holding_period ? '<p class="prose muted" style="margin-top:var(--sp-3);font-size:13px">' +
+           'Expected holding period ' + esc(p.holding_period) + '.' +
+           (p.cost_note ? " " + esc(p.cost_note) : "") + '</p>' : "") +
+         '</div>' : "",
+    '<div class="section"><h3>Advanced</h3><details class="adv"><summary>' +
+      'Model detail, raw factor contributions and research basis</summary>' +
+      '<div class="adv-body">' +
+        '<div class="readings" style="margin-bottom:var(--sp-3)">' +
+          row("Model rank", t.display_rank != null ? p.rank : p.rank) +
+          row("Universe percentile", t.percentile) +
+          row("Score after risk checks", t.score) +
+        '</div>' +
+        (t.why_raw && t.why_raw.length
+          ? '<div class="raw">' + esc(t.why_raw.join("\n")) + '</div>' : "") +
+        (t.against_raw && t.against_raw.length
+          ? '<div class="raw" style="margin-top:8px">' + esc(t.against_raw.join("\n")) + '</div>' : "") +
+        (t.warning ? '<p class="prose muted" style="margin-top:var(--sp-3);font-size:12.5px">' +
+          esc(t.warning) + '</p>' : "") +
+      '</div></details></div>',
+  ].join("");
+}
+
+/* ------------------------------------------------------------------ wire */
+function wire() {
+  $$(".card").forEach((el) => el.addEventListener("click", () => {
+    const p = (state.view.picks || []).find((x) => String(x.position) === el.dataset.pos);
+    if (p) openPanel(p);
+  }));
+  $$("tbody tr[data-tick]").forEach((el) => el.addEventListener("click", () => {
+    const p = (state.view.monitored || []).find((x) => x.ticker === el.dataset.tick);
+    if (p) openPanel(p);
+  }));
+}
+
+$("#scan").addEventListener("click", scan);
+$("#panel-close").addEventListener("click", closePanel);
+$("#scrim").addEventListener("click", closePanel);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("#panel").classList.contains("open")) closePanel();
+});
+$$(".nav button").forEach((b) => b.addEventListener("click", () => {
+  state.tab = b.dataset.view; render();
+}));
+
+/* Recover the most recent completed scan so a reload does not look like a
+   product that forgets. */
+(async function boot() {
+  render();
+  try {
+    await checkReady();
+    if (state.notReady) { render(); return; }
+    const r = await fetch("/analysis");
+    if (!r.ok) return;
+    const { jobs } = await r.json();
+    const done = (jobs || []).find((j) => j.kind === "analysis" && j.state === "COMPLETED");
+    if (!done) return;
+    const vr = await fetch("/analysis/" + done.id + "/view");
+    if (!vr.ok) return;
+    state.view = await vr.json();
+    state.run = done.id;
+    render();
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>
