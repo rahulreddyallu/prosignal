@@ -148,9 +148,14 @@ class DataIngestor:
         # treats a busy store.
         with store_lock(self.config.paths.curated, exclusive=True,
                         what=f"ingest {run_id}", blocking=True):
-            return self._run_locked(opts, run_id)
+            return self._run_locked(requested_date, opts, run_id)
 
-    def _run_locked(self, opts: IngestOptions, run_id: str) -> IngestResult:
+    def _run_locked(
+        self,
+        requested_date: Optional[dt.date],
+        opts: IngestOptions,
+        run_id: str,
+    ) -> IngestResult:
         p = self.config.params
         self._feeds = {}
 
@@ -389,7 +394,22 @@ class DataIngestor:
         self, as_of: dt.date, history_sessions: int, opts: IngestOptions
     ) -> List[dt.date]:
         """Which calendar days still need pulling, newest first."""
-        have_index: set = set() if opts.refetch_stored_sessions else set(self.store.known_sessions())
+        # A session counts as fetched only when BOTH its index file and its
+        # equity prices landed. `known_sessions()` returns INDEX dates, and
+        # gating the price fetch on it meant a day whose index file was written
+        # and whose bhavcopy was not got marked done and was never retried --
+        # the store carries exactly that in 2026-02-05, a real Thursday session
+        # with 145 index rows and zero equity prices, which every 63-session
+        # window through 2026-05-12 was computed across.
+        #
+        # Delivery is deliberately NOT part of the test: NSE stopped serving it
+        # for pre-2021 dates, so requiring it would re-probe eight years of
+        # sessions on every ingest and never succeed.
+        have_index: set = (
+            set()
+            if opts.refetch_stored_sessions
+            else set(self.store.known_sessions()) & set(self.store.price_sessions())
+        )
         cap = opts.max_backfill_calendar_days
         if cap is None:
             cap = int(self.config.params.storage.max_backfill_calendar_days)
