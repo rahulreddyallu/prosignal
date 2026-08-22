@@ -1,0 +1,219 @@
+{
+  "captured_at": "2026-08-22T10:37:07",
+  "coefficients": {
+    "amihud_r": 0.007368280687111723,
+    "beta_120_r": 0.002980059775017174,
+    "book_to_price_r": 0.01062766344497591,
+    "deliv_pct_r": 0.023489431875084052,
+    "deliv_trend_r": 0.005962960676378666,
+    "downside_vol_r": -0.0050804486163069625,
+    "earnings_yield_r": 0.008316930424181187,
+    "ebitda_to_ev_r": 0.008980162096935819,
+    "fcf_yield_r": 0.00587818726167481,
+    "max5_21_r": 0.0005018078125408584,
+    "max_dd_120_r": 0.002504405528008581,
+    "mom_6_1_r": 0.013885503570669916,
+    "prox_52w_r": 0.014036503415732529,
+    "resid_mom_r": 0.020364798986808912,
+    "reversal_1m_r": -0.0008754135666816184,
+    "sales_to_price_r": 0.005138383816291475,
+    "turnover_ratio_r": -0.009398955175272974
+  },
+  "config_hash": "9ecf1ced2909fce3",
+  "config_version": "baseline-v1@d5efe64bdb7d94f6",
+  "costs": {
+    "example_bps_round_trip": {
+      "Rs1.2L_at_20cr_adtv": 86,
+      "Rs1.2L_at_5cr_adtv": 135
+    },
+    "impact": "square-root in participation",
+    "model": "CostModel, size- and liquidity-dependent"
+  },
+  "data": {
+    "calendar_years": 8.94,
+    "delivery_last": "2026-08-18",
+    "external_ceilings": {
+      "nse_cash_bhavcopy": "HTTP 403 before 2016-01; 2016 onward served",
+      "nse_delivery_sec_bhavdata": "0 rows before ~2021 on re-fetch; store holds from 2019-07",
+      "yfinance_statements": "bulk share-count coverage begins 2023-06; quarterly rows only from 2024-12; no quarterly cash-flow fields"
+    },
+    "first_session": "2017-09-08",
+    "last_session": "2026-08-18",
+    "price_sessions": 2206,
+    "statements_annual_span": [
+      "2021-12-31",
+      "2026-06-30"
+    ],
+    "statements_quarterly_span": [
+      "2024-12-31",
+      "2026-06-30"
+    ],
+    "statements_rows": 22256
+  },
+  "engine_version": "0.1.0",
+  "features": [
+    "mom_6_1_r",
+    "reversal_1m_r",
+    "downside_vol_r",
+    "beta_120_r",
+    "amihud_r",
+    "turnover_ratio_r",
+    "max_dd_120_r",
+    "prox_52w_r",
+    "max5_21_r",
+    "resid_mom_r",
+    "deliv_pct_r",
+    "deliv_trend_r",
+    "earnings_yield_r",
+    "book_to_price_r",
+    "ebitda_to_ev_r",
+    "fcf_yield_r",
+    "sales_to_price_r"
+  ],
+  "git_commit": "17d86d7e322ff1555425577a46ea1e7f8cd3d26e",
+  "git_dirty": true,
+  "independent_observations": {
+    "_note": "independent_obs = live_dates * step / horizon. This is the ceiling on every DSR, PBO and calibration claim, and it differs by family.",
+    "delivery": {
+      "first_live": "2019-07-24",
+      "independent_obs_at_horizon": 26,
+      "live_dates": 80,
+      "n_factors": 2
+    },
+    "liquidity": {
+      "first_live": "2018-09-14",
+      "independent_obs_at_horizon": 30,
+      "live_dates": 90,
+      "n_factors": 2
+    },
+    "momentum": {
+      "first_live": "2018-09-14",
+      "independent_obs_at_horizon": 30,
+      "live_dates": 90,
+      "n_factors": 3
+    },
+    "reversal": {
+      "first_live": "2018-09-14",
+      "independent_obs_at_horizon": 30,
+      "live_dates": 90,
+      "n_factors": 1
+    },
+    "risk": {
+      "first_live": "2018-09-14",
+      "independent_obs_at_horizon": 30,
+      "live_dates": 90,
+      "n_factors": 4
+    },
+    "value": {
+      "first_live": "2023-06-21",
+      "independent_obs_at_horizon": 11,
+      "live_dates": 34,
+      "n_factors": 5
+    }
+  },
+  "known_limits": [
+    "Value factors have 11 independent observations at the 63-session horizon; price factors have 30. The three factor families are not equally evidenced and the model treats them as if they were.",
+    "PBO 44.3% across seven factor sets: selection among factor sets is close to a coin flip.",
+    "Portfolio CPCV shows 18% of splits with negative Sharpe; ranking CPCV showed 0% of paths negative. Ranking quality and book outcome are different questions.",
+    "No probability calibration. The composite is a cross-sectional rank and is reported as one.",
+    "Historical extension is externally capped: NSE 403s before 2016, delivery is not re-servable before ~2021, and vendor statement coverage begins 2023-06 for the bulk of the universe.",
+    "The quarterly-supersession branch of the TTM repair does not fire on this store (0 of 1284 symbols); the coverage gain came from the filter ordering and the staleness gate.",
+    "26 configuration parameters remain declared and reserved rather than implemented."
+  ],
+  "label": "BASELINE_V1",
+  "metrics": {
+    "factor_structure": {
+      "kaiser": 5,
+      "momentum_share_of_ic": 0.41,
+      "named": 17,
+      "participation_ratio": 8.97,
+      "pcs_for_90pct_var": 11
+    },
+    "holdout_ranking": {
+      "dsr_11_trials": 1.0,
+      "ic": 0.0878,
+      "net_per_year": 0.1099,
+      "periods": 15,
+      "t": 3.2,
+      "top_decile_excess_per_period": 0.0345
+    },
+    "pbo_across_7_factor_sets": 0.443,
+    "portfolio_cpcv_selection": {
+      "max_drawdown": {
+        "median": -0.032,
+        "min": -0.12
+      },
+      "return_per_period": {
+        "max": 0.0983,
+        "median": 0.0304,
+        "min": -0.0286
+      },
+      "share_splits_negative": 0.18,
+      "sharpe": {
+        "max": 2.69,
+        "median": 0.84,
+        "min": -1.66,
+        "p25": 0.32,
+        "p75": 1.37
+      },
+      "splits": 45
+    },
+    "ranking_cpcv_selection": {
+      "dsr_24_trials": 1.0,
+      "path_sharpe": {
+        "max": 1.07,
+        "median": 0.5,
+        "min": 0.16,
+        "sd": 0.22,
+        "share_negative": 0.0
+      },
+      "paths": 36,
+      "pooled_excess_per_period": 0.0263,
+      "pooled_ic": 0.062
+    }
+  },
+  "stage_logic": {
+    "stage6_admission": {
+      "entry_rank": 8,
+      "exit_rank": 16,
+      "rule": "rank band with hysteresis",
+      "triggers": "computed and reported, NOT gating"
+    },
+    "stage7_risk": {
+      "invalidation_buffer_atr": 1.5,
+      "invalidation_ma": 50,
+      "max_stop_pct": 15.0,
+      "min_stop_pct": 2.0,
+      "sizing": "min(risk_budget/risk_per_share, capital_slot, adtv_cap)",
+      "stop_atr_multiple": 2.5
+    },
+    "stage8_portfolio": {
+      "exposure_check": "reported, NOT gating",
+      "max_pairwise_corr": 0.7,
+      "max_per_sector": 2,
+      "max_signals_per_run": 8,
+      "min_universe_percentile": 90.0
+    }
+  },
+  "universe": {
+    "max_names": 750,
+    "min_adtv_inr": 50000000.0,
+    "min_price_inr": 20.0,
+    "resolved_size": 750,
+    "source": "liquidity_pit"
+  },
+  "validation": {
+    "cpcv": {
+      "n_groups": 10,
+      "n_test_groups_portfolio": 2,
+      "n_test_groups_ranking": 3
+    },
+    "embargo_sessions": 21,
+    "holdout_reserve_sessions": 378,
+    "holdout_start": "2025-02-03",
+    "horizon_sessions": 63,
+    "panel_step_sessions": 21,
+    "purge_sessions": 63,
+    "ridge_alpha": 20000.0
+  }
+}
