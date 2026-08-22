@@ -48,7 +48,28 @@
       "2024-12-31",
       "2026-06-30"
     ],
-    "statements_rows": 22256
+    "statements_rows": 22256,
+    "upstox_assessment": {
+      "delivery_data": "not offered; deliv_pct remains NSE-only at 26 observations",
+      "fundamentals": {
+        "effect_on_value_block_n": "none -- same LODR-deadline approximation as the current feed",
+        "filing_dates": false,
+        "history": "~4 years (limited)"
+      },
+      "historical_candles": {
+        "archived_masters": false,
+        "earliest": "2000-01",
+        "instrument_master_excludes_delisted": true,
+        "measured_disappearance_rate_per_year": 0.043,
+        "missing_share_at_26_years": 0.678,
+        "verdict": "refused -- the extension would be 68% survivors"
+      },
+      "out_of_scope": "orders, GTT, exit-all-positions and every other trading endpoint",
+      "worth_wiring": [
+        "corporate_actions (ex-dates and record dates, replaces a two-source merge that double-applied ratios)",
+        "share_holdings (would make the Stage 3 pledging gate testable for the first time)"
+      ]
+    }
   },
   "engine_version": "0.1.0",
   "features": [
@@ -123,7 +144,8 @@
     "Stage 6 band widths are not a meaningful lever: nested selection beats the fixed convention by +0.03 Sharpe on a distribution with sd 0.83, and the inner loop's chosen band scatters across the whole grid. Fixed at entry 8 / exit 16 on the index-construction convention rather than searched.",
     "The 63-session horizon sits on a plateau (21-84 sessions, 11.20-11.65% annualised net) rather than at a peak. H=84 buys +0.06 Sharpe and costs 0.41pp of return; the CPCV Sharpe distribution has sd 0.83, so that is noise. Alpha accrues fastest EARLY (5.5bp/session at H=5 vs 2.3bp at H=63) -- early exit forfeits cost amortisation, not alpha.",
     "Unmitigated momentum-crash exposure: worst observed 63-session top-decile excess -13.14% through the 2020 rebound, underperforming in 13 of 15 periods. The risk family AMPLIFIES it (-9.82% with, -5.43% without) because low-beta and low-drawdown tilts point away from the beaten-down names that lead a rebound. The regime gate recovers only +0.62 points. Critically, the standard walk-forward's first test date is 2022-01, so every CPCV, holdout, PBO and portfolio figure in this repository was computed on a window that EXCLUDES this crash.",
-    "Liveness is checked by NAME, so a parameter read in one module and ignored in another reads as live. news_spike.volume_multiple was exactly that -- live in Stage 6, unread inside _news_spike -- which made that check fire 2.7x its own specification and apply a 0.12 penalty on 1.30% of stock-sessions instead of 0.48%. Name-level liveness catches what nothing reads; it does not catch what the wrong module reads."
+    "Liveness is checked by NAME, so a parameter read in one module and ignored in another reads as live. news_spike.volume_multiple was exactly that -- live in Stage 6, unread inside _news_spike -- which made that check fire 2.7x its own specification and apply a 0.12 penalty on 1.30% of stock-sessions instead of 0.48%. Name-level liveness catches what nothing reads; it does not catch what the wrong module reads.",
+    "Upstox does not close n=11: its fundamentals carry no filing dates (period-end labels only) and about four years of history, which is what the current feed already has. Its daily candles reach 2000 but its instrument master excludes delisted stocks with no archived versions, and the measured disappearance rate of 4.3%/yr means a 26-year reconstruction would be missing 68% of the companies that actually traded. The extension was refused."
   ],
   "label": "BASELINE_V1",
   "metrics": {
