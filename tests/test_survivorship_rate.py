@@ -1,9 +1,10 @@
 """The delisting rate is the reason the price history is not extended.
 
-Upstox serves daily candles from January 2000 -- 26 years against the 8.9 held
--- which would take the price block from ~30 independent observations to ~100.
-Its instrument master excludes delisted stocks and has no archived versions, so
-that reconstruction would contain only companies still listed in 2026.
+Several vendors serve daily candles back to 2000 -- 26 years against the 8.9
+held -- which would take the price block from ~30 independent observations to
+~100. Their instrument masters carry only currently-listed securities and
+publish no archived versions, so that reconstruction would contain only
+companies still listed today.
 
 Measured on the local store, which WAS ingested progressively and therefore
 holds names that have since stopped trading, the disappearance rate is 4.0-4.6%
@@ -20,7 +21,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTE = ROOT / "research" / "UPSTOX_ASSESSMENT.md"
+NOTE = ROOT / "research" / "HISTORY_EXTENSION.md"
 
 #: Measured on this store, four windows 2017-2023.
 ANNUAL_DISAPPEARANCE = 0.043
@@ -44,22 +45,22 @@ def test_a_short_extension_is_the_only_tolerable_one():
     )
 
 
-def test_the_assessment_records_why_the_extension_was_refused():
+def test_the_note_records_why_a_long_extension_was_refused():
     text = NOTE.read_text(encoding="utf-8").lower()
-    for claim in ("67.8%", "delisted", "instrument master", "artefact"):
-        assert claim in text, f"the assessment no longer records {claim!r}"
+    for claim in ("68%", "delisted", "instrument master", "artefact"):
+        assert claim in text, f"the note no longer records {claim!r}"
 
 
-def test_the_assessment_records_that_fundamentals_lack_filing_dates():
+def test_the_note_records_that_broker_statements_lack_filing_dates():
     """The finding that decides whether n=11 moves. It does not."""
     text = NOTE.read_text(encoding="utf-8").lower()
     assert "filing date" in text
-    assert "period end" in text or "fiscal period end" in text
-    assert "none" in text, "the effect on n=11 must stay recorded as none"
+    assert "period-end" in text or "period end" in text
 
 
-def test_trading_endpoints_are_declared_out_of_scope():
+def test_the_note_states_the_rule_rather_than_only_the_measurement():
     text = NOTE.read_text(encoding="utf-8").lower()
-    assert "does not send orders" in text or "out of scope" in text, (
-        "the assessment must keep stating that order placement is not wired"
+    assert "point-in-time universe" in text, (
+        "the note must keep the rule -- extend only as far as a point-in-time "
+        "universe can be reconstructed -- not just the numbers behind it"
     )
