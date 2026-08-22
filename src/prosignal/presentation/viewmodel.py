@@ -91,6 +91,9 @@ def build_view(
     flags = list(payload.get("data_quality_flags") or [])
     slate = select_slate(recommendations, watchlist, slots=slots)
 
+    # Only the slate is shipped. The full ranked watchlist had its own screen
+    # and no longer does -- serialising forty-odd extra names that nothing
+    # renders is weight on every response for no reader.
     picks = [
         _build_pick(card, names, sector_map,
                     entry_rank=entry_rank, exit_rank=exit_rank)
@@ -111,11 +114,6 @@ def build_view(
         },
         "picks": picks,
         "journey": _journey(payload.get("funnel") or {}, slate),
-        "monitored": [
-            _build_pick(card, names, sector_map, entry_rank=entry_rank,
-                        exit_rank=exit_rank, brief=True)
-            for card in slate.ranked_watch
-        ],
         "data": _data_state(payload, flags),
         "disclaimer": payload.get("disclaimer"),
         "confidence_note": payload.get("probability_note"),
@@ -129,7 +127,6 @@ def _build_pick(
     *,
     entry_rank: int,
     exit_rank: int,
-    brief: bool = False,
 ) -> Dict[str, Any]:
     status = card.get("status") or (
         BUY if str(card.get("decision", "")).startswith("BUY") else WATCH
@@ -153,9 +150,6 @@ def _build_pick(
         "confirmation": {"agree": agree, "judged": judged},
         "highlights": category_summary(categories)[:4],
     }
-    if brief:
-        return pick
-
     narrative = build_narrative(
         card, categories, status=status,
         entry_rank=entry_rank, exit_rank=exit_rank,
