@@ -117,5 +117,13 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EOF
 chmod 644 /etc/cron.d/prosignal
 
+# --- 8. open the forward test -------------------------------------------
+# Registered here rather than by hand, because this deployment is meant to run
+# without a terminal. The clock starts on the deploy date and the criteria are
+# hashed at the same moment, which is the whole point of a pre-registration.
+sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && set -a && . /etc/prosignal.env && set +a && \
+  ./.venv/bin/python -m prosignal.cli research forward --start" || \
+  echo "forward test already registered, leaving it alone"
+
 echo "=== setup complete $(date -u) ==="
 echo "site: https://${DOMAIN}"
