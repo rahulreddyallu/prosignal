@@ -195,6 +195,7 @@ _AMBIENT = {
     "sort", "slice", "split", "trim", "includes", "scrollIntoView",
     "bind", "call", "apply", "select", "stringify", "parse", "then", "catch",
     "round", "floor", "ceil", "abs", "pow",
+    "requestAnimationFrame", "cancelAnimationFrame", "matchMedia", "now",
     # CSS function names picked up by the same scan
     "var", "rgba", "rect", "minmax", "clamp", "repeat", "translateX",
     "translateY", "scaleX", "rotate", "brightness", "saturate", "blur",
@@ -304,11 +305,17 @@ def test_the_method_note_admits_the_windows_are_not_fitted():
     assert "not values fitted" in _METHOD_NOTE
 
 
-def test_the_not_advice_notice_survives_the_trim():
-    """The probability paragraph went because nothing on screen shows a score
-    or implies a likelihood any more. This one is not about the model."""
+def test_the_footer_carries_ownership_and_stops_there():
+    """The owner asked for the footer to state who built it and nothing else.
+    The descriptor duplicated the masthead, which already reads
+    "ProSignal EQUITY RESEARCH", and the run disclaimer was a third line of
+    small print under a single short copyright."""
     html = _html()
-    assert "v.disclaimer" in html
+    assert "Built &amp; owned by" in html
+    assert "Rahul Reddy Allu" in html
+    assert "&copy; 2026 ProSignal" in html
+    # Removed deliberately, not by accident.
+    assert "Independent quantitative market" not in html
     assert "confidence_note" not in html
 
 
@@ -515,12 +522,16 @@ def test_the_copyright_names_the_product_not_the_person():
     assert "&copy; 2026 ProSignal. All rights reserved." in html
 
 
-def test_the_existing_disclaimer_is_preserved_not_replaced():
-    """It comes from the run, not from markup. Hardcoding it would let the
-    page state something the engine no longer says."""
+def test_the_page_never_hardcodes_a_disclaimer_of_its_own():
+    """The footer no longer renders the run's disclaimer -- the owner removed
+    it for space. What must not happen is the page inventing a replacement in
+    markup, which would let it state something the engine never said. The
+    engine still emits `disclaimer` on the payload; nothing on the page
+    fabricates one."""
     html = _html()
-    assert 'id="foot-note"' in html
-    assert "v.disclaimer" in html
+    assert 'id="foot-note"' not in html
+    assert "Not financial advice" not in html
+    assert "No trades are placed" not in html
 
 
 def test_the_footer_invents_no_legal_or_performance_claims():

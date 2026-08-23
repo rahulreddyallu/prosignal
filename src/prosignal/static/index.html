@@ -531,14 +531,15 @@ td.r { text-align: right; }
              gap: var(--sp-6); flex-wrap: wrap; }
 .foot-id .nm { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em;
                color: var(--ink); }
-.foot-id p { color: var(--ink-3); font-size: 12.5px; margin-top: 3px;
-             max-width: 42ch; line-height: 1.5; }
 .foot-own { text-align: right; }
 .foot-own .by { font-size: 12.5px; color: var(--ink-2); }
 .foot-own .by b { color: var(--ink); font-weight: 550; }
-.foot-own .lnk { margin-top: 5px; display: flex; gap: 8px; justify-content: flex-end;
-                 align-items: baseline; font-size: 12.5px; }
-.foot-own .lnk .dot { color: var(--line-strong); }
+.foot-own .lnk { margin-top: 5px; display: flex; gap: 9px; justify-content: flex-end;
+                 align-items: center; font-size: 12.5px; }
+/* A glyph middot sits on its own baseline and reads low between two links.
+   A drawn circle centres on the flex axis, which is where the eye expects it. */
+.foot-own .lnk .dot { width: 3px; height: 3px; border-radius: 50%; flex: none;
+                      background: var(--line-strong); }
 .foot a { color: var(--ink-2); text-decoration: none;
           border-bottom: 1px solid transparent; transition: color .14s ease,
           border-color .14s ease; }
@@ -546,11 +547,8 @@ td.r { text-align: right; }
 .foot a:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px;
                         border-radius: 2px; }
 
-.foot-legal { display: flex; justify-content: space-between; align-items: baseline;
-              gap: var(--sp-5); flex-wrap: wrap; margin-top: var(--sp-5);
-              padding-top: var(--sp-4); border-top: 1px solid var(--line);
-              color: var(--ink-3); font-size: 11.5px; line-height: 1.55; }
-.foot-legal span:last-child { text-align: right; max-width: 52ch; }
+.foot-legal { margin-top: var(--sp-4); color: var(--ink-3);
+              font-size: 11.5px; line-height: 1.55; }
 
 @media (max-width: 640px) {
   /* Stacked and left-aligned. The ownership line must not wrap mid-name, so
@@ -560,8 +558,7 @@ td.r { text-align: right; }
   .foot-own { text-align: left; }
   .foot-own .by { text-wrap: balance; }
   .foot-own .lnk { justify-content: flex-start; }
-  .foot-legal { flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-4); }
-  .foot-legal span:last-child { text-align: left; }
+  .foot-legal { margin-top: var(--sp-3); }
 }
 @media (max-width: 640px) {
   .rerun { flex-direction: column; gap: var(--sp-2); }
@@ -627,21 +624,19 @@ td.r { text-align: right; }
     <div class="foot-main">
       <div class="foot-id">
         <div class="nm">ProSignal</div>
-        <p>Independent quantitative market research &amp; signal intelligence.</p>
       </div>
       <div class="foot-own">
         <div class="by">Built &amp; owned by <b>Rahul Reddy Allu</b></div>
         <div class="lnk">
           <a href="https://www.linkedin.com/in/rahulreddyallu/" target="_blank"
              rel="noopener noreferrer">LinkedIn<span aria-hidden="true"> &#8599;</span></a>
-          <span class="dot" aria-hidden="true">&middot;</span>
+          <span class="dot" aria-hidden="true"></span>
           <a href="mailto:rahulallu.career@gmail.com">Email<span aria-hidden="true"> &#8599;</span></a>
         </div>
       </div>
     </div>
     <div class="foot-legal">
       <span>&copy; 2026 ProSignal. All rights reserved.</span>
-      <span id="foot-note"></span>
     </div>
   </footer>
 </main>
@@ -1124,8 +1119,14 @@ function render() {
   // and then replace it, which reads as a bug even though the data was on its
   // way the whole time.
   if (state.booting) {
-    $("#view").innerHTML =
-      '<div class="box"><div class="skel" style="height:150px"></div></div>';
+    // Only on a cold start. boot() also re-runs when a job finishes, and by
+    // then the card it is about to re-render is already on screen -- blanking
+    // it to a grey box and putting the same card back is the flash that made
+    // a completed fetch look like a glitch.
+    if (!$("#view").firstChild) {
+      $("#view").innerHTML =
+        '<div class="box"><div class="skel" style="height:150px"></div></div>';
+    }
     return;
   }
 
@@ -1168,28 +1169,65 @@ function hideScan() {
 
 function buildScreen() {
   const c = state.coverage || {};
+  // Already mounted: repaint it. Rewriting innerHTML would throw away the
+  // node the progress bar transitions from, so every update snapped instead
+  // of moving and the whole card visibly reflowed.
+  if ($("#b-now")) { paintBuild(c); syncBuildButton(); return ""; }
   $("#view").innerHTML =
     '<div class="box build">' +
       '<h3>Building the market data</h3>' +
       '<div class="count"><span id="b-now" class="num">' +
         (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
-        '</span><span class="of">of ' +
-        ((c.validated_target || 2200).toLocaleString("en-IN")) + ' sessions</span></div>' +
+        '</span><span class="of" id="b-goal"></span></div>' +
       '<div class="track" id="b-bar"><div class="seg done"></div><div class="seg"></div></div>' +
       '<p class="sub" id="b-sub"></p>' +
       '<button class="btn" id="boot">Build data store</button>' +
     '</div>';
   paintBuild(c);
+  $("#boot").addEventListener("click", bootstrap);
+  syncBuildButton();
+  return "";
+}
+
+/* Re-entering this screen while the server is mid-build must show the build,
+   not an idle button. This is what makes a refresh harmless. */
+function syncBuildButton() {
   const btn = $("#boot");
-  btn.addEventListener("click", bootstrap);
-  // Re-entering this screen while the server is mid-build must show the build,
-  // not an idle button. This is what makes a refresh harmless.
+  if (!btn) return;
   if (state.jobId) {
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Fetching';
+    if (!btn.querySelector(".spinner")) {
+      btn.innerHTML = '<span class="spinner"></span> Fetching';
+    }
     startMonitor();
+  } else if (btn.disabled) {
+    setBuildIdle();
   }
-  return "";
+}
+
+/* A build can land hundreds of sessions between two polls, and snapping the
+   digits from 1,317 to 1,600 reads as a glitch rather than as progress. The
+   number is walked to its new value instead. */
+let countAnim = null;
+function setCount(el, to) {
+  const from = Number(String(el.textContent).replace(/[^0-9]/g, "")) || 0;
+  if (from === to) return;
+  if (countAnim) { cancelAnimationFrame(countAnim); countAnim = null; }
+  const still = window.matchMedia
+    && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (still || Math.abs(to - from) < 2) {
+    el.textContent = to.toLocaleString("en-IN");
+    return;
+  }
+  const dur = 650, t0 = performance.now();
+  const step = (t) => {
+    const p = Math.min(1, (t - t0) / dur);
+    const e = 1 - Math.pow(1 - p, 3);                 // ease-out
+    el.textContent = Math.round(from + (to - from) * e).toLocaleString("en-IN");
+    if (p < 1) { countAnim = requestAnimationFrame(step); }
+    else { countAnim = null; el.textContent = to.toLocaleString("en-IN"); }
+  };
+  countAnim = requestAnimationFrame(step);
 }
 
 /* The single writer. Everything that changes during a build changes here. */
@@ -1198,7 +1236,11 @@ function paintBuild(c) {
   const now = c.price_sessions;
   const goal = c.validated_target || 2200;
   const el = $("#b-now");
-  if (el) el.textContent = now.toLocaleString("en-IN");
+  if (el) setCount(el, now);
+  const goalEl = $("#b-goal");
+  if (goalEl) {
+    goalEl.textContent = "of " + goal.toLocaleString("en-IN") + " sessions";
+  }
 
   const pct = Math.min(100, (now / goal) * 100);
   const bar = document.querySelector("#b-bar .seg.done");
@@ -1256,10 +1298,6 @@ function renderChrome(v) {
     ? "Ranked from the close of " + esc(v.as_of) + "."
     : sub;
 
-  // Preserved from the engine rather than hardcoded: it is the run's own
-  // disclaimer and it belongs on the legal row, not invented in markup.
-  const note = $("#foot-note");
-  if (note) note.textContent = (v && v.disclaimer) || "";
 }
 
 /* Whether the loaded results describe the newest session the store holds.
