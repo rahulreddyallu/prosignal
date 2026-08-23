@@ -402,6 +402,28 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             out.append({**row, "company": company, "outcome": outcome.__dict__})
         return {"names": out, "note": ""}
 
+    _resolved: Dict[str, Any] = {"key": None, "rows": None, "open": None}
+
+    def _resolved_rows():
+        """Resolution is the expensive part and it is the same work for the
+        History page and for any one name, so both share it -- opening a
+        stock after History should not pay for it a second time."""
+        from . import outcomes as _out
+        from . import performance as _perf
+        from .stages._cfg import iv
+        key = _ledger_fingerprint()
+        if _resolved["key"] != key:
+            store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+            led = Path(cfg.paths.ledger)
+            path = led / "outcomes.jsonl"
+            _out.resolve_pending(store, led, path, cfg)
+            rows = _apply_clear_mark(_out.load_outcomes(path))
+            horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
+            op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
+                                      store, max_hold=horizon)
+            _resolved.update(key=key, rows=rows, open=op)
+        return _resolved["rows"], _resolved["open"]
+
     @app.get("/stock/{ticker}/calls")
     def stock_calls(ticker: str) -> Dict[str, Any]:
         """Every call on one name, from the same source the list uses.
@@ -413,14 +435,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         from . import outcomes as _out
         from . import performance as _perf
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
-        led = Path(cfg.paths.ledger)
-        path = led / "outcomes.jsonl"
-        _out.resolve_pending(store, led, path, cfg)
-        rows = _out.load_outcomes(path)
-        from .stages._cfg import iv
-        horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
-        op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
-                                  store, max_hold=horizon)
+        rows, op = _resolved_rows()
         names, _ = _reference_names()
         sym = str(ticker).upper()
         company = names.get(sym) or sym
@@ -685,6 +700,36 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ),
         }
 
+    # Resolution walks the whole ledger and reads prices for every name it
+    # finds, which on a deep ledger is seconds -- paid on every open of the
+    # History page even when nothing had changed since the last one. The
+    # inputs are all files, so their mtimes say when the answer is stale.
+    _perf_cache: Dict[str, Any] = {"key": None, "value": None}
+
+    def _ledger_fingerprint() -> str:
+        led = Path(cfg.paths.ledger)
+        parts = []
+        for f in sorted(led.glob("*.jsonl")) + sorted(led.glob(".history-cleared")):
+            try:
+                st = f.stat()
+                parts.append(f"{f.name}:{st.st_mtime_ns}:{st.st_size}")
+            except OSError:
+                continue
+        return "|".join(parts)
+
+    def _apply_clear_mark(rows):
+        """Drop resolved results issued before the last clear."""
+        try:
+            from .presentation.clearmark import read_mark
+            mark = read_mark(cfg.paths.ledger)
+        except Exception:
+            return rows
+        if not mark:
+            return rows
+        cut = str(mark)[:10]
+        return [r for r in rows
+                if str(r.get("signal_date") or "")[:10] >= cut]
+
     def _git_commit() -> str:
         """Best effort. A period without a commit is still a period; one that
         refused to open because git was unavailable would not be."""
@@ -724,6 +769,9 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
     @app.get("/performance")
     def performance_report(period: str = "all") -> Dict[str, Any]:
+        key = period + "@" + _ledger_fingerprint()
+        if _perf_cache["key"] == key and _perf_cache["value"] is not None:
+            return _perf_cache["value"]
         """Did following the shortlist beat not following it?
 
         Resolution runs on read, like /outcomes, so the scheduled job does not
@@ -733,9 +781,14 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         from . import performance as _perf
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
         led = Path(cfg.paths.ledger)
-        path = led / "outcomes.jsonl"
-        _out.resolve_pending(store, led, path, cfg)
-        rows = _out.load_outcomes(path)
+        rows, _op = _resolved_rows()
+
+        # Clearing history sets a watermark rather than deleting ledger rows,
+        # because fail_run_if_unwritable exists precisely so the deflated-
+        # Sharpe trial count cannot be corrupted by a missing run. The mark
+        # therefore has to be applied HERE, where results are read -- the
+        # outcomes file is derived and rebuilt on every request, so deleting
+        # it would clear the screen only until the next one.
 
         # Scoping defaults to OFF. Keeping evidence from before a config
         # change out of evidence from after it matters for a t-statistic;
@@ -759,19 +812,19 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
         # The last session a signal could have been issued on and still have
         # had its whole window. Past it, only the fast movers have finished.
+        # The store keeps a session calendar. Deriving one by reading every
+        # price row instead cost 3.4s of a 3.8-million-row scan to learn 2,210
+        # dates it already had.
         cutoff = None
         try:
-            import pandas as _pd
-            days = sorted(set(_pd.to_datetime(
-                store.read_prices(columns=["date", "symbol", "close"])["date"]
-            ).dt.normalize()))
+            days = store.price_sessions()
             if len(days) > horizon:
-                cutoff = str(days[-horizon].date())
+                cutoff = str(days[-horizon])[:10]
         except Exception:
             cutoff = None
         rows, partial = _perf.split_cohorts(rows, cutoff)
         bench = str(cfg.params.stage2_regime.benchmark_index.value)
-        return {
+        payload = {
             "headline": _perf.performance(rows, store, horizon=horizon,
                                           benchmark=bench),
             "by_ticker": _perf.by_ticker(rows, store, benchmark=bench),
@@ -782,10 +835,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "measurement": state,
             "scope": ("period" if window is not None else "all"),
             # Kept apart from every figure above: a mark is not an outcome.
-            "open": _perf.open_positions(
-                Ledger(cfg.paths.ledger).read_all(), rows, store,
-                max_hold=horizon),
+            "open": _op,
         }
+        _perf_cache["key"], _perf_cache["value"] = key, payload
+        return payload
 
     # ------------------------------------------------------------------
     # Operator actions

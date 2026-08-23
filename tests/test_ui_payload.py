@@ -627,13 +627,6 @@ def test_the_schedule_switch_does_not_apologise_for_how_it_works():
     assert "Nothing will be recorded" in html
 
 
-def test_the_one_control_anyone_presses_runs_the_job_now():
-    html = _html()
-    assert "/admin/run-now" in html
-    assert "function runNow" in html
-    assert "Fetch today's data and rank" in html
-
-
 def test_the_one_click_erase_is_gone_but_the_endpoint_stays_guarded():
     html = _html()
     assert "/admin/reset/everything" not in html
@@ -646,7 +639,7 @@ def test_rebuilding_and_clearing_are_both_reachable_and_say_what_they_keep():
     html = _html()
     assert "/admin/reset/market-data" in html
     assert 'id="rebuild"' in html and 'id="wipe"' in html
-    assert "keeps the research record" in html
+    assert "Clears the History page" in html
     assert "measurement periods are kept" in html
 
 
@@ -742,3 +735,43 @@ def test_every_control_the_drawer_renders_is_bound_where_it_is_rendered():
     ids |= set(re.findall(r'toggle\("([a-z0-9-]+)"', render))
     unbound = sorted(i for i in ids if '$("#' + i + '")' not in paint)
     assert not unbound, f"rendered by the drawer but never bound: {unbound}"
+
+
+def test_history_does_not_need_a_scan_to_exist():
+    """viewHistory reads resolved outcomes. Testing state.view first sent it
+    down the "no scan yet" branch, so opening History on a fresh deployment
+    rendered Today's empty state under the History tab."""
+    html = _html()
+    start = html.index("function render()")
+    body = html[start:html.index("\nfunction ", start + 20)]
+    assert body.index('state.tab === "history"') < body.index("if (!v)"), \
+        "the history branch must be reached before the no-scan branch"
+
+
+def test_the_empty_today_screen_is_one_card_not_two():
+    """The build tile carries its own explanation and its own button, and the
+    masthead already carries Scan Market."""
+    html = _html()
+    assert "narrows to the setups that clear every risk check" not in html
+    assert "Rank the market to see today" in html
+
+
+def test_the_drawer_has_no_second_way_to_run_a_scan():
+    """Update now started the same job the Scan Market button does."""
+    html = _html()
+    assert "/admin/run-now" not in html
+    assert "Update now" not in html
+
+
+def test_clearing_results_is_applied_where_results_are_read():
+    """The outcomes file is derived and rebuilt on every request, so deleting
+    it clears the screen only until the next one. The watermark has to be
+    applied at read time -- otherwise Clear silently does nothing."""
+    src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
+    # Both readers now share one resolution, and the mark is applied inside
+    # it -- so it cannot be applied to one screen and forgotten on the other.
+    body = src[src.index("def _resolved_rows"):]
+    assert "_apply_clear_mark" in body[:900]
+    for reader in ("def performance_report", "def stock_calls"):
+        r = src[src.index(reader):]
+        assert "_resolved_rows()" in r[:1600], reader

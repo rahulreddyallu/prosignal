@@ -211,3 +211,23 @@ def test_a_name_reports_both_ways_of_totalling_it():
 def test_a_name_with_no_closed_call_says_so_without_inventing_one():
     d = P.calls_for("NOPE", [], None)
     assert d["n_calls"] == 0 and d["taking_every_call"] is None
+
+
+def test_the_benchmark_frame_is_built_once_per_request():
+    """performance(), by_ticker() and equity_curve() each want the same
+    benchmark and each rebuilt it from a 224,000-row table."""
+    calls = {"n": 0}
+
+    class _Counting(_Store):
+        def read_indices(self):
+            calls["n"] += 1
+            return super().read_indices()
+
+    st = _Counting(_indices())
+    P._INDEX_CACHE.clear()
+    rows = [_t(), _t(ticker="BBB", net=-0.02)]
+    P.performance(rows, st, benchmark="Nifty 200")
+    P.by_ticker(rows, st, benchmark="Nifty 200")
+    P.equity_curve(rows, st, benchmark="Nifty 200")
+    assert calls["n"] == 1, f"read the index table {calls['n']} times"
+    P._INDEX_CACHE.clear()

@@ -22,9 +22,11 @@ Three behaviours to know before changing anything here:
 from __future__ import annotations
 
 import datetime as dt
+import json
 import shutil
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
@@ -393,7 +395,16 @@ class DataIngestor:
     def _sessions_to_fetch(
         self, as_of: dt.date, history_sessions: int, opts: IngestOptions
     ) -> List[dt.date]:
-        """Which calendar days still need pulling, newest first."""
+        """Which calendar days still need pulling, newest first.
+
+        Days already probed and found to carry no index file are skipped. NSE
+        does not serve one for every weekday it looks like it should, and a
+        day that comes back empty was previously left unrecorded -- so the
+        next press selected it again, and the one after that. Deep in a
+        backfill the whole chunk could be dead dates, which is why the
+        counter moved by one or two sessions a press near the end while the
+        early ones moved by ninety.
+        """
         # A session counts as fetched only when BOTH its index file and its
         # equity prices landed. `known_sessions()` returns INDEX dates, and
         # gating the price fetch on it meant a day whose index file was written
@@ -410,6 +421,7 @@ class DataIngestor:
             if opts.refetch_stored_sessions
             else set(self.store.known_sessions()) & set(self.store.price_sessions())
         )
+        dead: set = set() if opts.refetch_stored_sessions else self._read_dead_days()
         cap = opts.max_backfill_calendar_days
         if cap is None:
             cap = int(self.config.params.storage.max_backfill_calendar_days)
@@ -436,11 +448,56 @@ class DataIngestor:
             if not is_probably_closed(day):
                 if day in have_index:
                     collected += 1
-                else:
+                elif day not in dead:
                     wanted.append(day)
                     collected += 1  # optimistic; a 404 just costs one probe
+                # A confirmed non-session is neither fetched nor counted: it
+                # is not a session, so counting it would make the walk stop
+                # short of the depth actually asked for.
             day -= dt.timedelta(days=1)
         return wanted
+
+    # ------------------------------------------------------------------
+    # Days NSE serves no index for. Recorded so they are probed once.
+    # ------------------------------------------------------------------
+    _DEAD_FILE = "no-session-days.json"
+
+    def _dead_path(self) -> Path:
+        return Path(self.config.paths.curated) / self._DEAD_FILE
+
+    def _read_dead_days(self) -> set:
+        path = self._dead_path()
+        if not path.exists():
+            return set()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return set()
+        out = set()
+        for d in raw.get("days", []):
+            try:
+                out.add(dt.date.fromisoformat(str(d)))
+            except ValueError:
+                continue
+        return out
+
+    def _record_dead_days(self, days) -> None:
+        """Only for days the archive answered for and had nothing to give.
+
+        A transport failure is not evidence a session does not exist, so
+        those are never written here -- marking one would silently put a real
+        trading day permanently out of reach.
+        """
+        days = {d for d in days if d}
+        if not days:
+            return
+        merged = sorted(self._read_dead_days() | days)
+        path = self._dead_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"days": [d.isoformat() for d in merged]},
+                                  indent=0), encoding="utf-8")
+        tmp.replace(path)
 
     def _backfill_sessions(
         self, as_of: dt.date, history_sessions: int, opts: IngestOptions
@@ -459,6 +516,7 @@ class DataIngestor:
         fetched = 0
         index_errors: List[str] = []
         price_errors: List[str] = []
+        dead_days: List[dt.date] = []
 
         # Sessions are buffered and flushed in batches. Writing one session at a
         # time forces a full read-modify-write of the year's parquet on every
@@ -490,12 +548,19 @@ class DataIngestor:
                     self._assert_disk_headroom(stage="backfill")
 
                 index_frame = None
+                failed = False
                 try:
                     index_frame = self.nse.fetch_index_close_all(day)
                 except ProviderError as exc:
                     index_errors.append(f"{day}: {exc.message}")
+                    failed = True
                 if index_frame is None or index_frame.empty:
-                    continue  # not a session
+                    # Answered, and had nothing: not a trading day. Remember
+                    # it so the next press spends its chunk on days that can
+                    # actually be fetched. A transport failure is NOT this.
+                    if not failed:
+                        dead_days.append(day)
+                    continue
 
                 buffers["indices"].append(index_frame)
                 pending += 1
@@ -526,6 +591,7 @@ class DataIngestor:
             # discarding a batch's worth of downloads.
             flush()
 
+        self._record_dead_days(dead_days)
         self._record_stored_price_feeds(as_of, index_errors + price_errors)
         return fetched
 

@@ -59,9 +59,19 @@ class Trade:
 _NAME_COLUMNS = ("index_name", "symbol", "name")
 
 
+_INDEX_CACHE: Dict[str, Any] = {}
+
+
 def _index_frame(store: Any, symbol: str):
     """The benchmark series, or None. Never a fabricated one, and never a
     frame that still holds more than one index."""
+    # performance(), by_ticker() and equity_curve() each want the same
+    # benchmark and each rebuilt it from a 224,000-row table, three times a
+    # request. Keyed by store identity so a rebuilt store is not served a
+    # stale frame.
+    ck = f"{id(store)}:{symbol}"
+    if ck in _INDEX_CACHE:
+        return _INDEX_CACHE[ck]
     fn = getattr(store, "read_indices", None)
     if fn is None:
         return None
@@ -79,8 +89,11 @@ def _index_frame(store: Any, symbol: str):
     want = symbol.strip().casefold()
     sel = df[df[col].astype(str).str.strip().str.casefold() == want]
     if sel.empty:
+        _INDEX_CACHE[ck] = None
         return None
-    return sel.sort_values("date").reset_index(drop=True)
+    out = sel.sort_values("date").reset_index(drop=True)
+    _INDEX_CACHE[ck] = out
+    return out
 
 
 def _bench_return(idx, entry_date: str, exit_date: str) -> Optional[float]:
@@ -489,7 +502,10 @@ def calls_for(ticker: str, outcomes: Sequence[Dict[str, Any]], store: Any = None
     hold = None
     if calls and store is not None:
         try:
-            f = store.read_prices(symbols=[sym])
+            # Only the close is needed for the hold comparison; reading the
+            # whole row set for one name was most of the panel's latency.
+            f = store.read_prices(symbols=[sym],
+                                  columns=["date", "symbol", "close"])
             if f is not None and not f.empty:
                 f = f.sort_values(DATE)
                 first_entry = float(calls[0]["entry_price"] or 0.0)

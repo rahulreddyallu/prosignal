@@ -136,8 +136,8 @@ button { font: inherit; color: inherit; }
   display: flex; align-items: center; gap: var(--sp-5);
 }
 .brand { display: flex; align-items: baseline; gap: var(--sp-2); font-weight: 600;
-         letter-spacing: -0.02em; font-size: 16px; }
-.brand span { color: var(--ink-3); font-weight: 450; font-size: 12px;
+         letter-spacing: -0.02em; font-size: 19px; }
+.brand span { color: var(--ink-3); font-weight: 450; font-size: 13px;
               letter-spacing: .04em; text-transform: uppercase; }
 .topbar-meta { margin-left: auto; display: flex; align-items: center;
                gap: var(--sp-4); font-size: 12.5px; color: var(--ink-2); }
@@ -580,10 +580,14 @@ td.r { text-align: right; }
 
 /* Small print. Lost once when the settings block was replaced wholesale,
    which left three callers styling themselves as body text. */
-.fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.55;
+.fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.5;
         margin-top: var(--sp-3); }
 
 /* ===== settings drawer ============================================= */
+/* A fixed element translated past the right edge is still reachable by a
+   horizontal scroll on mobile, which is where the grey band beside the page
+   came from -- it was the drawer's own ground, parked off-screen. */
+html, body { overflow-x: hidden; max-width: 100%; }
 .drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.42);
                 opacity: 0; transition: opacity .24s ease; }
 .drawer-scrim.in { opacity: 1; }
@@ -594,19 +598,22 @@ td.r { text-align: right; }
           transform: translateX(100%); transition: transform .26s cubic-bezier(.32,.72,0,1);
           box-shadow: -18px 0 48px rgba(0,0,0,.18); }
 .drawer.in { transform: translateX(0); }
+.drawer[hidden], .drawer-scrim[hidden] { display: none !important; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between;
                padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line);
                flex: none; }
 .drawer-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-.drawer-body { padding: var(--sp-4) var(--sp-5) var(--sp-6);
-               overflow-y: auto; display: grid; gap: var(--sp-5); }
+.drawer-body { padding: var(--sp-3) var(--sp-5) var(--sp-6);
+               overflow-y: auto; display: grid; gap: var(--sp-4); }
 
 .grp { display: grid; }
 .grp.quiet .rl { color: var(--ink-2); font-weight: 450; font-size: 13px; }
 .grp-h { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
          color: var(--ink-3); padding-bottom: 6px; }
 .row { display: flex; align-items: center; justify-content: space-between;
-       gap: var(--sp-4); padding: 11px 0; border-bottom: 1px solid var(--line); }
+       gap: var(--sp-4); height: 58px; padding: 0;
+       border-bottom: 1px solid var(--line); }
+.rs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .grp .row:last-of-type { border-bottom: none; }
 .row-t { min-width: 0; }
 .rl { font-size: 14px; color: var(--ink); font-weight: 500; }
@@ -614,7 +621,10 @@ td.r { text-align: right; }
 .row-c { flex: none; }
 .warn-t { color: var(--neg); }
 .danger-t { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 35%, transparent); }
-.btn.xs { padding: 5px 12px; font-size: 12.5px; border-radius: var(--r-sm); }
+/* One size for every control in the drawer, so a row's weight comes from
+   what it says and not from which button happened to be used. */
+.btn.xs { padding: 6px 0; font-size: 12.5px; font-weight: 550;
+          border-radius: var(--r-sm); width: 86px; text-align: center; }
 
 /* The switch. A track, a knob, and one transition on each. */
 .sw { position: relative; width: 42px; height: 25px; border-radius: 13px; flex: none;
@@ -693,15 +703,17 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 .nr-t { grid-area: t; font-size: 13.5px; font-weight: 550; color: var(--ink);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nr-h { grid-area: h; font-size: 11.5px; color: var(--ink-3); }
-.ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: var(--sp-4); padding-bottom: var(--sp-4);
+.stock { display: block; }
+.stock .fine { margin-top: var(--sp-3); }
+.ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: var(--sp-4); padding-bottom: var(--sp-3);
         border-bottom: 1px solid var(--line); }
 .way .wl { font-size: 11.5px; color: var(--ink-3); }
 .way .wv { font-size: 23px; font-weight: 600; letter-spacing: -0.02em;
            margin-top: 3px; font-variant-numeric: tabular-nums; }
 .way .ws { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
 .callh { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-         color: var(--ink-3); margin: var(--sp-5) 0 var(--sp-3); }
+         color: var(--ink-3); margin: var(--sp-4) 0 0; }
 .calls { display: grid; }
 .call { display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: center; gap: var(--sp-3); padding: 10px 0;
@@ -742,11 +754,11 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 @media (max-width: 560px) {
   .topbar-in { gap: var(--sp-3); }
   .topbar-meta { gap: var(--sp-3); }
-  .brand { font-size: 15px; }
-  .brand span { font-size: 9.5px; letter-spacing: .03em; }
+  .brand { font-size: 18px; }
+  .brand span { font-size: 12px; letter-spacing: .03em; }
 }
 @media (max-width: 400px) {
-  .brand span { font-size: 9px; }
+  .brand span { font-size: 11.5px; }
   #mkt-status { font-size: 11px; }
 }
 @media (max-width: 640px) {
@@ -1319,22 +1331,36 @@ function render() {
   state.shallow = !!(state.coverage && state.coverage.matches_validation === false);
 
   const v = state.view;
+
+  // History reads resolved outcomes, not the current scan. Testing `v` first
+  // sent it down the "no scan yet" branch, so opening History on a fresh
+  // deployment rendered Today's empty state under the History tab.
+  if (state.tab === "history") {
+    hideScan();
+    $("#page-title").textContent = "History";
+    $("#page-sub").textContent =
+      "Every name surfaced so far, and what the market did after.";
+    $("#view").innerHTML = viewHistory();
+    wire();
+    return;
+  }
+
   if (!v) {
-    $("#view").innerHTML =
-      (state.shallow ? buildTile() : "") +
-      '<div class="box empty"><h3>No scan has run yet</h3>' +
-      '<p>The engine ranks the market against a model fitted on point-in-time ' +
-      'data, then narrows to the setups that clear every risk check.</p>' +
-      '<button class="btn" onclick="document.getElementById(\'scan\').click()">Scan Market</button></div>';
+    // The build tile already carries its own explanation and its own button,
+    // and the masthead already carries Scan Market. A second card repeating
+    // both was the clutter.
+    $("#view").innerHTML = state.shallow
+      ? buildTile()
+      : '<div class="box empty"><h3>No scan has run yet</h3>' +
+        '<p>Rank the market to see today\'s shortlist.</p></div>';
     if (state.shallow) paintBuild(state.coverage || {});
     wire();
     return;
   }
 
   renderChrome(v);
-  const tile = (state.shallow && state.tab === "overview") ? buildTile() : "";
-  const body = state.tab === "history" ? viewHistory(v) : viewOverview(v);
-  $("#view").innerHTML = tile + body;
+  const tile = state.shallow ? buildTile() : "";
+  $("#view").innerHTML = tile + viewOverview(v);
   if (tile) paintBuild(state.coverage || {});
   wire();
 }
@@ -1381,8 +1407,6 @@ function renderSettings() {
                        : "Runs every weekday after the close")
                 : "Off \u2014 nothing is being recorded",
              toggle("sw-cron", on, "Daily signals")) +
-      setRow("Update now", "Fetch today's data and rank",
-             '<button class="btn xs" id="run-now">Run</button>') +
     '</div>' +
 
     '<div class="grp">' +
@@ -1391,7 +1415,7 @@ function renderSettings() {
     '</div>' +
 
     '<div class="grp quiet">' +
-      setRow("Recorded results", "Clears this history, keeps the research record",
+      setRow("Recorded results", "Clears the History page",
              '<button class="btn ghost xs" id="wipe">Clear</button>') +
       setRow("Market history",
              (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
@@ -1447,8 +1471,6 @@ function paintSettings() {
   });
   const cr = $("#sw-cron");
   if (cr) cr.addEventListener("click", toggleSchedule);
-  const rn = $("#run-now");
-  if (rn) rn.addEventListener("click", runNow);
   const rb = $("#rebuild");
   if (rb) rb.addEventListener("click", confirmResetMarketData);
   // wire() belongs to render(), and the drawer is painted by this function
@@ -1465,25 +1487,6 @@ async function loadMeasurement() {
   } catch (e) { /* the drawer renders without it */ }
 }
 
-/* What the nightly job does, on demand. The one control anyone presses:
-   opening the app before the job has run and finding yesterday's answer
-   with no way to move it forward is the case it exists for. */
-async function runNow() {
-  const btn = $("#run-now");
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
-  try {
-    const r = await fetch("/admin/run-now", { method: "POST" });
-    if (r.ok) {
-      const j = await r.json();
-      state.jobId = j.id; state.jobKind = "bootstrap";
-      startMonitor();
-      closeSettings();
-      return;
-    }
-    showError(await readErr(r));
-  } catch (e) { showError(e.message || String(e)); }
-  paintSettings();
-}
 
 /* renderChrome owns the scan button and the build screen returns before it,
    so without this the top "Scan Market" stays visible over a store that has
@@ -2033,13 +2036,17 @@ async function openStock(ticker) {
         'return on two slots of capital, not one.</p>'
       : "");
 
+  // One child, so the panel grid's gap applies once instead of between
+  // every block of a short page.
   $("#panel-body").innerHTML =
-    twoWays +
-    '<h4 class="callh">Each call</h4>' +
-    '<div class="calls">' + rows + '</div>' +
-    (d.open ? '<p class="fine">' + d.open +
-      (d.open === 1 ? ' call is' : ' calls are') +
-      ' still open and not counted above.</p>' : "");
+    '<div class="stock">' +
+      twoWays +
+      '<h4 class="callh">Each call</h4>' +
+      '<div class="calls">' + rows + '</div>' +
+      (d.open ? '<p class="fine">' + d.open +
+        (d.open === 1 ? ' call is' : ' calls are') +
+        ' still open and not counted above.</p>' : "") +
+    '</div>';
 }
 
 /* Colour and a word, never colour alone. */

@@ -98,3 +98,20 @@ def test_a_torn_log_line_does_not_break_the_screen(tmp_path: Path):
     with (tmp_path / O.OPS_LOG).open("a", encoding="utf-8") as fh:
         fh.write('{"action": "torn')            # no newline, no closing brace
     assert [r["action"] for r in O.operations_log(tmp_path)] == ["pause"]
+
+
+def test_rebuilding_removes_nested_cache_files_not_just_the_top_level(tmp_path):
+    """"Deleted" has to mean the bytes are gone. The raw HTTP cache nests a
+    few levels deep, and a top-level unlink would leave all of it behind."""
+    p = _Paths(tmp_path)
+    deep = p.cache / "nse" / "bhav" / "2024"
+    deep.mkdir(parents=True)
+    (deep / "payload.zip").write_bytes(b"y" * 8192)
+    (p.curated / "prices" / "year=2024").mkdir(parents=True)
+    (p.curated / "prices" / "year=2024" / "part.parquet").write_bytes(b"x" * 4096)
+
+    O.reset_market_data(p)
+
+    left = [f for d in (p.curated, p.cache, p.raw)
+            for f in d.rglob("*") if f.is_file()]
+    assert left == [], f"still on disk: {left}"

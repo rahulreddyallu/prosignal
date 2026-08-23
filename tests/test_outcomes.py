@@ -123,3 +123,33 @@ def test_a_triggered_exit_resolves_without_waiting_out_the_window():
         "a closed trade must not be withheld until the window elapses"
     # A partially elapsed window still must not become a time exit.
     assert "len(walk) < max_hold" in src[loop_at:]
+
+
+def test_one_call_is_resolved_once_however_many_runs_issued_it():
+    """A day can produce several ledger runs, each naming the same tickers,
+    so the same call arrived at the resolver once per run -- 6,192 items over
+    19 tickers on a real ledger. Each was resolved separately, wrote its own
+    outcome row, and was collapsed again downstream. It cost 5.3s a request
+    and it is where the duplicate counts on History came from."""
+    from prosignal import outcomes as O
+    rows = [
+        {"run_id": "a", "date": "2024-01-09", "signals_generated": ["X"],
+         "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]},
+        {"run_id": "b", "date": "2024-01-09", "signals_generated": ["X"],
+         "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]},
+        {"run_id": "c", "date": "2024-01-10", "signals_generated": ["X"],
+         "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]},
+    ]
+    got = O._pending(rows, set())
+    assert len(got) == 2, "two distinct calls, not three runs"
+    assert {p["date"] for p in got} == {"2024-01-09", "2024-01-10"}
+
+
+def test_a_call_already_on_file_is_not_retried_under_another_run_id():
+    """Otherwise the other runs of a resolved call stay pending forever and
+    are re-scanned on every single request."""
+    from prosignal import outcomes as O
+    rows = [{"run_id": "b", "date": "2024-01-09", "signals_generated": ["X"],
+             "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]}]
+    assert O._pending(rows, set()) != []
+    assert O._pending(rows, set(), {("X", "2024-01-09")}) == []
