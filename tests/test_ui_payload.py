@@ -104,7 +104,7 @@ def test_the_view_is_json_serialisable():
     "What would move this to Buy",    # the near misses stay actionable
     "No runs recorded yet",           # history with an empty ledger
     "has not been scanned yet",       # store moved on, results did not
-    "The shortlist on",               # a past run, headed by its own date
+    "Previous shortlists",            # history keyed by name, not by date
     "Not followed yet",               # a call with no sessions behind it
     "Clear the run history?",         # destructive action is confirmed
 ])
@@ -300,6 +300,28 @@ def test_clearing_history_says_the_record_is_kept():
     block = html[html.index("async function confirmWipe"):]
     block = block[:block.index("\n}")]
     assert "research record is kept" in block or "record is kept" in block
+
+
+def test_the_card_numbers_its_position_not_the_models_rank():
+    """Model ranks skip: on a live run the admitted names were 1, 2, 4, 5, 6
+    because rank 3 was removed by a risk check and appears in neither list.
+    Printing that on the card asked the reader to explain a gap that is about
+    the engine's internals. Position in the shortlist has no gaps; the model
+    rank moves into the analysis panel where there is room to say what it is.
+    """
+    html = _html()
+    card = html[html.index("function cardHTML"):html.index("function viewHistory")]
+    assert "p.position" in card
+    assert "Rank " not in card, "the card still prints the model's rank"
+    panel = html[html.index("function openPanel"):]
+    assert "ranked #" in panel, "the model rank was dropped rather than moved"
+
+
+def test_the_shortlist_says_when_it_is_one_bet(_=None):
+    """Five names that all rank for the same reason are not five ideas. The
+    model is momentum-heavy by construction, so a five-name list hides this
+    unless it is said."""
+    assert "concentration" in _html()
 
 
 def test_the_five_slot_rule_is_not_reimplemented_in_the_interface():

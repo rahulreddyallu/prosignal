@@ -113,10 +113,47 @@ def build_view(
             "withheld": slate.withheld_reason,
         },
         "picks": picks,
+        "concentration": _concentration(picks),
         "journey": _journey(payload.get("funnel") or {}, slate),
         "data": _data_state(payload, flags),
         "disclaimer": payload.get("disclaimer"),
         "confidence_note": payload.get("probability_note"),
+    }
+
+
+def _concentration(picks: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Say when the whole shortlist is the same bet.
+
+    Five names that all rank for the same reason are not five independent
+    ideas -- they rise and fall together, and a reader holding all five is
+    more concentrated than the count suggests. The model is momentum-heavy by
+    construction, so this is common rather than exceptional, and it is exactly
+    the sort of thing a list of five hides unless it is said.
+    """
+    if len(picks) < 3:
+        return None
+    leaders: Dict[str, int] = {}
+    for pick in picks:
+        top = next(
+            (c["label"] for c in pick.get("evidence") or []
+             if c.get("available") and c.get("verdict") in {"Strong", "Supportive"}),
+            None,
+        )
+        if top:
+            leaders[top] = leaders.get(top, 0) + 1
+    if not leaders:
+        return None
+    label, count = max(leaders.items(), key=lambda kv: kv[1])
+    if count < max(3, len(picks) - 1):
+        return None
+    return {
+        "label": label,
+        "count": count,
+        "total": len(picks),
+        "text": (
+            f"{count} of {len(picks)} rank mainly on {label.lower()}. They are "
+            f"one bet more than they look, and would tend to fall together."
+        ),
     }
 
 
@@ -207,38 +244,62 @@ def _market(regime: Dict[str, Any]) -> Dict[str, Any]:
         "Neutral": "Mixed",
         "Unfavorable": "Defensive",
     }.get(compat, compat)
-    breadth = regime.get("breadth_pct")
+    # Two readings, both of which change the strategy's behaviour. Breadth and
+    # the universe counts were removed: breadth restated the summary sentence
+    # verbatim, and the funnel counts describe the run rather than the market.
     return {
         "headline": headline,
-        "summary": _market_summary(regime),
+        "summary": _market_summary(regime, headline),
         "allows_new_positions": bool(regime.get("allow_new_entries", False)),
         "readings": [
             {"label": "Market trend", "value": regime.get("trend")},
-            {"label": "Breadth",
-             "value": regime.get("breadth_state"),
-             "detail": (f"{breadth:.0f}% of names above their trend line"
-                        if isinstance(breadth, (int, float)) else None)},
             {"label": "Volatility", "value": regime.get("volatility")},
         ],
         "in_transition": bool(regime.get("transition", False)),
     }
 
 
-def _market_summary(regime: Dict[str, Any]) -> str:
-    """One sentence about conditions.
+#: What each headline word means for the strategy, not for the market. The
+#: verdict comes from `RegimeCompatibility`, which is decided by three things:
+#: whether new entries are allowed at all, the momentum multiplier, and
+#: whether the regime is mid-transition. A word on its own is decoration --
+#: this is what it is actually claiming.
+_HEADLINE_MEANING = {
+    "Constructive": (
+        "Conditions of the kind this strategy has needed to work: trending, "
+        "not in transition, and not suppressing momentum."
+    ),
+    "Mixed": (
+        "Conditions are workable but weaker than the strategy prefers, so "
+        "position sizes are reduced."
+    ),
+    "Defensive": (
+        "Either the regime is turning or momentum is being penalised. The "
+        "strategy holds back here."
+    ),
+}
 
-    It deliberately does NOT restate the breadth percentage. That number has
-    its own row directly underneath, and printing the identical phrase twice
-    in one card reads as padding.
+
+def _market_summary(regime: Dict[str, Any], headline: str) -> str:
+    """One sentence saying what the verdict means and what produced it.
+
+    It deliberately does NOT restate the breadth percentage or the universe
+    counts. Those were separate rows saying the same thing twice.
     """
+    meaning = _HEADLINE_MEANING.get(headline, "")
     trend = str(regime.get("trend") or "").lower()
-    if not trend:
-        return "Market conditions could not be assessed."
-    article = "an" if trend.startswith(("u", "o", "a", "e", "i")) else "a"
-    text = f"The broader market is in {article} {trend}"
+    vol = str(regime.get("volatility") or "").lower()
+    facts: List[str] = []
+    if trend:
+        facts.append(trend)
+    if vol:
+        facts.append(f"volatility {vol}")
+    tail = f" Today: {', '.join(facts)}." if facts else ""
+    if regime.get("transition"):
+        tail += " The regime is in transition, which is itself a caution."
     if not regime.get("allow_new_entries", True):
-        return text + ", but conditions do not support opening new positions."
-    return text + "."
+        tail += " New positions are not being opened."
+    return (meaning + tail).strip() or "Market conditions could not be assessed."
 
 
 def _journey(funnel: Dict[str, Any], slate) -> List[Dict[str, Any]]:

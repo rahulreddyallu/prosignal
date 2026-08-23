@@ -302,3 +302,52 @@ def runs_for_ticker(
             "strength": entry.get("strength_band"),
         })
     return out
+
+
+def distinct_names(
+    records: Iterable[Any],
+    *,
+    slots: int = 5,
+    since: Optional[str] = None,
+    limit: int = 400,
+) -> List[Dict[str, Any]]:
+    """One entry per name, not per day.
+
+    A date-by-date table is the wrong shape for this data. The shortlist is
+    five names and most of them were on it yesterday too, so reading down the
+    dates means reading the same handful of tickers over and over and doing
+    the deduplication by eye. Collapsed by name, the same record answers the
+    question a reader actually has: which names does this engine keep coming
+    back to, and when did it last say so.
+    """
+    seen: Dict[str, Dict[str, Any]] = {}
+    for day in load_days(records, limit=limit, since=since):
+        for ticker, status in _slate(day, slots).items():
+            entry = seen.get(ticker)
+            detail = day.detail.get(ticker) or {}
+            if entry is None:
+                # Days arrive newest first, so the first sighting is the latest.
+                seen[ticker] = {
+                    "ticker": ticker,
+                    "times": 1,
+                    "last_seen": day.date,
+                    "last_status": status,
+                    "first_seen": day.date,
+                    "first_price": detail.get("last_close"),
+                    "last_price_at_signal": detail.get("last_close"),
+                    "statuses": {status},
+                }
+                continue
+            entry["times"] += 1
+            entry["first_seen"] = day.date
+            entry["first_price"] = detail.get("last_close")
+            entry["statuses"].add(status)
+
+    out = []
+    for entry in seen.values():
+        statuses = entry.pop("statuses")
+        entry["ever_bought"] = BUY in statuses
+        out.append(entry)
+    # Most recent first, then by how often the engine has returned to it.
+    out.sort(key=lambda e: (e["last_seen"], e["times"]), reverse=True)
+    return out
