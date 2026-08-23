@@ -416,7 +416,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         led = Path(cfg.paths.ledger)
         path = led / "outcomes.jsonl"
         _out.resolve_pending(store, led, path, cfg)
-        rows = _out.load_outcomes(path)
+        rows = _apply_clear_mark(_out.load_outcomes(path))
         from .stages._cfg import iv
         horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
         op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
@@ -685,6 +685,19 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ),
         }
 
+    def _apply_clear_mark(rows):
+        """Drop resolved results issued before the last clear."""
+        try:
+            from .presentation.clearmark import read_mark
+            mark = read_mark(cfg.paths.ledger)
+        except Exception:
+            return rows
+        if not mark:
+            return rows
+        cut = str(mark)[:10]
+        return [r for r in rows
+                if str(r.get("signal_date") or "")[:10] >= cut]
+
     def _git_commit() -> str:
         """Best effort. A period without a commit is still a period; one that
         refused to open because git was unavailable would not be."""
@@ -736,6 +749,14 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         path = led / "outcomes.jsonl"
         _out.resolve_pending(store, led, path, cfg)
         rows = _out.load_outcomes(path)
+
+        # Clearing history sets a watermark rather than deleting ledger rows,
+        # because fail_run_if_unwritable exists precisely so the deflated-
+        # Sharpe trial count cannot be corrupted by a missing run. The mark
+        # therefore has to be applied HERE, where results are read -- the
+        # outcomes file is derived and rebuilt on every request, so deleting
+        # it would clear the screen only until the next one.
+        rows = _apply_clear_mark(rows)
 
         # Scoping defaults to OFF. Keeping evidence from before a config
         # change out of evidence from after it matters for a t-statistic;
