@@ -102,7 +102,7 @@ def test_the_view_is_json_serialisable():
     "could not be completed",         # a failed run must not imply a trade
     "Checks that could not run",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the near misses stay actionable
-    "No runs recorded yet",           # history with an empty ledger
+    "Nothing has finished yet",           # history with an empty ledger
     "has not been scanned yet",       # store moved on, results did not
     "Every name surfaced so far",     # history keyed by name, not by date
     "Not followed yet",               # a call with no sessions behind it
@@ -197,6 +197,7 @@ _AMBIENT = {
     "round", "floor", "ceil", "abs", "pow",
     "requestAnimationFrame", "cancelAnimationFrame", "matchMedia", "now",
     "concat", "isArray", "keys", "reverse", "toUpperCase", "casefold",
+    "reduce",
     # CSS function names picked up by the same scan
     "var", "rgba", "rect", "minmax", "clamp", "repeat", "translateX",
     "translateY", "scaleX", "rotate", "brightness", "saturate", "blur",
@@ -219,6 +220,10 @@ def test_every_function_the_interface_calls_is_defined():
     # No whitespace before the paren: a real call never has one, and allowing
     # it matched prose like "returned an error (" inside a string literal.
     called = set(re.findall(r"\b([A-Za-z_$][\w$]*)\(", body))
+    # Handlers are passed by REFERENCE and never called, so the paren scan
+    # cannot see them. confirmWipe was deleted with a neighbouring block and
+    # this test passed anyway -- the Clear button threw on click.
+    called |= set(re.findall(r"addEventListener\(\s*\"[^\"]+\"\s*,\s*([A-Za-z_$][\w$]*)\s*\)", body))
     missing = sorted(called - defined - _AMBIENT)
     assert not missing, f"called but never defined: {missing}"
 
@@ -564,159 +569,18 @@ def test_the_ownership_line_does_not_wrap_mid_name_on_mobile():
 # Settings, the build tile, and the performance page
 # ===================================================================
 
-def test_settings_is_a_drawer_not_a_tab():
-    """These are controls you reach for and dismiss. A peer slot next to the
-    two screens you read implied they were somewhere to spend time."""
+def test_settings_is_a_drawer_that_comes_from_the_side():
+    """A peer slot next to the two screens you read implied it was somewhere
+    to spend time. It slides from the side at every width -- a bottom sheet
+    put it under the thumb and in front of the content at the same time."""
     html = _html()
     assert 'id="settings"' in html and 'class="drawer"' in html
     assert 'data-view="settings"' not in html
-    assert "function openSettings" in html and "function closeSettings" in html
-    # Living outside render() is what keeps it reachable when the store is not
-    # ready and the rest of the screen is a progress bar.
     assert 'state.tab === "settings"' not in html
     assert '$("#gear").addEventListener("click", openSettings)' in html
-
-
-def test_the_theme_control_is_a_switch_with_two_states():
-    """A three-way segmented control for a preference with an obvious default
-    was three buttons doing one button's job."""
-    html = _html()
-    assert 'id="theme"' not in html          # left the header
-    assert 'id="gear"' in html
-    assert '"sw-theme"' in html
-    assert 'role="switch"' in html
-    assert "data-theme-set" not in html      # the old segmented control
-    assert '"auto"' in html                  # still the un-chosen default
-    # It moves rather than snapping.
     css = html[html.index("<style>"):html.index("</style>")]
-    assert ".sw .knob" in css and "transform" in css
-
-
-def test_every_setting_is_a_row_rather_than_a_card():
-    """Four settings used to fill a phone screen, each with a heading and a
-    paragraph explaining itself. A control whose name needs a paragraph is
-    misnamed."""
-    html = _html()
-    assert "function setRow" in html
-    for gone in (".set-b", "seg3", "segbtn", "oplog", "Recent actions"):
-        assert gone not in html, gone
-
-
-def test_the_one_click_erase_is_gone_but_the_endpoint_stays_guarded():
-    """No case for it that a person could act on, and it destroys the only
-    record of what the engine said. The API keeps it for a deliberate reset."""
-    html = _html()
-    assert "/admin/reset/everything" not in html
-    assert "confirmEraseEverything" not in html
-    src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
-    assert 'confirm") != "ERASE"' in src
-
-
-def test_rebuilding_says_what_it_keeps():
-    html = _html()
-    assert "/admin/reset/market-data" in html
-    assert "Keeps your results" in html
-    assert "measurement periods are kept" in html
-
-
-def test_the_schedule_switch_does_not_apologise_for_how_it_works():
-    """It said pausing could not stop cron, which read as "this button does
-    not work". The run does not happen; that is what off means."""
-    html = _html()
-    assert "does not stop cron" not in html
-    assert "needs root" not in html
-    assert '"sw-cron"' in html
-    assert "No result will be recorded" in html
-
-
-# ===================================================================
-# Measurement periods -- the re-registration flow
-# ===================================================================
-
-def test_starting_a_period_is_reachable_from_the_drawer():
-    html = _html()
-    assert "/measurement/start" in html or "/measurement/" in html
-    assert "function toggleMeasurement" in html
-
-
-def test_the_drawer_names_a_drifted_period_as_drifted():
-    """A period whose config changed underneath it is measuring two models."""
-    html = _html()
-    assert "DRIFTED" in html
-    assert "settings changed since it began" in html
-
-
-def test_stopping_explains_that_periods_are_never_pooled():
-    html = _html()
-    assert "never averaged together" in html
-
-
-def test_the_build_tile_and_the_build_screen_share_one_writer():
-    """Two builders writing two progress readouts is a bug this already
-    shipped. Both mount the same ids so paintBuild stays the only writer."""
-    html = _html()
-    assert html.count('id="b-now"') == 2      # full screen + tile
-    assert html.count('id="b-bar"') == 2
-    assert html.count("function paintBuild") == 1
-
-
-def test_a_shallow_store_no_longer_hides_working_results():
-    """Above the model minimum there ARE real picks. Hiding them behind a
-    progress bar made a usable engine look broken for months."""
-    body = _html()
-    assert "state.shallow" in body
-    assert "buildTile()" in body
-    # The old behaviour returned the whole build screen for this case.
-    assert 'matches_validation === false\n      && state.tab === "overview"' not in body
-
-
-def test_the_performance_page_never_quotes_an_uncorrected_t_alone():
-    """Trades held at the same time share most of their window."""
-    html = _html()
-    assert "naive_t" in html
-    assert "carry about" in html          # the effective-n sentence
-    assert "significance" in html
-
-
-def test_the_verdict_says_when_it_cannot_answer():
-    html = _html()
-    assert "inside the noise" in html
-    assert "not\n              distinguishable from zero" in html or \
-           "distinguishable from zero" in html
-    assert "Too few completed trades" in html
-
-
-def test_a_pending_sample_is_not_an_empty_one():
-    """Before the first holding window elapses there is nothing to score,
-    and that is different from the engine having found nothing."""
-    html = _html()
-    assert "Nothing has finished yet" in html
-    assert "being tracked" in html
-
-
-def test_the_curve_is_labelled_as_a_sum_not_a_compounded_return():
-    html = _html()
-    assert "running SUM" in html or "running sum" in html
-
-
-def test_a_positive_average_over_a_negative_median_is_called_out():
-    """135 real trades average +1.23% while the median loses 5%. Reading the
-    average as "a typical trade" is the wrong conclusion and the one the
-    number invites."""
-    html = _html()
-    assert "median trade lost" in html
-    assert "A few large winners" in html
-
-
-def test_a_positive_average_over_a_negative_median_is_called_out():
-    """135 real trades average +1.23% while the median loses 5%. Reading the
-    average as "a typical trade" is the wrong conclusion and the one the
-    number invites."""
-    html = _html()
-    assert "median trade lost" in html
-    assert "A few large winners" in html
-
-
+    assert "translateX(100%)" in css
+    assert "translateY(100%)" not in css, "no bottom sheet at any width"
 
 
 def test_the_drawer_does_not_open_behind_a_throttled_animation_frame():
@@ -726,36 +590,134 @@ def test_the_drawer_does_not_open_behind_a_throttled_animation_frame():
     html = _html()
     body = html[html.index("async function openSettings"):
                 html.index("function closeSettings")]
-    # The word appears in the comment explaining why; the CALL must not.
     assert "requestAnimationFrame(" not in body
-    assert "offsetWidth" in body, "layout must be flushed before the end state"
+    assert "offsetWidth" in body
 
 
-def test_the_verdict_names_the_window_it_is_describing():
-    """With a period running the figures are scoped to it, so a zero means
-    "too early" and not "nothing works". The reader cannot tell which
-    without being told which window they are looking at."""
+def test_one_switch_runs_the_engine_and_the_measurement():
+    """Two switches for one idea. Nobody wants a measurement period running
+    over days the engine did not record, or the engine recording into no
+    period at all -- so the schedule switch moves both."""
     html = _html()
-    assert "Measuring since" in html
-    assert "Every run on record" in html
-    assert "settings changed mid-period" in html
+    assert '"sw-cron"' in html
+    assert 'id="meas"' not in html, "the separate measurement control is gone"
+    assert "toggleMeasurement" not in html
+    src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
+    resume = src[src.index("def operations_resume"):src.index("def _measurement_state")
+                 if "def _measurement_state" in src[src.index("def operations_resume"):]
+                 else len(src)]
+    assert "_m.start" in src[src.index("def operations_resume"):][:1400]
+    assert "_m.stop" in src[src.index("def operations_pause"):][:900]
+
+
+def test_turning_it_back_on_after_a_change_opens_a_new_period():
+    """That is the re-registration: the evidence from before a change never
+    joins the evidence from after."""
+    src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
+    body = src[src.index("def operations_resume"):][:1400]
+    assert 'status == "DRIFTED"' in body or "DRIFTED" in body
+
+
+def test_the_schedule_switch_does_not_apologise_for_how_it_works():
+    """It said pausing could not stop cron, which read as "this button does
+    not work". The run does not happen; that is what off means."""
+    html = _html()
+    assert "does not stop cron" not in html
+    assert "needs root" not in html
+    assert "Nothing will be recorded" in html
+
+
+def test_the_one_control_anyone_presses_runs_the_job_now():
+    html = _html()
+    assert "/admin/run-now" in html
+    assert "function runNow" in html
+    assert "Fetch today's data and rank" in html
+
+
+def test_the_one_click_erase_is_gone_but_the_endpoint_stays_guarded():
+    html = _html()
+    assert "/admin/reset/everything" not in html
+    assert "confirmEraseEverything" not in html
+    src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
+    assert 'confirm") != "ERASE"' in src
+
+
+def test_rebuilding_and_clearing_are_both_reachable_and_say_what_they_keep():
+    html = _html()
+    assert "/admin/reset/market-data" in html
+    assert 'id="rebuild"' in html and 'id="wipe"' in html
+    assert "keeps the research record" in html
+    assert "measurement periods are kept" in html
+
+
+# ===================================================================
+# History -- the graph and the two lists, and nothing else
+# ===================================================================
+
+def test_history_is_a_graph_and_two_lists():
+    """It answers which calls paid off and which did not, with the total for
+    each. Everything that was not that answer was clutter around it."""
+    html = _html()
+    assert "function viewHistory" in html
+    assert "Paid off" in html and "Went against" in html
+    assert "function curveSVG" in html
+    for gone in ("verdictCard", "tickerTable", "livePanel", "Following the shortlist",
+                 "Cost the most", "Paid the most", "Uncorrected this reads"):
+        assert gone not in html, gone
+
+
+def test_the_two_lists_are_split_by_sign_and_each_carries_its_total():
+    html = _html()
+    start = html.index("function viewHistory")
+    body = html[start:html.index("\nfunction ", start + 20)]
+    assert "total_return > 0" in body
+    assert "total_return <= 0" in body
+    assert "sum(items)" in body
+
+
+def test_a_name_row_says_what_it_returned_and_how_it_ended():
+    html = _html()
+    assert "function nameRow" in html
+    assert "stopped out" in html and "hit its target" in html
+    assert "paid off" in html
+    assert 'data-stock="' in html, "each name still opens its own history"
+
+
+def test_the_curve_is_summed_not_compounded():
+    """The book holds several names at once. Compounding overlapping holds
+    would draw a line the strategy never earned."""
+    html = _html()
+    assert "summed, not compounded" in html
+
+
+def test_an_empty_history_says_results_arrive_as_they_close():
+    html = _html()
+    assert "Nothing has finished yet" in html
+    assert "hits its target or its stop" in html
+    assert "are running now" in html
 
 
 def test_the_classes_that_carry_typography_are_all_styled():
-    """`.fine` was deleted along with the settings block it happened to live
-    in, and three callers silently rendered small print at body size. Nothing
-    errored; it just looked wrong. These are the classes whose whole job is
-    to change how text reads, so an unstyled one is always a bug."""
+    """`.fine` was deleted with the settings block it happened to live in,
+    and three callers rendered small print at body size. Nothing errored."""
     html = _html()
     css = html[html.index("<style>"):html.index("</style>")]
-    for cls in ("fine", "reading", "vscope", "rs", "rl", "sl", "ss", "sv",
-                "grp-h", "lc", "pf"):
+    for cls in ("fine", "reading", "rs", "rl", "grp-h", "nr-t", "nr-h", "nr-v",
+                "col-h", "chart-v", "chart-s"):
         assert "." + cls + " " in css or "." + cls + "{" in css, \
             f".{cls} is used for text but has no rule"
 
 
-def test_one_class_name_does_not_mean_two_things():
-    """`.live` already meant the market-status dot."""
+def test_every_control_the_drawer_renders_is_bound_where_it_is_rendered():
+    """wire() belongs to render(); the drawer is painted by paintSettings.
+    A control that moved into the drawer kept its binding in wire() and so
+    was never bound at all -- Clear looked entirely normal and did nothing."""
     html = _html()
-    assert 'class="box live"' not in html
-    assert ".nowbox" in html
+    render = html[html.index("function renderSettings"):
+                  html.index("/* Opening and closing.")]
+    paint = html[html.index("function paintSettings"):
+                 html.index("async function loadMeasurement")]
+    ids = set(re.findall(r'id="([a-z0-9-]+)"', render))
+    ids |= set(re.findall(r'toggle\("([a-z0-9-]+)"', render))
+    unbound = sorted(i for i in ids if '$("#' + i + '")' not in paint)
+    assert not unbound, f"rendered by the drawer but never bound: {unbound}"

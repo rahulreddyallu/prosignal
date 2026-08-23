@@ -592,6 +592,7 @@ td.r { text-align: right; }
                overflow-y: auto; display: grid; gap: var(--sp-5); }
 
 .grp { display: grid; }
+.grp.quiet .rl { color: var(--ink-2); font-weight: 450; font-size: 13px; }
 .grp-h { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
          color: var(--ink-3); padding-bottom: 6px; }
 .row { display: flex; align-items: center; justify-content: space-between;
@@ -622,12 +623,8 @@ td.r { text-align: right; }
 .pf { font-variant-numeric: tabular-nums; opacity: .75; }
 
 @media (max-width: 560px) {
-  /* A bottom sheet is where a thumb already is. */
-  .drawer { top: auto; left: 0; right: 0; bottom: 0; width: auto;
-            max-height: 86vh; border-left: none; border-top: 1px solid var(--line);
-            border-radius: var(--r-md) var(--r-md) 0 0;
-            transform: translateY(100%); box-shadow: 0 -18px 48px rgba(0,0,0,.22); }
-  .drawer.in { transform: translateY(0); }
+  /* Still from the side, just narrower. */
+  .drawer { width: min(320px, 88vw); }
 }
 @media (prefers-reduced-motion: reduce) {
   .drawer, .drawer-scrim, .sw, .sw .knob { transition: none; }
@@ -647,72 +644,51 @@ td.r { text-align: right; }
 .tile .sub { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .tile-a { margin-top: var(--sp-3); }
 
-/* ===== verdict ===================================================== */
-.vhead { display: flex; align-items: center; justify-content: space-between;
-         gap: var(--sp-4); margin-bottom: var(--sp-4); flex-wrap: wrap; }
-.vhead h3 { font-size: 15px; }
-.vscope { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
-.nowbox { border-left: 3px solid var(--accent); }
-.now-h { display: flex; align-items: center; justify-content: space-between;
-          gap: var(--sp-4); margin-bottom: var(--sp-4); }
-.now-h h3 { font-size: 15px; }
-.nowbox .stats { border-bottom: none; padding-bottom: 0; }
-.lcs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--sp-4); }
-.lc { font-size: 11.5px; padding: 3px 8px; border-radius: 999px;
-      background: var(--surface-sunk); color: var(--ink-2);
-      font-variant-numeric: tabular-nums; white-space: nowrap; }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-         gap: var(--sp-4); padding-bottom: var(--sp-4);
-         border-bottom: 1px solid var(--line); }
-.stat .sl { font-size: 11.5px; color: var(--ink-3); letter-spacing: .02em; }
-.stat .sv { font-size: 24px; font-weight: 600; letter-spacing: -0.02em;
-            margin-top: 3px; font-variant-numeric: tabular-nums; }
-.stat .ss { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
-.reading { font-size: 13.5px; color: var(--ink); line-height: 1.6;
-           margin-top: var(--sp-4); text-wrap: pretty; }
-.reading.skew { border-left: 2px solid var(--neg); padding-left: var(--sp-3);
-                color: var(--ink-2); font-size: 13px; }
-.exits { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5);
-         margin-top: var(--sp-4); padding-top: var(--sp-4);
-         border-top: 1px solid var(--line); }
-.ex { font-size: 12.5px; color: var(--ink-2); }
-.ex b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
-
-/* ===== curve ======================================================= */
-.curve { margin-top: var(--sp-4); }
-.curve svg { width: 100%; height: 150px; display: block; overflow: visible; }
-.curve path { fill: none; stroke-width: 1.75; vector-effect: non-scaling-stroke;
-              stroke-linejoin: round; stroke-linecap: round; }
-path.cs { stroke: var(--accent); }
-path.cb { stroke: var(--ink-3); stroke-dasharray: 3 3; stroke-width: 1.25; }
+/* ===== history ===================================================== */
+.chart { padding-bottom: var(--sp-3); }
+.chart-h { margin-bottom: var(--sp-4); }
+.chart-v { font-size: 30px; font-weight: 600; letter-spacing: -0.02em;
+           font-variant-numeric: tabular-nums; }
+.chart-s { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.chart svg { width: 100%; height: 132px; display: block; }
+.chart path { vector-effect: non-scaling-stroke; }
+path.cs { fill: none; stroke: var(--accent); stroke-width: 1.75;
+          stroke-linejoin: round; stroke-linecap: round; }
+path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 .cz { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.clegend { display: flex; align-items: center; gap: 7px; margin-top: var(--sp-3);
-           font-size: 11.5px; color: var(--ink-3); }
-.clegend .ck { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
-.clegend .ck.cs { background: var(--accent); }
-.clegend .ck.cb { background: var(--ink-3); margin-left: var(--sp-4); }
 
-/* ===== per-name tables ============================================= */
-.tts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-       gap: var(--sp-5); }
-.tt h4 { font-size: 12px; color: var(--ink-3); letter-spacing: .04em;
-         text-transform: uppercase; margin-bottom: var(--sp-3); }
-.tw { overflow-x: auto; }
-.tw table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.tw th { text-align: left; font-weight: 500; color: var(--ink-3);
-         font-size: 11px; padding: 0 8px 6px 0; white-space: nowrap; }
-.tw td { padding: 7px 8px 7px 0; border-top: 1px solid var(--line);
-         white-space: nowrap; }
-.tw .num { text-align: right; font-variant-numeric: tabular-nums; }
-.tw .tk { font-weight: 550; color: var(--ink); }
-.names-h { display: flex; align-items: center; justify-content: space-between;
-           gap: var(--sp-4); margin: var(--sp-6) 0 var(--sp-3); }
-.names-h h3 { font-size: 14px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: var(--sp-4); margin-top: var(--sp-4); }
+.col { background: var(--surface); border: 1px solid var(--line);
+       border-radius: var(--r-md); overflow: hidden; }
+.col-h { display: flex; align-items: baseline; justify-content: space-between;
+         gap: var(--sp-4); padding: var(--sp-4) var(--sp-4) var(--sp-3);
+         font-size: 12px; letter-spacing: .03em; text-transform: uppercase;
+         color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.col-h b { font-size: 15px; letter-spacing: 0; text-transform: none;
+           font-variant-numeric: tabular-nums; }
+.col.up .col-h b { color: var(--buy); }
+.col.dn .col-h b { color: var(--neg); }
+.col-b { max-height: 420px; overflow-y: auto; }
+
+.nr { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "t v" "h v"; align-items: center;
+      gap: 0 var(--sp-4); width: 100%; text-align: left;
+      padding: 10px var(--sp-4); background: none; border: none;
+      border-bottom: 1px solid var(--line); cursor: pointer; font: inherit;
+      transition: background .12s ease; }
+.nr:last-child { border-bottom: none; }
+.nr:hover { background: var(--surface-sunk); }
+.nr:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.nr-t { grid-area: t; font-size: 13.5px; font-weight: 550; color: var(--ink);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nr-h { grid-area: h; font-size: 11.5px; color: var(--ink-3); }
+.nr-v { grid-area: v; font-size: 14px; font-variant-numeric: tabular-nums;
+        white-space: nowrap; }
+
 
 @media (max-width: 640px) {
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
-  .stat .sv { font-size: 20px; }
-  .tile-h { flex-direction: column; gap: var(--sp-3); }
+      .tile-h { flex-direction: column; gap: var(--sp-3); }
   .count.sm .num { font-size: 22px; }
 }
 
@@ -727,13 +703,20 @@ path.cb { stroke: var(--ink-3); stroke-dasharray: 3 3; stroke-width: 1.25; }
 @media (max-width: 860px) {
   .topbar-meta .hide-sm { display: none; }
 }
-/* Below this the masthead, the date and the gear stop fitting on one line
-   and every one of them wrapped. The descriptor is the decorative part, so
-   it is the part that goes -- the name and the date still have to be read. */
+/* All three stopped fitting on one line and every one of them wrapped.
+   Hiding the descriptor fixed the wrap and lost the masthead, so instead
+   nothing wraps and the descriptor gives up width first. */
+.brand { white-space: nowrap; }
+.brand span { white-space: nowrap; }
 @media (max-width: 560px) {
-  .brand span { display: none; }
   .topbar-in { gap: var(--sp-3); }
   .topbar-meta { gap: var(--sp-3); }
+  .brand { font-size: 15px; }
+  .brand span { font-size: 9.5px; letter-spacing: .03em; }
+}
+@media (max-width: 400px) {
+  .brand span { font-size: 9px; }
+  #mkt-status { font-size: 11px; }
 }
 @media (max-width: 640px) {
   body { font-size: 14.5px; }
@@ -1356,51 +1339,33 @@ function toggle(id, on, label) {
 function renderSettings() {
   const ops = state.ops || {};
   const sch = ops.schedule || {};
-  const m = state.meas || {};
-  const cur = m.active;
+  const cur = (state.meas || {}).active;
   const c = state.coverage || {};
-  const dark = currentTheme() === "dark";
+  const on = !sch.paused;
 
-  const measBody = cur
-    ? setRow("Measuring", 
-        "Since " + esc(day(cur.started)) +
-        (cur.status === "DRIFTED"
-          ? ' &middot; <span class="warn-t">settings changed since it began</span>'
-          : ""),
-        '<button class="btn ghost xs" id="meas">Stop</button>')
-    : setRow("Measuring", "Not started",
-        '<button class="btn xs" id="meas">Start</button>');
-
-  const past = (m.periods || []).filter((x) => !x.open);
   return (
     '<div class="grp">' +
-      setRow("Dark mode", "", toggle("sw-theme", dark, "Dark mode")) +
+      setRow("Daily signals",
+             on ? (cur ? "Measuring since " + esc(day(cur.started))
+                       : "Runs every weekday after the close")
+                : "Off \u2014 nothing is being recorded",
+             toggle("sw-cron", on, "Daily signals")) +
+      setRow("Update now", "Fetch today's data and rank",
+             '<button class="btn xs" id="run-now">Run</button>') +
     '</div>' +
 
     '<div class="grp">' +
-      '<div class="grp-h">Measurement</div>' +
-      measBody +
-      // Directly under the row it belongs to, not stranded after the next one.
-      (past.length
-        ? '<div class="past">' + past.slice(0, 4).map((x) =>
-            '<div class="pr"><span>' + esc(day(x.started)) +
-            (x.ended && String(x.ended).slice(0, 10) !== String(x.started).slice(0, 10)
-              ? ' \u2013 ' + esc(day(x.ended)) : ' \u00b7 same day') +
-            '</span><span class="pf">' +
-            esc(x.fingerprint.slice(0, 8)) + '</span></div>').join("") + '</div>'
-        : "") +
-      setRow("Daily run", esc(sch.cron || "20:30 IST, weekdays"),
-             toggle("sw-cron", !sch.paused, "Daily run")) +
+      setRow("Dark mode", "", toggle("sw-theme", currentTheme() === "dark",
+                                     "Dark mode")) +
     '</div>' +
 
-    '<div class="grp">' +
-      '<div class="grp-h">Data</div>' +
+    '<div class="grp quiet">' +
+      setRow("Recorded results", "Clears this history, keeps the research record",
+             '<button class="btn ghost xs" id="wipe">Clear</button>') +
       setRow("Market history",
              (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
-             " sessions",
-             '<button class="btn ghost xs" id="refresh">Refresh</button>') +
-      setRow("Rebuild from scratch", "Keeps your results",
-             '<button class="btn ghost xs danger-t" id="rebuild">Rebuild</button>') +
+             " sessions stored",
+             '<button class="btn ghost xs" id="rebuild">Rebuild</button>') +
     '</div>'
   );
 }
@@ -1451,12 +1416,15 @@ function paintSettings() {
   });
   const cr = $("#sw-cron");
   if (cr) cr.addEventListener("click", toggleSchedule);
-  const me = $("#meas");
-  if (me) me.addEventListener("click", toggleMeasurement);
-  const rf = $("#refresh");
-  if (rf) rf.addEventListener("click", refreshData);
+  const rn = $("#run-now");
+  if (rn) rn.addEventListener("click", runNow);
   const rb = $("#rebuild");
   if (rb) rb.addEventListener("click", confirmResetMarketData);
+  // wire() belongs to render(), and the drawer is painted by this function
+  // instead -- so a control that moved in here silently lost its handler.
+  // Clear did, and looked completely normal while doing nothing.
+  const wp = $("#wipe");
+  if (wp) wp.addEventListener("click", confirmWipe);
 }
 
 async function loadMeasurement() {
@@ -1466,34 +1434,14 @@ async function loadMeasurement() {
   } catch (e) { /* the drawer renders without it */ }
 }
 
-/* Starting a period after a change IS the re-registration: the runs from
-   before it never join the runs from after. */
-async function toggleMeasurement() {
-  const cur = (state.meas || {}).active;
-  const btn = $("#meas");
-  if (cur) {
-    const ok = await ask("Stop measuring?",
-      "The period closes today and keeps its results. Starting again later " +
-      "opens a new one, so the two are never averaged together.", "Stop");
-    if (!ok) return;
-  }
+/* What the nightly job does, on demand. The one control anyone presses:
+   opening the app before the job has run and finding yesterday's answer
+   with no way to move it forward is the case it exists for. */
+async function runNow() {
+  const btn = $("#run-now");
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
   try {
-    await fetch("/measurement/" + (cur ? "stop" : "start"), {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({}) });
-    await loadMeasurement();
-    state.perf = undefined;
-    if (state.tab === "history") loadHistory();
-  } catch (e) { /* fall through to a repaint */ }
-  paintSettings();
-}
-
-async function refreshData() {
-  const btn = $("#refresh");
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
-  try {
-    const r = await fetch("/admin/bootstrap", { method: "POST" });
+    const r = await fetch("/admin/run-now", { method: "POST" });
     if (r.ok) {
       const j = await r.json();
       state.jobId = j.id; state.jobKind = "bootstrap";
@@ -1501,7 +1449,8 @@ async function refreshData() {
       closeSettings();
       return;
     }
-  } catch (e) { /* fall through */ }
+    showError(await readErr(r));
+  } catch (e) { showError(e.message || String(e)); }
   paintSettings();
 }
 
@@ -1859,212 +1808,96 @@ function curveSVG(curve) {
   '</div>';
 }
 
-/* What is happening right now. Separate from the verdict on purpose: an
-   open mark is not a result, and a trade that closed inside the current
-   window is a real close from a group where only the fast movers have
-   finished. Both move daily, which is what makes the page worth opening;
-   neither is allowed near a t-statistic. */
-function livePanel(perf) {
-  const op = (perf && perf.open) || {};
-  const rc = (perf && perf.recent) || {};
-  if (!op.n && !rc.n) return "";
-
-  const chips = (rc.recent || []).slice(0, 6).map((r) =>
-    '<span class="lc">' + esc(r.ticker) + ' ' + signed(r.net_return, 1) + '</span>'
-  ).join("");
-
-  return '<div class="box nowbox">' +
-    '<div class="now-h"><h3>Right now</h3>' +
-      '<span class="chip">' + esc(op.as_of ? day(op.as_of) : "latest close") + '</span>' +
-    '</div>' +
-    '<div class="stats">' +
-      (op.n ? '<div class="stat"><div class="sl">Still running</div>' +
-        '<div class="sv">' + op.n + '</div>' +
-        '<div class="ss">' + op.up + ' of ' + op.n + ' above entry</div></div>' : "") +
-      (op.avg_unrealised != null ? '<div class="stat"><div class="sl">Unrealised</div>' +
-        '<div class="sv">' + signed(op.avg_unrealised) + '</div>' +
-        '<div class="ss">average, marked to the close</div></div>' : "") +
-      (rc.n ? '<div class="stat"><div class="sl">Closed recently</div>' +
-        '<div class="sv">' + rc.n + '</div>' +
-        '<div class="ss">inside the current window</div></div>' : "") +
-    '</div>' +
-    (chips ? '<div class="lcs">' + chips + '</div>' : "") +
-    '<p class="fine">Not counted in the record below. A mark can reverse, ' +
-    'and only the fastest of the recent trades have finished \u2014 which ' +
-    'makes that group read better than it is.</p>' +
-  '</div>';
+/* The curve. Cumulative return by exit date -- summed, not compounded,
+   because the book holds several names at once and compounding overlapping
+   holds would draw a line the strategy never earned. */
+function curveSVG(curve) {
+  const pts = (curve || []).filter((c) => c && isFinite(c.cumulative));
+  if (pts.length < 2) return "";
+  const W = 640, H = 132, PAD = 4;
+  let lo = Math.min.apply(null, pts.map((c) => c.cumulative));
+  let hi = Math.max.apply(null, pts.map((c) => c.cumulative));
+  if (hi - lo < 1e-9) { hi += 0.01; lo -= 0.01; }
+  const x = (i) => PAD + (i / (pts.length - 1)) * (W - PAD * 2);
+  const y = (v) => PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2);
+  const d = pts.map((c, i) =>
+    (i ? "L" : "M") + x(i).toFixed(1) + " " + y(c.cumulative).toFixed(1)).join(" ");
+  const area = d + " L" + x(pts.length - 1).toFixed(1) + " " + y(lo).toFixed(1) +
+               " L" + x(0).toFixed(1) + " " + y(lo).toFixed(1) + " Z";
+  const zero = (lo <= 0 && hi >= 0)
+    ? '<line x1="' + PAD + '" x2="' + (W - PAD) + '" y1="' + y(0).toFixed(1) +
+      '" y2="' + y(0).toFixed(1) + '" class="cz"/>' : "";
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+    'role="img" aria-label="Cumulative return of the shortlist over time">' +
+    zero + '<path d="' + area + '" class="ca"/>' +
+    '<path d="' + d + '" class="cs"/></svg>';
 }
 
-/* The headline. It answers "did this work" before it shows anything else,
-   and it refuses to answer when the sample cannot carry the answer. */
-function verdictCard(perf) {
-  const h = (perf && perf.headline) || {};
-  const n = h.n || 0;
-  // Which window these numbers describe. With a period running the figures
-  // are scoped to it, and a scoped zero means "too early", not "nothing
-  // works" -- the difference has to be on the screen.
-  const per = ((perf && perf.measurement) || {}).active;
-  const scope = per
-    ? "Measuring since " + day(per.started)
-    : "Every run on record";
+/* One name, one row: what it returned and how it ended.
 
-  if (!n) {
-    return '<div class="box empty"><h3>Nothing has finished yet</h3>' +
-      '<p>' + esc(scope) + '. A signal is only scored once its full holding ' +
-      'window has elapsed, so the first results appear about three months ' +
-      'after the run that produced them.' +
-      ((perf && perf.pending)
-        ? ' <b>' + perf.pending + '</b> being tracked.' : '') +
-      '</p></div>';
-  }
-  const sig = h.significance || {};
-  const hasBench = h.benchmark_covered > 0;
-
-  // The reading, stated in words, so the number is not left to be
-  // interpreted generously. t is on the EXCESS over the index.
-  let reading;
-  if (!hasBench) {
-    reading = "No index comparison was possible for these trades, so this " +
-              "says what happened, not whether it beat the alternative.";
-  } else if (sig.t == null) {
-    reading = "Too few completed trades to test whether the gap is real.";
-  } else if (Math.abs(sig.t) >= 2) {
-    reading = "The gap over the index is larger than the noise in this " +
-              "sample (t " + sig.t.toFixed(2) + ").";
+   A row here is a NAME, not a trade, so it carries a tally rather than a
+   single exit -- by_ticker reports exit_mix and win_rate, and reading a
+   scalar exit_reason off it produced a dangling separator and nothing else. */
+function nameRow(r) {
+  const how = { stop: "stopped out", target_1: "hit its target",
+                target_2: "hit its target", time_exit: "ran out of time" };
+  let sub;
+  if (r.n > 1) {
+    const won = Math.round(r.win_rate * r.n);
+    sub = r.n + " calls \u00b7 " + won + " paid off";
   } else {
-    reading = "The gap over the index is inside the noise (t " +
-              sig.t.toFixed(2) + "), so on this evidence it is not " +
-              "distinguishable from zero.";
+    const only = Object.keys(r.exit_mix || {})[0];
+    sub = how[only] || "closed";
   }
-
-  const stat = (label, html, sub) =>
-    '<div class="stat"><div class="sl">' + label + '</div>' +
-    '<div class="sv">' + html + '</div>' +
-    (sub ? '<div class="ss">' + sub + '</div>' : "") + '</div>';
-
-  // A positive average over a negative median means a few large winners are
-  // carrying the number and the typical trade lost money. Reading "+1.23%
-  // average" as "a typical trade makes 1.23%" is the wrong conclusion, and
-  // it is the one the number invites.
-  const skew = (h.avg_return > 0 && h.median_return < 0)
-    ? "The average is positive but the median trade lost " +
-      Math.abs(h.median_return * 100).toFixed(1) + "%. A few large winners " +
-      "carry it, so a typical call is not what the average describes."
-    : "";
-
-  return '<div class="box verdict">' +
-    '<div class="vhead"><div><h3>Following the shortlist</h3>' +
-      '<div class="vscope">' + esc(scope) +
-      (per && per.status === "DRIFTED"
-        ? ' \u00b7 <span class="warn-t">settings changed mid-period</span>' : '') +
-      '</div></div>' +
-      '<span class="chip">' + n + ' completed' +
-      ((perf.pending) ? ' \u00b7 ' + perf.pending + ' running' : '') + '</span></div>' +
-    '<div class="stats">' +
-      stat("Average per trade", signed(h.avg_return),
-           "median " + (h.median_return * 100).toFixed(1) + "%") +
-      (hasBench ? stat("Index, same days", signed(h.avg_benchmark_return),
-                       esc(h.benchmark || "")) : "") +
-      (hasBench ? stat("Difference", signed(h.avg_excess),
-                       "beat it " + Math.round(h.beat_rate * 100) + "% of the time") : "") +
-      stat("Won", Math.round(h.win_rate * 100) + "%",
-           "held " + Math.round(h.avg_hold_sessions) + " sessions on average") +
-    '</div>' +
-    '<p class="reading">' + esc(reading) + '</p>' +
-    (skew ? '<p class="reading skew">' + esc(skew) + '</p>' : "") +
-    (sig.naive_t != null && sig.t != null
-      ? '<p class="fine">Uncorrected this reads t ' + sig.naive_t.toFixed(2) +
-        '. Trades held at the same time share most of their window, so the ' +
-        Math.round(n) + ' results carry about ' +
-        Math.round(sig.effective_n || 0) + ' independent ones.</p>'
-      : "") +
-    (h.benchmark_missing
-      ? '<p class="fine">' + h.benchmark_missing + ' of ' + n + ' had no index ' +
-        'data for their window and are excluded from the comparison.</p>' : "") +
-    curveSVG(perf.curve) +
-    (h.exit_mix ? '<div class="exits">' +
-      Object.keys(h.exit_mix).map((k) =>
-        '<span class="ex"><b>' + h.exit_mix[k] + '</b> ' +
-        esc({ stop: "stopped out", target_1: "hit first target",
-              target_2: "hit second target", time_exit: "ran out of time",
-              open: "still open" }[k] || k) + '</span>').join("") +
-      '</div>' : "") +
-  '</div>';
-}
-
-/* Per-name, worst first. The losses are the part worth reading and putting
-   the winners on top would bury them. */
-function tickerTable(perf) {
-  const rows = (perf && perf.by_ticker) || [];
-  if (rows.length < 2) return "";
-  const cell = (r) =>
-    '<tr><td class="tk">' + esc(r.ticker) + '</td>' +
-    '<td class="num">' + r.n + '</td>' +
-    '<td class="num">' + signed(r.avg_return) + '</td>' +
-    '<td class="num">' + (r.avg_excess == null ? '<span class="v-neu">\u2014</span>'
-                                               : signed(r.avg_excess)) + '</td>' +
-    '<td class="num">' + Math.round(r.win_rate * 100) + '%</td></tr>';
-  // A display cut of the per-name table, unrelated to the five-slot slate
-  // rule -- that lives in presentation.selection and is not reimplemented here.
-  const SHOW = 5;
-  const worst = rows.slice(0, SHOW).map(cell).join("");
-  const best = rows.slice(-SHOW).reverse().map(cell).join("");
-  const table = (title, body) =>
-    '<div class="tt"><h4>' + title + '</h4><div class="tw"><table>' +
-    '<thead><tr><th>Name</th><th class="num">Calls</th>' +
-    '<th class="num">Average</th><th class="num">vs index</th>' +
-    '<th class="num">Won</th></tr></thead><tbody>' + body +
-    '</tbody></table></div></div>';
-  return '<div class="box"><div class="tts">' +
-    table("Cost the most", worst) + table("Paid the most", best) +
-    '</div></div>';
+  return '<button class="nr" data-stock="' + esc(r.ticker) + '">' +
+    '<span class="nr-t">' + esc(r.ticker) + '</span>' +
+    '<span class="nr-h">' + esc(sub) + '</span>' +
+    '<span class="nr-v">' + signed(r.total_return) + '</span></button>';
 }
 
 function viewHistory(v) {
-  const h = state.history;
-  if (h === null) return '<div class="box"><div class="skel" style="height:220px"></div></div>';
-  if (!h || !h.names || !h.names.length) {
-    return '<div class="box empty"><h3>No runs recorded yet</h3>' +
-      '<p>' + esc((h && h.note) || "Once a scan completes, every name it " +
-      "surfaces is recorded here with what the market did afterwards.") + '</p></div>';
+  const perf = state.perf;
+  if (perf === null || perf === undefined) {
+    return '<div class="box"><div class="skel" style="height:260px"></div></div>';
+  }
+  const h = perf.headline || {};
+  const rows = perf.by_ticker || [];
+  const open = (perf.open || {}).n || 0;
+
+  if (!rows.length) {
+    return '<div class="box empty"><h3>Nothing has finished yet</h3>' +
+      '<p>Each signal is scored when it hits its target or its stop. ' +
+      (open ? '<b>' + open + '</b> are running now.' : 'Results appear here as they close.') +
+      '</p></div>';
   }
 
-  // One row per NAME. A date-by-date table repeated the same handful of
-  // tickers down the page -- the shortlist is five names and most were on it
-  // yesterday too -- which left the reader deduplicating by eye.
-  const rows = h.names.map((n) => {
-    const o = n.outcome || {};
-    const pending = o.resolved === "pending";
-    const repeat = n.times > 1
-      ? ' <span class="chip">' + n.times + ' runs</span>'
-      : "";
-    return '<button class="namerow" data-stock="' + esc(n.ticker) + '">' +
-      '<div style="min-width:0">' +
-        '<div class="nm">' + esc(n.company) + repeat + '</div>' +
-        '<div class="sb">' + esc(n.ticker) + ' · last seen ' + esc(day(n.last_seen)) +
-        (n.times > 1 ? ' · first ' + esc(day(n.first_seen)) : '') + '</div>' +
+  const won = rows.filter((r) => r.total_return > 0)
+                  .sort((a, b) => b.total_return - a.total_return);
+  const lost = rows.filter((r) => r.total_return <= 0)
+                   .sort((a, b) => a.total_return - b.total_return);
+  const sum = (xs) => xs.reduce((t, r) => t + r.total_return, 0);
+
+  const list = (title, items, tone) =>
+    '<div class="col ' + tone + '">' +
+      '<div class="col-h"><span>' + title + '</span>' +
+        '<b>' + signed(sum(items)) + '</b></div>' +
+      '<div class="col-b">' + items.map(nameRow).join("") + '</div>' +
+    '</div>';
+
+  return (
+    '<div class="box chart">' +
+      '<div class="chart-h">' +
+        '<div><div class="chart-v">' + signed(h.total_return) + '</div>' +
+          '<div class="chart-s">' + h.n + ' closed' +
+          (open ? " \u00b7 " + open + " running" : "") + '</div></div>' +
       '</div>' +
-      '<div style="text-align:right;white-space:nowrap">' +
-        '<span class="pill ' + (n.last_status === "BUY" ? "buy" : "watch") + '">' +
-          (n.last_status === "BUY" ? "Buy" : "Watch") + '</span>' +
-        '<div class="sb" style="margin-top:5px">' +
-          (pending ? "not followed yet"
-                   : (o.change_pct > 0 ? "+" : "") + o.change_pct.toFixed(2) +
-                     "% since first call") + '</div>' +
-      '</div></button>';
-  }).join("");
-
-  // The page title already says History and the subtitle already says what
-  // these are. A third heading over the same list was a label on a label.
-  const perf = state.perf;
-  const perfBlock = perf === null
-    ? '<div class="box"><div class="skel" style="height:200px"></div></div>'
-    : (perf ? livePanel(perf) + verdictCard(perf) + tickerTable(perf) : "");
-
-  return perfBlock +
-    '<div class="names-h"><h3>Every name it has called</h3>' +
-      '<button class="btn ghost sm" id="wipe">Clear history</button></div>' +
-    '<div class="names">' + rows + '</div>';
+      curveSVG(perf.curve) +
+    '</div>' +
+    '<div class="cols">' +
+      list("Paid off", won, "up") +
+      list("Went against", lost, "dn") +
+    '</div>'
+  );
 }
 
 async function confirmWipe() {
@@ -2082,6 +1915,8 @@ async function confirmWipe() {
     const j = await r.json();
     say(j.message || "History cleared.");
     state.history = undefined;
+    state.perf = undefined;
+    closeSettings();
     await loadHistory();
   } catch (e) {
     state.error = e.message || String(e);
@@ -2253,9 +2088,6 @@ function wire() {
   }));
   $$("button[data-stock]").forEach((el) =>
     el.addEventListener("click", () => openStock(el.dataset.stock)));
-  const wipe = $("#wipe");
-  if (wipe) wipe.addEventListener("click", confirmWipe);
-
   // The tile mounts its own build button. buildScreen binds its copy at
   // mount; the tile is rebuilt by render, so it binds here instead.
   const tileBoot = $(".tile #boot");
@@ -2277,9 +2109,10 @@ async function loadOps() {
 async function toggleSchedule() {
   const paused = !!((state.ops || {}).schedule || {}).paused;
   if (!paused) {
-    const ok = await ask("Turn off the daily run?",
-      "No result will be recorded until you turn it back on, and days " +
-      "without a result cannot be measured later.", "Turn off");
+    const ok = await ask("Turn off daily signals?",
+      "Nothing will be recorded until you turn it back on, and the current " +
+      "measurement period closes. Turning it on again starts a new one.",
+      "Turn off");
     if (!ok) { paintSettings(); return; }
   }
   const sw = $("#sw-cron");
@@ -2288,7 +2121,10 @@ async function toggleSchedule() {
     await fetch("/operations/" + (paused ? "resume" : "pause"),
                 { method: "POST", headers: { "content-type": "application/json" },
                   body: JSON.stringify({ reason: "changed from the interface" }) });
-    await loadOps();
+    // One switch, two things: the schedule and the period it records into.
+    await Promise.all([loadOps(), loadMeasurement()]);
+    state.perf = undefined;
+    if (state.tab === "history") loadHistory();
   } catch (e) { /* the repaint below shows the true state either way */ }
   paintSettings();
 }

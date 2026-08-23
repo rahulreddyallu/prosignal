@@ -682,27 +682,16 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     def measurement_state() -> Dict[str, Any]:
         return _measurement_state()
 
-    @app.post("/measurement/start")
-    def measurement_start(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
-        """Open a period. Starting one after a change IS the re-registration:
-        the evidence from before it never joins the evidence from after."""
-        from . import measurement as _m
-        from .version import ENGINE_VERSION as _ver
-        led = Path(cfg.paths.ledger)
-        p = _m.start(
-            led,
-            config_version=str(getattr(cfg, "version", "") or ""),
-            engine_version=str(_ver),
-            git_commit=_git_commit(),
-            label=str((body or {}).get("label") or ""),
-        )
-        return p.to_dict()
+    @app.post("/admin/run-now")
+    def run_now() -> Dict[str, Any]:
+        """What the nightly job does, on demand: refresh the data, then rank.
 
-    @app.post("/measurement/stop")
-    def measurement_stop() -> Dict[str, Any]:
-        from . import measurement as _m
-        closed = _m.stop(Path(cfg.paths.ledger))
-        return closed.to_dict() if closed else {"closed": None}
+        The only one of these controls anyone presses. Opening the app before
+        the job has run and finding yesterday's answer with no way to move it
+        forward is the case it exists for.
+        """
+        job = jobs.start(kind="bootstrap", runner=_bootstrap_runner)
+        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
 
     @app.get("/performance")
     def performance_report(period: str = "active") -> Dict[str, Any]:
@@ -786,14 +775,39 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
     @app.post("/operations/pause")
     def operations_pause(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Turning the daily run off also closes the measurement period.
+
+        They were two switches for one idea. Nobody wants a measurement
+        period that keeps running over days the engine did not record, and
+        nobody wants the engine recording into no period at all -- so there
+        is one switch and it moves both.
+        """
         from . import operations as _ops
+        from . import measurement as _m
         reason = (body or {}).get("reason", "")
-        return _ops.pause(Path(cfg.paths.ledger), reason).to_dict()
+        st = _ops.pause(Path(cfg.paths.ledger), reason)
+        _m.stop(Path(cfg.paths.ledger))
+        return {**st.to_dict(), "measurement": None}
 
     @app.post("/operations/resume")
     def operations_resume() -> Dict[str, Any]:
+        """Turning it on opens a period, so what follows is measured.
+
+        If the config has changed since the last period this is also the
+        re-registration: a new period, a new fingerprint, and the previous
+        evidence kept separate from what comes next.
+        """
         from . import operations as _ops
-        return _ops.resume(Path(cfg.paths.ledger)).to_dict()
+        from . import measurement as _m
+        from .version import ENGINE_VERSION as _ver
+        led = Path(cfg.paths.ledger)
+        st = _ops.resume(led)
+        cur = _m.active(led, config_version=str(getattr(cfg, "version", "") or ""))
+        if cur is None or cur.status == "DRIFTED":
+            cur = _m.start(led,
+                           config_version=str(getattr(cfg, "version", "") or ""),
+                           engine_version=str(_ver), git_commit=_git_commit())
+        return {**st.to_dict(), "measurement": cur.to_dict()}
 
     @app.post("/admin/reset/market-data")
     def reset_market_data() -> Dict[str, Any]:
