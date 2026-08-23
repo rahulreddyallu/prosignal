@@ -151,10 +151,20 @@ button { font: inherit; color: inherit; }
 .dot.closed { background: var(--ink-3); }
 .dot.stale { background: var(--watch); }
 
-.iconbtn { background: transparent; border: 1px solid var(--line); width: 32px;
-           height: 32px; border-radius: var(--r-sm); cursor: pointer;
-           display: grid; place-items: center; color: var(--ink-2); }
-.iconbtn:hover { background: var(--surface-2); color: var(--ink); }
+/* A glyph gear renders at whatever size the platform font decides, which on
+   iOS was a speck inside a 32px box. An inline SVG is the size we set it. */
+.iconbtn { background: transparent; border: 1px solid var(--line); width: 38px;
+           height: 38px; border-radius: 10px; cursor: pointer;
+           display: grid; place-items: center; color: var(--ink-2);
+           transition: background .14s ease, color .14s ease,
+                       border-color .14s ease; }
+.iconbtn svg { width: 19px; height: 19px; display: block;
+               fill: none; stroke: currentColor; stroke-width: 1.7;
+               stroke-linecap: round; stroke-linejoin: round; }
+.iconbtn:hover { background: var(--surface-2); color: var(--ink);
+                 border-color: var(--line-strong); }
+.iconbtn:active { transform: scale(.94); }
+.iconbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* ------------------------------------------------------------------ nav */
 .nav { border-bottom: 1px solid var(--line); background: var(--ground); }
@@ -738,7 +748,7 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
     <div class="topbar-meta">
       <span id="mkt-status"><span class="dot closed"></span>Loading</span>
       <span class="hide-sm" id="mkt-fresh"></span>
-      <button class="iconbtn" id="gear" aria-label="Settings" title="Settings">&#9881;</button>
+      <button class="iconbtn" id="gear" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 13.6a7.6 7.6 0 0 0 0-3.2l1.9-1.4-1.9-3.3-2.2.9a7.7 7.7 0 0 0-2.8-1.6L14.1 2H9.9l-.3 2.4a7.7 7.7 0 0 0-2.8 1.6l-2.2-.9-1.9 3.3 1.9 1.4a7.6 7.6 0 0 0 0 3.2l-1.9 1.4 1.9 3.3 2.2-.9a7.7 7.7 0 0 0 2.8 1.6l.3 2.4h4.2l.3-2.4a7.7 7.7 0 0 0 2.8-1.6l2.2.9 1.9-3.3z"/></svg></button>
     </div>
   </div>
 </header>
@@ -816,7 +826,7 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
        aria-labelledby="set-title" hidden tabindex="-1">
   <div class="drawer-head">
     <h2 id="set-title">Settings</h2>
-    <button class="iconbtn" id="set-close" aria-label="Close settings">&#10005;</button>
+    <button class="iconbtn" id="set-close" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
   <div class="drawer-body" id="set-body"></div>
 </aside>
@@ -1865,10 +1875,13 @@ function viewHistory(v) {
   const open = (perf.open || {}).n || 0;
 
   if (!rows.length) {
-    return '<div class="box empty"><h3>Nothing has finished yet</h3>' +
-      '<p>Each signal is scored when it hits its target or its stop. ' +
-      (open ? '<b>' + open + '</b> are running now.' : 'Results appear here as they close.') +
-      '</p></div>';
+    return '<div class="box empty"><h3>No results yet</h3>' +
+      '<p>' + (open
+        ? '<b>' + open + '</b> ' + (open === 1 ? 'call is' : 'calls are') +
+          ' still open \u2014 the market has not taken any of them to a ' +
+          'target or a stop yet. Each one lands here the day it closes.'
+        : 'Every call the engine makes lands here the day it closes, with ' +
+          'what it returned.') + '</p></div>';
   }
 
   const won = rows.filter((r) => r.total_return > 0)

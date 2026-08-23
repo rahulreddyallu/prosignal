@@ -102,7 +102,7 @@ def test_the_view_is_json_serialisable():
     "could not be completed",         # a failed run must not imply a trade
     "Checks that could not run",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the near misses stay actionable
-    "Nothing has finished yet",           # history with an empty ledger
+    "No results yet",           # history with an empty ledger
     "has not been scanned yet",       # store moved on, results did not
     "Every name surfaced so far",     # history keyed by name, not by date
     "Not followed yet",               # a call with no sessions behind it
@@ -690,11 +690,32 @@ def test_the_curve_is_summed_not_compounded():
     assert "summed, not compounded" in html
 
 
-def test_an_empty_history_says_results_arrive_as_they_close():
+def test_an_empty_history_explains_what_open_calls_are():
+    """"23 are running now" said a number without saying what it counted."""
     html = _html()
-    assert "Nothing has finished yet" in html
-    assert "hits its target or its stop" in html
-    assert "are running now" in html
+    assert "No results yet" in html
+    assert "still open" in html
+    assert "target or a stop" in html
+    assert "the day it closes" in html
+
+
+def test_the_history_shows_the_whole_record_not_just_the_open_period():
+    """Scoping matters for a t-statistic. This page is a record of what the
+    calls did, and scoping it meant turning the daily run on emptied a
+    history of 136 closed trades."""
+    src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
+    assert 'def performance_report(period: str = "all")' in src
+
+
+def test_the_icons_are_drawn_not_typed():
+    """A glyph gear renders at whatever size the platform font decides; on
+    iOS it was a speck inside its box."""
+    html = _html()
+    assert "&#9881;" not in html and "&#10005;" not in html
+    gear = html[html.index('id="gear"'):]
+    assert "<svg" in gear[:200]
+    css = html[html.index("<style>"):html.index("</style>")]
+    assert ".iconbtn svg" in css
 
 
 def test_the_classes_that_carry_typography_are_all_styled():

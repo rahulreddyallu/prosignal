@@ -694,7 +694,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
 
     @app.get("/performance")
-    def performance_report(period: str = "active") -> Dict[str, Any]:
+    def performance_report(period: str = "all") -> Dict[str, Any]:
         """Did following the shortlist beat not following it?
 
         Resolution runs on read, like /outcomes, so the scheduled job does not
@@ -708,8 +708,12 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         _out.resolve_pending(store, led, path, cfg)
         rows = _out.load_outcomes(path)
 
-        # Filtered to the period, so runs scored under different coefficients
-        # cannot silently join the same average.
+        # Scoping defaults to OFF. Keeping evidence from before a config
+        # change out of evidence from after it matters for a t-statistic;
+        # this endpoint feeds a record of what the calls did, which has no
+        # such problem. Scoping it by default meant that turning the daily
+        # run on opened a period and instantly emptied a history of 136
+        # closed trades -- the isolation was real and the screen was wrong.
         from . import measurement as _m
         state = _measurement_state()
         window = None
