@@ -1187,6 +1187,76 @@ def _portfolio_params(cfg: AppConfig):
     )
 
 
+def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """How far the pre-registered forward test has run.
+
+    Reports elapsed time and integrity only. It deliberately shows NO
+    performance: reading an interim result and stopping when it looks good is
+    optional stopping, and a test stopped that way has no p-value worth
+    quoting. The numbers arrive when both targets are met, or not at all.
+    """
+    from .ledger import Ledger
+    from .validation.forward import load_registration, progress, verify
+
+    if getattr(args, "start", False) or getattr(args, "restart", False):
+        import subprocess
+
+        from . import __version__
+        from .validation.forward import register
+        commit = subprocess.run(["git", "rev-parse", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+        try:
+            opened = register(cfg.paths.ledger, config_version=cfg.version,
+                              engine_version=__version__, git_commit=commit,
+                              overwrite=bool(args.restart))
+        except FileExistsError as exc:
+            _print(str(exc))
+            return 1
+        _print(f"Forward test registered {opened.started_on}, fingerprint "
+               f"{opened.fingerprint()}.")
+
+    reg = load_registration(cfg.paths.ledger)
+    if reg is None:
+        _print("No forward test is registered.")
+        _print("  `prosignal research forward --start` opens one against the "
+               "current configuration.")
+        return 1
+
+    _rule("Pre-registered forward test")
+    _table("registration", ["field", "value"], [
+        ["started", reg.started_on],
+        ["configuration", reg.config_version],
+        ["commit", reg.git_commit[:12]],
+        ["fingerprint", reg.fingerprint()],
+        ["intact", "yes" if verify(cfg.paths.ledger) else "NO -- FILE EDITED"],
+    ])
+
+    try:
+        rows = Ledger(cfg.paths.ledger).iter_rows()
+    except Exception as exc:
+        _print(f"  ledger unreadable: {exc}")
+        return 1
+    prog = progress(cfg.paths.ledger, rows)
+    if prog is None:
+        return 1
+
+    _print()
+    _table("progress", ["field", "value"], [
+        ["sessions", f"{prog.sessions_elapsed} of {prog.sessions_target}"],
+        ["months", f"{prog.months_elapsed} of {prog.months_target}"],
+        ["runs recorded", f"{prog.runs_recorded}"],
+        ["latest session", prog.latest_session or "none yet"],
+        ["configurations seen", ", ".join(prog.config_versions) or "none yet"],
+    ])
+    _print()
+    _print(f"  {prog.summary()}")
+    if not prog.complete and not prog.broken:
+        _print()
+        _print("  No performance figure is shown by design. The pre-registered "
+               "tests run once, at the end.")
+    return 0 if not prog.broken else 1
+
+
 def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     """CPCV over the BOOK, not the ranking.
 
@@ -1426,6 +1496,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "This spends the one honest test -- do not use it "
                              "while still choosing between models")
     cpcv_p.set_defaults(func=cmd_research_cpcv)
+
+    fwd_p = research_sub.add_parser(
+        "forward", help="status of the pre-registered forward test")
+    fwd_p.add_argument("--start", action="store_true",
+                       help="open a forward test against the current configuration")
+    fwd_p.add_argument("--restart", action="store_true",
+                       help="discard the running test and open a new one")
+    fwd_p.set_defaults(func=cmd_research_forward)
 
     port_p = research_sub.add_parser(
         "portfolio",
