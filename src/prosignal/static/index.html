@@ -23,7 +23,7 @@
 
   --ink:           #1B1D1F;
   --ink-2:         #55595E;
-  --ink-3:         #85898F;
+  --ink-3:         #6D7177;
 
   --accent:        #12615F;   /* petrol */
   --accent-ink:    #FFFFFF;
@@ -66,7 +66,7 @@
 
     --ink:          #ECEDEE;
     --ink-2:        #A2A7AD;
-    --ink-3:        #71767C;
+    --ink-3:        #7D8288;
 
     --accent:       #4FB3AE;
     --accent-ink:   #06201F;
@@ -92,7 +92,7 @@
 :root[data-theme="dark"] {
   --ground:#101214; --surface:#17191C; --surface-2:#1C1F22; --surface-sunk:#0C0E10;
   --line:#2A2E33; --line-strong:#3A3F45;
-  --ink:#ECEDEE; --ink-2:#A2A7AD; --ink-3:#71767C;
+  --ink:#ECEDEE; --ink-2:#A2A7AD; --ink-3:#7D8288;
   --accent:#4FB3AE; --accent-ink:#06201F; --accent-soft:#16302F; --accent-line:#244846;
   --buy:#64C08C; --buy-soft:#14291D; --buy-line:#24432F;
   --watch:#D6AC5A; --watch-soft:#2A2113; --watch-line:#453620;
@@ -193,6 +193,9 @@ button { font: inherit; color: inherit; }
 .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
 .btn.ghost:hover:not(:disabled) { background: var(--surface-2); filter: none; }
 .btn.sm { padding: 7px 14px; font-size: 13px; }
+/* 36px is comfortable with a mouse and small for a thumb. Only the height
+   grows -- widening secondary actions on a narrow screen would crowd them. */
+@media (pointer: coarse) { .btn.sm { min-height: 44px; } }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner { width: 14px; height: 14px; border-radius: 50%;
@@ -1050,7 +1053,7 @@ function viewHistory(v) {
     const o = n.outcome || {};
     const pending = o.resolved === "pending";
     const repeat = n.times > 1
-      ? '<span class="chip" style="margin-left:6px">' + n.times + ' runs</span>'
+      ? ' <span class="chip">' + n.times + ' runs</span>'
       : "";
     return '<button class="namerow" data-stock="' + esc(n.ticker) + '">' +
       '<div style="min-width:0">' +

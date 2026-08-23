@@ -413,3 +413,39 @@ def test_the_five_slot_rule_is_not_reimplemented_in_the_interface():
     html = _html()
     assert "slice(0, 5)" not in html and "slice(0,5)" not in html
     assert ".picks" in html, "the interface must render what the backend selected"
+
+
+def _contrast(fg: str, bg: str) -> float:
+    def lum(colour: str) -> float:
+        rgb = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        chan = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                for c in rgb]
+        return 0.2126 * chan[0] + 0.7152 * chan[1] + 0.0722 * chan[2]
+    a, b = lum(fg), lum(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _tokens(block: str) -> dict:
+    return dict(re.findall(r"(--[a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})", block))
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_muted_text_meets_aa_for_small_text(theme):
+    """`--ink-3` carries the factor table's z and coefficient columns at
+    11.5px. That is small text, so AA wants 4.5:1 and not the 3:1 that large
+    text can get away with -- it was at 3.52 in light and 3.85 in dark, which
+    reads as decoration rather than as data a quant is meant to check.
+    """
+    html = _html()
+    if theme == "light":
+        block = html[html.index(":root {"):html.index("@media (prefers-color-scheme: dark)")]
+    else:
+        block = html[html.index(':root[data-theme="dark"]'):]
+        block = block[:block.index("}")]
+    tok = _tokens(block)
+    for surface in ("--surface", "--ground"):
+        ratio = _contrast(tok["--ink-3"], tok[surface])
+        assert ratio >= 4.5, (
+            f"{theme}: ink-3 on {surface} is {ratio:.2f}:1, below AA for small text"
+        )
