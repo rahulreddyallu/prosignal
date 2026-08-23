@@ -15,7 +15,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -23,6 +23,8 @@ from .config.loader import AppConfig, load_config
 from .core.logging import get_logger, setup_logging
 from .core.memory import release_memory, trim_available
 from .data.store import DataStore
+from .auth import (OPEN_PATHS, assert_safe_to_serve, resolve_token,
+                    token_matches)
 from .jobs import JobManager
 from .ledger import Ledger
 from .pipeline import run_analysis
@@ -72,6 +74,60 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # =====================================================================
     # health / readiness
     # =====================================================================
+    # ---- access control -------------------------------------------------
+    # `api.auth_token` existed in the config from v1 and nothing read it. On a
+    # laptop bound to 127.0.0.1 that cost nothing; on a public bind it is the
+    # entire security model, and the endpoints behind it start jobs that run
+    # for minutes (/analysis/run) or hours (/admin/bootstrap).
+    # Fails closed: a hosted instance with no token does not start.
+    assert_safe_to_serve(cfg, getattr(getattr(cfg.params, "api", None), "host", None))
+    _token = resolve_token(cfg)
+
+    @app.middleware("http")
+    async def _require_token(request, call_next):
+        if _token and request.url.path not in OPEN_PATHS:
+            supplied = request.headers.get("authorization", "")
+            if supplied.lower().startswith("bearer "):
+                supplied = supplied[7:]
+            else:
+                supplied = request.headers.get("x-api-key", "")
+            # The browser cannot set headers on a top-level navigation, so the
+            # UI itself is also allowed through a cookie set once at sign-in.
+            if not supplied:
+                supplied = request.cookies.get("prosignal_token", "")
+            if not token_matches(supplied, _token):
+                return JSONResponse(
+                    {"detail": "not authorised"}, status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        return await call_next(request)
+
+    @app.post("/auth")
+    def sign_in(request: Request, payload: Dict[str, Any]) -> JSONResponse:
+        """Exchange the token for a cookie, so the interface works in a browser.
+
+        Rate limiting is deliberately absent: this is a single-user instance
+        and the token is 32 random bytes, which is not guessable at any rate a
+        network permits.
+        """
+        if not _token:
+            return JSONResponse({"detail": "no token configured"}, status_code=400)
+        if not token_matches(str(payload.get("token", "")), _token):
+            return JSONResponse({"detail": "not authorised"}, status_code=401)
+        response = JSONResponse({"ok": True})
+        # `secure` follows the scheme the request actually arrived on. Hardcoding
+        # it True is right for the deployed instance and silently breaks a local
+        # HTTP one -- the browser accepts the cookie and never sends it back, so
+        # sign-in appears to succeed and every subsequent request 401s.
+        forwarded = request.headers.get("x-forwarded-proto", "")
+        over_tls = (request.url.scheme == "https"
+                    or forwarded.split(",")[0].strip() == "https")
+        response.set_cookie(
+            "prosignal_token", _token, httponly=True, samesite="strict",
+            secure=over_tls, max_age=60 * 60 * 24 * 90,
+        )
+        return response
+
     @app.get("/health")
     def health() -> Dict[str, Any]:
         """Liveness, plus resident memory.

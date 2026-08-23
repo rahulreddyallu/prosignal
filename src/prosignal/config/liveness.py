@@ -134,7 +134,6 @@ RESERVED: Dict[str, str] = {
     "port": "the process binds $PORT (see render.yaml startCommand); this value "
             "is never read and setting it does not move the port",
     "cors_origins": "no CORS middleware is installed; setting this grants nothing",
-    "auth_token": "no authentication is implemented on any endpoint",
     "owner": "provenance only; appears in no output",
 
     # -- research protocol: describes how research is conducted, not what the
