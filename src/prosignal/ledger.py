@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from .modelprint import model_fingerprint
 from .core.contracts import FinalSignalOutput, LedgerRow, RunContext
 from .core.errors import LedgerError
 from .core.logging import get_logger
@@ -142,6 +143,7 @@ def row_from_output(
     funnel: Dict[str, int],
     duration_ms: float,
     error: Optional[str] = None,
+    train_sessions: Optional[int] = None,
 ) -> LedgerRow:
     """Flatten a completed run into its permanent record.
 
@@ -177,6 +179,7 @@ def row_from_output(
         engine_version=output.engine_version,
         schema_version=context.schema_version,
         config_version=output.config_version,
+        model_fingerprint=model_fingerprint(train_sessions),
         mode=context.mode,
         regime_state={
             "bucket": regime.regime_bucket,

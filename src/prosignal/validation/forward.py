@@ -110,6 +110,10 @@ class Progress:
     months_elapsed: int
     months_target: int
     runs_recorded: int
+    #: Distinct model fingerprints seen since the start. config_version
+    #: covers parameters.yaml only, so this is the one that notices a code
+    #: change or a store that grew under an unchanged config.
+    model_fingerprints: List[str] = field(default_factory=list)
     #: Distinct config_versions seen since the start. More than one means the
     #: model moved and the window is not one experiment.
     config_versions: List[str] = field(default_factory=list)
@@ -289,6 +293,7 @@ def progress(
 
     dates: List[dt.date] = []
     versions: set = set()
+    prints: set = set()
     for record in ledger_rows:
         row = record if isinstance(record, dict) else dict(
             getattr(record, "__dict__", {}))
@@ -309,6 +314,9 @@ def progress(
         dates.append(when)
         if row.get("config_version"):
             versions.add(str(row["config_version"]))
+        fp = row.get("model_fingerprint")
+        if fp and fp != "unknown/?":
+            prints.add(str(fp))
 
     unique_days = sorted(set(dates))
     months = (today.year - start.year) * 12 + (today.month - start.month)
@@ -316,6 +324,13 @@ def progress(
     broken: List[str] = []
     if not verify(root):
         broken.append("the pre-registration file no longer matches its hash")
+    # The check config_version cannot make. Same knobs, different model.
+    if len(prints) > 1:
+        broken.append(
+            f"{len(prints)} model fingerprints recorded since the start "
+            f"({', '.join(sorted(prints))}) -- the source or the training "
+            f"depth changed mid-flight even though the config may not have"
+        )
     if len(versions) > 1:
         broken.append(
             f"{len(versions)} configuration versions recorded since the start "
@@ -336,5 +351,6 @@ def progress(
         months_target=reg.target_months,
         runs_recorded=len(dates),
         config_versions=sorted(versions),
+        model_fingerprints=sorted(prints),
         broken=broken,
     )

@@ -25,6 +25,8 @@ import datetime as dt
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
+import weakref
+
 import numpy as np
 
 from .data.types import DATE
@@ -59,7 +61,10 @@ class Trade:
 _NAME_COLUMNS = ("index_name", "symbol", "name")
 
 
-_INDEX_CACHE: Dict[str, Any] = {}
+#: Keyed by the store OBJECT, weakly. id() was wrong: CPython reuses an id
+#: once the object behind it is collected, so a freshly built store could be
+#: handed the previous store's benchmark frame. A test caught exactly that.
+_INDEX_CACHE: "weakref.WeakKeyDictionary[Any, Dict[str, Any]]" = weakref.WeakKeyDictionary()
 
 
 def _index_frame(store: Any, symbol: str):
@@ -69,9 +74,12 @@ def _index_frame(store: Any, symbol: str):
     # benchmark and each rebuilt it from a 224,000-row table, three times a
     # request. Keyed by store identity so a rebuilt store is not served a
     # stale frame.
-    ck = f"{id(store)}:{symbol}"
-    if ck in _INDEX_CACHE:
-        return _INDEX_CACHE[ck]
+    try:
+        per_store = _INDEX_CACHE.setdefault(store, {})
+    except TypeError:
+        per_store = None            # not weak-referenceable: just do the work
+    if per_store is not None and symbol in per_store:
+        return per_store[symbol]
     fn = getattr(store, "read_indices", None)
     if fn is None:
         return None
@@ -89,10 +97,12 @@ def _index_frame(store: Any, symbol: str):
     want = symbol.strip().casefold()
     sel = df[df[col].astype(str).str.strip().str.casefold() == want]
     if sel.empty:
-        _INDEX_CACHE[ck] = None
+        if per_store is not None:
+            per_store[symbol] = None
         return None
     out = sel.sort_values("date").reset_index(drop=True)
-    _INDEX_CACHE[ck] = out
+    if per_store is not None:
+        per_store[symbol] = out
     return out
 
 

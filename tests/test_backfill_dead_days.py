@@ -68,3 +68,88 @@ def test_dead_days_are_skipped_when_choosing_what_to_fetch():
     # A non-session must not count toward the requested depth, or the walk
     # stops short of the depth actually asked for.
     assert body.count("collected += 1") == 2
+
+
+# ===================================================================
+# The calendar constant that capped the store at 2,171
+# ===================================================================
+
+def test_the_session_density_allows_for_a_year_nse_actually_trades():
+    """It was 1.45, assuming 250 sessions a year. NSE does not deliver 250.
+
+    Measured across 2017-09-08 to 2026-08-21 the real density is 1.480, and
+    the gap is not academic: at 1.45 a request for 2,200 sessions was allowed
+    3,210 calendar days, which reaches 2017-11-06, and exactly 2,171 sessions
+    exist in that window. The build stopped dead at 2,171 and every further
+    press re-walked the same wall.
+    """
+    from prosignal.data.ingest import _DAYS_PER_SESSION
+    assert _DAYS_PER_SESSION >= 1.50, (
+        "below the real 1.480 density plus slack, a deep backfill silently "
+        "stops short of the depth it was asked for"
+    )
+    # And not so generous that the span outruns the real bound.
+    assert int(2200 * _DAYS_PER_SESSION) + 20 < 4200
+
+
+def test_a_walk_that_runs_out_of_calendar_says_so():
+    """It returned fewer days each press and nothing explained why."""
+    src = Path("src/prosignal/data/ingest.py").read_text(encoding="utf-8")
+    body = src[src.index("def _sessions_to_fetch"):src.index("def _backfill_sessions")]
+    assert "if collected < history_sessions:" in body
+    assert "span exhausted" in body
+
+
+def test_the_requested_depth_is_reachable_for_the_validated_target(live_cfg):
+    """2,200 is the depth the shipped coefficients were validated on, so the
+    backfill has to be able to physically get there."""
+    import datetime as dt
+    from prosignal.data.ingest import _DAYS_PER_SESSION
+    from prosignal.data.store import DataStore
+
+    sessions = DataStore(live_cfg.paths.curated, live_cfg.paths.snapshots).price_sessions()
+    if len(sessions) < 2200:
+        pytest.skip("local store is not deep enough to check reachability")
+    span = min(int(2200 * _DAYS_PER_SESSION) + 20,
+               int(live_cfg.params.storage.max_backfill_calendar_days))
+    cutoff = sessions[-1] - dt.timedelta(days=span)
+    assert sum(1 for d in sessions if d >= cutoff) >= 2200
+
+
+def test_the_nightly_ingest_advances_the_backfill_not_just_today():
+    """The default was min_history_sessions + 30 = 330: enough to score
+    today and nothing more. A store below the validated depth therefore
+    stayed below it forever, because the only thing that reached further
+    back was a person pressing a button."""
+    src = Path("src/prosignal/cli.py").read_text(encoding="utf-8")
+    body = src[src.index("sessions = args.sessions"):]
+    body = body[:body.index("opts = IngestOptions")]
+    assert "validated_target" in body
+    assert "bootstrap_chunk_sessions" in body
+    assert "if have and have < cov.validated_target" in body
+
+
+def test_a_store_already_at_depth_does_not_refetch_the_world():
+    """Once there, the nightly job goes back to the cheap default -- asking
+    for 2,200 every night would re-walk nine years to add one session."""
+    src = Path("src/prosignal/cli.py").read_text(encoding="utf-8")
+    body = src[src.index("sessions = args.sessions"):]
+    body = body[:body.index("opts = IngestOptions")]
+    # The deep request is conditional on being below the target.
+    assert body.index("if have and have < cov.validated_target") < body.index("sessions = min(")
+
+
+def test_opening_history_cannot_start_a_scan():
+    """Loading History appeared to make a shortlist show up on Today. It
+    reads; it does not run anything. What appeared was the last completed
+    scan, loaded by boot()."""
+    ui = Path("src/prosignal/static/index.html").read_text(encoding="utf-8")
+    for fn in ("loadHistory", "loadPerformance"):
+        i = ui.index("async function " + fn)
+        body = ui[i:ui.index("\n}", i)]
+        assert "method: \"POST\"" not in body, f"{fn} must not start work"
+    api = Path("src/prosignal/api.py").read_text(encoding="utf-8")
+    for name in ("performance_report", "stock_calls"):
+        b = api[api.index("def " + name):]
+        b = b[:b.index("@app.")] if "@app." in b else b
+        assert "jobs.start" not in b, f"{name} must not start a job"

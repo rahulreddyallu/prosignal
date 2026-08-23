@@ -616,6 +616,11 @@ class LedgerRow(_Contract):
     engine_version: str
     schema_version: str
     config_version: str
+    #: What actually decided the ranking: a hash of the model's source next
+    #: to the training depth it was fitted on. config_version covers only
+    #: parameters.yaml, so a code change or a store that grew leaves it
+    #: identical -- which is the blind spot this closes.
+    model_fingerprint: str = "unknown/?"
     mode: str = "live"
 
     regime_state: Dict[str, Any] = Field(default_factory=dict)

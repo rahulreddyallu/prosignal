@@ -292,8 +292,15 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # -- persist BEFORE returning. A run that is not recorded must not be
     # -- reported as evidence, so a ledger failure fails the run.
     duration_ms = (dt.datetime.now() - started).total_seconds() * 1000.0
+    # The store IS the training set -- the model refits from it every run --
+    # so the depth is part of what produced this ranking.
+    try:
+        train_sessions = len(store.price_sessions())
+    except Exception:
+        train_sessions = None
     Ledger(config.paths.ledger).append(
-        row_from_output(output, context, funnel, duration_ms)
+        row_from_output(output, context, funnel, duration_ms,
+                        train_sessions=train_sessions)
     )
 
     log.info(
