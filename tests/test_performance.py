@@ -60,7 +60,8 @@ def test_a_frame_without_a_name_column_is_not_a_benchmark():
 
 
 def test_returns_stand_alone_when_no_comparison_is_possible():
-    perf = P.performance([_t(net=0.05), _t(net=-0.01)], None)
+    # Distinct calls: same name on one day is deduplicated to one.
+    perf = P.performance([_t(net=0.05), _t(ticker="BBB", net=-0.01)], None)
     assert perf["n"] == 2
     assert perf["win_rate"] == 0.5
     assert "comparison_note" in perf
@@ -81,7 +82,7 @@ def test_no_t_is_offered_on_a_single_trade():
 
 
 def test_every_ratio_carries_its_count():
-    perf = P.performance([_t(), _t(net=-0.02)], None)
+    perf = P.performance([_t(), _t(ticker="BBB", net=-0.02)], None)
     assert perf["n"] == 2
     assert "win_rate" in perf and "n" in perf
 
@@ -166,3 +167,47 @@ def test_open_positions_never_enter_the_realised_figures():
     body = text[text.index("def performance("):text.index("def by_ticker(")]
     assert "open_positions" not in body
     assert "unrealised" not in body
+
+
+# ===================================================================
+# One call is one call
+# ===================================================================
+
+def test_several_runs_issuing_a_name_on_one_day_is_one_call():
+    """SUZLON read as five calls returning +70.71% when it was three calls
+    returning +43.17% -- a day can produce several ledger runs and each
+    wrote its own outcome row for the same signal."""
+    rows = [_o("SUZLON", "2024-01-09", 0.1023, 12),
+            _o("SUZLON", "2024-01-09", 0.1023, 12),      # same call, other run
+            _o("SUZLON", "2024-01-16", 0.1731, 10),
+            _o("SUZLON", "2024-01-16", 0.1731, 10),
+            _o("SUZLON", "2024-08-02", 0.1563, 6)]
+    assert len(P.dedupe(rows)) == 3
+    got = P.by_ticker(rows, None)[0]
+    assert got["n"] == 3
+    assert abs(got["total_return"] - 0.4317) < 1e-6
+
+
+def test_calls_held_at_the_same_time_are_counted_as_overlapping():
+    """Two positions in one name held together are two slots. Adding their
+    returns is a return on twice the capital."""
+    a = {"entry_date": "2024-01-15", "exit_date": "2024-02-02"}
+    b = {"entry_date": "2024-01-17", "exit_date": "2024-02-02"}
+    c = {"entry_date": "2024-08-05", "exit_date": "2024-08-13"}
+    assert P.overlaps([a, b, c]) == 1
+    assert P.overlaps([a, c]) == 0
+
+
+def test_a_name_reports_both_ways_of_totalling_it():
+    """They answer different questions and the screen shows both."""
+    rows = [_o("X", "2024-01-09", 0.10, 12), _o("X", "2024-08-02", 0.15, 6)]
+    d = P.calls_for("X", rows, None)
+    assert d["n_calls"] == 2 and d["n_paid_off"] == 2
+    assert abs(d["taking_every_call"] - 0.25) < 1e-9
+    assert d["first_call"] == "2024-01-09"
+    assert d["holding_since_first"] is None     # no store, so no claim
+
+
+def test_a_name_with_no_closed_call_says_so_without_inventing_one():
+    d = P.calls_for("NOPE", [], None)
+    assert d["n_calls"] == 0 and d["taking_every_call"] is None

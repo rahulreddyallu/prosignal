@@ -402,6 +402,35 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             out.append({**row, "company": company, "outcome": outcome.__dict__})
         return {"names": out, "note": ""}
 
+    @app.get("/stock/{ticker}/calls")
+    def stock_calls(ticker: str) -> Dict[str, Any]:
+        """Every call on one name, from the same source the list uses.
+
+        The old panel read the ledger while the list read resolved outcomes,
+        so a name showing five calls opened a panel saying it had never
+        reached a shortlist. One source now.
+        """
+        from . import outcomes as _out
+        from . import performance as _perf
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        led = Path(cfg.paths.ledger)
+        path = led / "outcomes.jsonl"
+        _out.resolve_pending(store, led, path, cfg)
+        rows = _out.load_outcomes(path)
+        from .stages._cfg import iv
+        horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
+        op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
+                                  store, max_hold=horizon)
+        names, _ = _reference_names()
+        sym = str(ticker).upper()
+        company = names.get(sym) or sym
+        for suffix in (" Limited", " Ltd.", " Ltd", " LIMITED"):
+            if company.endswith(suffix):
+                company = company[: -len(suffix)].strip()
+                break
+        out = _perf.calls_for(sym, rows, store, open_rows=op.get("positions") or [])
+        return {**out, "company": company}
+
     @app.get("/stock/{ticker}/history")
     def stock_history(ticker: str) -> Dict[str, Any]:
         """Every time this name reached the shortlist, and what followed.

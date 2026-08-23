@@ -30,7 +30,7 @@ import numpy as np
 from .data.types import DATE
 
 __all__ = ["Trade", "performance", "by_ticker", "equity_curve",
-           "open_positions"]
+           "open_positions", "dedupe", "overlaps", "calls_for"]
 
 
 @dataclass
@@ -205,7 +205,7 @@ def performance(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
                 step: int = 21) -> Dict[str, Any]:
     """Headline comparison. Every ratio carries the count behind it."""
     idx = _index_frame(store, benchmark) if store is not None else None
-    trades = _trades(outcomes, idx)
+    trades = _trades(dedupe(outcomes), idx)
     n = len(trades)
     if n == 0:
         return {"n": 0, "benchmark": benchmark,
@@ -249,11 +249,45 @@ def performance(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
     return out
 
 
+def dedupe(outcomes: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One call is one call, however many runs issued it that day.
+
+    A day can produce several ledger runs and each writes its own outcome row
+    for the same signal. Counting those separately made SUZLON read as five
+    calls returning +70.71% when it was three calls returning +43.17%.
+    """
+    seen, out = set(), []
+    for o in outcomes:
+        key = (o.get("ticker"), str(o.get("signal_date") or "")[:10])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(o)
+    return out
+
+
+def overlaps(trades: Sequence[Dict[str, Any]]) -> int:
+    """How many calls on this name were held at the same time as another.
+
+    It matters because the totals add per-call returns. Two calls held
+    together cannot both be funded from one slot, so a sum across them is a
+    return on twice the capital -- leverage the strategy never took.
+    """
+    rows = sorted(({"a": str(t.get("entry_date") or "")[:10],
+                    "b": str(t.get("exit_date") or "")[:10]} for t in trades),
+                  key=lambda r: r["a"])
+    n = 0
+    for i, r in enumerate(rows):
+        if any(q["a"] <= r["b"] and r["a"] <= q["b"] for q in rows[:i]):
+            n += 1
+    return n
+
+
 def by_ticker(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
               benchmark: str = "Nifty 200") -> List[Dict[str, Any]]:
     """Per-name record, worst first -- the losses are the part worth reading."""
     idx = _index_frame(store, benchmark) if store is not None else None
-    trades = _trades(outcomes, idx)
+    trades = _trades(dedupe(outcomes), idx)
     grouped: Dict[str, List[Trade]] = {}
     for t in trades:
         grouped.setdefault(t.ticker, []).append(t)
@@ -272,6 +306,9 @@ def by_ticker(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
             "best": float(net.max()),
             "worst": float(net.min()),
             "last_exit": max(t.exit_date for t in ts),
+            "first_call": min(t.signal_date for t in ts),
+            "overlapping": overlaps([{"entry_date": t.entry_date,
+                                      "exit_date": t.exit_date} for t in ts]),
             "exit_mix": {r: sum(1 for t in ts if t.exit_reason == r)
                          for r in sorted({t.exit_reason for t in ts})},
         })
@@ -289,7 +326,7 @@ def equity_curve(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
     equal-slot book actually accumulates.
     """
     idx = _index_frame(store, benchmark) if store is not None else None
-    trades = sorted(_trades(outcomes, idx), key=lambda t: t.exit_date or "")
+    trades = sorted(_trades(dedupe(outcomes), idx), key=lambda t: t.exit_date or "")
     curve, run, bench_run = [], 0.0, 0.0
     for t in trades:
         if not t.exit_date:
@@ -409,4 +446,71 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
         "note": ("Marked to the latest close. These are not results -- they "
                  "can reverse before they close, and they are kept out of "
                  "every figure above."),
+    }
+
+
+def calls_for(ticker: str, outcomes: Sequence[Dict[str, Any]], store: Any = None,
+              *, open_rows: Sequence[Dict[str, Any]] = ()) -> Dict[str, Any]:
+    """Every call on one name, and two different ways of totalling them.
+
+    The two are not interchangeable and the screen shows both because the
+    honest answer to "what did this name return" depends on what you did.
+
+    `taking_every_call` adds the per-call returns. That is what an equal-slot
+    book earns IF the calls did not overlap. Where they did, the sum is a
+    return on more capital than one slot -- two positions in one name held
+    together are two slots -- so the overlap count is reported next to it
+    rather than buried.
+
+    `holding_since_first` is the other question entirely: buy on the first
+    call, never sell. It ignores every exit the engine asked for, which is
+    why it is a comparison and not a result.
+    """
+    sym = str(ticker).upper()
+    mine = dedupe([o for o in outcomes if str(o.get("ticker", "")).upper() == sym])
+    mine.sort(key=lambda o: str(o.get("signal_date") or ""))
+    still = [o for o in (open_rows or [])
+             if str(o.get("ticker", "")).upper() == sym]
+
+    calls = [{
+        "signal_date": o.get("signal_date"),
+        "entry_date": o.get("entry_date"),
+        "exit_date": o.get("exit_date"),
+        "entry_price": o.get("entry_price"),
+        "exit_price": o.get("exit_price"),
+        "sessions_held": o.get("sessions_held"),
+        "net_return": o.get("net_return"),
+        "exit_reason": o.get("exit_reason"),
+    } for o in mine]
+
+    total = float(sum(float(c["net_return"] or 0.0) for c in calls)) if calls else None
+    over = overlaps(calls)
+
+    hold = None
+    if calls and store is not None:
+        try:
+            f = store.read_prices(symbols=[sym])
+            if f is not None and not f.empty:
+                f = f.sort_values(DATE)
+                first_entry = float(calls[0]["entry_price"] or 0.0)
+                last_close = float(f.iloc[-1]["close"])
+                if first_entry > 0 and np.isfinite(last_close):
+                    hold = last_close / first_entry - 1.0
+        except Exception:
+            hold = None
+
+    won = [c for c in calls if (c["net_return"] or 0) > 0]
+    return {
+        "ticker": sym,
+        "n_calls": len(calls),
+        "n_paid_off": len(won),
+        "first_call": calls[0]["signal_date"] if calls else None,
+        "last_call": calls[-1]["signal_date"] if calls else None,
+        "calls": calls,
+        "open": len(still),
+        "taking_every_call": total,
+        "overlapping_calls": over,
+        "holding_since_first": hold,
+        "best": max((c["net_return"] for c in calls), default=None),
+        "worst": min((c["net_return"] for c in calls), default=None),
     }
