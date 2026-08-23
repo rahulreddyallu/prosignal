@@ -225,19 +225,19 @@ def _market(regime: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _market_summary(regime: Dict[str, Any]) -> str:
+    """One sentence about conditions.
+
+    It deliberately does NOT restate the breadth percentage. That number has
+    its own row directly underneath, and printing the identical phrase twice
+    in one card reads as padding.
+    """
     trend = str(regime.get("trend") or "").lower()
-    breadth = regime.get("breadth_pct")
-    bits: List[str] = []
-    if trend:
-        bits.append(f"The broader market is in an {trend}" if trend.startswith(("u", "o"))
-                    else f"The broader market is in a {trend}")
-    if isinstance(breadth, (int, float)):
-        bits.append(f"with {breadth:.0f}% of names above their trend line")
-    text = " ".join(bits).strip()
-    if not text:
+    if not trend:
         return "Market conditions could not be assessed."
+    article = "an" if trend.startswith(("u", "o", "a", "e", "i")) else "a"
+    text = f"The broader market is in {article} {trend}"
     if not regime.get("allow_new_entries", True):
-        return text + ". Conditions do not currently support opening new positions."
+        return text + ", but conditions do not support opening new positions."
     return text + "."
 
 

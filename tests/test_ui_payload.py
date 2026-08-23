@@ -104,7 +104,8 @@ def test_the_view_is_json_serialisable():
     "What would move this to Buy",    # the near misses stay actionable
     "No runs recorded yet",           # history with an empty ledger
     "has not been scanned yet",       # store moved on, results did not
-    "What happened next",             # a past run, followed forward
+    "The shortlist on",               # a past run, headed by its own date
+    "Not followed yet",               # a call with no sessions behind it
     "Clear the run history?",         # destructive action is confirmed
 ])
 def test_every_reachable_state_has_markup(state):
@@ -157,6 +158,44 @@ def test_both_themes_define_every_colour_token():
                if not t.startswith(("--r-", "--sp-", "--font", "--mono", "--maxw"))}
     missing = sorted(colours - darkset)
     assert not missing, f"tokens with no dark-theme value: {missing}"
+
+
+#: Names that come from the browser, the DOM, or a builtin -- everything else
+#: called from this file has to be defined in it.
+_AMBIENT = {
+    "if", "for", "while", "switch", "catch", "function", "return", "typeof",
+    "new", "Promise", "Number", "String", "Date", "Array", "Object", "JSON",
+    "Math", "fetch", "setTimeout", "parseInt", "parseFloat", "isNaN",
+    "isFinite", "encodeURIComponent", "Error", "addEventListener",
+    "removeEventListener", "querySelector", "querySelectorAll",
+    "getElementById", "getItem", "setItem", "setAttribute", "removeAttribute",
+    "click", "focus", "blur", "contains", "forEach", "from", "map", "join",
+    "push", "find", "filter", "replace", "toFixed", "toLocaleString",
+    "toLocaleDateString", "resolve", "json", "stopPropagation", "min", "max",
+    "sort", "slice", "split", "trim", "includes", "scrollIntoView",
+    # CSS function names picked up by the same scan
+    "var", "rgba", "rect", "minmax", "clamp", "repeat", "translateX",
+    "translateY", "scaleX", "rotate", "brightness", "saturate", "blur",
+    "gradient", "mix", "not", "bezier", "step", "add", "remove",
+}
+
+
+def test_every_function_the_interface_calls_is_defined():
+    """Deleting a block of view code has twice taken a neighbouring helper with
+    it -- `row()` once, then `openPanel`, `closePanel` and `panelHTML`. Both
+    times the page loaded, the suite passed, and the failure was a dead click
+    in a details panel that only appeared by opening it.
+    """
+    body = _html()[_html().index("<script>"):]
+    defined = set(re.findall(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", body))
+    # Arrow functions bound to a const are definitions too.
+    defined |= set(re.findall(
+        r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(", body))
+    # No whitespace before the paren: a real call never has one, and allowing
+    # it matched prose like "returned an error (" inside a string literal.
+    called = set(re.findall(r"\b([A-Za-z_$][\w$]*)\(", body))
+    missing = sorted(called - defined - _AMBIENT)
+    assert not missing, f"called but never defined: {missing}"
 
 
 def test_the_interface_has_one_results_tab():
@@ -242,9 +281,16 @@ def test_anything_toggled_by_hidden_has_a_hidden_rule():
 
 
 def test_clearing_history_asks_first():
+    """Not with window.confirm. Embedded and sandboxed browser contexts
+    suppress it, and a suppressed confirm returns false -- which is exactly
+    what made the clear button do nothing at all when it was pressed.
+    """
     html = _html()
-    assert "window.confirm" in html
+    assert "window.confirm" not in html, (
+        "native confirm is suppressed in embedded contexts and returns false"
+    )
     assert "Clear the run history?" in html
+    assert 'id="ask"' in html and "function ask(" in html
 
 
 def test_clearing_history_says_the_record_is_kept():

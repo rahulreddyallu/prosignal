@@ -71,13 +71,25 @@ def test_a_target_touched_intraday_counts_as_touched():
     assert out.target_hit is True and out.resolved == "target"
 
 
-def test_both_levels_touched_is_reported_as_unknown_not_guessed():
+def test_both_levels_touched_is_reported_as_both_not_guessed():
     """Daily bars do not record the sequence within a session. Choosing one
     would be inventing an ordering the data does not contain."""
     frame = bars([("2026-01-06", "AAA", 125.0, 85.0, 100.0)])
     out = outcomes_for([pick()], SIG, frame)[0]
-    assert out.resolved == "unknown"
+    assert out.resolved == "both"
     assert "which came first" in out.note
+
+
+def test_nothing_to_report_yet_is_not_the_same_as_an_ambiguous_result():
+    """These were both `unknown`, so a name flagged this morning rendered as
+    "Both touched" -- a claim that its target and its stop had already been
+    hit, about a name that had not traded since."""
+    pending = outcomes_for([pick()], SIG, bars([]))[0]
+    ambiguous = outcomes_for(
+        [pick()], SIG, bars([("2026-01-06", "AAA", 125.0, 85.0, 100.0)]))[0]
+    assert pending.resolved == "pending"
+    assert ambiguous.resolved == "both"
+    assert pending.resolved != ambiguous.resolved
 
 
 def test_an_untouched_setup_stays_open():
@@ -129,6 +141,8 @@ def test_the_summary_carries_the_sample_size():
 
 
 def test_a_run_with_no_follow_up_says_so_rather_than_reporting_zero():
+    """Three cards reading "0 of 0" say nothing. The screen suppresses the
+    tally entirely and explains why instead."""
     s = summarise(outcomes_for([pick()], SIG, bars([])))
     assert s["tracked"] == 0
-    assert "No follow-up" in s["text"]
+    assert "until the market trades again" in s["text"]

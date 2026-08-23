@@ -297,6 +297,65 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ),
         }
 
+    @app.get("/stock/{ticker}/history")
+    def stock_history(ticker: str) -> Dict[str, Any]:
+        """Every time this name reached the shortlist, and what followed.
+
+        Answers the question the day view cannot: is this a name the engine
+        keeps returning to, and how have those calls turned out?
+        """
+        import datetime as _dt
+
+        from .presentation.clearmark import read_mark
+        from .presentation.history import runs_for_ticker
+        from .presentation.outcome import outcomes_for, summarise
+
+        symbol = str(ticker).upper()
+        runs = runs_for_ticker(_ledger_rows(), symbol,
+                               since=read_mark(cfg.paths.ledger))
+        names, _ = _reference_names()
+        company = names.get(symbol) or symbol
+        for suffix in (" Limited", " Ltd.", " Ltd", " LIMITED"):
+            if company.endswith(suffix):
+                company = company[: -len(suffix)].strip()
+                break
+
+        if not runs:
+            return {"ticker": symbol, "company": company, "runs": [],
+                    "summary": {"tracked": 0,
+                                "text": "This name has not reached a shortlist."}}
+
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        earliest = min(_dt.date.fromisoformat(r["date"]) for r in runs)
+        prices = store.read_prices(
+            symbols=[symbol], start=earliest,
+            columns=["date", "symbol", "high", "low", "close"],
+        )
+
+        merged, outcomes = [], []
+        for run in runs:
+            out = outcomes_for([{**run, "ticker": symbol}],
+                               _dt.date.fromisoformat(run["date"]), prices)[0]
+            outcomes.append(out)
+            merged.append({**run, "outcome": out.__dict__})
+
+        latest = None
+        if prices is not None and not prices.empty:
+            latest = float(prices.sort_values("date")["close"].iloc[-1])
+
+        return {
+            "ticker": symbol,
+            "company": company,
+            "last_price": latest,
+            "times_flagged": len(runs),
+            "runs": merged,
+            "summary": summarise(outcomes),
+            "disclaimer": (
+                "Each call is followed from the session after it was made, at "
+                "the levels recorded that day. A record, not a backtest."
+            ),
+        }
+
     @app.get("/history/{date}")
     def history_day(date: str) -> Dict[str, Any]:
         """One past run, and what the market did afterwards.
