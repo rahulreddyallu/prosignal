@@ -656,8 +656,56 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ),
         }
 
+    def _git_commit() -> str:
+        """Best effort. A period without a commit is still a period; one that
+        refused to open because git was unavailable would not be."""
+        import subprocess
+        try:
+            out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(cfg.paths.root),
+                                 capture_output=True, text=True, timeout=5)
+            return out.stdout.strip() if out.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    def _measurement_state() -> Dict[str, Any]:
+        from . import measurement as _m
+        led = Path(cfg.paths.ledger)
+        cv = str(getattr(cfg, "version", "") or "")
+        cur = _m.active(led, config_version=cv)
+        return {
+            "active": cur.to_dict() if cur else None,
+            "periods": [x.to_dict() for x in _m.periods(led)[:12]],
+            "config_version": cv,
+        }
+
+    @app.get("/measurement")
+    def measurement_state() -> Dict[str, Any]:
+        return _measurement_state()
+
+    @app.post("/measurement/start")
+    def measurement_start(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Open a period. Starting one after a change IS the re-registration:
+        the evidence from before it never joins the evidence from after."""
+        from . import measurement as _m
+        from .version import ENGINE_VERSION as _ver
+        led = Path(cfg.paths.ledger)
+        p = _m.start(
+            led,
+            config_version=str(getattr(cfg, "version", "") or ""),
+            engine_version=str(_ver),
+            git_commit=_git_commit(),
+            label=str((body or {}).get("label") or ""),
+        )
+        return p.to_dict()
+
+    @app.post("/measurement/stop")
+    def measurement_stop() -> Dict[str, Any]:
+        from . import measurement as _m
+        closed = _m.stop(Path(cfg.paths.ledger))
+        return closed.to_dict() if closed else {"closed": None}
+
     @app.get("/performance")
-    def performance_report() -> Dict[str, Any]:
+    def performance_report(period: str = "active") -> Dict[str, Any]:
         """Did following the shortlist beat not following it?
 
         Resolution runs on read, like /outcomes, so the scheduled job does not
@@ -670,6 +718,20 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         path = led / "outcomes.jsonl"
         _out.resolve_pending(store, led, path, cfg)
         rows = _out.load_outcomes(path)
+
+        # Filtered to the period, so runs scored under different coefficients
+        # cannot silently join the same average.
+        from . import measurement as _m
+        state = _measurement_state()
+        window = None
+        if period == "active" and state["active"]:
+            window = _m.Period(**{k: v for k, v in state["active"].items()
+                                  if k not in ("status", "open")})
+        elif period not in ("active", "all"):
+            window = next((x for x in _m.periods(led) if x.id == period), None)
+        if window is not None:
+            rows = [r for r in rows if window.covers(str(r.get("signal_date") or ""))]
+
         from .stages._cfg import iv
         horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
         bench = str(cfg.params.stage2_regime.benchmark_index.value)
@@ -680,6 +742,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "curve": _perf.equity_curve(rows, store, benchmark=bench),
             "calibration": _out.calibration(rows),
             "pending": max(0, led_pending_count(led, rows)),
+            "measurement": state,
+            "scope": ("period" if window is not None else "all"),
         }
 
     def led_pending_count(led: Path, resolved) -> int:

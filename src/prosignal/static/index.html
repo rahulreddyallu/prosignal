@@ -568,49 +568,65 @@ td.r { text-align: right; }
   .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-5); }
 }
 
-/* ===== settings ==================================================== */
-.set { display: grid; gap: var(--sp-4); }
-.set-b h3 { font-size: 14.5px; margin-bottom: var(--sp-3); }
-.set-b .note { color: var(--ink-2); font-size: 13px; line-height: 1.6;
-               margin: var(--sp-3) 0; }
-.fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.55;
-        margin-top: var(--sp-3); }
-.seg3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px; }
-.segbtn { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px;
-          border: 1px solid var(--line); background: var(--surface);
-          border-radius: var(--r-sm); cursor: pointer; font: inherit;
-          font-size: 13px; font-weight: 550; color: var(--ink);
-          text-align: center; transition: border-color .14s ease,
-          background .14s ease; }
-.segbtn span { font-size: 11px; font-weight: 400; color: var(--ink-3); }
-.segbtn:hover { border-color: var(--line-strong); }
-.segbtn.on { border-color: var(--accent); background: var(--accent-soft); }
-.segbtn.on span { color: var(--ink-2); }
-.setrow { display: flex; align-items: center; justify-content: space-between;
-          gap: var(--sp-4); flex-wrap: wrap; }
-.setrow .k { font-size: 15px; font-weight: 600; color: var(--ink); }
-.setrow .v { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
-.set-b.danger { border-color: var(--neg); }
-.set-b.danger h3 { color: var(--neg); }
-.btn.danger { background: var(--neg); border-color: var(--neg); color: #fff; }
-.btn.danger:hover { filter: brightness(1.08); }
-.oplog { list-style: none; display: grid; gap: 2px; }
-.oplog li { display: flex; justify-content: space-between; gap: var(--sp-4);
-            padding: 7px 0; border-bottom: 1px solid var(--line);
-            font-size: 12.5px; }
-.oplog li:last-child { border-bottom: none; }
-.oplog .oa { color: var(--ink); text-transform: capitalize; }
-.oplog .od { color: var(--ink-3); white-space: nowrap; }
-.phrase { display: block; margin: var(--sp-4) 0 0; }
-.phrase span { display: block; font-size: 12px; color: var(--ink-2);
-               margin-bottom: 5px; }
-.phrase input { width: 100%; padding: 9px 11px; font: inherit; font-size: 14px;
-                letter-spacing: .08em; text-transform: uppercase;
-                color: var(--ink); background: var(--surface-sunk);
-                border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
-.phrase input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
+/* ===== settings drawer ============================================= */
+.drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.42);
+                opacity: 0; transition: opacity .24s ease; }
+.drawer-scrim.in { opacity: 1; }
+.drawer { position: fixed; z-index: 61; background: var(--surface);
+          display: flex; flex-direction: column;
+          top: 0; right: 0; bottom: 0; width: min(380px, 100vw);
+          border-left: 1px solid var(--line);
+          transform: translateX(100%); transition: transform .26s cubic-bezier(.32,.72,0,1);
+          box-shadow: -18px 0 48px rgba(0,0,0,.18); }
+.drawer.in { transform: translateX(0); }
+.drawer-head { display: flex; align-items: center; justify-content: space-between;
+               padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line);
+               flex: none; }
+.drawer-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.drawer-body { padding: var(--sp-4) var(--sp-5) var(--sp-6);
+               overflow-y: auto; display: grid; gap: var(--sp-5); }
+
+.grp { display: grid; }
+.grp-h { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
+         color: var(--ink-3); padding-bottom: 6px; }
+.row { display: flex; align-items: center; justify-content: space-between;
+       gap: var(--sp-4); padding: 11px 0; border-bottom: 1px solid var(--line); }
+.grp .row:last-of-type { border-bottom: none; }
+.row-t { min-width: 0; }
+.rl { font-size: 14px; color: var(--ink); font-weight: 500; }
+.rs { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.row-c { flex: none; }
+.warn-t { color: var(--neg); }
+.danger-t { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 35%, transparent); }
+.btn.xs { padding: 5px 12px; font-size: 12.5px; border-radius: var(--r-sm); }
+
+/* The switch. A track, a knob, and one transition on each. */
+.sw { position: relative; width: 42px; height: 25px; border-radius: 13px; flex: none;
+      background: var(--line-strong); border: none; cursor: pointer; padding: 0;
+      transition: background .2s ease; }
+.sw .knob { position: absolute; top: 3px; left: 3px; width: 19px; height: 19px;
+            border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+            transition: transform .22s cubic-bezier(.32,.72,0,1); }
+.sw.on { background: var(--accent); }
+.sw.on .knob { transform: translateX(17px); }
+.sw:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.past { margin-top: 6px; display: grid; gap: 3px; }
+.pr { display: flex; justify-content: space-between; gap: var(--sp-4);
+      font-size: 11.5px; color: var(--ink-3); }
+.pf { font-variant-numeric: tabular-nums; opacity: .75; }
+
+@media (max-width: 560px) {
+  /* A bottom sheet is where a thumb already is. */
+  .drawer { top: auto; left: 0; right: 0; bottom: 0; width: auto;
+            max-height: 86vh; border-left: none; border-top: 1px solid var(--line);
+            border-radius: var(--r-md) var(--r-md) 0 0;
+            transform: translateY(100%); box-shadow: 0 -18px 48px rgba(0,0,0,.22); }
+  .drawer.in { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .drawer-scrim, .sw, .sw .knob { transition: none; }
+}
 
 /* ===== build tile ================================================== */
 .tile { border-left: 3px solid var(--accent); }
@@ -630,6 +646,7 @@ td.r { text-align: right; }
 .vhead { display: flex; align-items: center; justify-content: space-between;
          gap: var(--sp-4); margin-bottom: var(--sp-4); flex-wrap: wrap; }
 .vhead h3 { font-size: 15px; }
+.vscope { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
          gap: var(--sp-4); padding-bottom: var(--sp-4);
          border-bottom: 1px solid var(--line); }
@@ -679,7 +696,6 @@ path.cb { stroke: var(--ink-3); stroke-dasharray: 3 3; stroke-width: 1.25; }
 .names-h h3 { font-size: 14px; }
 
 @media (max-width: 640px) {
-  .seg3 { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
   .stat .sv { font-size: 20px; }
   .tile-h { flex-direction: column; gap: var(--sp-3); }
@@ -734,7 +750,6 @@ path.cb { stroke: var(--ink-3); stroke-dasharray: 3 3; stroke-width: 1.25; }
   <div class="nav-in" role="tablist">
     <button role="tab" data-view="overview" aria-current="page">Today</button>
     <button role="tab" data-view="history">History</button>
-    <button role="tab" data-view="settings">Settings</button>
   </div>
 </nav>
 
@@ -793,17 +808,22 @@ path.cb { stroke: var(--ink-3); stroke-dasharray: 3 3; stroke-width: 1.25; }
   <div class="modal">
     <h3 id="ask-title">Clear the run history?</h3>
     <p id="ask-body"></p>
-    <label class="phrase" id="ask-phrase-wrap" hidden>
-      <span id="ask-phrase-label"></span>
-      <input type="text" id="ask-phrase" autocomplete="off" autocapitalize="characters"
-             spellcheck="false" aria-describedby="ask-phrase-label">
-    </label>
     <div class="modal-acts">
       <button class="btn ghost sm" id="ask-no">Cancel</button>
       <button class="btn sm" id="ask-yes">Clear history</button>
     </div>
   </div>
 </div>
+<div class="drawer-scrim" id="set-scrim" hidden></div>
+<aside class="drawer" id="settings" role="dialog" aria-modal="true"
+       aria-labelledby="set-title" hidden tabindex="-1">
+  <div class="drawer-head">
+    <h2 id="set-title">Settings</h2>
+    <button class="iconbtn" id="set-close" aria-label="Close settings">&#10005;</button>
+  </div>
+  <div class="drawer-body" id="set-body"></div>
+</aside>
+
 <aside class="panel" id="panel" role="dialog" aria-modal="true" aria-labelledby="panel-title" tabindex="-1">
   <div class="panel-head">
     <div style="flex:1;min-width:0">
@@ -835,7 +855,7 @@ const state = { view: null, run: null, tab: "overview", busy: false,
                 jobKind: null,
                 history: undefined,
                 latestSession: null, slateSize: 5, coverage: null,
-                perf: undefined, ops: null, shallow: false };
+                perf: undefined, ops: null, meas: null, shallow: false };
 
 /* ---------------------------------------------------------------- theme */
 const THEME_KEY = "signal.theme";
@@ -876,36 +896,18 @@ function day(iso) {
     { day: "numeric", month: "short", year: "numeric" });
 }
 
-/* `phrase` makes the confirmation cost something to give. A button that
-   only has to be found is pressed by accident; a word that has to be typed
-   is not. The server demands the same word, so the guard is not decorative. */
-function ask(title, body, confirmLabel, phrase) {
+function ask(title, body, confirmLabel) {
   return new Promise((resolve) => {
     $("#ask-title").textContent = title;
     $("#ask-body").textContent = body;
     $("#ask-yes").textContent = confirmLabel;
-    const wrap = $("#ask-phrase-wrap");
-    const field = $("#ask-phrase");
-    const yes = $("#ask-yes");
-    wrap.hidden = !phrase;
-    field.value = "";
-    if (phrase) {
-      $("#ask-phrase-label").textContent = 'Type ' + phrase + ' to confirm';
-      yes.disabled = true;
-      field.oninput = () => { yes.disabled = field.value.trim().toUpperCase() !== phrase; };
-    } else {
-      yes.disabled = false;
-      field.oninput = null;
-    }
     const box = $("#ask");
     box.hidden = false;
-    (phrase ? field : yes).focus();
+    $("#ask-yes").focus();
     const done = (answer) => {
       box.hidden = true;
-      yes.disabled = false;
       $("#ask-yes").onclick = null;
       $("#ask-no").onclick = null;
-      field.oninput = null;
       document.removeEventListener("keydown", onKey);
       resolve(answer);
     };
@@ -1262,18 +1264,6 @@ function render() {
 
   if (state.error) return renderError();
   if (state.busy) return;
-
-  // Ahead of every readiness check. Settings is where a store that is not
-  // ready gets rebuilt, so it must stay reachable when nothing else is.
-  if (state.tab === "settings") {
-    hideScan();
-    $("#page-title").textContent = "Settings";
-    $("#page-sub").textContent =
-      "Appearance, the scheduled run, and the two ways to start over.";
-    $("#view").innerHTML = viewSettings();
-    wire();
-    return;
-  }
   // Boot renders once before it knows anything. Showing the "no scan yet"
   // screen in that gap makes every refresh flash the empty state for a beat
   // and then replace it, which reads as a bug even though the data was on its
@@ -1327,91 +1317,178 @@ function render() {
    all rendering at once and disagreeing with each other. */
 /* ------------------------------------------------------------- settings
 
-   Everything here is a backend command that had no way to be invoked from a
-   phone. They are grouped by what they cost: appearance costs nothing, the
-   schedule costs an observation, and the two resets cost data -- the second
-   of them irreversibly. The grouping is the warning. */
+   A drawer, not a tab. These are controls you reach for occasionally and
+   then dismiss; giving them a peer slot next to the two screens you actually
+   read implied they were somewhere to spend time.
 
-function viewSettings() {
+   Every row is a row. The previous version gave each control a card, a
+   heading and a paragraph explaining itself, which made four settings fill a
+   phone screen and read as though each one needed defending. A control whose
+   name does not explain it is misnamed. */
+
+function setRow(label, sub, control) {
+  return '<div class="row">' +
+    '<div class="row-t"><div class="rl">' + label + '</div>' +
+    (sub ? '<div class="rs">' + sub + '</div>' : "") + '</div>' +
+    '<div class="row-c">' + control + '</div></div>';
+}
+
+function toggle(id, on, label) {
+  return '<button class="sw' + (on ? " on" : "") + '" id="' + id + '" ' +
+    'role="switch" aria-checked="' + (on ? "true" : "false") + '" ' +
+    'aria-label="' + esc(label) + '"><span class="knob"></span></button>';
+}
+
+function renderSettings() {
   const ops = state.ops || {};
   const sch = ops.schedule || {};
+  const m = state.meas || {};
+  const cur = m.active;
   const c = state.coverage || {};
-  const paused = !!sch.paused;
-  const t = currentTheme();
-  const opt = (v, label, note) =>
-    '<button class="segbtn' + (t === v ? ' on' : '') + '" data-theme-set="' + v + '">' +
-    esc(label) + '<span>' + esc(note) + '</span></button>';
+  const dark = currentTheme() === "dark";
 
+  const measBody = cur
+    ? setRow("Measuring", 
+        "Since " + esc(day(cur.started)) +
+        (cur.status === "DRIFTED"
+          ? ' &middot; <span class="warn-t">settings changed since it began</span>'
+          : ""),
+        '<button class="btn ghost xs" id="meas">Stop</button>')
+    : setRow("Measuring", "Not started",
+        '<button class="btn xs" id="meas">Start</button>');
+
+  const past = (m.periods || []).filter((x) => !x.open);
   return (
-  '<section class="set">' +
-
-    '<div class="box set-b">' +
-      '<h3>Appearance</h3>' +
-      '<div class="seg3">' +
-        opt("light", "Light", "Always light") +
-        opt("dark", "Dark", "Always dark") +
-        opt("auto", "System", "Follows the device") +
-      '</div>' +
+    '<div class="grp">' +
+      setRow("Dark mode", "", toggle("sw-theme", dark, "Dark mode")) +
     '</div>' +
 
-    '<div class="box set-b">' +
-      '<h3>Scheduled run</h3>' +
-      '<div class="setrow">' +
-        '<div><div class="k">' + (paused ? "Paused" : "Running") + '</div>' +
-          '<div class="v">' + esc(sch.cron || "20:30 IST, weekdays") + '</div></div>' +
-        '<span class="pill ' + (paused ? "warn" : "ok") + '">' +
-          (paused ? "Declining" : "Active") + '</span>' +
-      '</div>' +
-      (paused && sch.since
-        ? '<p class="note">Paused since ' + esc(day(sch.since)) + '. ' +
-          'Every weekday that passes is an observation the forward test does ' +
-          'not get.</p>'
-        : '<p class="note">The engine ranks the market after the close each ' +
-          'weekday whether or not anyone opens this page. That record is what ' +
-          'the performance figures are built from.</p>') +
-      '<button class="btn ' + (paused ? "" : "ghost") + '" id="sched">' +
-        (paused ? "Resume scheduled runs" : "Pause scheduled runs") + '</button>' +
-      (paused ? "" :
-        '<p class="fine">Pausing does not stop cron \u2014 that needs root. ' +
-        'The job still wakes, declines, and writes down that it declined.</p>') +
+    '<div class="grp">' +
+      '<div class="grp-h">Measurement</div>' +
+      measBody +
+      // Directly under the row it belongs to, not stranded after the next one.
+      (past.length
+        ? '<div class="past">' + past.slice(0, 4).map((x) =>
+            '<div class="pr"><span>' + esc(day(x.started)) +
+            (x.ended && String(x.ended).slice(0, 10) !== String(x.started).slice(0, 10)
+              ? ' \u2013 ' + esc(day(x.ended)) : ' \u00b7 same day') +
+            '</span><span class="pf">' +
+            esc(x.fingerprint.slice(0, 8)) + '</span></div>').join("") + '</div>'
+        : "") +
+      setRow("Daily run", esc(sch.cron || "20:30 IST, weekdays"),
+             toggle("sw-cron", !sch.paused, "Daily run")) +
     '</div>' +
 
-    '<div class="box set-b">' +
-      '<h3>Market data</h3>' +
-      '<div class="setrow">' +
-        '<div><div class="k">' +
-          (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
-          ' sessions</div>' +
-          '<div class="v">Target ' +
-          ((c.validated_target || 2200).toLocaleString("en-IN")) + '</div></div>' +
-        '<span class="pill ' + (c.matches_validation ? "ok" : "warn") + '">' +
-          (c.matches_validation ? "At validated depth" : "Below validated depth") +
-        '</span>' +
-      '</div>' +
-      '<p class="note">Clearing the store lets the build run again \u2014 needed ' +
-      'when a new version asks for data points the current store never ' +
-      'collected. Your run history and its measured outcomes are kept.</p>' +
-      '<button class="btn ghost" id="reset-md">Clear and rebuild market data</button>' +
-    '</div>' +
+    '<div class="grp">' +
+      '<div class="grp-h">Data</div>' +
+      setRow("Market history",
+             (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
+             " sessions",
+             '<button class="btn ghost xs" id="refresh">Refresh</button>') +
+      setRow("Rebuild from scratch", "Keeps your results",
+             '<button class="btn ghost xs danger-t" id="rebuild">Rebuild</button>') +
+    '</div>'
+  );
+}
 
-    '<div class="box set-b danger">' +
-      '<h3>Erase everything</h3>' +
-      '<p class="note">Market data <b>and</b> the entire record: every run, ' +
-      'every resolved outcome, and the forward-test registration. The store ' +
-      'can be re-fetched from NSE. The record cannot \u2014 it is the only ' +
-      'copy of what the engine said on a date that has passed.</p>' +
-      '<button class="btn danger" id="reset-all">Erase everything</button>' +
-    '</div>' +
+/* Opening and closing. The scrim mounts first so the drawer has something to
+   slide over, and focus moves in and back out so the keyboard is not left
+   behind the overlay. */
+let setReturnFocus = null;
 
-    (Array.isArray(ops.log) && ops.log.length
-      ? '<div class="box set-b"><h3>Recent actions</h3><ul class="oplog">' +
-        ops.log.slice(0, 8).map((r) =>
-          '<li><span class="oa">' + esc(String(r.action || "").replace(/_/g, " ")) +
-          '</span><span class="od">' + esc(day(r.at)) + '</span></li>').join("") +
-        '</ul></div>'
-      : "") +
+async function openSettings() {
+  setReturnFocus = document.activeElement;
+  const d = $("#settings"), sc = $("#set-scrim");
+  sc.hidden = false; d.hidden = false;
+  paintSettings();
+  // Flush layout so the transition has a start value to move FROM, then set
+  // the end state synchronously. requestAnimationFrame looked equivalent and
+  // is not: it is throttled in a background tab, and a drawer that never
+  // gets .in stays parked off-screen at translateX(100%) while reporting
+  // itself open.
+  void d.offsetWidth;
+  sc.classList.add("in"); d.classList.add("in");
+  d.focus();
+  document.body.style.overflow = "hidden";
+  await Promise.all([loadOps(), loadMeasurement()]);
+  paintSettings();
+}
 
-  '</section>');
+function closeSettings() {
+  const d = $("#settings"), sc = $("#set-scrim");
+  d.classList.remove("in"); sc.classList.remove("in");
+  document.body.style.overflow = "";
+  const done = () => { d.hidden = true; sc.hidden = true; };
+  // Wait for the transition so it slides out rather than vanishing.
+  const ms = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260;
+  setTimeout(done, ms);
+  if (setReturnFocus && setReturnFocus.focus) setReturnFocus.focus();
+}
+
+function paintSettings() {
+  const body = $("#set-body");
+  if (!body || $("#settings").hidden) return;
+  body.innerHTML = renderSettings();
+
+  const th = $("#sw-theme");
+  if (th) th.addEventListener("click", () => {
+    applyTheme(currentTheme() === "dark" ? "light" : "dark");
+    paintSettings();
+  });
+  const cr = $("#sw-cron");
+  if (cr) cr.addEventListener("click", toggleSchedule);
+  const me = $("#meas");
+  if (me) me.addEventListener("click", toggleMeasurement);
+  const rf = $("#refresh");
+  if (rf) rf.addEventListener("click", refreshData);
+  const rb = $("#rebuild");
+  if (rb) rb.addEventListener("click", confirmResetMarketData);
+}
+
+async function loadMeasurement() {
+  try {
+    const r = await fetch("/measurement");
+    if (r.ok) state.meas = await r.json();
+  } catch (e) { /* the drawer renders without it */ }
+}
+
+/* Starting a period after a change IS the re-registration: the runs from
+   before it never join the runs from after. */
+async function toggleMeasurement() {
+  const cur = (state.meas || {}).active;
+  const btn = $("#meas");
+  if (cur) {
+    const ok = await ask("Stop measuring?",
+      "The period closes today and keeps its results. Starting again later " +
+      "opens a new one, so the two are never averaged together.", "Stop");
+    if (!ok) return;
+  }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  try {
+    await fetch("/measurement/" + (cur ? "stop" : "start"), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({}) });
+    await loadMeasurement();
+    state.perf = undefined;
+    if (state.tab === "history") loadHistory();
+  } catch (e) { /* fall through to a repaint */ }
+  paintSettings();
+}
+
+async function refreshData() {
+  const btn = $("#refresh");
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  try {
+    const r = await fetch("/admin/bootstrap", { method: "POST" });
+    if (r.ok) {
+      const j = await r.json();
+      state.jobId = j.id; state.jobKind = "bootstrap";
+      startMonitor();
+      closeSettings();
+      return;
+    }
+  } catch (e) { /* fall through */ }
+  paintSettings();
 }
 
 /* renderChrome owns the scan button and the build screen returns before it,
@@ -1773,12 +1850,21 @@ function curveSVG(curve) {
 function verdictCard(perf) {
   const h = (perf && perf.headline) || {};
   const n = h.n || 0;
+  // Which window these numbers describe. With a period running the figures
+  // are scoped to it, and a scoped zero means "too early", not "nothing
+  // works" -- the difference has to be on the screen.
+  const per = ((perf && perf.measurement) || {}).active;
+  const scope = per
+    ? "Measuring since " + day(per.started)
+    : "Every run on record";
+
   if (!n) {
     return '<div class="box empty"><h3>Nothing has finished yet</h3>' +
-      '<p>A signal is only scored once its full holding window has elapsed, ' +
-      'so the first results appear about three months after the first run.' +
+      '<p>' + esc(scope) + '. A signal is only scored once its full holding ' +
+      'window has elapsed, so the first results appear about three months ' +
+      'after the run that produced them.' +
       ((perf && perf.pending)
-        ? ' <b>' + perf.pending + '</b> signals are being tracked.' : '') +
+        ? ' <b>' + perf.pending + '</b> being tracked.' : '') +
       '</p></div>';
   }
   const sig = h.significance || {};
@@ -1817,7 +1903,11 @@ function verdictCard(perf) {
     : "";
 
   return '<div class="box verdict">' +
-    '<div class="vhead"><h3>Following the shortlist</h3>' +
+    '<div class="vhead"><div><h3>Following the shortlist</h3>' +
+      '<div class="vscope">' + esc(scope) +
+      (per && per.status === "DRIFTED"
+        ? ' \u00b7 <span class="warn-t">settings changed mid-period</span>' : '') +
+      '</div></div>' +
       '<span class="chip">' + n + ' completed' +
       ((perf.pending) ? ' \u00b7 ' + perf.pending + ' running' : '') + '</span></div>' +
     '<div class="stats">' +
@@ -2125,15 +2215,6 @@ function wire() {
     syncBuildButton();
   }
 
-  $$("button[data-theme-set]").forEach((el) =>
-    el.addEventListener("click", () => { applyTheme(el.dataset.themeSet); render(); }));
-
-  const sched = $("#sched");
-  if (sched) sched.addEventListener("click", toggleSchedule);
-  const rmd = $("#reset-md");
-  if (rmd) rmd.addEventListener("click", confirmResetMarketData);
-  const rall = $("#reset-all");
-  if (rall) rall.addEventListener("click", confirmEraseEverything);
 }
 
 async function loadOps() {
@@ -2146,45 +2227,31 @@ async function loadOps() {
 async function toggleSchedule() {
   const paused = !!((state.ops || {}).schedule || {}).paused;
   if (!paused) {
-    const ok = await ask(
-      "Pause the scheduled run?",
-      "The engine will stop recording a result each weekday. Those runs are " +
-      "what the performance figures are built from, and a long pause is a " +
-      "gap the forward test counts against itself.",
-      "Pause runs");
-    if (!ok) return;
+    const ok = await ask("Turn off the daily run?",
+      "No result will be recorded until you turn it back on, and days " +
+      "without a result cannot be measured later.", "Turn off");
+    if (!ok) { paintSettings(); return; }
   }
-  const btn = $("#sched");
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Working'; }
+  const sw = $("#sw-cron");
+  if (sw) sw.classList.toggle("on", paused);      // move now, confirm after
   try {
     await fetch("/operations/" + (paused ? "resume" : "pause"),
                 { method: "POST", headers: { "content-type": "application/json" },
                   body: JSON.stringify({ reason: "changed from the interface" }) });
     await loadOps();
-  } catch (e) { /* fall through to a re-render */ }
-  render();
+  } catch (e) { /* the repaint below shows the true state either way */ }
+  paintSettings();
 }
 
 async function confirmResetMarketData() {
   const ok = await ask(
-    "Clear and rebuild market data?",
-    "Every stored session is removed and the build starts from nothing. " +
-    "Your run history and measured outcomes are kept. Rebuilding to the " +
-    "validated depth takes several hours.",
-    "Clear market data");
+    "Rebuild the data store?",
+    "Every stored session is removed and downloaded again. Your results and " +
+    "measurement periods are kept. It takes several hours.",
+    "Rebuild");
   if (!ok) return;
+  closeSettings();
   await runReset("/admin/reset/market-data", null);
-}
-
-async function confirmEraseEverything() {
-  const ok = await ask(
-    "Erase everything?",
-    "This removes the market data AND the entire record: every run, every " +
-    "resolved outcome, and the forward-test registration. The market data " +
-    "can be fetched again. The record cannot.",
-    "Erase everything", "ERASE");
-  if (!ok) return;
-  await runReset("/admin/reset/everything", { confirm: "ERASE" });
 }
 
 async function runReset(url, body) {
@@ -2205,17 +2272,19 @@ $("#scan").addEventListener("click", scan);
 $("#panel-close").addEventListener("click", closePanel);
 $("#scrim").addEventListener("click", closePanel);
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#settings").hidden) { closeSettings(); return; }
   if (e.key === "Escape" && $("#panel").classList.contains("open")) closePanel();
 });
 function goTab(name) {
   state.tab = name;
   render();
   if (name === "history" && state.history === undefined) loadHistory();
-  if (name === "settings") loadOps().then(render);
 }
 $$(".nav button").forEach((b) =>
   b.addEventListener("click", () => goTab(b.dataset.view)));
-$("#gear").addEventListener("click", () => goTab("settings"));
+$("#gear").addEventListener("click", openSettings);
+$("#set-close").addEventListener("click", closeSettings);
+$("#set-scrim").addEventListener("click", closeSettings);
 
 /* Surfacing a failed action. It replaces the view rather than appearing as a
    toast because every one of these actions changes what the rest of the

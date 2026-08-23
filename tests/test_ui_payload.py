@@ -230,10 +230,8 @@ def test_the_interface_has_one_results_tab():
     to look for something already in front of the reader."""
     html = _html()
     tabs = re.findall(r'data-view="([a-z]+)"', html)
-    # Settings is not a results tab -- it holds appearance, the schedule and
-    # the resets. What must stay singular is the place a run is READ.
-    assert tabs == ["overview", "history", "settings"], tabs
-    assert [t for t in tabs if t not in ("settings",)] == ["overview", "history"]
+    assert tabs == ["overview", "history"], tabs
+    # Settings is a drawer, not a peer of the two screens you actually read.
     assert "viewMonitored" not in html and "viewResearch" not in html
     assert "viewMethod" not in html
 
@@ -566,39 +564,91 @@ def test_the_ownership_line_does_not_wrap_mid_name_on_mobile():
 # Settings, the build tile, and the performance page
 # ===================================================================
 
-def test_settings_is_reachable_when_nothing_else_is():
-    """Settings is where a store that is not ready gets rebuilt, so the
-    readiness checks must not be able to swallow it."""
+def test_settings_is_a_drawer_not_a_tab():
+    """These are controls you reach for and dismiss. A peer slot next to the
+    two screens you read implied they were somewhere to spend time."""
     html = _html()
-    body = html[html.index("<script>"):]
-    route = body.index('state.tab === "settings"')
-    assert route < body.index("if (state.notReady)"), \
-        "a not-ready store can hide the screen that fixes it"
+    assert 'id="settings"' in html and 'class="drawer"' in html
+    assert 'data-view="settings"' not in html
+    assert "function openSettings" in html and "function closeSettings" in html
+    # Living outside render() is what keeps it reachable when the store is not
+    # ready and the rest of the screen is a progress bar.
+    assert 'state.tab === "settings"' not in html
+    assert '$("#gear").addEventListener("click", openSettings)' in html
 
 
-def test_the_theme_control_left_the_header_for_settings():
+def test_the_theme_control_is_a_switch_with_two_states():
+    """A three-way segmented control for a preference with an obvious default
+    was three buttons doing one button's job."""
     html = _html()
-    assert 'id="theme"' not in html
+    assert 'id="theme"' not in html          # left the header
     assert 'id="gear"' in html
-    assert "data-theme-set" in html
+    assert '"sw-theme"' in html
+    assert 'role="switch"' in html
+    assert "data-theme-set" not in html      # the old segmented control
+    assert '"auto"' in html                  # still the un-chosen default
+    # It moves rather than snapping.
+    css = html[html.index("<style>"):html.index("</style>")]
+    assert ".sw .knob" in css and "transform" in css
 
 
-def test_erasing_everything_needs_a_typed_word_in_both_places():
-    """A button that only has to be found gets pressed by accident. The
-    server demands the same word, so the dialog is not the only guard."""
+def test_every_setting_is_a_row_rather_than_a_card():
+    """Four settings used to fill a phone screen, each with a heading and a
+    paragraph explaining itself. A control whose name needs a paragraph is
+    misnamed."""
     html = _html()
-    assert '"ERASE"' in html
-    assert 'id="ask-phrase"' in html
+    assert "function setRow" in html
+    for gone in (".set-b", "seg3", "segbtn", "oplog", "Recent actions"):
+        assert gone not in html, gone
+
+
+def test_the_one_click_erase_is_gone_but_the_endpoint_stays_guarded():
+    """No case for it that a person could act on, and it destroys the only
+    record of what the engine said. The API keeps it for a deliberate reset."""
+    html = _html()
+    assert "/admin/reset/everything" not in html
+    assert "confirmEraseEverything" not in html
     src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
     assert 'confirm") != "ERASE"' in src
 
 
-def test_clearing_market_data_does_not_claim_to_keep_nothing():
-    """The two resets differ only in blast radius, so the screen has to say
-    which one keeps the record."""
+def test_rebuilding_says_what_it_keeps():
     html = _html()
-    assert "run history and measured outcomes are kept" in html
-    assert "The record cannot" in html
+    assert "/admin/reset/market-data" in html
+    assert "Keeps your results" in html
+    assert "measurement periods are kept" in html
+
+
+def test_the_schedule_switch_does_not_apologise_for_how_it_works():
+    """It said pausing could not stop cron, which read as "this button does
+    not work". The run does not happen; that is what off means."""
+    html = _html()
+    assert "does not stop cron" not in html
+    assert "needs root" not in html
+    assert '"sw-cron"' in html
+    assert "No result will be recorded" in html
+
+
+# ===================================================================
+# Measurement periods -- the re-registration flow
+# ===================================================================
+
+def test_starting_a_period_is_reachable_from_the_drawer():
+    html = _html()
+    assert "/measurement/start" in html or "/measurement/" in html
+    assert "function toggleMeasurement" in html
+
+
+def test_the_drawer_names_a_drifted_period_as_drifted():
+    """A period whose config changed underneath it is measuring two models."""
+    html = _html()
+    assert "DRIFTED" in html
+    assert "settings changed since it began" in html
+
+
+def test_stopping_explains_that_periods_are_never_pooled():
+    html = _html()
+    assert "never averaged together" in html
 
 
 def test_the_build_tile_and_the_build_screen_share_one_writer():
@@ -641,7 +691,7 @@ def test_a_pending_sample_is_not_an_empty_one():
     and that is different from the engine having found nothing."""
     html = _html()
     assert "Nothing has finished yet" in html
-    assert "signals are being tracked" in html
+    assert "being tracked" in html
 
 
 def test_the_curve_is_labelled_as_a_sum_not_a_compounded_return():
@@ -658,13 +708,34 @@ def test_a_positive_average_over_a_negative_median_is_called_out():
     assert "A few large winners" in html
 
 
-def test_the_settings_screen_separates_the_two_resets_by_blast_radius():
+def test_a_positive_average_over_a_negative_median_is_called_out():
+    """135 real trades average +1.23% while the median loses 5%. Reading the
+    average as "a typical trade" is the wrong conclusion and the one the
+    number invites."""
     html = _html()
-    assert "/admin/reset/market-data" in html
-    assert "/admin/reset/everything" in html
-    # The destructive one is the only one carrying a typed phrase.
-    erase = html[html.index("async function confirmEraseEverything"):]
-    body = erase[:erase.index("async function runReset")]
-    assert '"ERASE"' in body
-    md = html[html.index("async function confirmResetMarketData"):]
-    assert "ERASE" not in md[:md.index("async function confirmEraseEverything")]
+    assert "median trade lost" in html
+    assert "A few large winners" in html
+
+
+
+
+def test_the_drawer_does_not_open_behind_a_throttled_animation_frame():
+    """requestAnimationFrame is throttled in a background tab. A drawer that
+    never receives .in stays parked off-screen at translateX(100%) while
+    reporting itself open -- which is how it was found."""
+    html = _html()
+    body = html[html.index("async function openSettings"):
+                html.index("function closeSettings")]
+    # The word appears in the comment explaining why; the CALL must not.
+    assert "requestAnimationFrame(" not in body
+    assert "offsetWidth" in body, "layout must be flushed before the end state"
+
+
+def test_the_verdict_names_the_window_it_is_describing():
+    """With a period running the figures are scoped to it, so a zero means
+    "too early" and not "nothing works". The reader cannot tell which
+    without being told which window they are looking at."""
+    html = _html()
+    assert "Measuring since" in html
+    assert "Every run on record" in html
+    assert "settings changed mid-period" in html
