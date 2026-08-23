@@ -609,7 +609,7 @@ const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const state = { view: null, run: null, tab: "overview", busy: false,
                 error: null, notReady: false, history: undefined,
-                latestSession: null, slateSize: 5 };
+                latestSession: null, slateSize: 5, coverage: null };
 
 /* ---------------------------------------------------------------- theme */
 const THEME_KEY = "signal.theme";
@@ -806,6 +806,9 @@ async function bootstrap() {
       if (!s.ok) throw new Error(await readErr(s));
       const job = await s.json();
       if (job.progress && job.progress.label) note.textContent = job.progress.label;
+      // Refresh the coverage numbers mid-build so the bar advances between
+      // chunks rather than only at the very end.
+      if (job.state === "COMPLETED") { await checkReady(); }
       if (job.state === "COMPLETED") break;
       if (job.state === "FAILED") throw new Error(job.error || "The build did not finish.");
     }
@@ -821,11 +824,17 @@ async function bootstrap() {
 async function checkReady() {
   try {
     const r = await fetch("/ready");
-    if (!r.ok) { state.notReady = true; return; }
-    const j = await r.json();
-    state.notReady = !j.ready;
-    state.latestSession = (j.checks && j.checks.latest_session) || null;
-  } catch (e) { state.notReady = false; }
+    // 503 is the documented "not ready" response and carries the body that
+    // says why -- treating a non-2xx as unreadable threw that away and left
+    // the screen with no numbers to show.
+    const j = await r.json().catch(() => null);
+    state.coverage = (j && j.checks) || null;
+    state.notReady = !(j && j.ready);
+    state.latestSession = (j && j.checks && j.checks.latest_session) || null;
+  } catch (e) {
+    state.notReady = false;
+    state.coverage = null;
+  }
 }
 
 /* Every fetch goes through here so a 401 lands on the sign-in screen rather
@@ -929,12 +938,34 @@ function render() {
   if (state.busy) return;
 
   if (state.notReady) {
+    const c = state.coverage || {};
+    const have = c.price_sessions;
+    const need = c.model_minimum;
+    const full = c.validated_target;
+    const pct = (have != null && full) ? Math.min(100, Math.round(have / full * 100)) : 0;
     $("#view").innerHTML =
-      '<div class="box empty"><h3>Market data store is empty</h3>' +
-      '<p>There is not enough price history stored to rank anything yet. ' +
-      'Building it fetches from NSE in chunks and can be resumed — each press ' +
-      'adds another block of sessions.</p>' +
+      '<div class="box empty">' +
+      '<h3>' + (have ? "Building the market data" : "Market data store is empty") + '</h3>' +
+      '<p>' + esc(c.status || "There is not enough price history stored to rank " +
+        "anything yet.") + '</p>' +
+      (have != null ? '<div class="track" style="max-width:340px;margin:0 auto ' +
+        'var(--sp-5)"><div class="seg done" style="flex:' + pct + '"></div>' +
+        '<div class="seg" style="flex:' + (100 - pct) + '"></div></div>' : "") +
       '<button class="btn" id="boot">Build data store</button>' +
+      '<p id="boot-note" style="margin-top:var(--sp-4);font-size:13px"></p></div>';
+    $("#boot").addEventListener("click", bootstrap);
+    return;
+  }
+
+  // Enough to fit, but not the depth the coefficients were validated on. The
+  // screen must not present a sixteen-month fit as the nine-year one.
+  if (state.coverage && state.coverage.matches_validation === false
+      && state.tab === "overview") {
+    const c = state.coverage;
+    $("#view").innerHTML =
+      '<div class="box empty"><h3>Still building</h3>' +
+      '<p>' + esc(c.status || "") + '</p>' +
+      '<button class="btn" id="boot">Continue building</button>' +
       '<p id="boot-note" style="margin-top:var(--sp-4);font-size:13px"></p></div>';
     $("#boot").addEventListener("click", bootstrap);
     return;

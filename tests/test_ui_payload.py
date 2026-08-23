@@ -174,6 +174,7 @@ _AMBIENT = {
     "toLocaleDateString", "resolve", "json", "stopPropagation", "min", "max",
     "sort", "slice", "split", "trim", "includes", "scrollIntoView",
     "bind", "call", "apply", "select", "stringify", "parse", "then", "catch",
+    "round", "floor", "ceil", "abs", "pow",
     # CSS function names picked up by the same scan
     "var", "rgba", "rect", "minmax", "clamp", "repeat", "translateX",
     "translateY", "scaleX", "rotate", "brightness", "saturate", "blur",
