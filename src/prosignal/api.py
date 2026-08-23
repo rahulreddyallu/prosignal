@@ -685,6 +685,23 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ),
         }
 
+    # Resolution walks the whole ledger and reads prices for every name it
+    # finds, which on a deep ledger is seconds -- paid on every open of the
+    # History page even when nothing had changed since the last one. The
+    # inputs are all files, so their mtimes say when the answer is stale.
+    _perf_cache: Dict[str, Any] = {"key": None, "value": None}
+
+    def _ledger_fingerprint() -> str:
+        led = Path(cfg.paths.ledger)
+        parts = []
+        for f in sorted(led.glob("*.jsonl")) + sorted(led.glob(".history-cleared")):
+            try:
+                st = f.stat()
+                parts.append(f"{f.name}:{st.st_mtime_ns}:{st.st_size}")
+            except OSError:
+                continue
+        return "|".join(parts)
+
     def _apply_clear_mark(rows):
         """Drop resolved results issued before the last clear."""
         try:
@@ -737,6 +754,9 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
     @app.get("/performance")
     def performance_report(period: str = "all") -> Dict[str, Any]:
+        key = period + "@" + _ledger_fingerprint()
+        if _perf_cache["key"] == key and _perf_cache["value"] is not None:
+            return _perf_cache["value"]
         """Did following the shortlist beat not following it?
 
         Resolution runs on read, like /outcomes, so the scheduled job does not
@@ -792,7 +812,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             cutoff = None
         rows, partial = _perf.split_cohorts(rows, cutoff)
         bench = str(cfg.params.stage2_regime.benchmark_index.value)
-        return {
+        payload = {
             "headline": _perf.performance(rows, store, horizon=horizon,
                                           benchmark=bench),
             "by_ticker": _perf.by_ticker(rows, store, benchmark=bench),
@@ -807,6 +827,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 Ledger(cfg.paths.ledger).read_all(), rows, store,
                 max_hold=horizon),
         }
+        _perf_cache["key"], _perf_cache["value"] = key, payload
+        return payload
 
     # ------------------------------------------------------------------
     # Operator actions
