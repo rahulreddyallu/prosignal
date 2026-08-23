@@ -92,7 +92,7 @@ def client(hosted):
     return TestClient(create_app()), token
 
 
-@pytest.mark.parametrize("path", sorted(OPEN_PATHS - {"/auth"}))
+@pytest.mark.parametrize("path", ["/health", "/ready"])
 def test_health_probes_are_never_challenged(client, path):
     """A health endpoint that 401s reads to the platform as a dead service and
     gets the instance restarted in a loop."""
@@ -100,8 +100,17 @@ def test_health_probes_are_never_challenged(client, path):
     assert api.get(path).status_code == 200
 
 
+def test_nothing_is_open_that_carries_data():
+    """The open set is small on purpose. /health and /ready are probes, /auth
+    checks the token itself, and the rest are the static shell. Anything that
+    returns market data or starts a job must not be here."""
+    for path in OPEN_PATHS:
+        assert path in {"/health", "/ready", "/auth", "/", "/index.html",
+                        "/favicon.ico"}, f"{path} should not be open"
+
+
 @pytest.mark.parametrize("method,path", [
-    ("get", "/"), ("get", "/analysis"), ("get", "/config"),
+    ("get", "/analysis"), ("get", "/config"),
     ("post", "/analysis/run"), ("post", "/admin/bootstrap"),
     ("post", "/admin/release-memory"), ("get", "/history"),
 ])
@@ -142,11 +151,21 @@ def test_sign_in_is_open_because_it_checks_the_token_itself(client):
     assert api.post("/auth", json={"token": "nope"}).status_code == 401
 
 
-def test_the_cookie_unlocks_the_interface(client):
-    api, token = client
-    assert api.get("/").status_code == 401
-    api.post("/auth", json={"token": token})
+def test_the_shell_is_served_so_that_sign_in_is_reachable(client):
+    """The sign-in screen lives inside the page. Returning 401 for the page
+    itself means the browser renders raw JSON and the owner of the instance
+    cannot get in -- the shell is static and carries no data, so it is open
+    and everything it fetches is not."""
+    api, _ = client
     assert api.get("/").status_code == 200
+    assert api.get("/analysis").status_code == 401
+
+
+def test_the_cookie_unlocks_the_data(client):
+    api, token = client
+    assert api.get("/analysis").status_code == 401
+    api.post("/auth", json={"token": token})
+    assert api.get("/analysis").status_code == 200
 
 
 def test_the_cookie_is_not_marked_secure_over_plain_http(client):
@@ -194,3 +213,53 @@ def test_comparison_is_constant_time():
     assert token_matches("abc", "abc") is True
     assert token_matches("abc", "abd") is False
     assert token_matches(None, "abc") is False
+
+
+# --------------------------------------------------------- the sign-in screen
+def test_the_interface_can_sign_itself_in():
+    """A deployed instance returns 401 to a browser that has no cookie, and a
+    browser cannot set an Authorization header on a top-level navigation.
+    Without a sign-in screen the site is unreachable by the person who owns it.
+    """
+    from pathlib import Path
+
+    ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal"
+          / "static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="signin"' in ui
+    assert "requireSignIn" in ui
+    assert '"/auth"' in ui
+
+
+def test_the_401_handler_wraps_fetch_rather_than_each_call_site():
+    """Checking status at every call site means one missed call site is a dead
+    screen. The wrap also retries once, so the request that triggered sign-in
+    completes instead of being lost."""
+    from pathlib import Path
+
+    ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal"
+          / "static" / "index.html").read_text(encoding="utf-8")
+    assert "window.fetch = async" in ui
+    assert "rawFetch(input, init);   // retry once" in ui
+
+
+def test_the_cloud_init_script_carries_the_memory_environment():
+    """Without these three the analysis peaks at 542 MB rather than 409 MB,
+    and a 1 GB instance kills it."""
+    from pathlib import Path
+
+    sh = (Path(__file__).resolve().parents[1] / "scripts"
+          / "cloud-init.sh").read_text(encoding="utf-8")
+    for var in ("ARROW_DEFAULT_MEMORY_POOL=system", "MALLOC_ARENA_MAX=2",
+                "PYTHONMALLOC=malloc"):
+        assert var in sh
+    assert "fallocate -l 2G /swapfile" in sh
+    assert "--host 127.0.0.1" in sh, "the API must never bind publicly"
+
+
+def test_the_cloud_init_placeholders_are_obvious():
+    """A placeholder that looks like a real value gets deployed as one."""
+    from pathlib import Path
+
+    sh = (Path(__file__).resolve().parents[1] / "scripts"
+          / "cloud-init.sh").read_text(encoding="utf-8")
+    assert "__DOMAIN__" in sh and "__TOKEN__" in sh

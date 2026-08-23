@@ -173,6 +173,7 @@ _AMBIENT = {
     "push", "find", "filter", "replace", "toFixed", "toLocaleString",
     "toLocaleDateString", "resolve", "json", "stopPropagation", "min", "max",
     "sort", "slice", "split", "trim", "includes", "scrollIntoView",
+    "bind", "call", "apply", "select", "stringify", "parse", "then", "catch",
     # CSS function names picked up by the same scan
     "var", "rgba", "rect", "minmax", "clamp", "repeat", "translateX",
     "translateY", "scaleX", "rotate", "brightness", "saturate", "blur",
@@ -188,9 +189,10 @@ def test_every_function_the_interface_calls_is_defined():
     """
     body = _html()[_html().index("<script>"):]
     defined = set(re.findall(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", body))
-    # Arrow functions bound to a const are definitions too.
+    # Anything bound to a const is a definition -- an arrow function, or a
+    # method captured off another object (`const rawFetch = fetch.bind(...)`).
     defined |= set(re.findall(
-        r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(", body))
+        r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", body))
     # No whitespace before the paren: a real call never has one, and allowing
     # it matched prose like "returned an error (" inside a string literal.
     called = set(re.findall(r"\b([A-Za-z_$][\w$]*)\(", body))

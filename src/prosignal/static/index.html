@@ -359,6 +359,15 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .modal p { color: var(--ink-2); font-size: 14px; line-height: 1.6; }
 .modal-acts { display: flex; gap: var(--sp-2); justify-content: flex-end;
               margin-top: var(--sp-5); }
+.modal input {
+  width: 100%; margin-top: var(--sp-4); padding: 11px var(--sp-3);
+  font: inherit; font-family: var(--mono); font-size: 13px;
+  background: var(--surface-sunk); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+}
+.modal input:focus-visible { border-color: var(--accent); }
+.err-line { color: var(--neg); font-size: 13px; margin-top: var(--sp-3); }
+.err-line[hidden] { display: none; }
 
 .scrim { position: fixed; inset: 0; background: rgba(12,14,16,.45);
          z-index: 50; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
@@ -543,6 +552,22 @@ td.r { text-align: right; }
 
   <div class="foot" id="foot"></div>
 </main>
+
+<div class="modal-wrap" id="signin" role="dialog" aria-modal="true"
+     aria-labelledby="signin-title" hidden>
+  <div class="modal">
+    <h3 id="signin-title">Sign in</h3>
+    <p>This instance is private. Paste the access token you set when you
+      deployed it.</p>
+    <input id="signin-token" type="password" autocomplete="current-password"
+           placeholder="Access token" aria-label="Access token"
+           spellcheck="false" autocapitalize="off">
+    <p id="signin-error" class="err-line" hidden></p>
+    <div class="modal-acts">
+      <button class="btn" id="signin-go">Sign in</button>
+    </div>
+  </div>
+</div>
 
 <div class="scrim" id="scrim"></div>
 
@@ -802,6 +827,73 @@ async function checkReady() {
     state.latestSession = (j.checks && j.checks.latest_session) || null;
   } catch (e) { state.notReady = false; }
 }
+
+/* Every fetch goes through here so a 401 lands on the sign-in screen rather
+   than on an error card the reader cannot act on. Without this the deployed
+   instance shows "not authorised" and offers no way to become authorised --
+   the browser cannot set an Authorization header on a navigation. */
+let signInPending = null;
+
+function requireSignIn() {
+  if (signInPending) return signInPending;
+  const box = $("#signin");
+  const field = $("#signin-token");
+  const error = $("#signin-error");
+  error.hidden = true;
+  box.hidden = false;
+  field.value = "";
+  field.focus();
+
+  signInPending = new Promise((resolve) => {
+    const attempt = async () => {
+      const token = field.value.trim();
+      if (!token) return;
+      $("#signin-go").disabled = true;
+      try {
+        const r = await fetch("/auth", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        if (!r.ok) throw new Error("That token was not accepted.");
+        box.hidden = true;
+        signInPending = null;
+        resolve(true);
+        // The boot sequence ran before the cookie existed and rendered the
+        // signed-out state; re-run it so the page reflects what it can now see.
+        setTimeout(boot, 0);
+      } catch (e) {
+        error.textContent = e.message || "Sign-in failed.";
+        error.hidden = false;
+        field.select();
+      } finally {
+        $("#signin-go").disabled = false;
+      }
+    };
+    $("#signin-go").onclick = attempt;
+    field.onkeydown = (e) => { if (e.key === "Enter") attempt(); };
+  });
+  return signInPending;
+}
+
+/* Wrap fetch once, at the boundary, rather than checking 401 at every call
+   site -- a missed call site is a dead screen. */
+const rawFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  const url = String(typeof input === "string" ? input : (input && input.url) || "");
+  // /auth must NOT be intercepted. It returns 401 for a wrong token, and
+  // treating that as "needs sign-in" makes the sign-in call re-enter itself:
+  // the error never reaches the screen and a wrong token looks like nothing
+  // happened at all.
+  if (url.includes("/auth")) return rawFetch(input, init);
+
+  let res = await rawFetch(input, init);
+  if (res.status === 401) {
+    await requireSignIn();
+    res = await rawFetch(input, init);   // retry once, now with the cookie
+  }
+  return res;
+};
 
 async function readErr(res) {
   try {
@@ -1296,7 +1388,7 @@ async function loadHistory() {
 
 /* Recover the most recent completed scan so a reload does not look like a
    product that forgets. */
-(async function boot() {
+async function boot() {
   render();
   try {
     await checkReady();
@@ -1312,7 +1404,9 @@ async function loadHistory() {
     state.run = done.id;
     render();
   } catch (e) {}
-})();
+}
+
+boot();
 </script>
 </body>
 </html>

@@ -36,7 +36,13 @@ ENV_VAR = "PROSIGNAL_AUTH_TOKEN"
 #: browser has no way to break the cycle: it cannot set an Authorization header
 #: on a top-level navigation. The endpoint validates the token itself and
 #: returns 401 on a wrong one, so nothing is unguarded.
-OPEN_PATHS = frozenset({"/health", "/ready", "/auth"})
+#: `/` is the interface shell: static HTML and CSS with no data in it. It has
+#: to be open, because the sign-in screen lives INSIDE it -- returning 401 for
+#: the page means the browser renders raw JSON and the owner of the instance
+#: has no way to sign in at all. The shell then fetches its data, those
+#: requests 401, and the screen appears. Static shell open, data closed.
+OPEN_PATHS = frozenset({"/health", "/ready", "/auth", "/", "/index.html",
+                        "/favicon.ico"})
 
 #: The shortest token worth having. Below this an online guess is cheap.
 MIN_TOKEN_LENGTH = 24
