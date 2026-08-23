@@ -70,8 +70,20 @@ def load_outcomes(path: Path) -> List[Dict[str, Any]]:
     return _read_jsonl(Path(path))
 
 
-def _pending(ledger_rows, resolved_keys) -> List[Dict[str, Any]]:
-    out = []
+def _pending(ledger_rows, resolved_keys, resolved_calls=frozenset()) -> List[Dict[str, Any]]:
+    """Signals not yet scored, one entry per CALL rather than per run.
+
+    A day can produce several ledger runs and each names the same tickers, so
+    the same call arrived here once per run: 6,192 items over 19 tickers on
+    a real ledger. Every one was resolved separately, wrote its own outcome
+    row, and was then collapsed again downstream by performance.dedupe --
+    which is also where the duplicate counts on the History page came from.
+
+    One call is resolved once. `resolved_calls` carries (ticker, date) pairs
+    already on file so the other runs of a resolved call are never retried,
+    which is what stopped them being re-scanned on every single request.
+    """
+    out, seen = [], set()
     for row in ledger_rows:
         run_id = row.get("run_id")
         signals = set(row.get("signals_generated") or [])
@@ -83,8 +95,12 @@ def _pending(ledger_rows, resolved_keys) -> List[Dict[str, Any]]:
                 continue
             if (run_id, ticker) in resolved_keys:
                 continue
+            call = (ticker, str(row.get("date") or "")[:10])
+            if call in resolved_calls or call in seen:
+                continue
             if rec.get("stop") is None or rec.get("target_1") is None:
                 continue
+            seen.add(call)
             out.append({"run_id": run_id, "date": row.get("date"), "rec": rec,
                         "config_version": row.get("config_version"),
                         "engine_version": row.get("engine_version")})
@@ -109,8 +125,10 @@ def resolve_pending(
     ledger_rows = _read_jsonl(ledger_path)
     existing = _read_jsonl(outcomes_path)
     resolved_keys = {(r.get("run_id"), r.get("ticker")) for r in existing}
+    resolved_calls = {(r.get("ticker"), str(r.get("signal_date") or "")[:10])
+                      for r in existing}
 
-    pending = _pending(ledger_rows, resolved_keys)
+    pending = _pending(ledger_rows, resolved_keys, resolved_calls)
     if not pending:
         return {"pending": 0, "resolved": 0, "still_open": 0}
 

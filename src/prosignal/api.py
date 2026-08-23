@@ -812,14 +812,14 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
         # The last session a signal could have been issued on and still have
         # had its whole window. Past it, only the fast movers have finished.
+        # The store keeps a session calendar. Deriving one by reading every
+        # price row instead cost 3.4s of a 3.8-million-row scan to learn 2,210
+        # dates it already had.
         cutoff = None
         try:
-            import pandas as _pd
-            days = sorted(set(_pd.to_datetime(
-                store.read_prices(columns=["date", "symbol", "close"])["date"]
-            ).dt.normalize()))
+            days = store.price_sessions()
             if len(days) > horizon:
-                cutoff = str(days[-horizon].date())
+                cutoff = str(days[-horizon])[:10]
         except Exception:
             cutoff = None
         rows, partial = _perf.split_cohorts(rows, cutoff)
