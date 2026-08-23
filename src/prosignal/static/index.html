@@ -414,6 +414,18 @@ details.adv .adv-body { padding: 0 var(--sp-4) var(--sp-4); }
        white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
 
 /* ----------------------------------------------------------------- table */
+/* A list of names, not a grid of dates. Each row is a control. */
+.names { display: grid; gap: var(--sp-2); }
+.namerow { display: grid; grid-template-columns: minmax(0,1fr) auto;
+           gap: var(--sp-4); align-items: center; width: 100%; text-align: left;
+           background: var(--surface); border: 1px solid var(--line);
+           border-radius: var(--r-md); padding: var(--sp-4); cursor: pointer;
+           font: inherit; color: inherit;
+           transition: border-color .14s ease, box-shadow .14s ease; }
+.namerow:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
+.namerow .nm { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+.namerow .sb { color: var(--ink-3); font-size: 12.5px; margin-top: 2px; }
+
 .tablewrap { overflow-x: auto; border: 1px solid var(--line);
              border-radius: var(--r-lg); background: var(--surface); }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
@@ -549,7 +561,7 @@ const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const state = { view: null, run: null, tab: "overview", busy: false,
                 error: null, notReady: false, history: undefined,
-                latestSession: null };
+                latestSession: null, slateSize: 5 };
 
 /* ---------------------------------------------------------------- theme */
 const THEME_KEY = "signal.theme";
@@ -839,7 +851,7 @@ function renderChrome(v) {
 
   const titles = {
     overview: ["Today's opportunities", "The names the engine ranks highest, and the case for each."],
-    history: ["History", "Past runs, and what the market did afterwards."],
+    history: ["History", "Every name the engine has surfaced, and what the market did after."],
   };
   const [title, sub] = titles[state.tab] || titles.overview;
   $("#page-title").textContent = title;
@@ -919,6 +931,7 @@ function viewOverview(v) {
       'That is a result, not a failure to find one.</p></div>';
   }
 
+  state.slateSize = v.picks.length;
   const counts = [];
   if (s.buy)   counts.push('<span class="pill buy">' + s.buy + ' Buy</span>');
   if (s.watch) counts.push('<span class="pill watch">' + s.watch + ' Watch</span>');
@@ -927,7 +940,10 @@ function viewOverview(v) {
     '<div class="slate-head">' +
       '<h2>Shortlist</h2>' +
       '<div class="count">' + counts.join(" ") + '</div>' +
-      '<div class="note">' + esc(s.note || "") + '</div>' +
+      // What five names cannot show on their own: whether they are five ideas
+      // or one idea five times.
+      (v.concentration
+        ? '<div class="note">' + esc(v.concentration.text) + '</div>' : "") +
     '</div>' +
     '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>' +
     '<div style="margin-top:var(--sp-6);text-align:center">' +
@@ -940,27 +956,11 @@ function viewOverview(v) {
 
 function marketBlock(v) {
   const m = v.market || {};
-  const j = v.journey || [];
-  const step = (k) => (j.find((x) => x.key === k) || {}).count;
-  const universe = step("universe_considered");
-  const eligible = step("passed_eligibility");
-  const survived = step("survived_defense");
-
   const rows = (m.readings || []).filter((r) => r.value).map((r) =>
     '<div class="reading"><span class="k">' + esc(r.label) + '</span>' +
     '<span class="v">' + esc(r.value) + '</span>' +
     (r.detail ? '<span class="sub">' + esc(r.detail) + '</span>' : "") +
     '</div>').join("");
-
-  // The narrowing, in one line. It is the most concrete thing the run
-  // produced about the market and it was previously on a separate screen.
-  const narrowing = (universe && eligible)
-    ? '<div class="reading"><span class="k">Names examined</span>' +
-      '<span class="v num">' + universe.toLocaleString("en-IN") + '</span>' +
-      '<span class="sub">' + eligible.toLocaleString("en-IN") + ' tradable' +
-      (survived ? ', ' + survived + ' cleared every risk check' : '') +
-      '</span></div>'
-    : "";
 
   const warn = m.allows_new_positions === false
     ? '<span class="pill watch">New positions paused</span>' : "";
@@ -979,19 +979,18 @@ function marketBlock(v) {
     '<div><h2>Market environment</h2>' +
       '<div class="headline">' + esc(m.headline || "—") + " " + warn + '</div>' +
       '<p>' + esc(m.summary || "") + '</p></div>' +
-    '<div class="readings">' + rows + narrowing + '</div>' +
+    '<div class="readings">' + rows + '</div>' +
     notesHTML + '</div>';
 }
 
 function cardHTML(p) {
   const isBuy = p.status === "BUY";
   const chips = (p.highlights || []).map((h) => '<span class="chip">' + esc(h) + '</span>').join("");
-  const c = p.confirmation || {};
   return '<button class="card ' + (isBuy ? "is-buy" : "is-watch") + '" ' +
     'data-pos="' + p.position + '">' +
     '<div class="card-top">' +
       '<div class="card-id">' +
-        '<div class="rank">Rank ' + (p.rank ?? "—") + '</div>' +
+        '<div class="rank">' + p.position + ' of ' + state.slateSize + '</div>' +
         '<div class="name">' + esc(p.company) + '</div>' +
         '<div class="tick">' + esc(p.ticker) + (p.sector ? " · " + esc(p.sector) : "") + '</div>' +
       '</div>' +
@@ -1004,7 +1003,7 @@ function cardHTML(p) {
     (chips ? '<div class="chips">' + chips + '</div>' : "") +
     (p.thesis ? '<div class="thesis">' + esc(p.thesis) + '</div>' : "") +
     '<div class="card-foot">' +
-      '<span class="confirm">' + (c.judged ? c.agree + " of " + c.judged + " areas support this" : "") + '</span>' +
+      (p.sector ? '<span class="confirm">' + esc(p.sector) + '</span>' : '<span></span>') +
       '<span class="more">View analysis →</span>' +
     '</div></button>';
 }
@@ -1013,36 +1012,42 @@ function cardHTML(p) {
 function viewHistory(v) {
   const h = state.history;
   if (h === null) return '<div class="box"><div class="skel" style="height:220px"></div></div>';
-  if (!h || !h.days || !h.days.length) {
+  if (!h || !h.names || !h.names.length) {
     return '<div class="box empty"><h3>No runs recorded yet</h3>' +
-      '<p>' + esc((h && h.note) || "Once a scan completes it is recorded here, " +
-      "with what the market did afterwards.") + '</p></div>';
+      '<p>' + esc((h && h.note) || "Once a scan completes, every name it " +
+      "surfaces is recorded here with what the market did afterwards.") + '</p></div>';
   }
 
-  const rows = h.days.map((d) => {
-    // Each name is its own control. Opening the row shows that day; opening a
-    // name shows every time the engine has flagged it.
-    const shown = (d.shown || []).map((x) =>
-      '<button class="pill ' + (x.status === "BUY" ? "buy" : "watch") + '" ' +
-      'data-stock="' + esc(x.ticker) + '" style="margin:0 4px 4px 0" ' +
-      'title="See every run that flagged ' + esc(x.ticker) + '">' +
-      esc(x.ticker) + '</button>').join("");
-    return '<tr data-date="' + esc(d.date) + '">' +
-      '<td class="num">' + esc(day(d.date)) + '</td>' +
-      '<td class="num">' + d.buy_count + '</td>' +
-      '<td class="num">' + d.watch_count + '</td>' +
-      '<td>' + esc(d.regime) + '</td>' +
-      '<td style="white-space:normal;min-width:230px">' + shown + '</td></tr>';
+  // One row per NAME. A date-by-date table repeated the same handful of
+  // tickers down the page -- the shortlist is five names and most were on it
+  // yesterday too -- which left the reader deduplicating by eye.
+  const rows = h.names.map((n) => {
+    const o = n.outcome || {};
+    const pending = o.resolved === "pending";
+    const repeat = n.times > 1
+      ? '<span class="chip" style="margin-left:6px">' + n.times + ' runs</span>'
+      : "";
+    return '<button class="namerow" data-stock="' + esc(n.ticker) + '">' +
+      '<div style="min-width:0">' +
+        '<div class="nm">' + esc(n.company) + repeat + '</div>' +
+        '<div class="sb">' + esc(n.ticker) + ' · last seen ' + esc(day(n.last_seen)) +
+        (n.times > 1 ? ' · first ' + esc(day(n.first_seen)) : '') + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;white-space:nowrap">' +
+        '<span class="pill ' + (n.last_status === "BUY" ? "buy" : "watch") + '">' +
+          (n.last_status === "BUY" ? "Buy" : "Watch") + '</span>' +
+        '<div class="sb" style="margin-top:5px">' +
+          (pending ? "not followed yet"
+                   : (o.change_pct > 0 ? "+" : "") + o.change_pct.toFixed(2) +
+                     "% since first call") + '</div>' +
+      '</div></button>';
   }).join("");
 
   return '<div style="display:flex;align-items:center;gap:var(--sp-3);' +
-      'margin-bottom:var(--sp-3);flex-wrap:wrap">' +
-      '<span class="prose muted" style="font-size:13px;flex:1">' +
-      'Open a date for that run, or a name for every run that flagged it.</span>' +
+      'margin-bottom:var(--sp-4);flex-wrap:wrap">' +
+      '<h2 style="font-size:16px;flex:1;min-width:150px">Previous shortlists</h2>' +
       '<button class="btn ghost sm" id="wipe">Clear history</button></div>' +
-    '<div class="tablewrap"><table><thead><tr>' +
-    '<th>Date</th><th>Buy</th><th>Watch</th><th>Market</th><th>Shortlist</th>' +
-    '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    '<div class="names">' + rows + '</div>';
 }
 
 async function confirmWipe() {
@@ -1115,71 +1120,12 @@ async function openStock(ticker) {
     '<div class="callout">' + esc(d.disclaimer || "") + '</div>';
 }
 
-/* ------------------------------------------------------------ past day */
-async function openDay(date) {
-  lastFocus = document.activeElement;
-  $("#panel-rank").textContent = "Run of";
-  $("#panel-title").textContent = day(date);
-  $("#panel-tick").textContent = "";
-  $("#panel-body").innerHTML = '<div class="skel" style="height:200px"></div>';
-  $("#panel").classList.add("open");
-  $("#scrim").classList.add("open");
-  $("#panel").focus();
-  document.body.style.overflow = "hidden";
-
-  let d;
-  try {
-    const r = await fetch("/history/" + encodeURIComponent(date));
-    if (!r.ok) throw new Error(await readErr(r));
-    d = await r.json();
-  } catch (e) {
-    $("#panel-body").innerHTML =
-      '<div class="err"><h3>That run could not be loaded</h3><p>' +
-      esc(e.message || String(e)) + '</p></div>';
-    return;
-  }
-  $("#panel-tick").textContent = d.regime || "";
-  $("#panel-body").innerHTML = dayHTML(d);
-}
-
+/* Colour and a word, never colour alone. */
 function pctHTML(value) {
   if (value == null) return '<span class="v-neu">—</span>';
   const cls = value > 0 ? "v-pos" : value < 0 ? "v-neg" : "v-neu";
   return '<span class="' + cls + ' num">' + (value > 0 ? "+" : "") +
          value.toFixed(2) + '%</span>';
-}
-
-function dayHTML(d) {
-  if (!d.picks || !d.picks.length) {
-    return '<div class="prose muted">' + esc((d.summary || {}).text || "") + '</div>';
-  }
-  const s = d.summary || {};
-  const rows = d.picks.map((p) => outcomeRow(
-    p.outcome,
-    '<div style="font-weight:600;overflow-wrap:anywhere">' + esc(p.company) + '</div>',
-    esc(p.ticker) + " · flagged as " + (p.status === "BUY" ? "Buy" : "Watch")
-  )).join("");
-
-  // Only show the tally when there is something to tally. A run made today
-  // has no sessions behind it, and three cards reading "0 of 0" say nothing.
-  const tally = s.tracked
-    ? '<div class="levels" style="margin-top:var(--sp-3)">' +
-        '<div class="level"><div class="k">Average move</div><div class="v num">' +
-          (s.average_change_pct > 0 ? "+" : "") + s.average_change_pct + '%</div></div>' +
-        '<div class="level"><div class="k">Reached target</div><div class="v num">' +
-          s.targets_hit + ' of ' + s.tracked + '</div></div>' +
-        '<div class="level"><div class="k">Touched stop</div><div class="v num">' +
-          s.stops_hit + ' of ' + s.tracked + '</div></div>' +
-      '</div>'
-    : "";
-
-  return '<div class="section">' +
-      '<h3>' + (s.tracked ? "Since this run" : "Nothing to measure yet") + '</h3>' +
-      '<p class="prose">' + esc(s.text || "") + '</p>' + tally +
-    '</div>' +
-    '<div class="section"><h3>The shortlist on ' + esc(day(d.date)) + '</h3>' +
-      '<div class="ev">' + rows + '</div></div>' +
-    '<div class="callout">' + esc(d.disclaimer || "") + '</div>';
 }
 
 /* ----------------------------------------------------------------- panel */
@@ -1188,7 +1134,7 @@ function openPanel(pick) {
   lastFocus = document.activeElement;
   $("#panel-rank").textContent =
     (pick.status === "BUY" ? "Qualifying setup" : "Monitored") +
-    (pick.rank ? " · Rank " + pick.rank : "");
+    (pick.rank ? " · ranked #" + pick.rank + " by the model" : "");
   $("#panel-title").textContent = pick.company;
   $("#panel-tick").textContent = pick.ticker + (pick.sector ? " · " + pick.sector : "");
   $("#panel-body").innerHTML = panelHTML(pick);
@@ -1283,14 +1229,8 @@ function wire() {
     const p = (state.view.picks || []).find((x) => String(x.position) === el.dataset.pos);
     if (p) openPanel(p);
   }));
-  $$("tbody tr[data-date]").forEach((el) =>
-    el.addEventListener("click", () => openDay(el.dataset.date)));
-  // The name sits inside the row, so its click has to stop there or opening a
-  // name would also open the day behind it.
-  $$("button[data-stock]").forEach((el) => el.addEventListener("click", (e) => {
-    e.stopPropagation();
-    openStock(el.dataset.stock);
-  }));
+  $$("button[data-stock]").forEach((el) =>
+    el.addEventListener("click", () => openStock(el.dataset.stock)));
   const wipe = $("#wipe");
   if (wipe) wipe.addEventListener("click", confirmWipe);
 }
@@ -1311,10 +1251,11 @@ async function loadHistory() {
   state.history = null;                 // renders the skeleton
   if (state.tab === "history") render();
   try {
-    const r = await fetch("/history?limit=30");
-    state.history = r.ok ? await r.json() : { days: [], note: "The run history could not be read." };
+    const r = await fetch("/history/names?limit=60");
+    state.history = r.ok ? await r.json()
+      : { names: [], note: "The run history could not be read." };
   } catch (e) {
-    state.history = { days: [], note: "The run history could not be read." };
+    state.history = { names: [], note: "The run history could not be read." };
   }
   if (state.tab === "history") render();
 }

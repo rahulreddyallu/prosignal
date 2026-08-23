@@ -297,6 +297,49 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ),
         }
 
+    @app.get("/history/names")
+    def history_names(limit: int = 60) -> Dict[str, Any]:
+        """Every name the engine has surfaced, collapsed to one row each.
+
+        The date-by-date table repeated the same handful of tickers down the
+        page and left the reader to deduplicate by eye. This is the same
+        record keyed by name.
+        """
+        import datetime as _dt
+
+        from .presentation.clearmark import read_mark
+        from .presentation.history import distinct_names
+        from .presentation.outcome import outcomes_for
+
+        rows = distinct_names(_ledger_rows(), since=read_mark(cfg.paths.ledger))
+        if not rows:
+            return {"names": [], "note": "No runs have been recorded yet."}
+        rows = rows[: max(1, min(int(limit), 200))]
+
+        names, _ = _reference_names()
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        earliest = min(_dt.date.fromisoformat(r["first_seen"]) for r in rows)
+        prices = store.read_prices(
+            symbols=[r["ticker"] for r in rows], start=earliest,
+            columns=["date", "symbol", "high", "low", "close"],
+        )
+
+        out = []
+        for row in rows:
+            company = names.get(row["ticker"]) or row["ticker"]
+            for suffix in (" Limited", " Ltd.", " Ltd", " LIMITED"):
+                if company.endswith(suffix):
+                    company = company[: -len(suffix)].strip()
+                    break
+            # Measured from the FIRST time it was surfaced -- that is when a
+            # reader could first have acted on it.
+            outcome = outcomes_for(
+                [{"ticker": row["ticker"], "signal_price": row["first_price"]}],
+                _dt.date.fromisoformat(row["first_seen"]), prices,
+            )[0]
+            out.append({**row, "company": company, "outcome": outcome.__dict__})
+        return {"names": out, "note": ""}
+
     @app.get("/stock/{ticker}/history")
     def stock_history(ticker: str) -> Dict[str, Any]:
         """Every time this name reached the shortlist, and what followed.
