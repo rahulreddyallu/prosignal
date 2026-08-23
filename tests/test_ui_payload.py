@@ -768,8 +768,10 @@ def test_clearing_results_is_applied_where_results_are_read():
     it clears the screen only until the next one. The watermark has to be
     applied at read time -- otherwise Clear silently does nothing."""
     src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
-    assert "_apply_clear_mark" in src
-    perf = src[src.index("def performance_report"):]
-    assert "_apply_clear_mark" in perf[:1800]
-    calls = src[src.index("def stock_calls"):]
-    assert "_apply_clear_mark" in calls[:1200]
+    # Both readers now share one resolution, and the mark is applied inside
+    # it -- so it cannot be applied to one screen and forgotten on the other.
+    body = src[src.index("def _resolved_rows"):]
+    assert "_apply_clear_mark" in body[:900]
+    for reader in ("def performance_report", "def stock_calls"):
+        r = src[src.index(reader):]
+        assert "_resolved_rows()" in r[:1600], reader

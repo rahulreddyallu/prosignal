@@ -703,6 +703,8 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 .nr-t { grid-area: t; font-size: 13.5px; font-weight: 550; color: var(--ink);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nr-h { grid-area: h; font-size: 11.5px; color: var(--ink-3); }
+.stock { display: block; }
+.stock .fine { margin-top: var(--sp-3); }
 .ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
         gap: var(--sp-4); padding-bottom: var(--sp-3);
         border-bottom: 1px solid var(--line); }
@@ -711,7 +713,7 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
            margin-top: 3px; font-variant-numeric: tabular-nums; }
 .way .ws { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
 .callh { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-         color: var(--ink-3); margin: var(--sp-4) 0 2px; }
+         color: var(--ink-3); margin: var(--sp-4) 0 0; }
 .calls { display: grid; }
 .call { display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: center; gap: var(--sp-3); padding: 10px 0;
@@ -2034,13 +2036,17 @@ async function openStock(ticker) {
         'return on two slots of capital, not one.</p>'
       : "");
 
+  // One child, so the panel grid's gap applies once instead of between
+  // every block of a short page.
   $("#panel-body").innerHTML =
-    twoWays +
-    '<h4 class="callh">Each call</h4>' +
-    '<div class="calls">' + rows + '</div>' +
-    (d.open ? '<p class="fine">' + d.open +
-      (d.open === 1 ? ' call is' : ' calls are') +
-      ' still open and not counted above.</p>' : "");
+    '<div class="stock">' +
+      twoWays +
+      '<h4 class="callh">Each call</h4>' +
+      '<div class="calls">' + rows + '</div>' +
+      (d.open ? '<p class="fine">' + d.open +
+        (d.open === 1 ? ' call is' : ' calls are') +
+        ' still open and not counted above.</p>' : "") +
+    '</div>';
 }
 
 /* Colour and a word, never colour alone. */

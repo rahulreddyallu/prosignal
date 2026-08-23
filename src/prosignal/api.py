@@ -402,6 +402,28 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             out.append({**row, "company": company, "outcome": outcome.__dict__})
         return {"names": out, "note": ""}
 
+    _resolved: Dict[str, Any] = {"key": None, "rows": None, "open": None}
+
+    def _resolved_rows():
+        """Resolution is the expensive part and it is the same work for the
+        History page and for any one name, so both share it -- opening a
+        stock after History should not pay for it a second time."""
+        from . import outcomes as _out
+        from . import performance as _perf
+        from .stages._cfg import iv
+        key = _ledger_fingerprint()
+        if _resolved["key"] != key:
+            store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+            led = Path(cfg.paths.ledger)
+            path = led / "outcomes.jsonl"
+            _out.resolve_pending(store, led, path, cfg)
+            rows = _apply_clear_mark(_out.load_outcomes(path))
+            horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
+            op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
+                                      store, max_hold=horizon)
+            _resolved.update(key=key, rows=rows, open=op)
+        return _resolved["rows"], _resolved["open"]
+
     @app.get("/stock/{ticker}/calls")
     def stock_calls(ticker: str) -> Dict[str, Any]:
         """Every call on one name, from the same source the list uses.
@@ -413,14 +435,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         from . import outcomes as _out
         from . import performance as _perf
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
-        led = Path(cfg.paths.ledger)
-        path = led / "outcomes.jsonl"
-        _out.resolve_pending(store, led, path, cfg)
-        rows = _apply_clear_mark(_out.load_outcomes(path))
-        from .stages._cfg import iv
-        horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
-        op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
-                                  store, max_hold=horizon)
+        rows, op = _resolved_rows()
         names, _ = _reference_names()
         sym = str(ticker).upper()
         company = names.get(sym) or sym
@@ -766,9 +781,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         from . import performance as _perf
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
         led = Path(cfg.paths.ledger)
-        path = led / "outcomes.jsonl"
-        _out.resolve_pending(store, led, path, cfg)
-        rows = _out.load_outcomes(path)
+        rows, _op = _resolved_rows()
 
         # Clearing history sets a watermark rather than deleting ledger rows,
         # because fail_run_if_unwritable exists precisely so the deflated-
@@ -776,7 +789,6 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         # therefore has to be applied HERE, where results are read -- the
         # outcomes file is derived and rebuilt on every request, so deleting
         # it would clear the screen only until the next one.
-        rows = _apply_clear_mark(rows)
 
         # Scoping defaults to OFF. Keeping evidence from before a config
         # change out of evidence from after it matters for a t-statistic;
@@ -823,9 +835,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "measurement": state,
             "scope": ("period" if window is not None else "all"),
             # Kept apart from every figure above: a mark is not an outcome.
-            "open": _perf.open_positions(
-                Ledger(cfg.paths.ledger).read_all(), rows, store,
-                max_hold=horizon),
+            "open": _op,
         }
         _perf_cache["key"], _perf_cache["value"] = key, payload
         return payload

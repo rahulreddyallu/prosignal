@@ -489,7 +489,10 @@ def calls_for(ticker: str, outcomes: Sequence[Dict[str, Any]], store: Any = None
     hold = None
     if calls and store is not None:
         try:
-            f = store.read_prices(symbols=[sym])
+            # Only the close is needed for the hold comparison; reading the
+            # whole row set for one name was most of the panel's latency.
+            f = store.read_prices(symbols=[sym],
+                                  columns=["date", "symbol", "close"])
             if f is not None and not f.empty:
                 f = f.sort_values(DATE)
                 first_entry = float(calls[0]["entry_price"] or 0.0)
