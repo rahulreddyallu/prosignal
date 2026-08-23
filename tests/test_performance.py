@@ -224,10 +224,27 @@ def test_the_benchmark_frame_is_built_once_per_request():
             return super().read_indices()
 
     st = _Counting(_indices())
-    P._INDEX_CACHE.clear()
     rows = [_t(), _t(ticker="BBB", net=-0.02)]
     P.performance(rows, st, benchmark="Nifty 200")
     P.by_ticker(rows, st, benchmark="Nifty 200")
     P.equity_curve(rows, st, benchmark="Nifty 200")
     assert calls["n"] == 1, f"read the index table {calls['n']} times"
-    P._INDEX_CACHE.clear()
+
+
+def test_two_different_stores_never_share_a_cached_benchmark():
+    """The cache was keyed on id(store). CPython reuses an id once the object
+    behind it is collected, so a freshly built store could be handed the
+    previous store's benchmark frame -- which is how a store with no name
+    column started returning a benchmark it could not possibly have."""
+    import pandas as pd
+
+    good = _Store(_indices())
+    assert P.performance([_t()], good, benchmark="Nifty 200")["benchmark_covered"] == 1
+    del good
+
+    # A store with no way to identify the benchmark must refuse, whatever
+    # object ids have been recycled in between.
+    for _ in range(50):
+        bare = _Store(pd.DataFrame({"date": pd.date_range("2026-01-01", periods=30),
+                                    "close": range(30)}))
+        assert P.performance([_t()], bare)["benchmark_covered"] == 0

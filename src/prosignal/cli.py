@@ -264,6 +264,29 @@ def cmd_data_ingest(cfg: AppConfig, args: argparse.Namespace) -> int:
     if args.full:
         sessions = int(cfg.params.universe.min_history_sessions.value) + 30
 
+    if sessions is None:
+        # Advance the backfill as well as fetching the new day.
+        #
+        # The default was min_history_sessions + 30 = 330, which is enough to
+        # score today and nothing more. A store below the validated depth
+        # therefore stayed below it forever: the nightly job added the latest
+        # session and never reached further back, so the only thing that grew
+        # the history was a person pressing a button. One chunk a night gets
+        # there on its own.
+        from .data.coverage import assess
+        from .data.store import DataStore
+
+        try:
+            have = len(DataStore(cfg.paths.curated, cfg.paths.snapshots).price_sessions())
+        except Exception:
+            have = 0
+        cov = assess(cfg, have)
+        if have and have < cov.validated_target:
+            chunk = int(getattr(cfg.params.api, "bootstrap_chunk_sessions", 0) or 90)
+            sessions = min(have + chunk, cov.validated_target)
+            _print(f"Store is {have} of {cov.validated_target} sessions; "
+                   f"reaching for {sessions} tonight.")
+
     opts = IngestOptions(
         history_sessions=sessions,
         offline=args.offline,

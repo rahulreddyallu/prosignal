@@ -114,3 +114,42 @@ def test_the_requested_depth_is_reachable_for_the_validated_target(live_cfg):
                int(live_cfg.params.storage.max_backfill_calendar_days))
     cutoff = sessions[-1] - dt.timedelta(days=span)
     assert sum(1 for d in sessions if d >= cutoff) >= 2200
+
+
+def test_the_nightly_ingest_advances_the_backfill_not_just_today():
+    """The default was min_history_sessions + 30 = 330: enough to score
+    today and nothing more. A store below the validated depth therefore
+    stayed below it forever, because the only thing that reached further
+    back was a person pressing a button."""
+    src = Path("src/prosignal/cli.py").read_text(encoding="utf-8")
+    body = src[src.index("sessions = args.sessions"):]
+    body = body[:body.index("opts = IngestOptions")]
+    assert "validated_target" in body
+    assert "bootstrap_chunk_sessions" in body
+    assert "if have and have < cov.validated_target" in body
+
+
+def test_a_store_already_at_depth_does_not_refetch_the_world():
+    """Once there, the nightly job goes back to the cheap default -- asking
+    for 2,200 every night would re-walk nine years to add one session."""
+    src = Path("src/prosignal/cli.py").read_text(encoding="utf-8")
+    body = src[src.index("sessions = args.sessions"):]
+    body = body[:body.index("opts = IngestOptions")]
+    # The deep request is conditional on being below the target.
+    assert body.index("if have and have < cov.validated_target") < body.index("sessions = min(")
+
+
+def test_opening_history_cannot_start_a_scan():
+    """Loading History appeared to make a shortlist show up on Today. It
+    reads; it does not run anything. What appeared was the last completed
+    scan, loaded by boot()."""
+    ui = Path("src/prosignal/static/index.html").read_text(encoding="utf-8")
+    for fn in ("loadHistory", "loadPerformance"):
+        i = ui.index("async function " + fn)
+        body = ui[i:ui.index("\n}", i)]
+        assert "method: \"POST\"" not in body, f"{fn} must not start work"
+    api = Path("src/prosignal/api.py").read_text(encoding="utf-8")
+    for name in ("performance_report", "stock_calls"):
+        b = api[api.index("def " + name):]
+        b = b[:b.index("@app.")] if "@app." in b else b
+        assert "jobs.start" not in b, f"{name} must not start a job"
