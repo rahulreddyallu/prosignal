@@ -109,16 +109,20 @@ def test_the_bootstrap_aims_at_the_validated_depth():
     assert "min_history_sessions.value) + 30" not in runner
 
 
-def test_the_interface_keeps_offering_the_button_until_the_model_can_run():
+def test_the_interface_keeps_offering_the_button_until_the_store_is_deep_enough():
     """It disappeared at 330 because the screen keyed off `ready`, which was
-    itself wrong. It now also stays for a store that fits but is short of the
-    validated depth."""
+    itself wrong. Both the too-short state and the fits-but-not-validated
+    state now route to the same build screen, so the button cannot vanish
+    while there is still history to fetch."""
     from pathlib import Path
 
     ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
           / "index.html").read_text(encoding="utf-8")
     assert "matches_validation === false" in ui
-    assert "Continue building" in ui
+    render = ui[ui.index("function render()"):ui.index("function buildScreen")]
+    assert render.count("buildScreen()") == 2, (
+        "both incomplete states must reach the build screen"
+    )
 
 
 def test_a_503_from_ready_is_read_not_discarded():
@@ -197,14 +201,52 @@ def test_the_empty_state_does_not_flash_before_the_data_arrives():
     assert "if (state.booting)" in render
 
 
+def _ui() -> str:
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
+            / "index.html").read_text(encoding="utf-8")
+
+
 def test_the_build_screen_shows_a_moving_session_count():
     """The job's own label is written once at the start and once at the end,
     so it sat unchanged for 24 minutes and made a working build look frozen."""
-    from pathlib import Path
-
-    ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
-          / "index.html").read_text(encoding="utf-8")
-    block = ui[ui.index("async function bootstrap"):ui.index("async function checkReady")]
+    block = _ui()
+    block = block[block.index("async function bootstrap"):block.index("async function checkReady")]
     assert "setInterval" in block
     assert "clearInterval" in block, "the poller must stop when the build ends"
     assert "price_sessions" in block
+
+
+def test_exactly_one_writer_owns_the_build_numbers():
+    """Three things used to write numbers to that screen at once: a status
+    line frozen at page load, the job's progress label reporting a figure
+    minutes out of date, and the poller. They rendered together and
+    disagreed -- 319 in one place and 369 in another, on the same screen.
+    """
+    ui = _ui()
+    assert "function paintBuild" in ui
+    boot = ui[ui.index("async function bootstrap"):ui.index("async function checkReady")]
+    assert "paintBuild(c)" in boot
+    assert "job.progress.label" not in ui, (
+        "the job label is minutes stale and must not be rendered beside a "
+        "live counter"
+    )
+    assert "boot-note" not in ui, "the second number's element is gone"
+
+
+def test_the_counter_is_the_largest_thing_on_the_build_screen():
+    """It is the answer to 'is this doing anything', so it is not a note under
+    a button."""
+    ui = _ui()
+    css = ui[ui.index(".build .count .num"):]
+    css = css[:css.index("}")]
+    assert "clamp(38px" in css
+    assert "tabular-nums" in css
+
+
+def test_a_batched_jump_is_marked_so_it_reads_as_progress():
+    """Sessions land in batches, so the number can sit still for two minutes
+    and then jump 30. Without a cue that reads as a page reload."""
+    ui = _ui()
+    assert "tick" in ui[ui.index("async function bootstrap"):]
