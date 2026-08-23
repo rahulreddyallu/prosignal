@@ -15,7 +15,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -655,6 +655,105 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 "more often."
             ),
         }
+
+    @app.get("/performance")
+    def performance_report() -> Dict[str, Any]:
+        """Did following the shortlist beat not following it?
+
+        Resolution runs on read, like /outcomes, so the scheduled job does not
+        need to remember to do it and a missed night self-heals.
+        """
+        from . import outcomes as _out
+        from . import performance as _perf
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        led = Path(cfg.paths.ledger)
+        path = led / "outcomes.jsonl"
+        _out.resolve_pending(store, led, path, cfg)
+        rows = _out.load_outcomes(path)
+        from .stages._cfg import iv
+        horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
+        bench = str(cfg.params.stage2_regime.benchmark_index.value)
+        return {
+            "headline": _perf.performance(rows, store, horizon=horizon,
+                                          benchmark=bench),
+            "by_ticker": _perf.by_ticker(rows, store, benchmark=bench),
+            "curve": _perf.equity_curve(rows, store, benchmark=bench),
+            "calibration": _out.calibration(rows),
+            "pending": max(0, led_pending_count(led, rows)),
+        }
+
+    def led_pending_count(led: Path, resolved) -> int:
+        """Signals issued but not yet scoreable. Shown so an empty
+        performance page reads as "too early" rather than as "no signals"."""
+        try:
+            keys = {(r.get("run_id"), r.get("ticker")) for r in resolved}
+            total = 0
+            for row in Ledger(cfg.paths.ledger).read_all():
+                for sig in (row.get("signals") or []):
+                    if (row.get("run_id"), sig.get("ticker")) not in keys:
+                        total += 1
+            return total
+        except Exception:
+            return 0
+
+    # ------------------------------------------------------------------
+    # Operator actions
+    # ------------------------------------------------------------------
+
+    @app.get("/operations")
+    def operations_state() -> Dict[str, Any]:
+        from . import operations as _ops
+        led = Path(cfg.paths.ledger)
+        return {
+            "schedule": {
+                **_ops.pause_state(led).to_dict(),
+                "cron": "20:30 IST, weekdays",
+                "note": ("Pausing does not stop cron -- editing /etc/cron.d "
+                         "needs root. The job still wakes and declines, and "
+                         "the decline is recorded."),
+            },
+            "log": _ops.operations_log(led, limit=25),
+        }
+
+    @app.post("/operations/pause")
+    def operations_pause(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        from . import operations as _ops
+        reason = (body or {}).get("reason", "")
+        return _ops.pause(Path(cfg.paths.ledger), reason).to_dict()
+
+    @app.post("/operations/resume")
+    def operations_resume() -> Dict[str, Any]:
+        from . import operations as _ops
+        return _ops.resume(Path(cfg.paths.ledger)).to_dict()
+
+    @app.post("/admin/reset/market-data")
+    def reset_market_data() -> Dict[str, Any]:
+        """Clear the price store so the build can run again. The record of
+        what the engine said is kept -- that cannot be re-fetched."""
+        from . import operations as _ops
+        active = jobs.active_job()
+        if active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="A job is running. Cancel it before resetting the store.")
+        return _ops.reset_market_data(cfg.paths)
+
+    @app.post("/admin/reset/everything")
+    def reset_everything(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Market data AND the entire record. The confirmation phrase is
+        required by the server, not only by the interface -- a destructive
+        endpoint that trusts the caller to have asked is not guarded."""
+        from . import operations as _ops
+        if (body or {}).get("confirm") != "ERASE":
+            raise HTTPException(
+                status_code=400,
+                detail='Send {"confirm": "ERASE"} to erase the record.')
+        active = jobs.active_job()
+        if active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="A job is running. Cancel it before erasing.")
+        return _ops.erase_everything(cfg.paths)
 
     @app.get("/ledger")
     def ledger(limit: int = 50) -> Dict[str, Any]:

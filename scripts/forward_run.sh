@@ -18,6 +18,17 @@ say() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >> "$LOG"; }
 export ARROW_DEFAULT_MEMORY_POOL=system MALLOC_ARENA_MAX=2
 
 say "--- observation start"
+
+# The operator can decline an observation from the interface. cron still
+# wakes -- editing /etc/cron.d needs root and the service does not have it --
+# so the decline is a flag this script honours, and it is written down. A gap
+# nobody can explain is indistinguishable from a gap that was hidden.
+PAUSE="$ROOT/data/ledger/cron.paused"
+if [ -f "$PAUSE" ]; then
+  say "PAUSED by operator -- no observation recorded ($(cat "$PAUSE" 2>/dev/null | head -c 200))"
+  exit 0
+fi
+
 if ! "$PY" -m prosignal.cli data ingest >>"$LOG" 2>&1; then
   say "ingest FAILED -- no run recorded for today"
   exit 1

@@ -196,6 +196,7 @@ _AMBIENT = {
     "bind", "call", "apply", "select", "stringify", "parse", "then", "catch",
     "round", "floor", "ceil", "abs", "pow",
     "requestAnimationFrame", "cancelAnimationFrame", "matchMedia", "now",
+    "concat", "isArray", "keys", "reverse", "toUpperCase", "casefold",
     # CSS function names picked up by the same scan
     "var", "rgba", "rect", "minmax", "clamp", "repeat", "translateX",
     "translateY", "scaleX", "rotate", "brightness", "saturate", "blur",
@@ -229,7 +230,10 @@ def test_the_interface_has_one_results_tab():
     to look for something already in front of the reader."""
     html = _html()
     tabs = re.findall(r'data-view="([a-z]+)"', html)
-    assert tabs == ["overview", "history"], tabs
+    # Settings is not a results tab -- it holds appearance, the schedule and
+    # the resets. What must stay singular is the place a run is READ.
+    assert tabs == ["overview", "history", "settings"], tabs
+    assert [t for t in tabs if t not in ("settings",)] == ["overview", "history"]
     assert "viewMonitored" not in html and "viewResearch" not in html
     assert "viewMethod" not in html
 
@@ -556,3 +560,111 @@ def test_the_ownership_line_does_not_wrap_mid_name_on_mobile():
     mobile = html[html.index("@media (max-width: 640px) {\n  /* Stacked"):]
     mobile = mobile[:mobile.index("\n}")]
     assert "text-wrap: balance" in mobile
+
+
+# ===================================================================
+# Settings, the build tile, and the performance page
+# ===================================================================
+
+def test_settings_is_reachable_when_nothing_else_is():
+    """Settings is where a store that is not ready gets rebuilt, so the
+    readiness checks must not be able to swallow it."""
+    html = _html()
+    body = html[html.index("<script>"):]
+    route = body.index('state.tab === "settings"')
+    assert route < body.index("if (state.notReady)"), \
+        "a not-ready store can hide the screen that fixes it"
+
+
+def test_the_theme_control_left_the_header_for_settings():
+    html = _html()
+    assert 'id="theme"' not in html
+    assert 'id="gear"' in html
+    assert "data-theme-set" in html
+
+
+def test_erasing_everything_needs_a_typed_word_in_both_places():
+    """A button that only has to be found gets pressed by accident. The
+    server demands the same word, so the dialog is not the only guard."""
+    html = _html()
+    assert '"ERASE"' in html
+    assert 'id="ask-phrase"' in html
+    src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
+    assert 'confirm") != "ERASE"' in src
+
+
+def test_clearing_market_data_does_not_claim_to_keep_nothing():
+    """The two resets differ only in blast radius, so the screen has to say
+    which one keeps the record."""
+    html = _html()
+    assert "run history and measured outcomes are kept" in html
+    assert "The record cannot" in html
+
+
+def test_the_build_tile_and_the_build_screen_share_one_writer():
+    """Two builders writing two progress readouts is a bug this already
+    shipped. Both mount the same ids so paintBuild stays the only writer."""
+    html = _html()
+    assert html.count('id="b-now"') == 2      # full screen + tile
+    assert html.count('id="b-bar"') == 2
+    assert html.count("function paintBuild") == 1
+
+
+def test_a_shallow_store_no_longer_hides_working_results():
+    """Above the model minimum there ARE real picks. Hiding them behind a
+    progress bar made a usable engine look broken for months."""
+    body = _html()
+    assert "state.shallow" in body
+    assert "buildTile()" in body
+    # The old behaviour returned the whole build screen for this case.
+    assert 'matches_validation === false\n      && state.tab === "overview"' not in body
+
+
+def test_the_performance_page_never_quotes_an_uncorrected_t_alone():
+    """Trades held at the same time share most of their window."""
+    html = _html()
+    assert "naive_t" in html
+    assert "carry about" in html          # the effective-n sentence
+    assert "significance" in html
+
+
+def test_the_verdict_says_when_it_cannot_answer():
+    html = _html()
+    assert "inside the noise" in html
+    assert "not\n              distinguishable from zero" in html or \
+           "distinguishable from zero" in html
+    assert "Too few completed trades" in html
+
+
+def test_a_pending_sample_is_not_an_empty_one():
+    """Before the first holding window elapses there is nothing to score,
+    and that is different from the engine having found nothing."""
+    html = _html()
+    assert "Nothing has finished yet" in html
+    assert "signals are being tracked" in html
+
+
+def test_the_curve_is_labelled_as_a_sum_not_a_compounded_return():
+    html = _html()
+    assert "running SUM" in html or "running sum" in html
+
+
+def test_a_positive_average_over_a_negative_median_is_called_out():
+    """135 real trades average +1.23% while the median loses 5%. Reading the
+    average as "a typical trade" is the wrong conclusion and the one the
+    number invites."""
+    html = _html()
+    assert "median trade lost" in html
+    assert "A few large winners" in html
+
+
+def test_the_settings_screen_separates_the_two_resets_by_blast_radius():
+    html = _html()
+    assert "/admin/reset/market-data" in html
+    assert "/admin/reset/everything" in html
+    # The destructive one is the only one carrying a typed phrase.
+    erase = html[html.index("async function confirmEraseEverything"):]
+    body = erase[:erase.index("async function runReset")]
+    assert '"ERASE"' in body
+    md = html[html.index("async function confirmResetMarketData"):]
+    assert "ERASE" not in md[:md.index("async function confirmEraseEverything")]

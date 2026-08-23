@@ -565,6 +565,124 @@ td.r { text-align: right; }
   .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-5); }
 }
 
+/* ===== settings ==================================================== */
+.set { display: grid; gap: var(--sp-4); }
+.set-b h3 { font-size: 14.5px; margin-bottom: var(--sp-3); }
+.set-b .note { color: var(--ink-2); font-size: 13px; line-height: 1.6;
+               margin: var(--sp-3) 0; }
+.fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.55;
+        margin-top: var(--sp-3); }
+.seg3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px; }
+.segbtn { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px;
+          border: 1px solid var(--line); background: var(--surface);
+          border-radius: var(--r-sm); cursor: pointer; font: inherit;
+          font-size: 13px; font-weight: 550; color: var(--ink);
+          text-align: center; transition: border-color .14s ease,
+          background .14s ease; }
+.segbtn span { font-size: 11px; font-weight: 400; color: var(--ink-3); }
+.segbtn:hover { border-color: var(--line-strong); }
+.segbtn.on { border-color: var(--accent); background: var(--accent-soft); }
+.segbtn.on span { color: var(--ink-2); }
+.setrow { display: flex; align-items: center; justify-content: space-between;
+          gap: var(--sp-4); flex-wrap: wrap; }
+.setrow .k { font-size: 15px; font-weight: 600; color: var(--ink); }
+.setrow .v { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+.set-b.danger { border-color: var(--neg); }
+.set-b.danger h3 { color: var(--neg); }
+.btn.danger { background: var(--neg); border-color: var(--neg); color: #fff; }
+.btn.danger:hover { filter: brightness(1.08); }
+.oplog { list-style: none; display: grid; gap: 2px; }
+.oplog li { display: flex; justify-content: space-between; gap: var(--sp-4);
+            padding: 7px 0; border-bottom: 1px solid var(--line);
+            font-size: 12.5px; }
+.oplog li:last-child { border-bottom: none; }
+.oplog .oa { color: var(--ink); text-transform: capitalize; }
+.oplog .od { color: var(--ink-3); white-space: nowrap; }
+.phrase { display: block; margin: var(--sp-4) 0 0; }
+.phrase span { display: block; font-size: 12px; color: var(--ink-2);
+               margin-bottom: 5px; }
+.phrase input { width: 100%; padding: 9px 11px; font: inherit; font-size: 14px;
+                letter-spacing: .08em; text-transform: uppercase;
+                color: var(--ink); background: var(--surface-sunk);
+                border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
+.phrase input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ===== build tile ================================================== */
+.tile { border-left: 3px solid var(--accent); }
+.tile-h { display: flex; align-items: flex-start; justify-content: space-between;
+          gap: var(--sp-4); flex-wrap: wrap; }
+.tile-t { font-size: 14px; font-weight: 600; color: var(--ink); }
+.tile-s { font-size: 12.5px; color: var(--ink-3); margin-top: 3px;
+          max-width: 46ch; line-height: 1.5; }
+.count.sm { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+.count.sm .num { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.count.sm .of { font-size: 12px; color: var(--ink-3); }
+.tile .track { margin: var(--sp-4) 0 var(--sp-3); }
+.tile .sub { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.tile-a { margin-top: var(--sp-3); }
+
+/* ===== verdict ===================================================== */
+.vhead { display: flex; align-items: center; justify-content: space-between;
+         gap: var(--sp-4); margin-bottom: var(--sp-4); flex-wrap: wrap; }
+.vhead h3 { font-size: 15px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+         gap: var(--sp-4); padding-bottom: var(--sp-4);
+         border-bottom: 1px solid var(--line); }
+.stat .sl { font-size: 11.5px; color: var(--ink-3); letter-spacing: .02em; }
+.stat .sv { font-size: 24px; font-weight: 600; letter-spacing: -0.02em;
+            margin-top: 3px; font-variant-numeric: tabular-nums; }
+.stat .ss { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.reading { font-size: 13.5px; color: var(--ink); line-height: 1.6;
+           margin-top: var(--sp-4); text-wrap: pretty; }
+.reading.skew { border-left: 2px solid var(--neg); padding-left: var(--sp-3);
+                color: var(--ink-2); font-size: 13px; }
+.exits { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5);
+         margin-top: var(--sp-4); padding-top: var(--sp-4);
+         border-top: 1px solid var(--line); }
+.ex { font-size: 12.5px; color: var(--ink-2); }
+.ex b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ===== curve ======================================================= */
+.curve { margin-top: var(--sp-4); }
+.curve svg { width: 100%; height: 150px; display: block; overflow: visible; }
+.curve path { fill: none; stroke-width: 1.75; vector-effect: non-scaling-stroke;
+              stroke-linejoin: round; stroke-linecap: round; }
+path.cs { stroke: var(--accent); }
+path.cb { stroke: var(--ink-3); stroke-dasharray: 3 3; stroke-width: 1.25; }
+.cz { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.clegend { display: flex; align-items: center; gap: 7px; margin-top: var(--sp-3);
+           font-size: 11.5px; color: var(--ink-3); }
+.clegend .ck { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+.clegend .ck.cs { background: var(--accent); }
+.clegend .ck.cb { background: var(--ink-3); margin-left: var(--sp-4); }
+
+/* ===== per-name tables ============================================= */
+.tts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+       gap: var(--sp-5); }
+.tt h4 { font-size: 12px; color: var(--ink-3); letter-spacing: .04em;
+         text-transform: uppercase; margin-bottom: var(--sp-3); }
+.tw { overflow-x: auto; }
+.tw table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tw th { text-align: left; font-weight: 500; color: var(--ink-3);
+         font-size: 11px; padding: 0 8px 6px 0; white-space: nowrap; }
+.tw td { padding: 7px 8px 7px 0; border-top: 1px solid var(--line);
+         white-space: nowrap; }
+.tw .num { text-align: right; font-variant-numeric: tabular-nums; }
+.tw .tk { font-weight: 550; color: var(--ink); }
+.names-h { display: flex; align-items: center; justify-content: space-between;
+           gap: var(--sp-4); margin: var(--sp-6) 0 var(--sp-3); }
+.names-h h3 { font-size: 14px; }
+
+@media (max-width: 640px) {
+  .seg3 { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+  .stat .sv { font-size: 20px; }
+  .tile-h { flex-direction: column; gap: var(--sp-3); }
+  .count.sm .num { font-size: 22px; }
+}
+
 .skel { background: linear-gradient(90deg, var(--surface-sunk) 25%,
         var(--surface-2) 37%, var(--surface-sunk) 63%);
         background-size: 400% 100%; animation: sk 1.4s ease infinite;
@@ -596,7 +714,7 @@ td.r { text-align: right; }
     <div class="topbar-meta">
       <span id="mkt-status"><span class="dot closed"></span>Loading</span>
       <span class="hide-sm" id="mkt-fresh"></span>
-      <button class="iconbtn" id="theme" aria-label="Switch between light and dark theme" title="Theme">◐</button>
+      <button class="iconbtn" id="gear" aria-label="Settings" title="Settings">&#9881;</button>
     </div>
   </div>
 </header>
@@ -605,6 +723,7 @@ td.r { text-align: right; }
   <div class="nav-in" role="tablist">
     <button role="tab" data-view="overview" aria-current="page">Today</button>
     <button role="tab" data-view="history">History</button>
+    <button role="tab" data-view="settings">Settings</button>
   </div>
 </nav>
 
@@ -663,6 +782,11 @@ td.r { text-align: right; }
   <div class="modal">
     <h3 id="ask-title">Clear the run history?</h3>
     <p id="ask-body"></p>
+    <label class="phrase" id="ask-phrase-wrap" hidden>
+      <span id="ask-phrase-label"></span>
+      <input type="text" id="ask-phrase" autocomplete="off" autocapitalize="characters"
+             spellcheck="false" aria-describedby="ask-phrase-label">
+    </label>
     <div class="modal-acts">
       <button class="btn ghost sm" id="ask-no">Cancel</button>
       <button class="btn sm" id="ask-yes">Clear history</button>
@@ -699,7 +823,8 @@ const state = { view: null, run: null, tab: "overview", busy: false,
                 booting: true, error: null, notReady: false, jobId: null,
                 jobKind: null,
                 history: undefined,
-                latestSession: null, slateSize: 5, coverage: null };
+                latestSession: null, slateSize: 5, coverage: null,
+                perf: undefined, ops: null, shallow: false };
 
 /* ---------------------------------------------------------------- theme */
 const THEME_KEY = "signal.theme";
@@ -708,16 +833,10 @@ function applyTheme(t) {
   else document.documentElement.setAttribute("data-theme", t);
   try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
 }
-(function () {
-  let t = "auto";
-  try { t = localStorage.getItem(THEME_KEY) || "auto"; } catch (e) {}
-  applyTheme(t);
-  $("#theme").addEventListener("click", () => {
-    let cur = "auto";
-    try { cur = localStorage.getItem(THEME_KEY) || "auto"; } catch (e) {}
-    applyTheme(cur === "auto" ? "light" : cur === "light" ? "dark" : "auto");
-  });
-})();
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) || "auto"; } catch (e) { return "auto"; }
+}
+applyTheme(currentTheme());
 
 /* ------------------------------------------------------------- helpers */
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -746,18 +865,36 @@ function day(iso) {
     { day: "numeric", month: "short", year: "numeric" });
 }
 
-function ask(title, body, confirmLabel) {
+/* `phrase` makes the confirmation cost something to give. A button that
+   only has to be found is pressed by accident; a word that has to be typed
+   is not. The server demands the same word, so the guard is not decorative. */
+function ask(title, body, confirmLabel, phrase) {
   return new Promise((resolve) => {
     $("#ask-title").textContent = title;
     $("#ask-body").textContent = body;
     $("#ask-yes").textContent = confirmLabel;
+    const wrap = $("#ask-phrase-wrap");
+    const field = $("#ask-phrase");
+    const yes = $("#ask-yes");
+    wrap.hidden = !phrase;
+    field.value = "";
+    if (phrase) {
+      $("#ask-phrase-label").textContent = 'Type ' + phrase + ' to confirm';
+      yes.disabled = true;
+      field.oninput = () => { yes.disabled = field.value.trim().toUpperCase() !== phrase; };
+    } else {
+      yes.disabled = false;
+      field.oninput = null;
+    }
     const box = $("#ask");
     box.hidden = false;
-    $("#ask-yes").focus();
+    (phrase ? field : yes).focus();
     const done = (answer) => {
       box.hidden = true;
+      yes.disabled = false;
       $("#ask-yes").onclick = null;
       $("#ask-no").onclick = null;
+      field.oninput = null;
       document.removeEventListener("keydown", onKey);
       resolve(answer);
     };
@@ -1114,6 +1251,18 @@ function render() {
 
   if (state.error) return renderError();
   if (state.busy) return;
+
+  // Ahead of every readiness check. Settings is where a store that is not
+  // ready gets rebuilt, so it must stay reachable when nothing else is.
+  if (state.tab === "settings") {
+    hideScan();
+    $("#page-title").textContent = "Settings";
+    $("#page-sub").textContent =
+      "Appearance, the scheduled run, and the two ways to start over.";
+    $("#view").innerHTML = viewSettings();
+    wire();
+    return;
+  }
   // Boot renders once before it knows anything. Showing the "no scan yet"
   // screen in that gap makes every refresh flash the empty state for a beat
   // and then replace it, which reads as a bug even though the data was on its
@@ -1130,26 +1279,34 @@ function render() {
     return;
   }
 
+  // Below the model minimum the engine cannot rank at all, so the build is
+  // the whole screen -- there is no result being withheld.
   if (state.notReady) { hideScan(); return buildScreen(); }
 
-  // Enough to fit, but not the depth the coefficients were validated on. The
-  // screen must not present a sixteen-month fit as the nine-year one.
-  if (state.coverage && state.coverage.matches_validation === false
-      && state.tab === "overview") { hideScan(); return buildScreen(); }
+  // Above the minimum but below the validated depth there ARE real picks, and
+  // hiding them behind a progress bar was the wrong trade: it made a usable
+  // engine look broken for months. The build becomes a tile above the
+  // results, and the results carry the caveat rather than the silence.
+  state.shallow = !!(state.coverage && state.coverage.matches_validation === false);
 
   const v = state.view;
   if (!v) {
     $("#view").innerHTML =
+      (state.shallow ? buildTile() : "") +
       '<div class="box empty"><h3>No scan has run yet</h3>' +
       '<p>The engine ranks the market against a model fitted on point-in-time ' +
       'data, then narrows to the setups that clear every risk check.</p>' +
       '<button class="btn" onclick="document.getElementById(\'scan\').click()">Scan Market</button></div>';
+    if (state.shallow) paintBuild(state.coverage || {});
+    wire();
     return;
   }
 
   renderChrome(v);
+  const tile = (state.shallow && state.tab === "overview") ? buildTile() : "";
   const body = state.tab === "history" ? viewHistory(v) : viewOverview(v);
-  $("#view").innerHTML = body;
+  $("#view").innerHTML = tile + body;
+  if (tile) paintBuild(state.coverage || {});
   wire();
 }
 
@@ -1157,6 +1314,95 @@ function render() {
    updated by ONE writer, because the previous version had three: a status
    line frozen at page load, the job's own progress label, and a poller --
    all rendering at once and disagreeing with each other. */
+/* ------------------------------------------------------------- settings
+
+   Everything here is a backend command that had no way to be invoked from a
+   phone. They are grouped by what they cost: appearance costs nothing, the
+   schedule costs an observation, and the two resets cost data -- the second
+   of them irreversibly. The grouping is the warning. */
+
+function viewSettings() {
+  const ops = state.ops || {};
+  const sch = ops.schedule || {};
+  const c = state.coverage || {};
+  const paused = !!sch.paused;
+  const t = currentTheme();
+  const opt = (v, label, note) =>
+    '<button class="segbtn' + (t === v ? ' on' : '') + '" data-theme-set="' + v + '">' +
+    esc(label) + '<span>' + esc(note) + '</span></button>';
+
+  return (
+  '<section class="set">' +
+
+    '<div class="box set-b">' +
+      '<h3>Appearance</h3>' +
+      '<div class="seg3">' +
+        opt("light", "Light", "Always light") +
+        opt("dark", "Dark", "Always dark") +
+        opt("auto", "System", "Follows the device") +
+      '</div>' +
+    '</div>' +
+
+    '<div class="box set-b">' +
+      '<h3>Scheduled run</h3>' +
+      '<div class="setrow">' +
+        '<div><div class="k">' + (paused ? "Paused" : "Running") + '</div>' +
+          '<div class="v">' + esc(sch.cron || "20:30 IST, weekdays") + '</div></div>' +
+        '<span class="pill ' + (paused ? "warn" : "ok") + '">' +
+          (paused ? "Declining" : "Active") + '</span>' +
+      '</div>' +
+      (paused && sch.since
+        ? '<p class="note">Paused since ' + esc(day(sch.since)) + '. ' +
+          'Every weekday that passes is an observation the forward test does ' +
+          'not get.</p>'
+        : '<p class="note">The engine ranks the market after the close each ' +
+          'weekday whether or not anyone opens this page. That record is what ' +
+          'the performance figures are built from.</p>') +
+      '<button class="btn ' + (paused ? "" : "ghost") + '" id="sched">' +
+        (paused ? "Resume scheduled runs" : "Pause scheduled runs") + '</button>' +
+      (paused ? "" :
+        '<p class="fine">Pausing does not stop cron \u2014 that needs root. ' +
+        'The job still wakes, declines, and writes down that it declined.</p>') +
+    '</div>' +
+
+    '<div class="box set-b">' +
+      '<h3>Market data</h3>' +
+      '<div class="setrow">' +
+        '<div><div class="k">' +
+          (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
+          ' sessions</div>' +
+          '<div class="v">Target ' +
+          ((c.validated_target || 2200).toLocaleString("en-IN")) + '</div></div>' +
+        '<span class="pill ' + (c.matches_validation ? "ok" : "warn") + '">' +
+          (c.matches_validation ? "At validated depth" : "Below validated depth") +
+        '</span>' +
+      '</div>' +
+      '<p class="note">Clearing the store lets the build run again \u2014 needed ' +
+      'when a new version asks for data points the current store never ' +
+      'collected. Your run history and its measured outcomes are kept.</p>' +
+      '<button class="btn ghost" id="reset-md">Clear and rebuild market data</button>' +
+    '</div>' +
+
+    '<div class="box set-b danger">' +
+      '<h3>Erase everything</h3>' +
+      '<p class="note">Market data <b>and</b> the entire record: every run, ' +
+      'every resolved outcome, and the forward-test registration. The store ' +
+      'can be re-fetched from NSE. The record cannot \u2014 it is the only ' +
+      'copy of what the engine said on a date that has passed.</p>' +
+      '<button class="btn danger" id="reset-all">Erase everything</button>' +
+    '</div>' +
+
+    (Array.isArray(ops.log) && ops.log.length
+      ? '<div class="box set-b"><h3>Recent actions</h3><ul class="oplog">' +
+        ops.log.slice(0, 8).map((r) =>
+          '<li><span class="oa">' + esc(String(r.action || "").replace(/_/g, " ")) +
+          '</span><span class="od">' + esc(day(r.at)) + '</span></li>').join("") +
+        '</ul></div>'
+      : "") +
+
+  '</section>');
+}
+
 /* renderChrome owns the scan button and the build screen returns before it,
    so without this the top "Scan Market" stays visible over a store that has
    nothing to scan -- two buttons, one of which cannot work. */
@@ -1203,6 +1449,34 @@ function syncBuildButton() {
   } else if (btn.disabled) {
     setBuildIdle();
   }
+}
+
+/* The slim form of the build, shown above results that already work.
+
+   It reuses the same element ids as the full screen so paintBuild stays the
+   single writer -- two builders writing two different progress readouts is
+   the bug this project already shipped once. Only one of the two is ever
+   mounted, because render picks one branch. */
+function buildTile() {
+  const c = state.coverage || {};
+  const yrs = (n) => (n / 250).toFixed(1);
+  return (
+  '<div class="box tile">' +
+    '<div class="tile-h">' +
+      '<div><div class="tile-t">Still building market history</div>' +
+        '<div class="tile-s">Ranking on ' + yrs(c.price_sessions || 0) +
+        ' years of history. The published coefficients were fitted on ' +
+        yrs(c.validated_target || 2200) + '.</div></div>' +
+      '<div class="count sm"><span id="b-now" class="num">' +
+        (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
+        '</span><span class="of" id="b-goal"></span></div>' +
+    '</div>' +
+    '<div class="track" id="b-bar"><div class="seg done"></div><div class="seg"></div></div>' +
+    '<p class="sub" id="b-sub"></p>' +
+    '<div class="tile-a">' +
+      '<button class="btn ghost sm" id="boot">Continue building</button>' +
+    '</div>' +
+  '</div>');
 }
 
 /* A build can land hundreds of sessions between two polls, and snapping the
@@ -1437,6 +1711,164 @@ function cardHTML(p) {
 }
 
 /* --------------------------------------------------------------- history */
+/* Percent with a sign and a colour. Losses are not softened -- the whole
+   point of this page is that a person can see when it did not work. */
+function signed(x, dp) {
+  if (x == null || !isFinite(x)) return '<span class="v-neu">\u2014</span>';
+  const pct = x * 100;
+  const cls = pct > 0.005 ? "v-pos" : pct < -0.005 ? "v-neg" : "v-neu";
+  return '<span class="' + cls + '">' + (pct > 0 ? "+" : "") +
+         pct.toFixed(dp == null ? 2 : dp) + '%</span>';
+}
+
+/* Cumulative return against the same days in the index.
+
+   Plotted as a running SUM of per-trade returns, not a compounded curve:
+   the shortlist holds several names at once, and compounding overlapping
+   positions would draw a line the strategy never earned. */
+function curveSVG(curve) {
+  const pts = (curve || []).filter((c) => c && isFinite(c.cumulative));
+  if (pts.length < 2) return "";
+  const W = 640, H = 150, PAD = 6;
+  const paired = pts.filter((c) => c.benchmark_cumulative != null);
+  const all = pts.map((c) => c.cumulative)
+                 .concat(paired.map((c) => c.benchmark_cumulative));
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  if (hi - lo < 1e-9) { hi += 0.01; lo -= 0.01; }
+  const x = (i, n) => PAD + (i / (n - 1)) * (W - PAD * 2);
+  const y = (v) => PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2);
+  const line = (vals) => vals.map((v, i) =>
+    (i ? "L" : "M") + x(i, vals.length).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+
+  const zero = (lo <= 0 && hi >= 0)
+    ? '<line x1="' + PAD + '" x2="' + (W - PAD) + '" y1="' + y(0).toFixed(1) +
+      '" y2="' + y(0).toFixed(1) + '" class="cz"/>' : "";
+  const bench = paired.length > 1
+    ? '<path d="' + line(paired.map((c) => c.benchmark_cumulative)) + '" class="cb"/>' : "";
+
+  return '<div class="curve">' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+    'role="img" aria-label="Cumulative return of the shortlist against the index">' +
+    zero + bench +
+    '<path d="' + line(pts.map((c) => c.cumulative)) + '" class="cs"/>' +
+    '</svg>' +
+    '<div class="clegend"><span class="ck cs"></span>Shortlist' +
+    (paired.length > 1 ? '<span class="ck cb"></span>Index' : "") + '</div>' +
+  '</div>';
+}
+
+/* The headline. It answers "did this work" before it shows anything else,
+   and it refuses to answer when the sample cannot carry the answer. */
+function verdictCard(perf) {
+  const h = (perf && perf.headline) || {};
+  const n = h.n || 0;
+  if (!n) {
+    return '<div class="box empty"><h3>Nothing has finished yet</h3>' +
+      '<p>A signal is only scored once its full holding window has elapsed, ' +
+      'so the first results appear about three months after the first run.' +
+      ((perf && perf.pending)
+        ? ' <b>' + perf.pending + '</b> signals are being tracked.' : '') +
+      '</p></div>';
+  }
+  const sig = h.significance || {};
+  const hasBench = h.benchmark_covered > 0;
+
+  // The reading, stated in words, so the number is not left to be
+  // interpreted generously. t is on the EXCESS over the index.
+  let reading;
+  if (!hasBench) {
+    reading = "No index comparison was possible for these trades, so this " +
+              "says what happened, not whether it beat the alternative.";
+  } else if (sig.t == null) {
+    reading = "Too few completed trades to test whether the gap is real.";
+  } else if (Math.abs(sig.t) >= 2) {
+    reading = "The gap over the index is larger than the noise in this " +
+              "sample (t " + sig.t.toFixed(2) + ").";
+  } else {
+    reading = "The gap over the index is inside the noise (t " +
+              sig.t.toFixed(2) + "), so on this evidence it is not " +
+              "distinguishable from zero.";
+  }
+
+  const stat = (label, html, sub) =>
+    '<div class="stat"><div class="sl">' + label + '</div>' +
+    '<div class="sv">' + html + '</div>' +
+    (sub ? '<div class="ss">' + sub + '</div>' : "") + '</div>';
+
+  // A positive average over a negative median means a few large winners are
+  // carrying the number and the typical trade lost money. Reading "+1.23%
+  // average" as "a typical trade makes 1.23%" is the wrong conclusion, and
+  // it is the one the number invites.
+  const skew = (h.avg_return > 0 && h.median_return < 0)
+    ? "The average is positive but the median trade lost " +
+      Math.abs(h.median_return * 100).toFixed(1) + "%. A few large winners " +
+      "carry it, so a typical call is not what the average describes."
+    : "";
+
+  return '<div class="box verdict">' +
+    '<div class="vhead"><h3>Following the shortlist</h3>' +
+      '<span class="chip">' + n + ' completed' +
+      ((perf.pending) ? ' \u00b7 ' + perf.pending + ' running' : '') + '</span></div>' +
+    '<div class="stats">' +
+      stat("Average per trade", signed(h.avg_return),
+           "median " + (h.median_return * 100).toFixed(1) + "%") +
+      (hasBench ? stat("Index, same days", signed(h.avg_benchmark_return),
+                       esc(h.benchmark || "")) : "") +
+      (hasBench ? stat("Difference", signed(h.avg_excess),
+                       "beat it " + Math.round(h.beat_rate * 100) + "% of the time") : "") +
+      stat("Won", Math.round(h.win_rate * 100) + "%",
+           "held " + Math.round(h.avg_hold_sessions) + " sessions on average") +
+    '</div>' +
+    '<p class="reading">' + esc(reading) + '</p>' +
+    (skew ? '<p class="reading skew">' + esc(skew) + '</p>' : "") +
+    (sig.naive_t != null && sig.t != null
+      ? '<p class="fine">Uncorrected this reads t ' + sig.naive_t.toFixed(2) +
+        '. Trades held at the same time share most of their window, so the ' +
+        Math.round(n) + ' results carry about ' +
+        Math.round(sig.effective_n || 0) + ' independent ones.</p>'
+      : "") +
+    (h.benchmark_missing
+      ? '<p class="fine">' + h.benchmark_missing + ' of ' + n + ' had no index ' +
+        'data for their window and are excluded from the comparison.</p>' : "") +
+    curveSVG(perf.curve) +
+    (h.exit_mix ? '<div class="exits">' +
+      Object.keys(h.exit_mix).map((k) =>
+        '<span class="ex"><b>' + h.exit_mix[k] + '</b> ' +
+        esc({ stop: "stopped out", target_1: "hit first target",
+              target_2: "hit second target", time_exit: "ran out of time",
+              open: "still open" }[k] || k) + '</span>').join("") +
+      '</div>' : "") +
+  '</div>';
+}
+
+/* Per-name, worst first. The losses are the part worth reading and putting
+   the winners on top would bury them. */
+function tickerTable(perf) {
+  const rows = (perf && perf.by_ticker) || [];
+  if (rows.length < 2) return "";
+  const cell = (r) =>
+    '<tr><td class="tk">' + esc(r.ticker) + '</td>' +
+    '<td class="num">' + r.n + '</td>' +
+    '<td class="num">' + signed(r.avg_return) + '</td>' +
+    '<td class="num">' + (r.avg_excess == null ? '<span class="v-neu">\u2014</span>'
+                                               : signed(r.avg_excess)) + '</td>' +
+    '<td class="num">' + Math.round(r.win_rate * 100) + '%</td></tr>';
+  // A display cut of the per-name table, unrelated to the five-slot slate
+  // rule -- that lives in presentation.selection and is not reimplemented here.
+  const SHOW = 5;
+  const worst = rows.slice(0, SHOW).map(cell).join("");
+  const best = rows.slice(-SHOW).reverse().map(cell).join("");
+  const table = (title, body) =>
+    '<div class="tt"><h4>' + title + '</h4><div class="tw"><table>' +
+    '<thead><tr><th>Name</th><th class="num">Calls</th>' +
+    '<th class="num">Average</th><th class="num">vs index</th>' +
+    '<th class="num">Won</th></tr></thead><tbody>' + body +
+    '</tbody></table></div></div>';
+  return '<div class="box"><div class="tts">' +
+    table("Cost the most", worst) + table("Paid the most", best) +
+    '</div></div>';
+}
+
 function viewHistory(v) {
   const h = state.history;
   if (h === null) return '<div class="box"><div class="skel" style="height:220px"></div></div>';
@@ -1473,8 +1905,13 @@ function viewHistory(v) {
 
   // The page title already says History and the subtitle already says what
   // these are. A third heading over the same list was a label on a label.
-  return '<div style="display:flex;justify-content:flex-end;' +
-      'margin-bottom:var(--sp-3)">' +
+  const perf = state.perf;
+  const perfBlock = perf === null
+    ? '<div class="box"><div class="skel" style="height:200px"></div></div>'
+    : (perf ? verdictCard(perf) + tickerTable(perf) : "");
+
+  return perfBlock +
+    '<div class="names-h"><h3>Every name it has called</h3>' +
       '<button class="btn ghost sm" id="wipe">Clear history</button></div>' +
     '<div class="names">' + rows + '</div>';
 }
@@ -1667,6 +2104,90 @@ function wire() {
     el.addEventListener("click", () => openStock(el.dataset.stock)));
   const wipe = $("#wipe");
   if (wipe) wipe.addEventListener("click", confirmWipe);
+
+  // The tile mounts its own build button. buildScreen binds its copy at
+  // mount; the tile is rebuilt by render, so it binds here instead.
+  const tileBoot = $(".tile #boot");
+  if (tileBoot && !tileBoot.dataset.bound) {
+    tileBoot.dataset.bound = "1";
+    tileBoot.addEventListener("click", bootstrap);
+    syncBuildButton();
+  }
+
+  $$("button[data-theme-set]").forEach((el) =>
+    el.addEventListener("click", () => { applyTheme(el.dataset.themeSet); render(); }));
+
+  const sched = $("#sched");
+  if (sched) sched.addEventListener("click", toggleSchedule);
+  const rmd = $("#reset-md");
+  if (rmd) rmd.addEventListener("click", confirmResetMarketData);
+  const rall = $("#reset-all");
+  if (rall) rall.addEventListener("click", confirmEraseEverything);
+}
+
+async function loadOps() {
+  try {
+    const r = await fetch("/operations");
+    if (r.ok) state.ops = await r.json();
+  } catch (e) { /* the screen renders without it */ }
+}
+
+async function toggleSchedule() {
+  const paused = !!((state.ops || {}).schedule || {}).paused;
+  if (!paused) {
+    const ok = await ask(
+      "Pause the scheduled run?",
+      "The engine will stop recording a result each weekday. Those runs are " +
+      "what the performance figures are built from, and a long pause is a " +
+      "gap the forward test counts against itself.",
+      "Pause runs");
+    if (!ok) return;
+  }
+  const btn = $("#sched");
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Working'; }
+  try {
+    await fetch("/operations/" + (paused ? "resume" : "pause"),
+                { method: "POST", headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ reason: "changed from the interface" }) });
+    await loadOps();
+  } catch (e) { /* fall through to a re-render */ }
+  render();
+}
+
+async function confirmResetMarketData() {
+  const ok = await ask(
+    "Clear and rebuild market data?",
+    "Every stored session is removed and the build starts from nothing. " +
+    "Your run history and measured outcomes are kept. Rebuilding to the " +
+    "validated depth takes several hours.",
+    "Clear market data");
+  if (!ok) return;
+  await runReset("/admin/reset/market-data", null);
+}
+
+async function confirmEraseEverything() {
+  const ok = await ask(
+    "Erase everything?",
+    "This removes the market data AND the entire record: every run, every " +
+    "resolved outcome, and the forward-test registration. The market data " +
+    "can be fetched again. The record cannot.",
+    "Erase everything", "ERASE");
+  if (!ok) return;
+  await runReset("/admin/reset/everything", { confirm: "ERASE" });
+}
+
+async function runReset(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) { showError(await readErr(r)); return; }
+  } catch (e) { showError(e.message || String(e)); return; }
+  // Everything on screen described the data that was just removed.
+  state.view = null; state.history = undefined; state.coverage = null;
+  state.ops = null; state.perf = undefined; state.tab = "overview";
+  await boot();
 }
 
 $("#scan").addEventListener("click", scan);
@@ -1675,14 +2196,42 @@ $("#scrim").addEventListener("click", closePanel);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && $("#panel").classList.contains("open")) closePanel();
 });
-$$(".nav button").forEach((b) => b.addEventListener("click", () => {
-  state.tab = b.dataset.view;
+function goTab(name) {
+  state.tab = name;
   render();
-  if (state.tab === "history" && state.history === undefined) loadHistory();
-}));
+  if (name === "history" && state.history === undefined) loadHistory();
+  if (name === "settings") loadOps().then(render);
+}
+$$(".nav button").forEach((b) =>
+  b.addEventListener("click", () => goTab(b.dataset.view)));
+$("#gear").addEventListener("click", () => goTab("settings"));
+
+/* Surfacing a failed action. It replaces the view rather than appearing as a
+   toast because every one of these actions changes what the rest of the
+   screen is describing -- leaving stale content under an error message is
+   how a failed reset reads as a successful one. */
+function showError(message) {
+  state.error = message || "That did not work.";
+  render();
+}
+
+/* Resolution runs server-side on read, so this can take a moment on a store
+   with a long ledger. It is fetched alongside the name list rather than
+   after it, because the verdict is the reason to open this page. */
+async function loadPerformance() {
+  state.perf = null;
+  try {
+    const r = await fetch("/performance");
+    state.perf = r.ok ? await r.json() : { headline: { n: 0 }, pending: 0 };
+  } catch (e) {
+    state.perf = { headline: { n: 0 }, pending: 0 };
+  }
+  if (state.tab === "history") render();
+}
 
 async function loadHistory() {
   state.history = null;                 // renders the skeleton
+  loadPerformance();
   if (state.tab === "history") render();
   try {
     const r = await fetch("/history/names?limit=60");
