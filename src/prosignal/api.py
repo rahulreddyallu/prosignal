@@ -646,6 +646,14 @@ def _shape(run) -> Dict[str, Any]:
             "bucket": r.regime_bucket,
             "trend": r.trend_regime.value,
             "volatility": f"{r.vol_tercile.value}/{r.vol_context.value}",
+            # The measurements the labels are read off. Stage 2 computes all
+            # of these and nothing was serialising them, so "Uptrend" reached
+            # the screen as an assertion with no way to check it.
+            "trend_slope_annualised": r.trend_slope_annualised,
+            "index_vs_fast_ma_pct": r.index_vs_fast_ma_pct,
+            "index_vs_slow_ma_pct": r.index_vs_slow_ma_pct,
+            "vix_level": r.vix_level,
+            "vix_percentile": r.vix_percentile,
             "breadth_pct": r.breadth_pct_above_ma,
             "breadth_state": r.breadth_state.value,
             "transition": r.transition_flag,

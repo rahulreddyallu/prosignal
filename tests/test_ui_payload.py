@@ -225,9 +225,11 @@ def test_the_card_layout_does_not_depend_on_the_company_name():
     at = {k: head.index(v) for k, v in (
         ("rank", 'class="rank"'), ("pill", 'class="pill '),
         ("name", 'class="name"'), ("price", 'class="p num"'),
-        ("tick", 'class="tick"'),
     )}
-    assert at["rank"] < at["pill"] < at["name"] < at["price"] < at["tick"], at
+    assert at["rank"] < at["pill"] < at["name"] < at["price"], at
+    # The ticker joined the position label rather than taking a row of its own,
+    # which was mostly empty; that space now carries the factor arithmetic.
+    assert 'class="tk"' in head
 
 
 def test_the_card_does_not_restate_a_pill_in_a_second_vocabulary():
@@ -239,6 +241,44 @@ def test_the_card_does_not_restate_a_pill_in_a_second_vocabulary():
     panel = _html()
     panel = panel[panel.index("function openPanel"):]
     assert "pick.strength" in panel, "strength was dropped rather than moved"
+
+
+def test_the_card_shows_the_arithmetic_not_a_paraphrase_of_it():
+    """A quant reading this needs z, the fitted coefficient and their product,
+    with the factor's own identifier -- not a sentence describing them. The
+    prose version stays in the panel."""
+    html = _html()
+    card = html[html.index("function contribHTML"):html.index("function viewHistory")]
+    for column in ("Factor", '"z"', "coef", "contrib"):
+        assert column in card
+    assert "r.coefficient.toFixed" in card and "r.contribution.toFixed" in card
+    assert "esc(r.factor)" in card, "the card must print the model's own name"
+    css = html[html.index("<style>"):html.index("</style>")]
+    block = css[css.index(".contrib {"):css.index(".contrib div")]
+    assert "tabular-nums" in block, "columns of figures must align"
+
+
+def test_the_market_labels_carry_the_measurements_behind_them():
+    """"Uptrend" on its own is an assertion. Stage 2 computes the slope, the
+    distance from the 200-session average, the VIX level and its percentile,
+    and none of them were being serialised."""
+    from prosignal.presentation.viewmodel import _trend_evidence, _vol_evidence
+
+    trend = _trend_evidence({"trend_slope_annualised": 0.182,
+                             "index_vs_slow_ma_pct": 0.8})
+    assert "+18.2%" in trend and "200-session" in trend
+    vol = _vol_evidence({"vix_level": 11.2, "vix_percentile": 23.0})
+    assert "11.2" in vol and "23rd" in vol
+
+
+def test_the_method_note_admits_the_windows_are_not_fitted():
+    """The 50/200 averages and the tercile split are conventional, and carry
+    status UNVALIDATED in the config. Presenting them as tuned would be a
+    claim the project has not earned."""
+    from prosignal.presentation.viewmodel import _METHOD_NOTE
+
+    assert "conventional defaults" in _METHOD_NOTE
+    assert "not values fitted" in _METHOD_NOTE
 
 
 def test_a_completed_scan_invalidates_the_cached_history():
