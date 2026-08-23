@@ -72,6 +72,46 @@ def _tidy_company(name: str) -> str:
     return name
 
 
+def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Which scorer actually produced this ranking.
+
+    Stage 4 falls back to a hand-weighted composite when the cross-sectional
+    model cannot fit -- an insufficient store is treated as a benign reason, so
+    the run proceeds rather than failing. That is a defensible degraded mode
+    and the engine records it in a note. The note never reached this payload,
+    so the composite's output rendered identically to the model's: same cards,
+    same green contributions, same BUY.
+
+    The composite was measured at -0.047%/month excess against an equal-weight
+    benchmark, t = -0.11. Presenting it as the validated model is the single
+    most misleading thing this interface could do, so it is detected here from
+    the factor names themselves rather than trusted to arrive as a flag.
+    """
+    from .evidence import FACTOR_MAP
+
+    seen: set = set()
+    for pick in picks:
+        seen.update((pick.get("factors") or {}).keys())
+    if not seen:
+        return {"model": "unknown", "validated": False,
+                "note": "No factor detail was recorded for this run."}
+    known = seen & set(FACTOR_MAP)
+    if known:
+        return {"model": "cross-sectional", "validated": True, "note": None}
+    return {
+        "model": "composite",
+        "validated": False,
+        "factors": sorted(seen),
+        "note": (
+            "The cross-sectional model could not fit this run, so the ranking "
+            "came from the hand-weighted composite instead. That composite was "
+            "measured at -0.047% excess per month against an equal-weight "
+            "benchmark, t = -0.11 -- it is a placeholder, not a signal. Treat "
+            "this shortlist as unscored."
+        ),
+    }
+
+
 def build_view(
     payload: Dict[str, Any],
     *,
@@ -113,6 +153,7 @@ def build_view(
             "withheld": slate.withheld_reason,
         },
         "picks": picks,
+        "scorer": _scorer_used(recommendations + watchlist),
         "concentration": _concentration(picks),
         "journey": _journey(payload.get("funnel") or {}, slate),
         "data": _data_state(payload, flags),
