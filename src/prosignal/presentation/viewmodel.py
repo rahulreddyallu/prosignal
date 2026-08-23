@@ -204,6 +204,7 @@ def _build_pick(
             }
             for c in categories
         ],
+        "contributions": _contributions(card.get("factors") or {}),
         "levels": _levels(card),
         "holding_period": card.get("holding_period"),
         "cost_note": card.get("cost_note"),
@@ -221,6 +222,39 @@ def _build_pick(
         },
     })
     return pick
+
+
+def _contributions(factors: Dict[str, Any], top: int = 8) -> List[Dict[str, Any]]:
+    """What each factor actually added to the score, largest first.
+
+    contribution = standardised loading x fitted coefficient. This is the
+    arithmetic behind the ranking and it was previously only available as
+    prose. The factor's own name is kept alongside the readable one -- someone
+    checking the model against its source needs the identifier, not a
+    paraphrase of it.
+    """
+    from .evidence import FACTOR_MAP
+
+    rows: List[Dict[str, Any]] = []
+    for name, detail in factors.items():
+        if not (detail or {}).get("available", False):
+            continue
+        sd = detail.get("standardised")
+        weight = detail.get("weight")
+        if not isinstance(sd, (int, float)) or not isinstance(weight, (int, float)):
+            continue
+        mapped = FACTOR_MAP.get(name)
+        rows.append({
+            "factor": name,
+            "label": mapped[1] if mapped else name,
+            "category": mapped[0] if mapped else None,
+            "z": round(float(sd), 3),
+            "coefficient": round(float(weight), 5),
+            "contribution": round(float(sd) * float(weight), 5),
+            "raw": detail.get("raw"),
+        })
+    rows.sort(key=lambda r: -abs(r["contribution"]))
+    return rows[:top]
 
 
 def _levels(card: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,9 +286,12 @@ def _market(regime: Dict[str, Any]) -> Dict[str, Any]:
         "summary": _market_summary(regime, headline),
         "allows_new_positions": bool(regime.get("allow_new_entries", False)),
         "readings": [
-            {"label": "Market trend", "value": regime.get("trend")},
-            {"label": "Volatility", "value": regime.get("volatility")},
+            {"label": "Market trend", "value": regime.get("trend"),
+             "detail": _trend_evidence(regime)},
+            {"label": "Volatility", "value": regime.get("volatility"),
+             "detail": _vol_evidence(regime)},
         ],
+        "method": _METHOD_NOTE,
         "in_transition": bool(regime.get("transition", False)),
     }
 
@@ -278,6 +315,51 @@ _HEADLINE_MEANING = {
         "strategy holds back here."
     ),
 }
+
+
+#: Stated because the labels are conventional, not fitted. The 50/200-session
+#: averages and the tercile split are standard practice -- a 200-day filter is
+#: the usual long-term trend test and a VIX percentile is the usual volatility
+#: read -- but the exact windows carry status UNVALIDATED in the config and
+#: were never searched on this data.
+_METHOD_NOTE = (
+    "Trend requires two things to agree: the annualised slope of a 63-session "
+    "log-price regression on NIFTY 200, and price above its 200-session "
+    "average. Either alone gives a different wrong answer -- the average calls "
+    "a flat market trending whenever price sits a hair above the line, and the "
+    "slope calls every bounce inside a bear market an uptrend. Volatility is "
+    "India VIX ranked against its own trailing 252 sessions, split at the "
+    "33rd and 67th percentiles. These windows are conventional defaults, not "
+    "values fitted on this data."
+)
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _trend_evidence(regime: Dict[str, Any]) -> Optional[str]:
+    """The two measurements the trend label is read off."""
+    slope = regime.get("trend_slope_annualised")
+    vs_slow = regime.get("index_vs_slow_ma_pct")
+    bits: List[str] = []
+    if isinstance(slope, (int, float)):
+        bits.append(f"slope {slope * 100:+.1f}% annualised")
+    if isinstance(vs_slow, (int, float)):
+        bits.append(f"{vs_slow:+.1f}% vs its 200-session average")
+    return " · ".join(bits) or None
+
+
+def _vol_evidence(regime: Dict[str, Any]) -> Optional[str]:
+    level = regime.get("vix_level")
+    pct = regime.get("vix_percentile")
+    bits: List[str] = []
+    if isinstance(level, (int, float)):
+        bits.append(f"India VIX {level:.1f}")
+    if isinstance(pct, (int, float)):
+        bits.append(f"{_ordinal(int(round(pct)))} percentile of the last 252 sessions")
+    return " · ".join(bits) or None
 
 
 def _market_summary(regime: Dict[str, Any], headline: str) -> str:

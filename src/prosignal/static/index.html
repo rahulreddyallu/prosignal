@@ -285,8 +285,25 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
                   overflow-wrap: anywhere; line-height: 1.3; min-width: 0; }
 .card-top .p { justify-self: end; align-self: baseline; font-size: 19px;
                font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; }
-.card-top .tick { color: var(--ink-3); font-size: 12.5px; letter-spacing: .05em;
-                  overflow-wrap: anywhere; grid-column: 1; }
+/* The ticker sits with the position label rather than on a row of its own.
+   That row was mostly empty and the space now carries the factor arithmetic. */
+.card-top .rank .tk { color: var(--ink-2); letter-spacing: .05em; }
+
+/* Factor contributions. Fixed columns and tabular figures so the z-scores,
+   coefficients and products line up down the card and can be read as a
+   table rather than as prose. */
+.contrib { display: grid; gap: 3px; font-variant-numeric: tabular-nums;
+           font-family: var(--mono); font-size: 11.5px; }
+.contrib div { display: grid; grid-template-columns: minmax(0,1fr) 4.6em 5.4em 5.2em;
+               gap: var(--sp-2); align-items: baseline; }
+.contrib .fx { color: var(--ink); overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; }
+.contrib .z, .contrib .co { color: var(--ink-3); text-align: right; }
+.contrib .cn { text-align: right; font-weight: 600; }
+.contrib .hdr { color: var(--ink-3); font-size: 10px; letter-spacing: .06em;
+                text-transform: uppercase; font-family: var(--font);
+                border-bottom: 1px solid var(--line); padding-bottom: 3px;
+                margin-bottom: 2px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 12.5px; color: var(--ink-2); background: var(--surface-sunk);
@@ -979,6 +996,16 @@ function marketBlock(v) {
 
   const warn = m.allows_new_positions === false
     ? '<span class="pill watch">New positions paused</span>' : "";
+  // How the two labels are arrived at. Without it "Uptrend" is an assertion
+  // with no way to check it, and the windows behind it are conventional
+  // defaults rather than values fitted on this data -- which the note says.
+  const method = m.method
+    ? '<details class="adv" style="margin-top:var(--sp-3);grid-column:1/-1">' +
+      '<summary>How trend and volatility are decided</summary>' +
+      '<div class="adv-body"><p class="prose muted" style="font-size:13px">' +
+      esc(m.method) + '</p></div></details>'
+    : "";
+
   const notes = ((v.data || {}).flags || []);
   const notesHTML = notes.length
     ? '<details class="adv" style="margin-top:var(--sp-4);grid-column:1/-1">' +
@@ -995,7 +1022,23 @@ function marketBlock(v) {
       '<div class="headline">' + esc(m.headline || "—") + " " + warn + '</div>' +
       '<p>' + esc(m.summary || "") + '</p></div>' +
     '<div class="readings">' + rows + '</div>' +
-    notesHTML + '</div>';
+    method + notesHTML + '</div>';
+}
+
+/* z x coefficient = contribution, largest first. The prose version of this
+   lives in the panel; the card shows the numbers it was describing. */
+function contribHTML(rows) {
+  if (!rows || !rows.length) return "";
+  const head = '<div class="hdr"><span class="fx">Factor</span>' +
+    '<span class="z">z</span><span class="co">coef</span>' +
+    '<span class="cn">contrib</span></div>';
+  const body = rows.slice(0, 4).map((r) =>
+    '<div><span class="fx">' + esc(r.factor) + '</span>' +
+    '<span class="z">' + (r.z > 0 ? "+" : "") + r.z.toFixed(2) + '</span>' +
+    '<span class="co">' + (r.coefficient > 0 ? "+" : "") + r.coefficient.toFixed(4) + '</span>' +
+    '<span class="cn ' + (r.contribution > 0 ? "v-pos" : "v-neg") + '">' +
+    (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(4) + '</span></div>').join("");
+  return '<div class="contrib">' + head + body + '</div>';
 }
 
 function cardHTML(p) {
@@ -1004,15 +1047,15 @@ function cardHTML(p) {
   return '<button class="card ' + (isBuy ? "is-buy" : "is-watch") + '" ' +
     'data-pos="' + p.position + '">' +
     '<div class="card-top">' +
-      '<div class="rank">' + p.position + ' of ' + state.slateSize + '</div>' +
+      '<div class="rank">' + p.position + ' of ' + state.slateSize +
+        ' <span class="tk">· ' + esc(p.ticker) + '</span></div>' +
       '<span class="pill ' + (isBuy ? "buy" : "watch") + '">' +
         (isBuy ? "Buy" : "Watch") + '</span>' +
       '<div class="name">' + esc(p.company) + '</div>' +
       '<div class="p num">' + money(p.price) + '</div>' +
-      '<div class="tick">' + esc(p.ticker) + (p.sector ? " · " + esc(p.sector) : "") + '</div>' +
     '</div>' +
     (chips ? '<div class="chips">' + chips + '</div>' : "") +
-    (p.thesis ? '<div class="thesis">' + esc(p.thesis) + '</div>' : "") +
+    contribHTML(p.contributions) +
     '<div class="card-foot">' +
       (p.sector ? '<span class="confirm">' + esc(p.sector) + '</span>' : '<span></span>') +
       '<span class="more">View analysis →</span>' +
