@@ -51,7 +51,17 @@ __all__ = ["DataIngestor", "IngestOptions", "IngestResult"]
 
 log = get_logger(__name__)
 
-_DAYS_PER_SESSION = 1.45  # ~250 sessions per 365 calendar days, with slack
+#: Calendar days per trading session, used to bound how far back a backfill
+#: walks. It was 1.45 on an assumption of 250 sessions a year, and NSE does
+#: not deliver 250 -- measured across 2017-09-08 to 2026-08-21 the real
+#: density is 1.480. The difference is not academic: at 1.45 a request for
+#: 2,200 sessions was allowed 3,210 days, which reaches 2017-11-06, and
+#: exactly 2,171 sessions exist in that window. The build stopped dead there
+#: and every further press re-walked the same wall.
+#:
+#: 1.55 carries slack for a holiday-heavy year and still sits well inside
+#: max_backfill_calendar_days, which remains the real bound.
+_DAYS_PER_SESSION = 1.55
 
 
 @dataclass
@@ -455,6 +465,21 @@ class DataIngestor:
                 # is not a session, so counting it would make the walk stop
                 # short of the depth actually asked for.
             day -= dt.timedelta(days=1)
+
+        if collected < history_sessions:
+            # The walk ran out of calendar before it ran out of target. This
+            # is how the store silently stopped growing at 2,171: the loop
+            # returned fewer days each time and nothing said why.
+            log.warning(
+                "backfill span exhausted before reaching the requested depth",
+                extra={
+                    "requested_sessions": history_sessions,
+                    "reachable_sessions": collected,
+                    "span_days": span_days,
+                    "reaches": str(as_of - dt.timedelta(days=span_days)),
+                    "raise": "storage.max_backfill_calendar_days",
+                },
+            )
         return wanted
 
     # ------------------------------------------------------------------

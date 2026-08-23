@@ -68,3 +68,49 @@ def test_dead_days_are_skipped_when_choosing_what_to_fetch():
     # A non-session must not count toward the requested depth, or the walk
     # stops short of the depth actually asked for.
     assert body.count("collected += 1") == 2
+
+
+# ===================================================================
+# The calendar constant that capped the store at 2,171
+# ===================================================================
+
+def test_the_session_density_allows_for_a_year_nse_actually_trades():
+    """It was 1.45, assuming 250 sessions a year. NSE does not deliver 250.
+
+    Measured across 2017-09-08 to 2026-08-21 the real density is 1.480, and
+    the gap is not academic: at 1.45 a request for 2,200 sessions was allowed
+    3,210 calendar days, which reaches 2017-11-06, and exactly 2,171 sessions
+    exist in that window. The build stopped dead at 2,171 and every further
+    press re-walked the same wall.
+    """
+    from prosignal.data.ingest import _DAYS_PER_SESSION
+    assert _DAYS_PER_SESSION >= 1.50, (
+        "below the real 1.480 density plus slack, a deep backfill silently "
+        "stops short of the depth it was asked for"
+    )
+    # And not so generous that the span outruns the real bound.
+    assert int(2200 * _DAYS_PER_SESSION) + 20 < 4200
+
+
+def test_a_walk_that_runs_out_of_calendar_says_so():
+    """It returned fewer days each press and nothing explained why."""
+    src = Path("src/prosignal/data/ingest.py").read_text(encoding="utf-8")
+    body = src[src.index("def _sessions_to_fetch"):src.index("def _backfill_sessions")]
+    assert "if collected < history_sessions:" in body
+    assert "span exhausted" in body
+
+
+def test_the_requested_depth_is_reachable_for_the_validated_target(live_cfg):
+    """2,200 is the depth the shipped coefficients were validated on, so the
+    backfill has to be able to physically get there."""
+    import datetime as dt
+    from prosignal.data.ingest import _DAYS_PER_SESSION
+    from prosignal.data.store import DataStore
+
+    sessions = DataStore(live_cfg.paths.curated, live_cfg.paths.snapshots).price_sessions()
+    if len(sessions) < 2200:
+        pytest.skip("local store is not deep enough to check reachability")
+    span = min(int(2200 * _DAYS_PER_SESSION) + 20,
+               int(live_cfg.params.storage.max_backfill_calendar_days))
+    cutoff = sessions[-1] - dt.timedelta(days=span)
+    assert sum(1 for d in sessions if d >= cutoff) >= 2200

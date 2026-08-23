@@ -361,6 +361,12 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .seg { height: 4px; flex: 1; border-radius: 2px; background: var(--surface-sunk);
        overflow: hidden; position: relative; }
 .seg.done { background: var(--accent); }
+/* Green means BUY on this screen and yellow means watch. A download bar is
+   neither, so it does not borrow their colour.
+   Order matters: these two selectors have equal specificity, so the filled
+   segment has to come second or the track colour wins and the bar vanishes. */
+.build .track .seg, .tile .track .seg { background: var(--surface-sunk); }
+.build .track .seg.done, .tile .track .seg.done { background: var(--ink-2); }
 .seg.now::after { content: ""; position: absolute; inset: 0;
                   background: var(--accent); transform-origin: left;
                   animation: fill 1.6s ease-in-out infinite; }
@@ -623,8 +629,11 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .danger-t { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 35%, transparent); }
 /* One size for every control in the drawer, so a row's weight comes from
    what it says and not from which button happened to be used. */
+/* .btn is inline-flex, so text-align does nothing to its label -- which is
+   why these read left-aligned inside an evenly sized box. */
 .btn.xs { padding: 6px 0; font-size: 12.5px; font-weight: 550;
-          border-radius: var(--r-sm); width: 86px; text-align: center; }
+          border-radius: var(--r-sm); width: 86px;
+          justify-content: center; gap: 0; }
 
 /* The switch. A track, a knob, and one transition on each. */
 .sw { position: relative; width: 42px; height: 25px; border-radius: 13px; flex: none;
