@@ -204,17 +204,11 @@ button { font: inherit; color: inherit; }
 }
 
 /* ----------------------------------------------------------- market strip */
-.market {
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--r-lg); padding: var(--sp-5);
-  display: grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr);
-  gap: var(--sp-5); align-items: start; box-shadow: var(--shadow);
-}
+.market { background: var(--surface); border: 1px solid var(--line);
+          border-radius: var(--r-lg); padding: var(--sp-4) var(--sp-5);
+          box-shadow: var(--shadow); }
 .market h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
              color: var(--ink-3); font-weight: 550; margin-bottom: var(--sp-2); }
-.market .headline { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
-.market .headline .pill { font-size: 12px; vertical-align: 3px; margin-left: 8px; }
-.market p { color: var(--ink-2); font-size: 14px; margin-top: 6px; max-width: 52ch; }
 .readings { display: grid; gap: var(--sp-2); }
 .reading { display: grid; grid-template-columns: minmax(0, 1fr) auto;
            gap: var(--sp-2) var(--sp-4); padding: 10px 0;
@@ -498,7 +492,6 @@ td.r { text-align: right; }
 
 /* ------------------------------------------------------------ responsive */
 @media (max-width: 860px) {
-  .market { grid-template-columns: 1fr; gap: var(--sp-4); }
   .topbar-meta .hide-sm { display: none; }
 }
 @media (max-width: 640px) {
@@ -883,7 +876,7 @@ function renderChrome(v) {
 
   const titles = {
     overview: ["Today's opportunities", "The names the engine ranks highest, and the case for each."],
-    history: ["History", "Every name the engine has surfaced, and what the market did after."],
+    history: ["History", "Every name surfaced so far, and what the market did after."],
   };
   const [title, sub] = titles[state.tab] || titles.overview;
   $("#page-title").textContent = title;
@@ -907,9 +900,7 @@ function renderChrome(v) {
     ? "Ranked from the close of " + esc(v.as_of) + "."
     : sub;
 
-  $("#foot").innerHTML =
-    (v && v.disclaimer ? esc(v.disclaimer) + "<br><br>" : "") +
-    (v && v.confidence_note ? esc(v.confidence_note) : "");
+  $("#foot").textContent = (v && v.disclaimer) || "";
 }
 
 /* Whether the loaded results describe the newest session the store holds.
@@ -972,10 +963,6 @@ function viewOverview(v) {
     '<div class="slate-head">' +
       '<h2>Shortlist</h2>' +
       '<div class="count">' + counts.join(" ") + '</div>' +
-      // What five names cannot show on their own: whether they are five ideas
-      // or one idea five times.
-      (v.concentration
-        ? '<div class="note">' + esc(v.concentration.text) + '</div>' : "") +
     '</div>' +
     '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>' +
     '<div style="margin-top:var(--sp-6);text-align:center">' +
@@ -993,36 +980,20 @@ function marketBlock(v) {
     '<span class="v">' + esc(r.value) + '</span>' +
     (r.detail ? '<span class="sub">' + esc(r.detail) + '</span>' : "") +
     '</div>').join("");
+  if (!rows) return "";
 
+  // Two measured readings and nothing around them. The verdict word and its
+  // paragraph restated what the numbers already say, and the two folded
+  // panels put method and caveats on a screen meant for a decision. The
+  // freshness dot in the header still marks an incomplete run and names the
+  // count in its tooltip, so the signal survives even though the detail does
+  // not sit here.
   const warn = m.allows_new_positions === false
-    ? '<span class="pill watch">New positions paused</span>' : "";
-  // How the two labels are arrived at. Without it "Uptrend" is an assertion
-  // with no way to check it, and the windows behind it are conventional
-  // defaults rather than values fitted on this data -- which the note says.
-  const method = m.method
-    ? '<details class="adv" style="margin-top:var(--sp-3);grid-column:1/-1">' +
-      '<summary>How trend and volatility are decided</summary>' +
-      '<div class="adv-body"><p class="prose muted" style="font-size:13px">' +
-      esc(m.method) + '</p></div></details>'
-    : "";
-
-  const notes = ((v.data || {}).flags || []);
-  const notesHTML = notes.length
-    ? '<details class="adv" style="margin-top:var(--sp-4);grid-column:1/-1">' +
-      '<summary>' + notes.length +
-      (notes.length === 1 ? " data note" : " data notes") +
-      ' on this run</summary><div class="adv-body">' +
-      notes.map((n) => '<p class="prose muted" style="font-size:13px;' +
-        'margin-bottom:8px">' + esc(n) + '</p>').join("") +
-      '</div></details>'
-    : "";
-
-  return '<div class="market">' +
-    '<div><h2>Market environment</h2>' +
-      '<div class="headline">' + esc(m.headline || "—") + " " + warn + '</div>' +
-      '<p>' + esc(m.summary || "") + '</p></div>' +
-    '<div class="readings">' + rows + '</div>' +
-    method + notesHTML + '</div>';
+    ? '<div class="note" style="margin-bottom:var(--sp-3)">' +
+      '<span class="pill watch">New positions paused</span></div>' : "";
+  return '<div class="market compact">' +
+    '<h2>Market environment</h2>' + warn +
+    '<div class="readings">' + rows + '</div></div>';
 }
 
 /* z x coefficient = contribution, largest first. The prose version of this
@@ -1097,9 +1068,10 @@ function viewHistory(v) {
       '</div></button>';
   }).join("");
 
-  return '<div style="display:flex;align-items:center;gap:var(--sp-3);' +
-      'margin-bottom:var(--sp-4);flex-wrap:wrap">' +
-      '<h2 style="font-size:16px;flex:1;min-width:150px">Previous shortlists</h2>' +
+  // The page title already says History and the subtitle already says what
+  // these are. A third heading over the same list was a label on a label.
+  return '<div style="display:flex;justify-content:flex-end;' +
+      'margin-bottom:var(--sp-3)">' +
       '<button class="btn ghost sm" id="wipe">Clear history</button></div>' +
     '<div class="names">' + rows + '</div>';
 }

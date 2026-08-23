@@ -104,7 +104,7 @@ def test_the_view_is_json_serialisable():
     "What would move this to Buy",    # the near misses stay actionable
     "No runs recorded yet",           # history with an empty ledger
     "has not been scanned yet",       # store moved on, results did not
-    "Previous shortlists",            # history keyed by name, not by date
+    "Every name surfaced so far",     # history keyed by name, not by date
     "Not followed yet",               # a call with no sessions behind it
     "Clear the run history?",         # destructive action is confirmed
 ])
@@ -272,13 +272,31 @@ def test_the_market_labels_carry_the_measurements_behind_them():
 
 
 def test_the_method_note_admits_the_windows_are_not_fitted():
-    """The 50/200 averages and the tercile split are conventional, and carry
-    status UNVALIDATED in the config. Presenting them as tuned would be a
-    claim the project has not earned."""
+    """The note is no longer rendered -- the panel holding it was removed --
+    but it stays in the payload, and if it is ever shown again it must not
+    imply the 50/200 windows were tuned. They carry status UNVALIDATED."""
     from prosignal.presentation.viewmodel import _METHOD_NOTE
 
     assert "conventional defaults" in _METHOD_NOTE
     assert "not values fitted" in _METHOD_NOTE
+
+
+def test_the_not_advice_notice_survives_the_trim():
+    """The probability paragraph went because nothing on screen shows a score
+    or implies a likelihood any more. This one is not about the model."""
+    html = _html()
+    assert "v.disclaimer" in html
+    assert "confidence_note" not in html
+
+
+def test_an_incomplete_run_is_still_marked_even_though_the_notes_panel_is_gone():
+    """The two data notes were folded into a panel that has been removed. The
+    signal must not go with them -- the freshness dot still turns and names
+    the count in its tooltip."""
+    html = _html()
+    chrome = html[html.index("function renderChrome"):html.index("function isCurrent")]
+    assert "dot " in chrome and "stale" in chrome
+    assert "data note" in chrome, "an incomplete run no longer says so anywhere"
 
 
 def test_a_completed_scan_invalidates_the_cached_history():
@@ -387,13 +405,6 @@ def test_the_card_numbers_its_position_not_the_models_rank():
     assert "Rank " not in card, "the card still prints the model's rank"
     panel = html[html.index("function openPanel"):]
     assert "ranked #" in panel, "the model rank was dropped rather than moved"
-
-
-def test_the_shortlist_says_when_it_is_one_bet(_=None):
-    """Five names that all rank for the same reason are not five ideas. The
-    model is momentum-heavy by construction, so a five-name list hides this
-    unless it is said."""
-    assert "concentration" in _html()
 
 
 def test_the_five_slot_rule_is_not_reimplemented_in_the_interface():
