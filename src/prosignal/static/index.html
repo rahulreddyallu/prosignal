@@ -702,6 +702,7 @@ const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const state = { view: null, run: null, tab: "overview", busy: false,
                 booting: true, error: null, notReady: false, jobId: null,
+                jobKind: null,
                 history: undefined,
                 latestSession: null, slateSize: 5, coverage: null };
 
@@ -938,11 +939,21 @@ async function pollOnce() {
   state.latestSession = c.latest_session || state.latestSession;
 
   if (state.jobId) {
-    // Two kinds of job reach here. A store that cannot yet fit the model is
-    // being built; anything running against a store that can is a scan. The
-    // server tells us which by what it has, so a reload during either one
-    // resumes the right screen instead of showing an idle button.
-    if (!c.model_will_fit) {
+    // Which screen to show depends on WHAT IS RUNNING, and the job says so.
+    // Inferring it from store depth was wrong in the one case that matters: a
+    // bootstrap against a store deep enough to fit the model looked like a
+    // scan, so pressing "Build data store" replaced the build screen with the
+    // nine-stage scan progress and the build appeared to become a scan.
+    let kind = state.jobKind;
+    if (!kind) {
+      try {
+        const jr = await rawFetch("/analysis/" + state.jobId);
+        const job = await jr.json();
+        kind = state.jobKind = job.kind || "analysis";
+      } catch (e) { return; }
+    }
+
+    if (kind === "bootstrap") {
       paintBuild(c);
       if (lastCount != null && c.price_sessions > lastCount) {
         const el = $("#b-now");
@@ -950,7 +961,6 @@ async function pollOnce() {
       }
       lastCount = c.price_sessions;
     } else if (!state.busy) {
-      // A scan someone else started, or one this tab started before a reload.
       try {
         const jr = await rawFetch("/analysis/" + state.jobId);
         const job = await jr.json();
@@ -964,6 +974,7 @@ async function pollOnce() {
   // whatever the run produced -- a deeper store, or a fresh shortlist.
   stopMonitor();
   lastCount = null;
+  state.jobKind = null;
   if (wasRunning) { await boot(); }
   else { paintBuild(c); setBuildIdle(); }
 }
@@ -983,6 +994,7 @@ async function bootstrap() {
     // running -- single-flight makes a second press a no-op, not a second job.
     const j = await r.json();
     state.jobId = j.id;
+    state.jobKind = "bootstrap";     // we started it; no need to ask
     startMonitor();
   } catch (e) {
     const sub = $("#b-sub");
@@ -1117,12 +1129,12 @@ function render() {
     return;
   }
 
-  if (state.notReady) return buildScreen();
+  if (state.notReady) { hideScan(); return buildScreen(); }
 
   // Enough to fit, but not the depth the coefficients were validated on. The
   // screen must not present a sixteen-month fit as the nine-year one.
   if (state.coverage && state.coverage.matches_validation === false
-      && state.tab === "overview") return buildScreen();
+      && state.tab === "overview") { hideScan(); return buildScreen(); }
 
   const v = state.view;
   if (!v) {
@@ -1144,6 +1156,16 @@ function render() {
    updated by ONE writer, because the previous version had three: a status
    line frozen at page load, the job's own progress label, and a poller --
    all rendering at once and disagreeing with each other. */
+/* renderChrome owns the scan button and the build screen returns before it,
+   so without this the top "Scan Market" stays visible over a store that has
+   nothing to scan -- two buttons, one of which cannot work. */
+function hideScan() {
+  const b = $("#scan");
+  if (b) b.hidden = true;
+  $("#page-sub").textContent =
+    "Fetching the market history the ranking model is fitted on.";
+}
+
 function buildScreen() {
   const c = state.coverage || {};
   $("#view").innerHTML =

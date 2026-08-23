@@ -298,3 +298,42 @@ def test_a_reload_during_a_job_picks_it_back_up():
     assert "if (state.jobId)" in screen, (
         "re-entering the build screen mid-build must show the build"
     )
+
+
+def test_the_screen_follows_the_job_kind_not_the_store_depth():
+    """Reported live: pressing "Build data store" showed the nine-stage scan
+    progress instead of the build.
+
+    The monitor chose the screen with `if (!model_will_fit) build else scan`.
+    That holds only while the store is too short. At 1,042 sessions the store
+    DOES fit the model, so a bootstrap job satisfied the else branch and the
+    build was rendered as a scan -- the deeper the store got, the more
+    confidently it showed the wrong screen.
+
+    The job carries its own kind. Nothing needs to be inferred.
+    """
+    ui = _ui()
+    poll = ui[ui.index("async function pollOnce"):ui.index("function setBuildIdle")]
+    assert 'kind === "bootstrap"' in poll
+    assert "job.kind" in poll
+    assert "if (!c.model_will_fit)" not in poll, (
+        "store depth must not decide which job is running"
+    )
+
+
+def test_the_kind_is_known_without_asking_when_we_started_the_job():
+    """A press that just POSTed a bootstrap does not need a round trip to
+    learn what it started."""
+    ui = _ui()
+    boot = ui[ui.index("async function bootstrap"):ui.index("async function checkReady")]
+    assert 'state.jobKind = "bootstrap"' in boot
+
+
+def test_the_scan_button_is_hidden_on_the_build_screen():
+    """renderChrome owns that button and the build screen returns before it,
+    so the top "Scan Market" stayed visible over a store with nothing to
+    scan -- two buttons, one of which could not work."""
+    ui = _ui()
+    assert "function hideScan" in ui
+    render = ui[ui.index("function render()"):ui.index("function hideScan")]
+    assert render.count("hideScan(); return buildScreen();") == 2
