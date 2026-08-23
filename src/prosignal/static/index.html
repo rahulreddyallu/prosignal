@@ -264,27 +264,29 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
               transform: translateY(-1px); }
 @media (prefers-reduced-motion: reduce) { .card:hover { transform: none; } }
 
-/* Two columns, never wrapping. The identity column is minmax(0,1fr) so a long
-   company name wraps inside its own track instead of pushing the status and
-   price somewhere else -- which is what made every card sit differently
-   depending on how long the name happened to be. The right track sizes to its
-   widest content and then holds still. */
+/* One grid for the whole header, so the same things sit on the same rows on
+   every card. Two stacked columns could not do this: the left column had
+   three items and the right had two or three, so what appeared beside the
+   company name depended on how many lines the name took.
+
+   Auto-placement fills it in source order --
+       row 1   position          status pill
+       row 2   company name      price
+       row 3   ticker
+   -- and the name lives in a minmax(0,1fr) track, so a long one wraps inside
+   its own column instead of moving the price. */
 .card-top { display: grid; grid-template-columns: minmax(0, 1fr) auto;
-            gap: var(--sp-4); align-items: start; }
-.card-id { min-width: 0; }
-.card-id .rank { color: var(--ink-3); font-size: 12px; font-weight: 550;
-                 letter-spacing: .06em; text-transform: uppercase; }
-.card-id .name { font-size: 18px; font-weight: 600; letter-spacing: -0.02em;
-                 margin-top: 2px; overflow-wrap: anywhere; line-height: 1.3; }
-.card-id .tick { color: var(--ink-3); font-size: 12.5px; letter-spacing: .05em;
-                 margin-top: 3px; overflow-wrap: anywhere; }
-/* The status column: pill on top, price under it, aligned right on every
-   screen so the eye finds them in the same place on all five cards. */
-.card-meta { display: flex; flex-direction: column; align-items: flex-end;
-             gap: 7px; text-align: right; }
-.card-meta .p { font-size: 19px; font-weight: 600; letter-spacing: -0.02em;
-                white-space: nowrap; }
-.card-meta .s { color: var(--ink-2); font-size: 12.5px; }
+            column-gap: var(--sp-4); row-gap: 3px; }
+.card-top .rank { color: var(--ink-3); font-size: 12px; font-weight: 550;
+                  letter-spacing: .06em; text-transform: uppercase;
+                  align-self: center; }
+.card-top .pill { justify-self: end; align-self: center; }
+.card-top .name { font-size: 18px; font-weight: 600; letter-spacing: -0.02em;
+                  overflow-wrap: anywhere; line-height: 1.3; min-width: 0; }
+.card-top .p { justify-self: end; align-self: baseline; font-size: 19px;
+               font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; }
+.card-top .tick { color: var(--ink-3); font-size: 12.5px; letter-spacing: .05em;
+                  overflow-wrap: anywhere; grid-column: 1; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 12.5px; color: var(--ink-2); background: var(--surface-sunk);
@@ -357,6 +359,14 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 @media (prefers-reduced-motion: reduce) {
   .panel, .scrim { transition: none; }
 }
+.panel-id { min-width: 0; }
+.panel-id .rank { color: var(--ink-3); font-size: 12px; font-weight: 550;
+                  letter-spacing: .06em; text-transform: uppercase; }
+.panel-id .name { font-size: 20px; font-weight: 600; letter-spacing: -0.02em;
+                  margin-top: 2px; overflow-wrap: anywhere; line-height: 1.25; }
+.panel-id .tick { color: var(--ink-3); font-size: 12.5px; letter-spacing: .05em;
+                  margin-top: 3px; overflow-wrap: anywhere; }
+
 .panel-head { padding: var(--sp-5); border-bottom: 1px solid var(--line);
               display: flex; gap: var(--sp-4); align-items: flex-start;
               background: var(--surface); }
@@ -536,7 +546,7 @@ td.r { text-align: right; }
 <aside class="panel" id="panel" role="dialog" aria-modal="true" aria-labelledby="panel-title" tabindex="-1">
   <div class="panel-head">
     <div style="flex:1;min-width:0">
-      <div class="card-id">
+      <div class="panel-id">
         <div class="rank" id="panel-rank"></div>
         <div class="name" id="panel-title"></div>
         <div class="tick" id="panel-tick"></div>
@@ -723,6 +733,11 @@ async function scan() {
     if (!r.ok) throw new Error(await readErr(r));
     state.view = await r.json();
     state.run = id;
+    // The run just completed IS new history. Without this the tab keeps
+    // whatever it loaded first -- so clearing, then scanning, then opening
+    // History showed the empty result cached at the moment of the clear.
+    state.history = undefined;
+    if (state.tab === "history") loadHistory();
     say("Scan complete. " + state.view.summary.buy + " qualifying, "
         + state.view.summary.watch + " monitored.");
   } catch (e) {
@@ -989,16 +1004,12 @@ function cardHTML(p) {
   return '<button class="card ' + (isBuy ? "is-buy" : "is-watch") + '" ' +
     'data-pos="' + p.position + '">' +
     '<div class="card-top">' +
-      '<div class="card-id">' +
-        '<div class="rank">' + p.position + ' of ' + state.slateSize + '</div>' +
-        '<div class="name">' + esc(p.company) + '</div>' +
-        '<div class="tick">' + esc(p.ticker) + (p.sector ? " · " + esc(p.sector) : "") + '</div>' +
-      '</div>' +
-      '<div class="card-meta">' +
-        '<span class="pill ' + (isBuy ? "buy" : "watch") + '">' + (isBuy ? "Buy" : "Watch") + '</span>' +
-        '<div class="p num">' + money(p.price) + '</div>' +
-        '<div class="s">' + esc(p.strength || "") + '</div>' +
-      '</div>' +
+      '<div class="rank">' + p.position + ' of ' + state.slateSize + '</div>' +
+      '<span class="pill ' + (isBuy ? "buy" : "watch") + '">' +
+        (isBuy ? "Buy" : "Watch") + '</span>' +
+      '<div class="name">' + esc(p.company) + '</div>' +
+      '<div class="p num">' + money(p.price) + '</div>' +
+      '<div class="tick">' + esc(p.ticker) + (p.sector ? " · " + esc(p.sector) : "") + '</div>' +
     '</div>' +
     (chips ? '<div class="chips">' + chips + '</div>' : "") +
     (p.thesis ? '<div class="thesis">' + esc(p.thesis) + '</div>' : "") +
@@ -1064,6 +1075,7 @@ async function confirmWipe() {
     if (!r.ok) throw new Error(await readErr(r));
     const j = await r.json();
     say(j.message || "History cleared.");
+    state.history = undefined;
     await loadHistory();
   } catch (e) {
     state.error = e.message || String(e);
@@ -1136,7 +1148,11 @@ function openPanel(pick) {
     (pick.status === "BUY" ? "Qualifying setup" : "Monitored") +
     (pick.rank ? " · ranked #" + pick.rank + " by the model" : "");
   $("#panel-title").textContent = pick.company;
-  $("#panel-tick").textContent = pick.ticker + (pick.sector ? " · " + pick.sector : "");
+  $("#panel-tick").textContent = [
+    pick.ticker,
+    pick.sector,
+    pick.strength ? pick.strength + " setup" : null,
+  ].filter(Boolean).join(" · ");
   $("#panel-body").innerHTML = panelHTML(pick);
   $("#panel").classList.add("open");
   $("#scrim").classList.add("open");

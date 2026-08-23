@@ -211,13 +211,45 @@ def test_the_interface_has_one_results_tab():
 
 
 def test_the_card_layout_does_not_depend_on_the_company_name():
-    """A flex row let a long name push the price and the status badge to a
-    different place on every card. The identity column is now a track that
-    wraps inside itself."""
+    """One grid for the whole header. Two stacked columns could not keep the
+    rows level: the left had three items and the right had two or three, so
+    what sat beside the company name depended on how many lines it took."""
     html = _html()
-    block = html[html.index(".card-top {"):html.index(".card-id {")]
+    block = html[html.index(".card-top {"):html.index(".card-top .rank")]
     assert "grid-template-columns: minmax(0, 1fr) auto" in block
     assert "flex-wrap" not in block
+    # Auto-placement carries the alignment, so source order is load-bearing:
+    # rank and pill fill row 1, name and price row 2, ticker row 3.
+    card = html[html.index("function cardHTML"):html.index("function viewHistory")]
+    head = card[card.index('class="card-top"'):card.index('(chips ?')]
+    at = {k: head.index(v) for k, v in (
+        ("rank", 'class="rank"'), ("pill", 'class="pill '),
+        ("name", 'class="name"'), ("price", 'class="p num"'),
+        ("tick", 'class="tick"'),
+    )}
+    assert at["rank"] < at["pill"] < at["name"] < at["price"] < at["tick"], at
+
+
+def test_the_card_does_not_restate_a_pill_in_a_second_vocabulary():
+    """"Strong" sat under the price while "Momentum strong" sat in a pill four
+    lines below. Two words for one reading, in two registers."""
+    card = _html()
+    card = card[card.index("function cardHTML"):card.index("function viewHistory")]
+    assert "p.strength" not in card
+    panel = _html()
+    panel = panel[panel.index("function openPanel"):]
+    assert "pick.strength" in panel, "strength was dropped rather than moved"
+
+
+def test_a_completed_scan_invalidates_the_cached_history():
+    """History loads once and is then held. Clearing it, scanning, and opening
+    the tab returned the empty result cached at the moment of the clear -- the
+    run had been recorded and the screen never asked again."""
+    body = _html()
+    scan = body[body.index("async function scan()"):body.index("async function readErr")]
+    assert "state.history = undefined" in scan, (
+        "a completed scan does not invalidate the history cache"
+    )
 
 
 def test_the_card_is_the_same_on_mobile_and_desktop():
