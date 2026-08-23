@@ -317,7 +317,12 @@ def test_ui_has_no_external_requests(client):
     would also break entirely on the Render instance behind a cold start.
     """
     text = client.get("/").text
-    for pattern in ('src="http', 'href="http', "@import", "//fonts.", "cdn."):
+    # `href="http` is deliberately absent from this list: an <a> is navigation
+    # the reader chooses, fetches nothing on load, and the footer's attribution
+    # link is the point of it. A <link href> would be a fetch, and is caught by
+    # the stylesheet pattern below.
+    for pattern in ('src="http', '<link rel="stylesheet"', "@import",
+                    "//fonts.", "cdn."):
         assert pattern not in text, f"external dependency introduced: {pattern}"
 
 
