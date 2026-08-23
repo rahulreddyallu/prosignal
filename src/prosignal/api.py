@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from .config.loader import AppConfig, load_config
 from .core.logging import get_logger, setup_logging
 from .core.memory import release_memory, trim_available
+from .data.coverage import MINIMUM_NOTE, assess
 from .data.store import DataStore
 from .auth import (OPEN_PATHS, assert_safe_to_serve, resolve_token,
                     token_matches)
@@ -177,22 +178,27 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         try:
             store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
             sessions = store.price_sessions()
-            need = int(cfg.params.universe.min_history_sessions.value)
-            checks["price_sessions"] = len(sessions)
-            checks["min_history_required"] = need
-            checks["analysable_dates"] = max(len(sessions) - need, 0)
-            if len(sessions) <= need:
+            # One source of truth. This used to compare against
+            # min_history_sessions (300), which is the bar for a STOCK to be
+            # scoreable, not the bar for the MODEL to fit -- so a store of 330
+            # reported ready and then produced no ranking at all.
+            cov = assess(cfg, len(sessions))
+            checks.update(cov.to_dict())
+            checks["analysable_dates"] = max(len(sessions) - cov.eligibility_minimum, 0)
+            if not cov.model_will_fit:
                 ok = False
-                checks["price_data"] = (
-                    f"only {len(sessions)} sessions; need more than {need} before "
-                    f"any stock has enough history"
-                )
+                checks["price_data"] = cov.status()
                 checks["remedy"] = (
-                    "the market-data store is empty or short. POST /admin/bootstrap "
-                    "(or press BUILD DATA STORE in the UI) to populate it from NSE. "
-                    "This is expected on a fresh deployment: data/ is not in version "
-                    "control."
+                    "the market-data store is too short for the ranking model. "
+                    "POST /admin/bootstrap (or press BUILD DATA STORE in the UI) "
+                    "until it reports the validated depth. This is expected on a "
+                    "fresh deployment: data/ is not in version control."
                 )
+            elif not cov.matches_validation:
+                # Usable, but not the model that was validated. Serving without
+                # saying so would let a 16-month fit pass for a 9-year one.
+                checks["price_data"] = cov.status()
+                checks["warning"] = MINIMUM_NOTE
             else:
                 checks["price_data"] = "ok"
                 checks["latest_session"] = sessions[-1].isoformat()
@@ -554,14 +560,18 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         """
         from .data.ingest import DataIngestor, IngestOptions
 
-        need = int(cfg.params.universe.min_history_sessions.value) + 30
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
         have = len(store.price_sessions())
+        cov = assess(cfg, have)
+        # Aim at the depth the shipped coefficients were validated on, not at
+        # the minimum that makes the fit consent to run. The model refits from
+        # stored history every analysis, so the store IS the training set.
+        need = cov.validated_target
 
         chunk = int(getattr(cfg.params.api, "bootstrap_chunk_sessions", 0) or 90)
         target = min(have + chunk, need) if have else min(chunk, need)
 
-        progress(0, f"Have {have} of {need} sessions. Fetching up to {target}...")
+        progress(0, f"{have} of {need} sessions. Fetching up to {target}...")
         result = DataIngestor(cfg).run(
             options=IngestOptions(
                 history_sessions=target,
@@ -571,20 +581,25 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         )
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
         sessions = store.price_sessions()
-        done = len(sessions) >= need
-        progress(8, "complete" if done else f"{len(sessions)}/{need} sessions - press again to continue")
+        after = assess(cfg, len(sessions))
+        done = after.matches_validation
+        progress(8, "complete" if done else
+                 f"{len(sessions)}/{need} sessions - press again to continue")
 
         return {
             "sessions_in_store": len(sessions),
             "sessions_required": need,
             "complete": done,
+            "model_will_fit": after.model_will_fit,
+            "matches_validation": after.matches_validation,
+            "status": after.status(),
             "sessions_fetched_this_run": result.sessions_fetched,
             "latest_session": sessions[-1].isoformat() if sessions else None,
             "universe_size": len(result.universe.symbols),
             "next_step": (
-                "ready to analyse"
-                if done
-                else "press BUILD DATA STORE again to fetch the next chunk"
+                "ready to analyse at full validated depth"
+                if done else
+                "press BUILD DATA STORE again to fetch the next chunk"
             ),
         }
 
