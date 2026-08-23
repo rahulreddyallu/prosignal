@@ -168,14 +168,6 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of) -> Optional[Di
     t2 = float(rec["target_2"]) if rec.get("target_2") else t1
     walk = future.iloc[1:].head(max_hold)
 
-    # Only score once the full window has elapsed. A partially elapsed horizon
-    # would report whatever the opening sessions did, which is not the result
-    # the strategy claimed.
-    if len(walk) < max_hold and entry_row[DATE].date() <= as_of:
-        remaining = frame[frame[DATE] > entry_row[DATE]]
-        if len(remaining) < max_hold:
-            return None
-
     exit_price = exit_date = None
     reason = "open"
     held = 0
@@ -194,7 +186,17 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of) -> Optional[Di
             exit_date = bar[DATE].date()
             break
     if exit_price is None:
-        if walk.empty:
+        # Nothing triggered. Only a FULLY elapsed window turns that into a
+        # time exit -- a partially elapsed one is a position still running,
+        # and marking it closed would report whatever the opening sessions
+        # happened to do.
+        #
+        # A triggered stop or target is different and is handled above: that
+        # outcome is final on the day it happened and waiting out the rest of
+        # the window would hide a closed trade for months. It did. Average
+        # hold is 18 sessions against a 63-session window, so most trades
+        # finish long before the window does.
+        if walk.empty or len(walk) < max_hold:
             return None
         last = walk.iloc[-1]
         exit_price, exit_date, reason = float(last["close"]), last[DATE].date(), "time_exit"

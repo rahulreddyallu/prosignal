@@ -104,3 +104,65 @@ def test_the_curve_sums_rather_than_compounds():
 def test_per_name_puts_the_losses_first():
     rows = [_t(ticker="WIN", net=0.20), _t(ticker="LOSS", net=-0.15)]
     assert [r["ticker"] for r in P.by_ticker(rows, None)] == ["LOSS", "WIN"]
+
+
+# ===================================================================
+# Cohort censoring -- the bias that nearly shipped
+# ===================================================================
+
+def _o(ticker, signal_date, net, held, reason="target_1", exit_date="2026-08-20"):
+    return {"ticker": ticker, "signal_date": signal_date, "entry_date": signal_date,
+            "exit_date": exit_date, "sessions_held": held, "net_return": net,
+            "gross_return": net, "exit_reason": reason}
+
+
+def test_partly_observed_signals_are_not_pooled_with_finished_ones():
+    """A signal issued 63 sessions ago has had its whole window. One issued
+    three days ago has not, and the only members of that cohort visible are
+    the ones that finished fast -- which skews to winners, because target_1
+    sits nearer than a 2.5-ATR stop.
+
+    Measured on the real ledger: complete cohorts gave +1.31% at a 49.3% win
+    rate; the incomplete ones gave +5.89% at 60.9% over a 1.79-session hold.
+    Pooling them turned a corrected t of 0.41 into 8.47.
+    """
+    old = [_o("A", "2026-01-05", 0.01, 20), _o("B", "2026-01-06", -0.02, 25)]
+    new = [_o("C", "2026-08-18", 0.09, 2), _o("D", "2026-08-19", 0.11, 1)]
+    done, partial = P.split_cohorts(old + new, "2026-05-25")
+    assert [x["ticker"] for x in done] == ["A", "B"]
+    assert [x["ticker"] for x in partial] == ["C", "D"]
+
+    headline = P.performance(done, None)
+    assert headline["n"] == 2
+    assert headline["avg_return"] < 0.01, "the fast winners must not be in here"
+
+
+def test_without_a_cutoff_nothing_is_split():
+    rows = [_o("A", "2026-01-05", 0.01, 20)]
+    done, partial = P.split_cohorts(rows, None)
+    assert len(done) == 1 and partial == []
+
+
+def test_recent_activity_reports_but_flags_itself():
+    rows = [_o("C", "2026-08-18", 0.09, 2), _o("D", "2026-08-19", -0.03, 1)]
+    got = P.recent_activity(rows)
+    assert got["n"] == 2
+    assert got["win_rate"] == 0.5
+    assert "kept out of the figures above" in got["note"]
+
+
+def test_recent_activity_counts_one_close_once():
+    """Several runs can issue the same name on the same day; that is one
+    position closing, not three."""
+    dup = [_o("C", "2026-08-18", 0.09, 2, exit_date="2026-08-20")] * 3
+    assert P.recent_activity(dup)["n"] == 1
+
+
+def test_open_positions_never_enter_the_realised_figures():
+    """A mark is what a position happens to be worth today. Letting one into
+    the win rate would let the record be improved by picking a good day."""
+    src = (P.__file__)
+    text = open(src, encoding="utf-8").read()
+    body = text[text.index("def performance("):text.index("def by_ticker(")]
+    assert "open_positions" not in body
+    assert "unrealised" not in body

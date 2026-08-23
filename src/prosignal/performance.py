@@ -27,7 +27,10 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
-__all__ = ["Trade", "performance", "by_ticker", "equity_curve"]
+from .data.types import DATE
+
+__all__ = ["Trade", "performance", "by_ticker", "equity_curve",
+           "open_positions"]
 
 
 @dataclass
@@ -143,6 +146,60 @@ def _corrected_t(values: np.ndarray, horizon: int, step: int) -> Dict[str, Any]:
         return {"t": None, "note": "Overlap correction unavailable."}
 
 
+def split_cohorts(outcomes: Sequence[Dict[str, Any]], cutoff: Optional[str]):
+    """Separate fully observed signals from partially observed ones.
+
+    A signal issued 63 sessions ago has had its whole window: whatever it was
+    going to do, it did. A signal issued three days ago has not -- and the
+    only members of that cohort visible today are the ones that finished
+    fast. Since target_1 sits nearer than a 2.5-ATR stop, finishing fast
+    skews to winners, so the recent cohort looks far better than it is.
+
+    Measured on this ledger: complete cohorts gave +1.31% at a 49.3% win rate
+    over an 18-session average hold; the incomplete ones gave +5.89% at 60.9%
+    over 1.79 sessions. Pooling the two turned a corrected t of 0.41 into
+    8.47. They are different populations and are kept apart.
+    """
+    if not cutoff:
+        return list(outcomes), []
+    done, partial = [], []
+    for o in outcomes:
+        d = str(o.get("signal_date") or "")[:10]
+        (done if d and d <= cutoff[:10] else partial).append(o)
+    return done, partial
+
+
+def recent_activity(partial: Sequence[Dict[str, Any]], limit: int = 8) -> Dict[str, Any]:
+    """Trades that closed inside the incomplete window.
+
+    Real closes, shown so the page moves daily, and deliberately not folded
+    into any figure that carries a t-statistic.
+    """
+    # One name closing once is one close, however many runs issued it.
+    rows, seen = [], set()
+    for o in sorted((x for x in partial if x.get("net_return") is not None),
+                    key=lambda x: str(x.get("exit_date") or ""), reverse=True):
+        key = (o.get("ticker"), str(o.get("exit_date") or "")[:10])
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(o)
+    net = np.array([float(o["net_return"]) for o in rows]) if rows else np.array([])
+    return {
+        "n": len(rows),
+        "recent": [{
+            "ticker": o.get("ticker"), "net_return": float(o["net_return"]),
+            "exit_date": o.get("exit_date"), "exit_reason": o.get("exit_reason"),
+            "sessions_held": o.get("sessions_held"),
+        } for o in rows[:limit]],
+        "avg_return": float(net.mean()) if net.size else None,
+        "win_rate": float((net > 0).mean()) if net.size else None,
+        "note": ("Closed inside the current window. Only the fast movers in "
+                 "this group have finished, so it reads better than it is "
+                 "and is kept out of the figures above."),
+    }
+
+
 def performance(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
                 benchmark: str = "Nifty 200", horizon: int = 63,
                 step: int = 21) -> Dict[str, Any]:
@@ -248,3 +305,108 @@ def equity_curve(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
             "trade_return": t.net_return,
         })
     return curve
+
+
+# ---------------------------------------------------------------------------
+# Positions still running
+# ---------------------------------------------------------------------------
+
+def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
+                   as_of=None) -> Dict[str, Any]:
+    """Signals that have not closed yet, marked to the latest close.
+
+    These move every day, which is the point -- without them a page that only
+    counts closed trades sits still for weeks and looks broken.
+
+    They are returned SEPARATELY and must never be pooled into the realised
+    figures. A mark is not an outcome: it is what the position happens to be
+    worth today, it can reverse tomorrow, and letting a favourable mark into
+    the win rate or the t-statistic would let the record be improved by
+    picking a good afternoon to look at it.
+    """
+    import pandas as pd
+
+    # A ledger row names the tickers it issued in `signals_generated` and
+    # carries their detail in `stocks_scored`. There is no `signals` list --
+    # reading one returned nothing, silently, which is exactly how a page
+    # ends up reporting zero open positions forever.
+    done = {(r.get("run_id"), r.get("ticker")) for r in (resolved or [])}
+    seen = set()
+    want: Dict[str, list] = {}
+    for row in (ledger_rows or []):
+        rid = row.get("run_id")
+        issued = set(row.get("signals_generated") or [])
+        if not issued:
+            continue
+        for rec in (row.get("stocks_scored") or []):
+            tk = rec.get("ticker")
+            if not tk or tk not in issued or (rid, tk) in done:
+                continue
+            if rec.get("stop") is None or rec.get("target_1") is None:
+                continue
+            # One name called once on one day is one position, however many
+            # runs that day issued it. Without this the same holding is
+            # listed several times and the average is weighted by how often
+            # the engine happened to re-run.
+            key = (str(tk), str(row.get("date") or "")[:10])
+            if key in seen:
+                continue
+            seen.add(key)
+            want.setdefault(str(tk), []).append({
+                "run_id": rid,
+                "date": key[1],
+            })
+    if not want:
+        return {"n": 0, "positions": []}
+
+    try:
+        prices = store.read_prices(symbols=list(want.keys()))
+    except Exception:
+        return {"n": 0, "positions": [], "note": "Prices unavailable."}
+    if prices is None or getattr(prices, "empty", True):
+        return {"n": 0, "positions": []}
+
+    out = []
+    for ticker, items in want.items():
+        f = prices[prices["symbol"].astype(str) == ticker].sort_values(DATE)
+        if f.empty:
+            continue
+        last = f.iloc[-1]
+        last_px, last_dt = float(last["close"]), last[DATE]
+        for it in items:
+            try:
+                sig_dt = pd.to_datetime(it["date"]).normalize()
+            except Exception:
+                continue
+            fut = f[f[DATE] > sig_dt]
+            if fut.empty:
+                continue
+            entry = float(fut.iloc[0]["open"])
+            if not np.isfinite(entry) or entry <= 0:
+                continue
+            held = int((f[DATE] > fut.iloc[0][DATE]).sum())
+            if held >= max_hold:
+                continue                       # the resolver owns this one
+            out.append({
+                "ticker": ticker,
+                "signal_date": it["date"],
+                "entry_price": entry,
+                "last_price": last_px,
+                "last_date": str(pd.Timestamp(last_dt).date()),
+                "unrealised": last_px / entry - 1.0,
+                "sessions_held": held,
+                "sessions_left": max_hold - held,
+            })
+
+    out.sort(key=lambda r: r["unrealised"])
+    marks = np.array([r["unrealised"] for r in out], dtype=float) if out else np.array([])
+    return {
+        "n": len(out),
+        "positions": out,
+        "avg_unrealised": float(marks.mean()) if marks.size else None,
+        "up": int((marks > 0).sum()) if marks.size else 0,
+        "as_of": out[0]["last_date"] if out else None,
+        "note": ("Marked to the latest close. These are not results -- they "
+                 "can reverse before they close, and they are kept out of "
+                 "every figure above."),
+    }

@@ -106,3 +106,20 @@ def test_summarise_on_no_trades_returns_zero_not_a_ratio():
 def test_calibration_refuses_to_report_on_too_few_trades():
     rows = [{"composite_score": 0.5, "net_return": 0.01}] * 4
     assert O.calibration(rows, buckets=4) == []
+
+
+def test_a_triggered_exit_resolves_without_waiting_out_the_window():
+    """A stop hit on day two is final on day two. The gate that withheld it
+    for a full 63 sessions hid 580 closed trades on the real ledger, and the
+    average hold is 18 sessions against that window -- so most trades finish
+    long before it does."""
+    import inspect
+    from prosignal import outcomes as O
+    src = inspect.getsource(O._resolve_one)
+    walk_at = src.index("walk = future.iloc[1:]")
+    loop_at = src.index("for held, (_, bar) in enumerate")
+    # No early return may sit between building the walk and inspecting it.
+    assert "return None" not in src[walk_at:loop_at], \
+        "a closed trade must not be withheld until the window elapses"
+    # A partially elapsed window still must not become a time exit.
+    assert "len(walk) < max_hold" in src[loop_at:]

@@ -734,6 +734,20 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
         from .stages._cfg import iv
         horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
+
+        # The last session a signal could have been issued on and still have
+        # had its whole window. Past it, only the fast movers have finished.
+        cutoff = None
+        try:
+            import pandas as _pd
+            days = sorted(set(_pd.to_datetime(
+                store.read_prices(columns=["date", "symbol", "close"])["date"]
+            ).dt.normalize()))
+            if len(days) > horizon:
+                cutoff = str(days[-horizon].date())
+        except Exception:
+            cutoff = None
+        rows, partial = _perf.split_cohorts(rows, cutoff)
         bench = str(cfg.params.stage2_regime.benchmark_index.value)
         return {
             "headline": _perf.performance(rows, store, horizon=horizon,
@@ -741,24 +755,15 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "by_ticker": _perf.by_ticker(rows, store, benchmark=bench),
             "curve": _perf.equity_curve(rows, store, benchmark=bench),
             "calibration": _out.calibration(rows),
-            "pending": max(0, led_pending_count(led, rows)),
+            "cohort_cutoff": cutoff,
+            "recent": _perf.recent_activity(partial),
             "measurement": state,
             "scope": ("period" if window is not None else "all"),
+            # Kept apart from every figure above: a mark is not an outcome.
+            "open": _perf.open_positions(
+                Ledger(cfg.paths.ledger).read_all(), rows, store,
+                max_hold=horizon),
         }
-
-    def led_pending_count(led: Path, resolved) -> int:
-        """Signals issued but not yet scoreable. Shown so an empty
-        performance page reads as "too early" rather than as "no signals"."""
-        try:
-            keys = {(r.get("run_id"), r.get("ticker")) for r in resolved}
-            total = 0
-            for row in Ledger(cfg.paths.ledger).read_all():
-                for sig in (row.get("signals") or []):
-                    if (row.get("run_id"), sig.get("ticker")) not in keys:
-                        total += 1
-            return total
-        except Exception:
-            return 0
 
     # ------------------------------------------------------------------
     # Operator actions

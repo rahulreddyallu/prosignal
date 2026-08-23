@@ -739,3 +739,23 @@ def test_the_verdict_names_the_window_it_is_describing():
     assert "Measuring since" in html
     assert "Every run on record" in html
     assert "settings changed mid-period" in html
+
+
+def test_the_classes_that_carry_typography_are_all_styled():
+    """`.fine` was deleted along with the settings block it happened to live
+    in, and three callers silently rendered small print at body size. Nothing
+    errored; it just looked wrong. These are the classes whose whole job is
+    to change how text reads, so an unstyled one is always a bug."""
+    html = _html()
+    css = html[html.index("<style>"):html.index("</style>")]
+    for cls in ("fine", "reading", "vscope", "rs", "rl", "sl", "ss", "sv",
+                "grp-h", "lc", "pf"):
+        assert "." + cls + " " in css or "." + cls + "{" in css, \
+            f".{cls} is used for text but has no rule"
+
+
+def test_one_class_name_does_not_mean_two_things():
+    """`.live` already meant the market-status dot."""
+    html = _html()
+    assert 'class="box live"' not in html
+    assert ".nowbox" in html

@@ -568,6 +568,11 @@ td.r { text-align: right; }
   .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-5); }
 }
 
+/* Small print. Lost once when the settings block was replaced wholesale,
+   which left three callers styling themselves as body text. */
+.fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.55;
+        margin-top: var(--sp-3); }
+
 /* ===== settings drawer ============================================= */
 .drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.42);
                 opacity: 0; transition: opacity .24s ease; }
@@ -647,6 +652,15 @@ td.r { text-align: right; }
          gap: var(--sp-4); margin-bottom: var(--sp-4); flex-wrap: wrap; }
 .vhead h3 { font-size: 15px; }
 .vscope { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.nowbox { border-left: 3px solid var(--accent); }
+.now-h { display: flex; align-items: center; justify-content: space-between;
+          gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.now-h h3 { font-size: 15px; }
+.nowbox .stats { border-bottom: none; padding-bottom: 0; }
+.lcs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--sp-4); }
+.lc { font-size: 11.5px; padding: 3px 8px; border-radius: 999px;
+      background: var(--surface-sunk); color: var(--ink-2);
+      font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
          gap: var(--sp-4); padding-bottom: var(--sp-4);
          border-bottom: 1px solid var(--line); }
@@ -1845,6 +1859,42 @@ function curveSVG(curve) {
   '</div>';
 }
 
+/* What is happening right now. Separate from the verdict on purpose: an
+   open mark is not a result, and a trade that closed inside the current
+   window is a real close from a group where only the fast movers have
+   finished. Both move daily, which is what makes the page worth opening;
+   neither is allowed near a t-statistic. */
+function livePanel(perf) {
+  const op = (perf && perf.open) || {};
+  const rc = (perf && perf.recent) || {};
+  if (!op.n && !rc.n) return "";
+
+  const chips = (rc.recent || []).slice(0, 6).map((r) =>
+    '<span class="lc">' + esc(r.ticker) + ' ' + signed(r.net_return, 1) + '</span>'
+  ).join("");
+
+  return '<div class="box nowbox">' +
+    '<div class="now-h"><h3>Right now</h3>' +
+      '<span class="chip">' + esc(op.as_of ? day(op.as_of) : "latest close") + '</span>' +
+    '</div>' +
+    '<div class="stats">' +
+      (op.n ? '<div class="stat"><div class="sl">Still running</div>' +
+        '<div class="sv">' + op.n + '</div>' +
+        '<div class="ss">' + op.up + ' of ' + op.n + ' above entry</div></div>' : "") +
+      (op.avg_unrealised != null ? '<div class="stat"><div class="sl">Unrealised</div>' +
+        '<div class="sv">' + signed(op.avg_unrealised) + '</div>' +
+        '<div class="ss">average, marked to the close</div></div>' : "") +
+      (rc.n ? '<div class="stat"><div class="sl">Closed recently</div>' +
+        '<div class="sv">' + rc.n + '</div>' +
+        '<div class="ss">inside the current window</div></div>' : "") +
+    '</div>' +
+    (chips ? '<div class="lcs">' + chips + '</div>' : "") +
+    '<p class="fine">Not counted in the record below. A mark can reverse, ' +
+    'and only the fastest of the recent trades have finished \u2014 which ' +
+    'makes that group read better than it is.</p>' +
+  '</div>';
+}
+
 /* The headline. It answers "did this work" before it shows anything else,
    and it refuses to answer when the sample cannot carry the answer. */
 function verdictCard(perf) {
@@ -2009,7 +2059,7 @@ function viewHistory(v) {
   const perf = state.perf;
   const perfBlock = perf === null
     ? '<div class="box"><div class="skel" style="height:200px"></div></div>'
-    : (perf ? verdictCard(perf) + tickerTable(perf) : "");
+    : (perf ? livePanel(perf) + verdictCard(perf) + tickerTable(perf) : "");
 
   return perfBlock +
     '<div class="names-h"><h3>Every name it has called</h3>' +
