@@ -167,6 +167,7 @@ _AMBIENT = {
     "new", "Promise", "Number", "String", "Date", "Array", "Object", "JSON",
     "Math", "fetch", "setTimeout", "parseInt", "parseFloat", "isNaN",
     "isFinite", "encodeURIComponent", "Error", "addEventListener",
+    "setInterval", "clearInterval", "clearTimeout",
     "removeEventListener", "querySelector", "querySelectorAll",
     "getElementById", "getItem", "setItem", "setAttribute", "removeAttribute",
     "click", "focus", "blur", "contains", "forEach", "from", "map", "join",

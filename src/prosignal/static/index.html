@@ -226,6 +226,14 @@ button { font: inherit; color: inherit; }
                 margin-top: -2px; }
 
 /* ------------------------------------------------------------- slate */
+.box-warn { background: var(--neg-soft); border: 1px solid var(--line);
+            border-left: 3px solid var(--neg); border-radius: var(--r-md);
+            padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5); }
+.box-warn b { display: block; color: var(--neg); margin-bottom: 5px;
+              font-size: 14.5px; }
+.box-warn p { color: var(--ink-2); font-size: 14px; line-height: 1.6;
+              max-width: 62ch; }
+
 .slate-head { display: flex; align-items: center; gap: var(--sp-3);
               margin: var(--sp-7) 0 var(--sp-4); flex-wrap: wrap; }
 .slate-head h2 { font-size: 20px; letter-spacing: -0.02em; }
@@ -491,9 +499,19 @@ td.r { text-align: right; }
 .err h3 { font-size: 15.5px; margin-bottom: 6px; }
 .err p { color: var(--ink-2); font-size: 14px; margin-bottom: var(--sp-4); }
 
+/* Was a centred stack with a paragraph under it, which on a narrow screen
+   became three lines of air between the last card and the footer rule. */
+.rerun { display: flex; align-items: center; justify-content: center;
+         gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-5); }
+.rerun span { color: var(--ink-3); font-size: 12.5px; }
+
 .foot { color: var(--ink-3); font-size: 12px; line-height: 1.6;
-        border-top: 1px solid var(--line); margin-top: var(--sp-8);
-        padding: var(--sp-5) 0 var(--sp-8); max-width: 78ch; }
+        border-top: 1px solid var(--line); margin-top: var(--sp-6);
+        padding: var(--sp-4) 0 var(--sp-6); max-width: 78ch; }
+@media (max-width: 640px) {
+  .rerun { flex-direction: column; gap: var(--sp-2); }
+  .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-5); }
+}
 
 .skel { background: linear-gradient(90deg, var(--surface-sunk) 25%,
         var(--surface-2) 37%, var(--surface-sunk) 63%);
@@ -608,7 +626,7 @@ const $  = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const state = { view: null, run: null, tab: "overview", busy: false,
-                error: null, notReady: false, history: undefined,
+                booting: true, error: null, notReady: false, history: undefined,
                 latestSession: null, slateSize: 5, coverage: null };
 
 /* ---------------------------------------------------------------- theme */
@@ -795,7 +813,37 @@ async function bootstrap() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Fetching';
   const note = $("#boot-note");
-  note.textContent = "Fetching from NSE. This takes a few minutes per block.";
+  note.textContent = "Fetching from NSE...";
+
+  // The job's own progress label is written once at the start and once at the
+  // end, so it sat unchanged for 24 minutes and made a working build look
+  // frozen. Polling /ready alongside it shows the session count actually
+  // moving, which is the number that answers "is this doing anything".
+  let ticker = null;
+  const startCount = (state.coverage || {}).price_sessions || 0;
+  const showCount = async () => {
+    try {
+      const r = await rawFetch("/ready");
+      const j = await r.json().catch(() => null);
+      const c = (j && j.checks) || {};
+      if (c.price_sessions == null) return;
+      state.coverage = c;
+      const gained = c.price_sessions - startCount;
+      note.textContent =
+        c.price_sessions + " of " + (c.validated_target || "?") + " sessions"
+        + (gained > 0 ? "  (+" + gained + " this block)" : "")
+        + "  \u00b7 fetching...";
+      const bar = document.querySelector(".track .seg.done");
+      if (bar && c.validated_target) {
+        const pct = Math.min(100, Math.round(c.price_sessions / c.validated_target * 100));
+        bar.style.flex = pct;
+        const rest = document.querySelectorAll(".track .seg")[1];
+        if (rest) rest.style.flex = 100 - pct;
+      }
+    } catch (e) {}
+  };
+  showCount();
+  ticker = setInterval(showCount, 8000);
   try {
     const r = await fetch("/admin/bootstrap", { method: "POST" });
     if (!r.ok) throw new Error(await readErr(r));
@@ -818,6 +866,8 @@ async function bootstrap() {
     note.textContent = e.message || String(e);
     btn.disabled = false;
     btn.textContent = "Build data store";
+  } finally {
+    if (ticker) clearInterval(ticker);
   }
 }
 
@@ -936,6 +986,15 @@ function render() {
 
   if (state.error) return renderError();
   if (state.busy) return;
+  // Boot renders once before it knows anything. Showing the "no scan yet"
+  // screen in that gap makes every refresh flash the empty state for a beat
+  // and then replace it, which reads as a bug even though the data was on its
+  // way the whole time.
+  if (state.booting) {
+    $("#view").innerHTML =
+      '<div class="box"><div class="skel" style="height:150px"></div></div>';
+    return;
+  }
 
   if (state.notReady) {
     const c = state.coverage || {};
@@ -1081,22 +1140,28 @@ function viewOverview(v) {
   }
 
   state.slateSize = v.picks.length;
+  // A run the model could not score must not render as one it did. The
+  // composite behind it measured t = -0.11 against equal weight.
+  const scorer = v.scorer || {};
+  const unscored = scorer.validated === false
+    ? '<div class="box-warn"><b>This shortlist is not from the model</b>' +
+      '<p>' + esc(scorer.note || "") + '</p></div>'
+    : "";
+
   const counts = [];
   if (s.buy)   counts.push('<span class="pill buy">' + s.buy + ' Buy</span>');
   if (s.watch) counts.push('<span class="pill watch">' + s.watch + ' Watch</span>');
 
-  return marketBlock(v) +
+  return unscored + marketBlock(v) +
     '<div class="slate-head">' +
       '<h2>Shortlist</h2>' +
       '<div class="count">' + counts.join(" ") + '</div>' +
     '</div>' +
     '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>' +
-    '<div style="margin-top:var(--sp-6);text-align:center">' +
+    '<div class="rerun">' +
       '<button class="btn ghost sm" onclick="document.getElementById(\'scan\').click()">' +
       'Re-run this scan</button>' +
-      '<p class="prose muted" style="font-size:12.5px;margin-top:8px">' +
-      'The data has not changed since this ran, so a re-run returns the same ' +
-      'ranking.</p></div>';
+      '<span>Same data, so the ranking will not change.</span></div>';
 }
 
 function marketBlock(v) {
@@ -1420,10 +1485,11 @@ async function loadHistory() {
 /* Recover the most recent completed scan so a reload does not look like a
    product that forgets. */
 async function boot() {
+  state.booting = true;
   render();
   try {
     await checkReady();
-    if (state.notReady) { render(); return; }
+    if (state.notReady) { state.booting = false; render(); return; }
     const r = await fetch("/analysis");
     if (!r.ok) return;
     const { jobs } = await r.json();
@@ -1433,8 +1499,12 @@ async function boot() {
     if (!vr.ok) return;
     state.view = await vr.json();
     state.run = done.id;
+  } catch (e) {
+    // fall through: whatever we have is what we show
+  } finally {
+    state.booting = false;
     render();
-  } catch (e) {}
+  }
 }
 
 boot();

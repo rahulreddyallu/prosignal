@@ -133,3 +133,78 @@ def test_a_503_from_ready_is_read_not_discarded():
     block = block[:block.index("\n}")]
     assert "r.json()" in block
     assert "if (!r.ok)" not in block, "a 503 body must still be parsed"
+
+
+# ------------------------------------------------- which scorer actually ran
+def test_a_composite_run_is_not_presented_as_a_model_run():
+    """Stage 4 falls back to a hand-weighted composite when the
+    cross-sectional model cannot fit, and treats an insufficient store as a
+    benign reason -- so the run proceeds. The engine records that in a note.
+    The note never reached the payload, so on a real deployment the composite
+    rendered five confident BUY cards indistinguishable from the model's.
+
+    The composite was measured at -0.047% excess per month against equal
+    weight, t = -0.11.
+    """
+    from prosignal.presentation.viewmodel import _scorer_used
+
+    # What the live server actually produced on 88 sessions.
+    got = _scorer_used([{"factors": {"momentum_12_1": {},
+                                     "sector_relative_strength": {}}}])
+    assert got["model"] == "composite"
+    assert got["validated"] is False
+    assert "t = -0.11" in got["note"]
+
+
+def test_a_real_model_run_is_not_flagged():
+    from prosignal.presentation.viewmodel import _scorer_used
+
+    got = _scorer_used([{"factors": {"resid_mom": {}, "deliv_pct": {},
+                                     "prox_52w": {}}}])
+    assert got["validated"] is True
+    assert got["note"] is None
+
+
+def test_the_scorer_is_detected_from_the_factors_not_trusted_as_a_flag():
+    """Nothing upstream sets a 'this was the fallback' field. Reading the
+    factor names is the only signal that cannot be forgotten."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "prosignal"
+           / "presentation" / "viewmodel.py").read_text(encoding="utf-8")
+    fn = src[src.index("def _scorer_used"):src.index("def build_view")]
+    assert "FACTOR_MAP" in fn
+
+
+def test_the_interface_renders_the_unscored_warning():
+    from pathlib import Path
+
+    ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
+          / "index.html").read_text(encoding="utf-8")
+    assert "This shortlist is not from the model" in ui
+    assert "scorer.validated === false" in ui
+
+
+def test_the_empty_state_does_not_flash_before_the_data_arrives():
+    """Boot renders once before it knows anything. Showing 'no scan yet' in
+    that gap made every refresh flash the empty screen and replace it."""
+    from pathlib import Path
+
+    ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
+          / "index.html").read_text(encoding="utf-8")
+    assert "state.booting" in ui
+    render = ui[ui.index("function render()"):ui.index("function renderChrome")]
+    assert "if (state.booting)" in render
+
+
+def test_the_build_screen_shows_a_moving_session_count():
+    """The job's own label is written once at the start and once at the end,
+    so it sat unchanged for 24 minutes and made a working build look frozen."""
+    from pathlib import Path
+
+    ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
+          / "index.html").read_text(encoding="utf-8")
+    block = ui[ui.index("async function bootstrap"):ui.index("async function checkReady")]
+    assert "setInterval" in block
+    assert "clearInterval" in block, "the poller must stop when the build ends"
+    assert "price_sessions" in block
