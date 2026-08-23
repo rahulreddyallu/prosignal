@@ -111,18 +111,25 @@ def test_the_bootstrap_aims_at_the_validated_depth():
 
 def test_the_interface_keeps_offering_the_button_until_the_store_is_deep_enough():
     """It disappeared at 330 because the screen keyed off `ready`, which was
-    itself wrong. Both the too-short state and the fits-but-not-validated
-    state now route to the same build screen, so the button cannot vanish
-    while there is still history to fetch."""
+    itself wrong.
+
+    Both incomplete states still offer the build, but they no longer offer it
+    the same way. Below the model minimum there is no ranking to withhold, so
+    the build is the whole screen. Above it there ARE real picks, and hiding
+    them behind a progress bar until the store reached nine years made a
+    working engine look broken for months -- so the build becomes a tile over
+    results that are shown with their caveat.
+    """
     from pathlib import Path
 
     ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
           / "index.html").read_text(encoding="utf-8")
     assert "matches_validation === false" in ui
-    render = ui[ui.index("function render()"):ui.index("function buildScreen")]
-    assert render.count("buildScreen()") == 2, (
-        "both incomplete states must reach the build screen"
-    )
+    render = ui[ui.index("function render()"):ui.index("function buildTile")]
+    assert "buildScreen()" in render, "the too-short state must reach the build"
+    assert "buildTile()" in render, "the shallow state must still offer it"
+    # The button lives on both, so it cannot vanish while history remains.
+    assert ui.count('id="boot"') == 2
 
 
 def test_a_503_from_ready_is_read_not_discarded():
@@ -336,4 +343,7 @@ def test_the_scan_button_is_hidden_on_the_build_screen():
     ui = _ui()
     assert "function hideScan" in ui
     render = ui[ui.index("function render()"):ui.index("function hideScan")]
-    assert render.count("hideScan(); return buildScreen();") == 2
+    # The full build screen still hides it -- there is nothing to scan there.
+    assert "hideScan(); return buildScreen();" in render
+    # The tile does NOT, because those results are real and rescannable.
+    assert "state.shallow" in render

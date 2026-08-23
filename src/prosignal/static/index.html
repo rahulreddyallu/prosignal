@@ -141,6 +141,9 @@ button { font: inherit; color: inherit; }
               letter-spacing: .04em; text-transform: uppercase; }
 .topbar-meta { margin-left: auto; display: flex; align-items: center;
                gap: var(--sp-4); font-size: 12.5px; color: var(--ink-2); }
+/* A date is one token. Letting it break gave "2026-08-" over "21". */
+#mkt-status { white-space: nowrap; }
+.brand { min-width: 0; }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block;
        margin-right: 6px; vertical-align: 1px; }
@@ -148,10 +151,20 @@ button { font: inherit; color: inherit; }
 .dot.closed { background: var(--ink-3); }
 .dot.stale { background: var(--watch); }
 
-.iconbtn { background: transparent; border: 1px solid var(--line); width: 32px;
-           height: 32px; border-radius: var(--r-sm); cursor: pointer;
-           display: grid; place-items: center; color: var(--ink-2); }
-.iconbtn:hover { background: var(--surface-2); color: var(--ink); }
+/* A glyph gear renders at whatever size the platform font decides, which on
+   iOS was a speck inside a 32px box. An inline SVG is the size we set it. */
+.iconbtn { background: transparent; border: 1px solid var(--line); width: 38px;
+           height: 38px; border-radius: 10px; cursor: pointer;
+           display: grid; place-items: center; color: var(--ink-2);
+           transition: background .14s ease, color .14s ease,
+                       border-color .14s ease; }
+.iconbtn svg { width: 19px; height: 19px; display: block;
+               fill: none; stroke: currentColor; stroke-width: 1.7;
+               stroke-linecap: round; stroke-linejoin: round; }
+.iconbtn:hover { background: var(--surface-2); color: var(--ink);
+                 border-color: var(--line-strong); }
+.iconbtn:active { transform: scale(.94); }
+.iconbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* ------------------------------------------------------------------ nav */
 .nav { border-bottom: 1px solid var(--line); background: var(--ground); }
@@ -565,6 +578,151 @@ td.r { text-align: right; }
   .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-5); }
 }
 
+/* Small print. Lost once when the settings block was replaced wholesale,
+   which left three callers styling themselves as body text. */
+.fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.55;
+        margin-top: var(--sp-3); }
+
+/* ===== settings drawer ============================================= */
+.drawer-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.42);
+                opacity: 0; transition: opacity .24s ease; }
+.drawer-scrim.in { opacity: 1; }
+.drawer { position: fixed; z-index: 61; background: var(--surface);
+          display: flex; flex-direction: column;
+          top: 0; right: 0; bottom: 0; width: min(380px, 100vw);
+          border-left: 1px solid var(--line);
+          transform: translateX(100%); transition: transform .26s cubic-bezier(.32,.72,0,1);
+          box-shadow: -18px 0 48px rgba(0,0,0,.18); }
+.drawer.in { transform: translateX(0); }
+.drawer-head { display: flex; align-items: center; justify-content: space-between;
+               padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line);
+               flex: none; }
+.drawer-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.drawer-body { padding: var(--sp-4) var(--sp-5) var(--sp-6);
+               overflow-y: auto; display: grid; gap: var(--sp-5); }
+
+.grp { display: grid; }
+.grp.quiet .rl { color: var(--ink-2); font-weight: 450; font-size: 13px; }
+.grp-h { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
+         color: var(--ink-3); padding-bottom: 6px; }
+.row { display: flex; align-items: center; justify-content: space-between;
+       gap: var(--sp-4); padding: 11px 0; border-bottom: 1px solid var(--line); }
+.grp .row:last-of-type { border-bottom: none; }
+.row-t { min-width: 0; }
+.rl { font-size: 14px; color: var(--ink); font-weight: 500; }
+.rs { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.row-c { flex: none; }
+.warn-t { color: var(--neg); }
+.danger-t { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 35%, transparent); }
+.btn.xs { padding: 5px 12px; font-size: 12.5px; border-radius: var(--r-sm); }
+
+/* The switch. A track, a knob, and one transition on each. */
+.sw { position: relative; width: 42px; height: 25px; border-radius: 13px; flex: none;
+      background: var(--line-strong); border: none; cursor: pointer; padding: 0;
+      transition: background .2s ease; }
+.sw .knob { position: absolute; top: 3px; left: 3px; width: 19px; height: 19px;
+            border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+            transition: transform .22s cubic-bezier(.32,.72,0,1); }
+.sw.on { background: var(--accent); }
+.sw.on .knob { transform: translateX(17px); }
+.sw:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.past { margin-top: 6px; display: grid; gap: 3px; }
+.pr { display: flex; justify-content: space-between; gap: var(--sp-4);
+      font-size: 11.5px; color: var(--ink-3); }
+.pf { font-variant-numeric: tabular-nums; opacity: .75; }
+
+@media (max-width: 560px) {
+  /* Still from the side, just narrower. */
+  .drawer { width: min(320px, 88vw); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .drawer-scrim, .sw, .sw .knob { transition: none; }
+}
+
+/* ===== build tile ================================================== */
+.tile { border-left: 3px solid var(--accent); }
+.tile-h { display: flex; align-items: flex-start; justify-content: space-between;
+          gap: var(--sp-4); flex-wrap: wrap; }
+.tile-t { font-size: 14px; font-weight: 600; color: var(--ink); }
+.tile-s { font-size: 12.5px; color: var(--ink-3); margin-top: 3px;
+          max-width: 46ch; line-height: 1.5; }
+.count.sm { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+.count.sm .num { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.count.sm .of { font-size: 12px; color: var(--ink-3); }
+.tile .track { margin: var(--sp-4) 0 var(--sp-3); }
+.tile .sub { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.tile-a { margin-top: var(--sp-3); }
+
+/* ===== history ===================================================== */
+.chart { padding-bottom: var(--sp-3); }
+.chart-h { margin-bottom: var(--sp-4); }
+.chart-v { font-size: 30px; font-weight: 600; letter-spacing: -0.02em;
+           font-variant-numeric: tabular-nums; }
+.chart-s { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.chart svg { width: 100%; height: 132px; display: block; }
+.chart path { vector-effect: non-scaling-stroke; }
+path.cs { fill: none; stroke: var(--accent); stroke-width: 1.75;
+          stroke-linejoin: round; stroke-linecap: round; }
+path.ca { fill: var(--accent); opacity: .09; stroke: none; }
+.cz { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: var(--sp-4); margin-top: var(--sp-4); }
+.col { background: var(--surface); border: 1px solid var(--line);
+       border-radius: var(--r-md); overflow: hidden; }
+.col-h { display: flex; align-items: baseline; justify-content: space-between;
+         gap: var(--sp-4); padding: var(--sp-4) var(--sp-4) var(--sp-3);
+         font-size: 12px; letter-spacing: .03em; text-transform: uppercase;
+         color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.col-h b { font-size: 15px; letter-spacing: 0; text-transform: none;
+           font-variant-numeric: tabular-nums; }
+.col.up .col-h b { color: var(--buy); }
+.col.dn .col-h b { color: var(--neg); }
+.col-b { max-height: 420px; overflow-y: auto; }
+
+.nr { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "t v" "h v"; align-items: center;
+      gap: 0 var(--sp-4); width: 100%; text-align: left;
+      padding: 10px var(--sp-4); background: none; border: none;
+      border-bottom: 1px solid var(--line); cursor: pointer; font: inherit;
+      transition: background .12s ease; }
+.nr:last-child { border-bottom: none; }
+.nr:hover { background: var(--surface-sunk); }
+.nr:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.nr-t { grid-area: t; font-size: 13.5px; font-weight: 550; color: var(--ink);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nr-h { grid-area: h; font-size: 11.5px; color: var(--ink-3); }
+.ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: var(--sp-4); padding-bottom: var(--sp-4);
+        border-bottom: 1px solid var(--line); }
+.way .wl { font-size: 11.5px; color: var(--ink-3); }
+.way .wv { font-size: 23px; font-weight: 600; letter-spacing: -0.02em;
+           margin-top: 3px; font-variant-numeric: tabular-nums; }
+.way .ws { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.callh { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+         color: var(--ink-3); margin: var(--sp-5) 0 var(--sp-3); }
+.calls { display: grid; }
+.call { display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center; gap: var(--sp-3); padding: 10px 0;
+        border-bottom: 1px solid var(--line); }
+.call:last-child { border-bottom: none; }
+.call-n { width: 20px; height: 20px; border-radius: 50%; display: grid;
+          place-items: center; font-size: 11px; color: var(--ink-3);
+          background: var(--surface-sunk); }
+.call-d { font-size: 13px; color: var(--ink); }
+.call-s { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.call-v { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.nr-v { grid-area: v; font-size: 14px; font-variant-numeric: tabular-nums;
+        white-space: nowrap; }
+
+
+@media (max-width: 640px) {
+      .tile-h { flex-direction: column; gap: var(--sp-3); }
+  .count.sm .num { font-size: 22px; }
+}
+
 .skel { background: linear-gradient(90deg, var(--surface-sunk) 25%,
         var(--surface-2) 37%, var(--surface-sunk) 63%);
         background-size: 400% 100%; animation: sk 1.4s ease infinite;
@@ -575,6 +733,21 @@ td.r { text-align: right; }
 /* ------------------------------------------------------------ responsive */
 @media (max-width: 860px) {
   .topbar-meta .hide-sm { display: none; }
+}
+/* All three stopped fitting on one line and every one of them wrapped.
+   Hiding the descriptor fixed the wrap and lost the masthead, so instead
+   nothing wraps and the descriptor gives up width first. */
+.brand { white-space: nowrap; }
+.brand span { white-space: nowrap; }
+@media (max-width: 560px) {
+  .topbar-in { gap: var(--sp-3); }
+  .topbar-meta { gap: var(--sp-3); }
+  .brand { font-size: 15px; }
+  .brand span { font-size: 9.5px; letter-spacing: .03em; }
+}
+@media (max-width: 400px) {
+  .brand span { font-size: 9px; }
+  #mkt-status { font-size: 11px; }
 }
 @media (max-width: 640px) {
   body { font-size: 14.5px; }
@@ -596,7 +769,7 @@ td.r { text-align: right; }
     <div class="topbar-meta">
       <span id="mkt-status"><span class="dot closed"></span>Loading</span>
       <span class="hide-sm" id="mkt-fresh"></span>
-      <button class="iconbtn" id="theme" aria-label="Switch between light and dark theme" title="Theme">◐</button>
+      <button class="iconbtn" id="gear" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 13.6a7.6 7.6 0 0 0 0-3.2l1.9-1.4-1.9-3.3-2.2.9a7.7 7.7 0 0 0-2.8-1.6L14.1 2H9.9l-.3 2.4a7.7 7.7 0 0 0-2.8 1.6l-2.2-.9-1.9 3.3 1.9 1.4a7.6 7.6 0 0 0 0 3.2l-1.9 1.4 1.9 3.3 2.2-.9a7.7 7.7 0 0 0 2.8 1.6l.3 2.4h4.2l.3-2.4a7.7 7.7 0 0 0 2.8-1.6l2.2.9 1.9-3.3z"/></svg></button>
     </div>
   </div>
 </header>
@@ -669,6 +842,16 @@ td.r { text-align: right; }
     </div>
   </div>
 </div>
+<div class="drawer-scrim" id="set-scrim" hidden></div>
+<aside class="drawer" id="settings" role="dialog" aria-modal="true"
+       aria-labelledby="set-title" hidden tabindex="-1">
+  <div class="drawer-head">
+    <h2 id="set-title">Settings</h2>
+    <button class="iconbtn" id="set-close" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="drawer-body" id="set-body"></div>
+</aside>
+
 <aside class="panel" id="panel" role="dialog" aria-modal="true" aria-labelledby="panel-title" tabindex="-1">
   <div class="panel-head">
     <div style="flex:1;min-width:0">
@@ -699,7 +882,8 @@ const state = { view: null, run: null, tab: "overview", busy: false,
                 booting: true, error: null, notReady: false, jobId: null,
                 jobKind: null,
                 history: undefined,
-                latestSession: null, slateSize: 5, coverage: null };
+                latestSession: null, slateSize: 5, coverage: null,
+                perf: undefined, ops: null, meas: null, shallow: false };
 
 /* ---------------------------------------------------------------- theme */
 const THEME_KEY = "signal.theme";
@@ -708,16 +892,10 @@ function applyTheme(t) {
   else document.documentElement.setAttribute("data-theme", t);
   try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
 }
-(function () {
-  let t = "auto";
-  try { t = localStorage.getItem(THEME_KEY) || "auto"; } catch (e) {}
-  applyTheme(t);
-  $("#theme").addEventListener("click", () => {
-    let cur = "auto";
-    try { cur = localStorage.getItem(THEME_KEY) || "auto"; } catch (e) {}
-    applyTheme(cur === "auto" ? "light" : cur === "light" ? "dark" : "auto");
-  });
-})();
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) || "auto"; } catch (e) { return "auto"; }
+}
+applyTheme(currentTheme());
 
 /* ------------------------------------------------------------- helpers */
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -1130,26 +1308,34 @@ function render() {
     return;
   }
 
+  // Below the model minimum the engine cannot rank at all, so the build is
+  // the whole screen -- there is no result being withheld.
   if (state.notReady) { hideScan(); return buildScreen(); }
 
-  // Enough to fit, but not the depth the coefficients were validated on. The
-  // screen must not present a sixteen-month fit as the nine-year one.
-  if (state.coverage && state.coverage.matches_validation === false
-      && state.tab === "overview") { hideScan(); return buildScreen(); }
+  // Above the minimum but below the validated depth there ARE real picks, and
+  // hiding them behind a progress bar was the wrong trade: it made a usable
+  // engine look broken for months. The build becomes a tile above the
+  // results, and the results carry the caveat rather than the silence.
+  state.shallow = !!(state.coverage && state.coverage.matches_validation === false);
 
   const v = state.view;
   if (!v) {
     $("#view").innerHTML =
+      (state.shallow ? buildTile() : "") +
       '<div class="box empty"><h3>No scan has run yet</h3>' +
       '<p>The engine ranks the market against a model fitted on point-in-time ' +
       'data, then narrows to the setups that clear every risk check.</p>' +
       '<button class="btn" onclick="document.getElementById(\'scan\').click()">Scan Market</button></div>';
+    if (state.shallow) paintBuild(state.coverage || {});
+    wire();
     return;
   }
 
   renderChrome(v);
+  const tile = (state.shallow && state.tab === "overview") ? buildTile() : "";
   const body = state.tab === "history" ? viewHistory(v) : viewOverview(v);
-  $("#view").innerHTML = body;
+  $("#view").innerHTML = tile + body;
+  if (tile) paintBuild(state.coverage || {});
   wire();
 }
 
@@ -1157,6 +1343,148 @@ function render() {
    updated by ONE writer, because the previous version had three: a status
    line frozen at page load, the job's own progress label, and a poller --
    all rendering at once and disagreeing with each other. */
+/* ------------------------------------------------------------- settings
+
+   A drawer, not a tab. These are controls you reach for occasionally and
+   then dismiss; giving them a peer slot next to the two screens you actually
+   read implied they were somewhere to spend time.
+
+   Every row is a row. The previous version gave each control a card, a
+   heading and a paragraph explaining itself, which made four settings fill a
+   phone screen and read as though each one needed defending. A control whose
+   name does not explain it is misnamed. */
+
+function setRow(label, sub, control) {
+  return '<div class="row">' +
+    '<div class="row-t"><div class="rl">' + label + '</div>' +
+    (sub ? '<div class="rs">' + sub + '</div>' : "") + '</div>' +
+    '<div class="row-c">' + control + '</div></div>';
+}
+
+function toggle(id, on, label) {
+  return '<button class="sw' + (on ? " on" : "") + '" id="' + id + '" ' +
+    'role="switch" aria-checked="' + (on ? "true" : "false") + '" ' +
+    'aria-label="' + esc(label) + '"><span class="knob"></span></button>';
+}
+
+function renderSettings() {
+  const ops = state.ops || {};
+  const sch = ops.schedule || {};
+  const cur = (state.meas || {}).active;
+  const c = state.coverage || {};
+  const on = !sch.paused;
+
+  return (
+    '<div class="grp">' +
+      setRow("Daily signals",
+             on ? (cur ? "Measuring since " + esc(day(cur.started))
+                       : "Runs every weekday after the close")
+                : "Off \u2014 nothing is being recorded",
+             toggle("sw-cron", on, "Daily signals")) +
+      setRow("Update now", "Fetch today's data and rank",
+             '<button class="btn xs" id="run-now">Run</button>') +
+    '</div>' +
+
+    '<div class="grp">' +
+      setRow("Dark mode", "", toggle("sw-theme", currentTheme() === "dark",
+                                     "Dark mode")) +
+    '</div>' +
+
+    '<div class="grp quiet">' +
+      setRow("Recorded results", "Clears this history, keeps the research record",
+             '<button class="btn ghost xs" id="wipe">Clear</button>') +
+      setRow("Market history",
+             (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
+             " sessions stored",
+             '<button class="btn ghost xs" id="rebuild">Rebuild</button>') +
+    '</div>'
+  );
+}
+
+/* Opening and closing. The scrim mounts first so the drawer has something to
+   slide over, and focus moves in and back out so the keyboard is not left
+   behind the overlay. */
+let setReturnFocus = null;
+
+async function openSettings() {
+  setReturnFocus = document.activeElement;
+  const d = $("#settings"), sc = $("#set-scrim");
+  sc.hidden = false; d.hidden = false;
+  paintSettings();
+  // Flush layout so the transition has a start value to move FROM, then set
+  // the end state synchronously. requestAnimationFrame looked equivalent and
+  // is not: it is throttled in a background tab, and a drawer that never
+  // gets .in stays parked off-screen at translateX(100%) while reporting
+  // itself open.
+  void d.offsetWidth;
+  sc.classList.add("in"); d.classList.add("in");
+  d.focus();
+  document.body.style.overflow = "hidden";
+  await Promise.all([loadOps(), loadMeasurement()]);
+  paintSettings();
+}
+
+function closeSettings() {
+  const d = $("#settings"), sc = $("#set-scrim");
+  d.classList.remove("in"); sc.classList.remove("in");
+  document.body.style.overflow = "";
+  const done = () => { d.hidden = true; sc.hidden = true; };
+  // Wait for the transition so it slides out rather than vanishing.
+  const ms = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260;
+  setTimeout(done, ms);
+  if (setReturnFocus && setReturnFocus.focus) setReturnFocus.focus();
+}
+
+function paintSettings() {
+  const body = $("#set-body");
+  if (!body || $("#settings").hidden) return;
+  body.innerHTML = renderSettings();
+
+  const th = $("#sw-theme");
+  if (th) th.addEventListener("click", () => {
+    applyTheme(currentTheme() === "dark" ? "light" : "dark");
+    paintSettings();
+  });
+  const cr = $("#sw-cron");
+  if (cr) cr.addEventListener("click", toggleSchedule);
+  const rn = $("#run-now");
+  if (rn) rn.addEventListener("click", runNow);
+  const rb = $("#rebuild");
+  if (rb) rb.addEventListener("click", confirmResetMarketData);
+  // wire() belongs to render(), and the drawer is painted by this function
+  // instead -- so a control that moved in here silently lost its handler.
+  // Clear did, and looked completely normal while doing nothing.
+  const wp = $("#wipe");
+  if (wp) wp.addEventListener("click", confirmWipe);
+}
+
+async function loadMeasurement() {
+  try {
+    const r = await fetch("/measurement");
+    if (r.ok) state.meas = await r.json();
+  } catch (e) { /* the drawer renders without it */ }
+}
+
+/* What the nightly job does, on demand. The one control anyone presses:
+   opening the app before the job has run and finding yesterday's answer
+   with no way to move it forward is the case it exists for. */
+async function runNow() {
+  const btn = $("#run-now");
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+  try {
+    const r = await fetch("/admin/run-now", { method: "POST" });
+    if (r.ok) {
+      const j = await r.json();
+      state.jobId = j.id; state.jobKind = "bootstrap";
+      startMonitor();
+      closeSettings();
+      return;
+    }
+    showError(await readErr(r));
+  } catch (e) { showError(e.message || String(e)); }
+  paintSettings();
+}
+
 /* renderChrome owns the scan button and the build screen returns before it,
    so without this the top "Scan Market" stays visible over a store that has
    nothing to scan -- two buttons, one of which cannot work. */
@@ -1203,6 +1531,34 @@ function syncBuildButton() {
   } else if (btn.disabled) {
     setBuildIdle();
   }
+}
+
+/* The slim form of the build, shown above results that already work.
+
+   It reuses the same element ids as the full screen so paintBuild stays the
+   single writer -- two builders writing two different progress readouts is
+   the bug this project already shipped once. Only one of the two is ever
+   mounted, because render picks one branch. */
+function buildTile() {
+  const c = state.coverage || {};
+  const yrs = (n) => (n / 250).toFixed(1);
+  return (
+  '<div class="box tile">' +
+    '<div class="tile-h">' +
+      '<div><div class="tile-t">Still building market history</div>' +
+        '<div class="tile-s">Ranking on ' + yrs(c.price_sessions || 0) +
+        ' years of history. The published coefficients were fitted on ' +
+        yrs(c.validated_target || 2200) + '.</div></div>' +
+      '<div class="count sm"><span id="b-now" class="num">' +
+        (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
+        '</span><span class="of" id="b-goal"></span></div>' +
+    '</div>' +
+    '<div class="track" id="b-bar"><div class="seg done"></div><div class="seg"></div></div>' +
+    '<p class="sub" id="b-sub"></p>' +
+    '<div class="tile-a">' +
+      '<button class="btn ghost sm" id="boot">Continue building</button>' +
+    '</div>' +
+  '</div>');
 }
 
 /* A build can land hundreds of sessions between two polls, and snapping the
@@ -1437,46 +1793,145 @@ function cardHTML(p) {
 }
 
 /* --------------------------------------------------------------- history */
+/* Percent with a sign and a colour. Losses are not softened -- the whole
+   point of this page is that a person can see when it did not work. */
+function signed(x, dp) {
+  if (x == null || !isFinite(x)) return '<span class="v-neu">\u2014</span>';
+  const pct = x * 100;
+  const cls = pct > 0.005 ? "v-pos" : pct < -0.005 ? "v-neg" : "v-neu";
+  return '<span class="' + cls + '">' + (pct > 0 ? "+" : "") +
+         pct.toFixed(dp == null ? 2 : dp) + '%</span>';
+}
+
+/* Cumulative return against the same days in the index.
+
+   Plotted as a running SUM of per-trade returns, not a compounded curve:
+   the shortlist holds several names at once, and compounding overlapping
+   positions would draw a line the strategy never earned. */
+function curveSVG(curve) {
+  const pts = (curve || []).filter((c) => c && isFinite(c.cumulative));
+  if (pts.length < 2) return "";
+  const W = 640, H = 150, PAD = 6;
+  const paired = pts.filter((c) => c.benchmark_cumulative != null);
+  const all = pts.map((c) => c.cumulative)
+                 .concat(paired.map((c) => c.benchmark_cumulative));
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  if (hi - lo < 1e-9) { hi += 0.01; lo -= 0.01; }
+  const x = (i, n) => PAD + (i / (n - 1)) * (W - PAD * 2);
+  const y = (v) => PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2);
+  const line = (vals) => vals.map((v, i) =>
+    (i ? "L" : "M") + x(i, vals.length).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+
+  const zero = (lo <= 0 && hi >= 0)
+    ? '<line x1="' + PAD + '" x2="' + (W - PAD) + '" y1="' + y(0).toFixed(1) +
+      '" y2="' + y(0).toFixed(1) + '" class="cz"/>' : "";
+  const bench = paired.length > 1
+    ? '<path d="' + line(paired.map((c) => c.benchmark_cumulative)) + '" class="cb"/>' : "";
+
+  return '<div class="curve">' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+    'role="img" aria-label="Cumulative return of the shortlist against the index">' +
+    zero + bench +
+    '<path d="' + line(pts.map((c) => c.cumulative)) + '" class="cs"/>' +
+    '</svg>' +
+    '<div class="clegend"><span class="ck cs"></span>Shortlist' +
+    (paired.length > 1 ? '<span class="ck cb"></span>Index' : "") + '</div>' +
+  '</div>';
+}
+
+/* The curve. Cumulative return by exit date -- summed, not compounded,
+   because the book holds several names at once and compounding overlapping
+   holds would draw a line the strategy never earned. */
+function curveSVG(curve) {
+  const pts = (curve || []).filter((c) => c && isFinite(c.cumulative));
+  if (pts.length < 2) return "";
+  const W = 640, H = 132, PAD = 4;
+  let lo = Math.min.apply(null, pts.map((c) => c.cumulative));
+  let hi = Math.max.apply(null, pts.map((c) => c.cumulative));
+  if (hi - lo < 1e-9) { hi += 0.01; lo -= 0.01; }
+  const x = (i) => PAD + (i / (pts.length - 1)) * (W - PAD * 2);
+  const y = (v) => PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2);
+  const d = pts.map((c, i) =>
+    (i ? "L" : "M") + x(i).toFixed(1) + " " + y(c.cumulative).toFixed(1)).join(" ");
+  const area = d + " L" + x(pts.length - 1).toFixed(1) + " " + y(lo).toFixed(1) +
+               " L" + x(0).toFixed(1) + " " + y(lo).toFixed(1) + " Z";
+  const zero = (lo <= 0 && hi >= 0)
+    ? '<line x1="' + PAD + '" x2="' + (W - PAD) + '" y1="' + y(0).toFixed(1) +
+      '" y2="' + y(0).toFixed(1) + '" class="cz"/>' : "";
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+    'role="img" aria-label="Cumulative return of the shortlist over time">' +
+    zero + '<path d="' + area + '" class="ca"/>' +
+    '<path d="' + d + '" class="cs"/></svg>';
+}
+
+/* One name, one row: what it returned and how it ended.
+
+   A row here is a NAME, not a trade, so it carries a tally rather than a
+   single exit -- by_ticker reports exit_mix and win_rate, and reading a
+   scalar exit_reason off it produced a dangling separator and nothing else. */
+function nameRow(r) {
+  const how = { stop: "stopped out", target_1: "hit its target",
+                target_2: "hit its target", time_exit: "ran out of time" };
+  let sub;
+  if (r.n > 1) {
+    const won = Math.round(r.win_rate * r.n);
+    sub = r.n + " calls \u00b7 " + won + " paid off";
+  } else {
+    const only = Object.keys(r.exit_mix || {})[0];
+    sub = how[only] || "closed";
+  }
+  return '<button class="nr" data-stock="' + esc(r.ticker) + '">' +
+    '<span class="nr-t">' + esc(r.ticker) + '</span>' +
+    '<span class="nr-h">' + esc(sub) + '</span>' +
+    '<span class="nr-v">' + signed(r.total_return) + '</span></button>';
+}
+
 function viewHistory(v) {
-  const h = state.history;
-  if (h === null) return '<div class="box"><div class="skel" style="height:220px"></div></div>';
-  if (!h || !h.names || !h.names.length) {
-    return '<div class="box empty"><h3>No runs recorded yet</h3>' +
-      '<p>' + esc((h && h.note) || "Once a scan completes, every name it " +
-      "surfaces is recorded here with what the market did afterwards.") + '</p></div>';
+  const perf = state.perf;
+  if (perf === null || perf === undefined) {
+    return '<div class="box"><div class="skel" style="height:260px"></div></div>';
+  }
+  const h = perf.headline || {};
+  const rows = perf.by_ticker || [];
+  const open = (perf.open || {}).n || 0;
+
+  if (!rows.length) {
+    return '<div class="box empty"><h3>No results yet</h3>' +
+      '<p>' + (open
+        ? '<b>' + open + '</b> ' + (open === 1 ? 'call is' : 'calls are') +
+          ' still open \u2014 the market has not taken any of them to a ' +
+          'target or a stop yet. Each one lands here the day it closes.'
+        : 'Every call the engine makes lands here the day it closes, with ' +
+          'what it returned.') + '</p></div>';
   }
 
-  // One row per NAME. A date-by-date table repeated the same handful of
-  // tickers down the page -- the shortlist is five names and most were on it
-  // yesterday too -- which left the reader deduplicating by eye.
-  const rows = h.names.map((n) => {
-    const o = n.outcome || {};
-    const pending = o.resolved === "pending";
-    const repeat = n.times > 1
-      ? ' <span class="chip">' + n.times + ' runs</span>'
-      : "";
-    return '<button class="namerow" data-stock="' + esc(n.ticker) + '">' +
-      '<div style="min-width:0">' +
-        '<div class="nm">' + esc(n.company) + repeat + '</div>' +
-        '<div class="sb">' + esc(n.ticker) + ' · last seen ' + esc(day(n.last_seen)) +
-        (n.times > 1 ? ' · first ' + esc(day(n.first_seen)) : '') + '</div>' +
-      '</div>' +
-      '<div style="text-align:right;white-space:nowrap">' +
-        '<span class="pill ' + (n.last_status === "BUY" ? "buy" : "watch") + '">' +
-          (n.last_status === "BUY" ? "Buy" : "Watch") + '</span>' +
-        '<div class="sb" style="margin-top:5px">' +
-          (pending ? "not followed yet"
-                   : (o.change_pct > 0 ? "+" : "") + o.change_pct.toFixed(2) +
-                     "% since first call") + '</div>' +
-      '</div></button>';
-  }).join("");
+  const won = rows.filter((r) => r.total_return > 0)
+                  .sort((a, b) => b.total_return - a.total_return);
+  const lost = rows.filter((r) => r.total_return <= 0)
+                   .sort((a, b) => a.total_return - b.total_return);
+  const sum = (xs) => xs.reduce((t, r) => t + r.total_return, 0);
 
-  // The page title already says History and the subtitle already says what
-  // these are. A third heading over the same list was a label on a label.
-  return '<div style="display:flex;justify-content:flex-end;' +
-      'margin-bottom:var(--sp-3)">' +
-      '<button class="btn ghost sm" id="wipe">Clear history</button></div>' +
-    '<div class="names">' + rows + '</div>';
+  const list = (title, items, tone) =>
+    '<div class="col ' + tone + '">' +
+      '<div class="col-h"><span>' + title + '</span>' +
+        '<b>' + signed(sum(items)) + '</b></div>' +
+      '<div class="col-b">' + items.map(nameRow).join("") + '</div>' +
+    '</div>';
+
+  return (
+    '<div class="box chart">' +
+      '<div class="chart-h">' +
+        '<div><div class="chart-v">' + signed(h.total_return) + '</div>' +
+          '<div class="chart-s">' + h.n + ' closed' +
+          (open ? " \u00b7 " + open + " running" : "") + '</div></div>' +
+      '</div>' +
+      curveSVG(perf.curve) +
+    '</div>' +
+    '<div class="cols">' +
+      list("Paid off", won, "up") +
+      list("Went against", lost, "dn") +
+    '</div>'
+  );
 }
 
 async function confirmWipe() {
@@ -1494,6 +1949,8 @@ async function confirmWipe() {
     const j = await r.json();
     say(j.message || "History cleared.");
     state.history = undefined;
+    state.perf = undefined;
+    closeSettings();
     await loadHistory();
   } catch (e) {
     state.error = e.message || String(e);
@@ -1504,10 +1961,10 @@ async function confirmWipe() {
 /* ---------------------------------------------------------- one stock */
 async function openStock(ticker) {
   lastFocus = document.activeElement;
-  $("#panel-rank").textContent = "Past calls";
+  $("#panel-rank").textContent = "Every call";
   $("#panel-title").textContent = ticker;
   $("#panel-tick").textContent = "";
-  $("#panel-body").innerHTML = '<div class="skel" style="height:200px"></div>';
+  $("#panel-body").innerHTML = '<div class="skel" style="height:220px"></div>';
   $("#panel").classList.add("open");
   $("#scrim").classList.add("open");
   $("#panel").focus();
@@ -1515,39 +1972,74 @@ async function openStock(ticker) {
 
   let d;
   try {
-    const r = await fetch("/stock/" + encodeURIComponent(ticker) + "/history");
+    const r = await fetch("/stock/" + encodeURIComponent(ticker) + "/calls");
     if (!r.ok) throw new Error(await readErr(r));
     d = await r.json();
   } catch (e) {
     $("#panel-body").innerHTML =
-      '<div class="err"><h3>That name could not be loaded</h3><p>' +
-      esc(e.message || String(e)) + '</p></div>';
+      '<p class="prose muted">' + esc(e.message || String(e)) + '</p>';
     return;
   }
 
-  $("#panel-title").textContent = d.company;
-  $("#panel-tick").textContent = d.ticker +
-    (d.last_price != null ? " · " + money(d.last_price) + " now" : "");
-  $("#panel-rank").textContent = d.times_flagged === 1
-    ? "Flagged once" : "Flagged " + d.times_flagged + " times";
+  $("#panel-title").textContent = d.company || ticker;
+  $("#panel-tick").textContent = d.ticker;
+  $("#panel-rank").textContent =
+    d.n_calls === 1 ? "Called once" : "Called " + d.n_calls + " times";
 
-  if (!d.runs || !d.runs.length) {
-    $("#panel-body").innerHTML = '<div class="prose muted">' +
-      esc((d.summary || {}).text || "") + '</div>';
+  if (!d.n_calls) {
+    $("#panel-body").innerHTML =
+      '<p class="prose muted">' +
+      (d.open ? 'Called ' + d.open + (d.open === 1 ? ' time' : ' times') +
+                ' and still open \u2014 nothing has closed yet.'
+              : 'No closed call on this name yet.') + '</p>';
     return;
   }
-  const rows = d.runs.map((r) => outcomeRow(
-    r.outcome,
-    '<div style="font-weight:600">' + esc(day(r.date)) + '</div>',
-    "Flagged as " + (r.status === "BUY" ? "Buy" : "Watch") +
-    (r.regime ? " · " + esc(r.regime) : "")
-  )).join("");
+
+  const how = { stop: "stopped out", target_1: "hit its target",
+                target_2: "hit its target", time_exit: "ran out of time" };
+
+  const rows = d.calls.map((c, i) =>
+    '<div class="call">' +
+      '<div class="call-n">' + (i + 1) + '</div>' +
+      '<div class="call-m">' +
+        '<div class="call-d">' + esc(day(c.entry_date)) + ' \u2192 ' +
+          esc(day(c.exit_date)) + '</div>' +
+        '<div class="call-s">' + esc(how[c.exit_reason] || c.exit_reason) +
+          ' after ' + c.sessions_held +
+          (c.sessions_held === 1 ? " session" : " sessions") + ' \u00b7 ' +
+          money(c.entry_price) + ' \u2192 ' + money(c.exit_price) + '</div>' +
+      '</div>' +
+      '<div class="call-v">' + signed(c.net_return) + '</div>' +
+    '</div>').join("");
+
+  // Two totals, because the honest answer depends on what you did.
+  const twoWays =
+    '<div class="ways">' +
+      '<div class="way"><div class="wl">Taking every call</div>' +
+        '<div class="wv">' + signed(d.taking_every_call) + '</div>' +
+        '<div class="ws">' + d.n_paid_off + ' of ' + d.n_calls +
+        ' paid off</div></div>' +
+      (d.holding_since_first != null
+        ? '<div class="way"><div class="wl">Holding since the first call</div>' +
+          '<div class="wv">' + signed(d.holding_since_first) + '</div>' +
+          '<div class="ws">bought ' + esc(day(d.first_call)) +
+          ', never sold</div></div>'
+        : "") +
+    '</div>' +
+    (d.overlapping_calls
+      ? '<p class="fine">' + d.overlapping_calls +
+        (d.overlapping_calls === 1 ? ' call was' : ' calls were') +
+        ' open while another was still running. Adding those together is a ' +
+        'return on two slots of capital, not one.</p>'
+      : "");
 
   $("#panel-body").innerHTML =
-    '<div class="section"><h3>How these calls have gone</h3>' +
-      '<p class="prose">' + esc((d.summary || {}).text || "") + '</p></div>' +
-    '<div class="section"><h3>Every call</h3><div class="ev">' + rows + '</div></div>' +
-    '<div class="callout">' + esc(d.disclaimer || "") + '</div>';
+    twoWays +
+    '<h4 class="callh">Each call</h4>' +
+    '<div class="calls">' + rows + '</div>' +
+    (d.open ? '<p class="fine">' + d.open +
+      (d.open === 1 ? ' call is' : ' calls are') +
+      ' still open and not counted above.</p>' : "");
 }
 
 /* Colour and a word, never colour alone. */
@@ -1665,24 +2157,116 @@ function wire() {
   }));
   $$("button[data-stock]").forEach((el) =>
     el.addEventListener("click", () => openStock(el.dataset.stock)));
-  const wipe = $("#wipe");
-  if (wipe) wipe.addEventListener("click", confirmWipe);
+  // The tile mounts its own build button. buildScreen binds its copy at
+  // mount; the tile is rebuilt by render, so it binds here instead.
+  const tileBoot = $(".tile #boot");
+  if (tileBoot && !tileBoot.dataset.bound) {
+    tileBoot.dataset.bound = "1";
+    tileBoot.addEventListener("click", bootstrap);
+    syncBuildButton();
+  }
+
+}
+
+async function loadOps() {
+  try {
+    const r = await fetch("/operations");
+    if (r.ok) state.ops = await r.json();
+  } catch (e) { /* the screen renders without it */ }
+}
+
+async function toggleSchedule() {
+  const paused = !!((state.ops || {}).schedule || {}).paused;
+  if (!paused) {
+    const ok = await ask("Turn off daily signals?",
+      "Nothing will be recorded until you turn it back on, and the current " +
+      "measurement period closes. Turning it on again starts a new one.",
+      "Turn off");
+    if (!ok) { paintSettings(); return; }
+  }
+  const sw = $("#sw-cron");
+  if (sw) sw.classList.toggle("on", paused);      // move now, confirm after
+  try {
+    await fetch("/operations/" + (paused ? "resume" : "pause"),
+                { method: "POST", headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ reason: "changed from the interface" }) });
+    // One switch, two things: the schedule and the period it records into.
+    await Promise.all([loadOps(), loadMeasurement()]);
+    state.perf = undefined;
+    if (state.tab === "history") loadHistory();
+  } catch (e) { /* the repaint below shows the true state either way */ }
+  paintSettings();
+}
+
+async function confirmResetMarketData() {
+  const ok = await ask(
+    "Rebuild the data store?",
+    "Every stored session is removed and downloaded again. Your results and " +
+    "measurement periods are kept. It takes several hours.",
+    "Rebuild");
+  if (!ok) return;
+  closeSettings();
+  await runReset("/admin/reset/market-data", null);
+}
+
+async function runReset(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) { showError(await readErr(r)); return; }
+  } catch (e) { showError(e.message || String(e)); return; }
+  // Everything on screen described the data that was just removed.
+  state.view = null; state.history = undefined; state.coverage = null;
+  state.ops = null; state.perf = undefined; state.tab = "overview";
+  await boot();
 }
 
 $("#scan").addEventListener("click", scan);
 $("#panel-close").addEventListener("click", closePanel);
 $("#scrim").addEventListener("click", closePanel);
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#settings").hidden) { closeSettings(); return; }
   if (e.key === "Escape" && $("#panel").classList.contains("open")) closePanel();
 });
-$$(".nav button").forEach((b) => b.addEventListener("click", () => {
-  state.tab = b.dataset.view;
+function goTab(name) {
+  state.tab = name;
   render();
-  if (state.tab === "history" && state.history === undefined) loadHistory();
-}));
+  if (name === "history" && state.history === undefined) loadHistory();
+}
+$$(".nav button").forEach((b) =>
+  b.addEventListener("click", () => goTab(b.dataset.view)));
+$("#gear").addEventListener("click", openSettings);
+$("#set-close").addEventListener("click", closeSettings);
+$("#set-scrim").addEventListener("click", closeSettings);
+
+/* Surfacing a failed action. It replaces the view rather than appearing as a
+   toast because every one of these actions changes what the rest of the
+   screen is describing -- leaving stale content under an error message is
+   how a failed reset reads as a successful one. */
+function showError(message) {
+  state.error = message || "That did not work.";
+  render();
+}
+
+/* Resolution runs server-side on read, so this can take a moment on a store
+   with a long ledger. It is fetched alongside the name list rather than
+   after it, because the verdict is the reason to open this page. */
+async function loadPerformance() {
+  state.perf = null;
+  try {
+    const r = await fetch("/performance");
+    state.perf = r.ok ? await r.json() : { headline: { n: 0 }, pending: 0 };
+  } catch (e) {
+    state.perf = { headline: { n: 0 }, pending: 0 };
+  }
+  if (state.tab === "history") render();
+}
 
 async function loadHistory() {
   state.history = null;                 // renders the skeleton
+  loadPerformance();
   if (state.tab === "history") render();
   try {
     const r = await fetch("/history/names?limit=60");

@@ -15,7 +15,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -402,6 +402,35 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             out.append({**row, "company": company, "outcome": outcome.__dict__})
         return {"names": out, "note": ""}
 
+    @app.get("/stock/{ticker}/calls")
+    def stock_calls(ticker: str) -> Dict[str, Any]:
+        """Every call on one name, from the same source the list uses.
+
+        The old panel read the ledger while the list read resolved outcomes,
+        so a name showing five calls opened a panel saying it had never
+        reached a shortlist. One source now.
+        """
+        from . import outcomes as _out
+        from . import performance as _perf
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        led = Path(cfg.paths.ledger)
+        path = led / "outcomes.jsonl"
+        _out.resolve_pending(store, led, path, cfg)
+        rows = _out.load_outcomes(path)
+        from .stages._cfg import iv
+        horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
+        op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
+                                  store, max_hold=horizon)
+        names, _ = _reference_names()
+        sym = str(ticker).upper()
+        company = names.get(sym) or sym
+        for suffix in (" Limited", " Ltd.", " Ltd", " LIMITED"):
+            if company.endswith(suffix):
+                company = company[: -len(suffix)].strip()
+                break
+        out = _perf.calls_for(sym, rows, store, open_rows=op.get("positions") or [])
+        return {**out, "company": company}
+
     @app.get("/stock/{ticker}/history")
     def stock_history(ticker: str) -> Dict[str, Any]:
         """Every time this name reached the shortlist, and what followed.
@@ -655,6 +684,192 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 "more often."
             ),
         }
+
+    def _git_commit() -> str:
+        """Best effort. A period without a commit is still a period; one that
+        refused to open because git was unavailable would not be."""
+        import subprocess
+        try:
+            out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(cfg.paths.root),
+                                 capture_output=True, text=True, timeout=5)
+            return out.stdout.strip() if out.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    def _measurement_state() -> Dict[str, Any]:
+        from . import measurement as _m
+        led = Path(cfg.paths.ledger)
+        cv = str(getattr(cfg, "version", "") or "")
+        cur = _m.active(led, config_version=cv)
+        return {
+            "active": cur.to_dict() if cur else None,
+            "periods": [x.to_dict() for x in _m.periods(led)[:12]],
+            "config_version": cv,
+        }
+
+    @app.get("/measurement")
+    def measurement_state() -> Dict[str, Any]:
+        return _measurement_state()
+
+    @app.post("/admin/run-now")
+    def run_now() -> Dict[str, Any]:
+        """What the nightly job does, on demand: refresh the data, then rank.
+
+        The only one of these controls anyone presses. Opening the app before
+        the job has run and finding yesterday's answer with no way to move it
+        forward is the case it exists for.
+        """
+        job = jobs.start(kind="bootstrap", runner=_bootstrap_runner)
+        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
+
+    @app.get("/performance")
+    def performance_report(period: str = "all") -> Dict[str, Any]:
+        """Did following the shortlist beat not following it?
+
+        Resolution runs on read, like /outcomes, so the scheduled job does not
+        need to remember to do it and a missed night self-heals.
+        """
+        from . import outcomes as _out
+        from . import performance as _perf
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        led = Path(cfg.paths.ledger)
+        path = led / "outcomes.jsonl"
+        _out.resolve_pending(store, led, path, cfg)
+        rows = _out.load_outcomes(path)
+
+        # Scoping defaults to OFF. Keeping evidence from before a config
+        # change out of evidence from after it matters for a t-statistic;
+        # this endpoint feeds a record of what the calls did, which has no
+        # such problem. Scoping it by default meant that turning the daily
+        # run on opened a period and instantly emptied a history of 136
+        # closed trades -- the isolation was real and the screen was wrong.
+        from . import measurement as _m
+        state = _measurement_state()
+        window = None
+        if period == "active" and state["active"]:
+            window = _m.Period(**{k: v for k, v in state["active"].items()
+                                  if k not in ("status", "open")})
+        elif period not in ("active", "all"):
+            window = next((x for x in _m.periods(led) if x.id == period), None)
+        if window is not None:
+            rows = [r for r in rows if window.covers(str(r.get("signal_date") or ""))]
+
+        from .stages._cfg import iv
+        horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
+
+        # The last session a signal could have been issued on and still have
+        # had its whole window. Past it, only the fast movers have finished.
+        cutoff = None
+        try:
+            import pandas as _pd
+            days = sorted(set(_pd.to_datetime(
+                store.read_prices(columns=["date", "symbol", "close"])["date"]
+            ).dt.normalize()))
+            if len(days) > horizon:
+                cutoff = str(days[-horizon].date())
+        except Exception:
+            cutoff = None
+        rows, partial = _perf.split_cohorts(rows, cutoff)
+        bench = str(cfg.params.stage2_regime.benchmark_index.value)
+        return {
+            "headline": _perf.performance(rows, store, horizon=horizon,
+                                          benchmark=bench),
+            "by_ticker": _perf.by_ticker(rows, store, benchmark=bench),
+            "curve": _perf.equity_curve(rows, store, benchmark=bench),
+            "calibration": _out.calibration(rows),
+            "cohort_cutoff": cutoff,
+            "recent": _perf.recent_activity(partial),
+            "measurement": state,
+            "scope": ("period" if window is not None else "all"),
+            # Kept apart from every figure above: a mark is not an outcome.
+            "open": _perf.open_positions(
+                Ledger(cfg.paths.ledger).read_all(), rows, store,
+                max_hold=horizon),
+        }
+
+    # ------------------------------------------------------------------
+    # Operator actions
+    # ------------------------------------------------------------------
+
+    @app.get("/operations")
+    def operations_state() -> Dict[str, Any]:
+        from . import operations as _ops
+        led = Path(cfg.paths.ledger)
+        return {
+            "schedule": {
+                **_ops.pause_state(led).to_dict(),
+                "cron": "20:30 IST, weekdays",
+                "note": ("Pausing does not stop cron -- editing /etc/cron.d "
+                         "needs root. The job still wakes and declines, and "
+                         "the decline is recorded."),
+            },
+            "log": _ops.operations_log(led, limit=25),
+        }
+
+    @app.post("/operations/pause")
+    def operations_pause(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Turning the daily run off also closes the measurement period.
+
+        They were two switches for one idea. Nobody wants a measurement
+        period that keeps running over days the engine did not record, and
+        nobody wants the engine recording into no period at all -- so there
+        is one switch and it moves both.
+        """
+        from . import operations as _ops
+        from . import measurement as _m
+        reason = (body or {}).get("reason", "")
+        st = _ops.pause(Path(cfg.paths.ledger), reason)
+        _m.stop(Path(cfg.paths.ledger))
+        return {**st.to_dict(), "measurement": None}
+
+    @app.post("/operations/resume")
+    def operations_resume() -> Dict[str, Any]:
+        """Turning it on opens a period, so what follows is measured.
+
+        If the config has changed since the last period this is also the
+        re-registration: a new period, a new fingerprint, and the previous
+        evidence kept separate from what comes next.
+        """
+        from . import operations as _ops
+        from . import measurement as _m
+        from .version import ENGINE_VERSION as _ver
+        led = Path(cfg.paths.ledger)
+        st = _ops.resume(led)
+        cur = _m.active(led, config_version=str(getattr(cfg, "version", "") or ""))
+        if cur is None or cur.status == "DRIFTED":
+            cur = _m.start(led,
+                           config_version=str(getattr(cfg, "version", "") or ""),
+                           engine_version=str(_ver), git_commit=_git_commit())
+        return {**st.to_dict(), "measurement": cur.to_dict()}
+
+    @app.post("/admin/reset/market-data")
+    def reset_market_data() -> Dict[str, Any]:
+        """Clear the price store so the build can run again. The record of
+        what the engine said is kept -- that cannot be re-fetched."""
+        from . import operations as _ops
+        active = jobs.active_job()
+        if active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="A job is running. Cancel it before resetting the store.")
+        return _ops.reset_market_data(cfg.paths)
+
+    @app.post("/admin/reset/everything")
+    def reset_everything(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Market data AND the entire record. The confirmation phrase is
+        required by the server, not only by the interface -- a destructive
+        endpoint that trusts the caller to have asked is not guarded."""
+        from . import operations as _ops
+        if (body or {}).get("confirm") != "ERASE":
+            raise HTTPException(
+                status_code=400,
+                detail='Send {"confirm": "ERASE"} to erase the record.')
+        active = jobs.active_job()
+        if active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="A job is running. Cancel it before erasing.")
+        return _ops.erase_everything(cfg.paths)
 
     @app.get("/ledger")
     def ledger(limit: int = 50) -> Dict[str, Any]:
