@@ -137,12 +137,31 @@ def test_the_score_is_not_presented_as_a_probability():
 
 def test_the_interface_makes_no_third_party_request():
     """A CDN font or script would put a network dependency between the user and
-    their own analysis, and leak that they are running it."""
+    their own analysis, and leak that they are running it.
+
+    An <a href> is not that. It is navigation the reader chooses, it fetches
+    nothing on load, and the footer's LinkedIn link is the whole point of the
+    attribution. The test targets what the PAGE fetches -- src, stylesheet
+    links, @import, url() -- not where it can send someone.
+    """
     html = _html()
-    for pattern in ("http://", "https://", "//cdn", "fonts.googleapis"):
-        offenders = [l for l in html.splitlines()
-                     if pattern in l and "localhost" not in l]
-        assert not offenders, f"external reference: {offenders[:2]}"
+    fetching = re.findall(
+        r'(?:src\s*=\s*["\']|<link[^>]+href\s*=\s*["\']|@import\s+["\']|url\()\s*([^"\')\s]+)',
+        html, re.I)
+    external = [u for u in fetching
+                if u.startswith(("http://", "https://", "//"))
+                and "localhost" not in u]
+    assert not external, f"the page fetches from off-host: {external[:3]}"
+
+
+def test_every_external_link_is_a_deliberate_navigation():
+    """Only links a reader clicks may leave the origin, and each must open
+    safely -- an unguarded target=_blank hands the opener to the destination."""
+    html = _html()
+    for url, attrs in re.findall(r'<a\s+href="(https?://[^"]+)"([^>]*)>', html):
+        assert "linkedin.com/in/rahulreddyallu" in url, f"unexpected link: {url}"
+        assert 'target="_blank"' in attrs
+        assert "noopener" in attrs and "noreferrer" in attrs
 
 
 def test_both_themes_define_every_colour_token():
@@ -453,3 +472,76 @@ def test_muted_text_meets_aa_for_small_text(theme):
         assert ratio >= 4.5, (
             f"{theme}: ink-3 on {surface} is {ratio:.2f}:1, below AA for small text"
         )
+
+
+# ------------------------------------------------------------------- brand
+def test_the_product_is_called_prosignal_everywhere_it_is_the_brand():
+    """The wordmark and the tab title are the only two places the product
+    names itself. Every other 'signal' in this file is the ordinary word --
+    signal strength, false signal -- and must not be touched."""
+    html = _html()
+    assert "<title>ProSignal</title>" in html
+    assert '<div class="brand">ProSignal' in html
+    assert ">Signal <span>" not in html, "the old wordmark survived"
+
+
+def test_ownership_is_attributed_once_not_repeated():
+    """Naming the owner twice in a footer this small is personal branding
+    rather than quiet attribution."""
+    html = _html()
+    foot = html[html.index('<footer class="foot">'):html.index("</footer>")]
+    assert foot.count("Rahul Reddy Allu") == 1
+
+
+def test_the_owner_links_are_correct_and_open_safely():
+    html = _html()
+    assert 'href="https://www.linkedin.com/in/rahulreddyallu/"' in html
+    assert 'href="mailto:rahulallu.career@gmail.com"' in html
+    foot = html[html.index('<footer class="foot">'):html.index("</footer>")]
+    assert 'target="_blank"' in foot and 'rel="noopener noreferrer"' in foot
+
+
+def test_the_arrows_are_hidden_from_screen_readers():
+    """A decorative glyph read aloud as "north east arrow" after every link is
+    noise."""
+    foot = _html()
+    foot = foot[foot.index('<footer class="foot">'):foot.index("</footer>")]
+    assert foot.count('aria-hidden="true"') >= 2
+
+
+def test_the_copyright_names_the_product_not_the_person():
+    """The product is the intellectual property; the person owns the product."""
+    html = _html()
+    assert "&copy; 2026 ProSignal. All rights reserved." in html
+
+
+def test_the_existing_disclaimer_is_preserved_not_replaced():
+    """It comes from the run, not from markup. Hardcoding it would let the
+    page state something the engine no longer says."""
+    html = _html()
+    assert 'id="foot-note"' in html
+    assert "v.disclaimer" in html
+
+
+def test_the_footer_invents_no_legal_or_performance_claims():
+    html = _html()
+    foot = html[html.index('<footer class="foot">'):html.index("</footer>")]
+    for invented in ("SEBI", "Pvt", "Ltd", "LLP", "registered", "GST",
+                     "Privacy Policy", "Terms", "alpha", "beat the market",
+                     "guaranteed", "institutional-grade"):
+        assert invented.lower() not in foot.lower(), f"invented: {invented}"
+
+
+def test_the_footer_uses_the_existing_tokens_and_no_new_colours():
+    """A footer with its own palette is a second design system."""
+    html = _html()
+    css = html[html.index(".foot { border-top"):html.index("@media (max-width: 640px) {\n  /* Stacked")]
+    for literal in ("#", "rgb(", "rgba("):
+        assert literal not in css, f"hardcoded colour in the footer: {literal}"
+
+
+def test_the_ownership_line_does_not_wrap_mid_name_on_mobile():
+    html = _html()
+    mobile = html[html.index("@media (max-width: 640px) {\n  /* Stacked"):]
+    mobile = mobile[:mobile.index("\n}")]
+    assert "text-wrap: balance" in mobile

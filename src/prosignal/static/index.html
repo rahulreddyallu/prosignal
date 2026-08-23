@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Signal — Equity Research</title>
+<title>ProSignal</title>
 <style>
 /* ==========================================================================
    TOKENS
@@ -522,9 +522,47 @@ td.r { text-align: right; }
          gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-5); }
 .rerun span { color: var(--ink-3); font-size: 12.5px; }
 
-.foot { color: var(--ink-3); font-size: 12px; line-height: 1.6;
-        border-top: 1px solid var(--line); margin-top: var(--sp-6);
-        padding: var(--sp-4) 0 var(--sp-6); max-width: 78ch; }
+/* Quiet by construction. The product name is the only thing at full ink; the
+   attribution sits a step down and the legal row a step below that, so the
+   hierarchy is carried by contrast rather than by size or decoration. */
+.foot { border-top: 1px solid var(--line); margin-top: var(--sp-7);
+        padding-top: var(--sp-5); padding-bottom: var(--sp-7); }
+.foot-main { display: flex; justify-content: space-between; align-items: flex-start;
+             gap: var(--sp-6); flex-wrap: wrap; }
+.foot-id .nm { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em;
+               color: var(--ink); }
+.foot-id p { color: var(--ink-3); font-size: 12.5px; margin-top: 3px;
+             max-width: 42ch; line-height: 1.5; }
+.foot-own { text-align: right; }
+.foot-own .by { font-size: 12.5px; color: var(--ink-2); }
+.foot-own .by b { color: var(--ink); font-weight: 550; }
+.foot-own .lnk { margin-top: 5px; display: flex; gap: 8px; justify-content: flex-end;
+                 align-items: baseline; font-size: 12.5px; }
+.foot-own .lnk .dot { color: var(--line-strong); }
+.foot a { color: var(--ink-2); text-decoration: none;
+          border-bottom: 1px solid transparent; transition: color .14s ease,
+          border-color .14s ease; }
+.foot a:hover { color: var(--accent); border-bottom-color: var(--accent-line); }
+.foot a:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px;
+                        border-radius: 2px; }
+
+.foot-legal { display: flex; justify-content: space-between; align-items: baseline;
+              gap: var(--sp-5); flex-wrap: wrap; margin-top: var(--sp-5);
+              padding-top: var(--sp-4); border-top: 1px solid var(--line);
+              color: var(--ink-3); font-size: 11.5px; line-height: 1.55; }
+.foot-legal span:last-child { text-align: right; max-width: 52ch; }
+
+@media (max-width: 640px) {
+  /* Stacked and left-aligned. The ownership line must not wrap mid-name, so
+     the whole block reads as one statement rather than two fragments. */
+  .foot { margin-top: var(--sp-6); padding-bottom: var(--sp-6); }
+  .foot-main { flex-direction: column; gap: var(--sp-4); }
+  .foot-own { text-align: left; }
+  .foot-own .by { text-wrap: balance; }
+  .foot-own .lnk { justify-content: flex-start; }
+  .foot-legal { flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-4); }
+  .foot-legal span:last-child { text-align: left; }
+}
 @media (max-width: 640px) {
   .rerun { flex-direction: column; gap: var(--sp-2); }
   .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-5); }
@@ -557,7 +595,7 @@ td.r { text-align: right; }
 
 <header class="topbar">
   <div class="topbar-in">
-    <div class="brand">Signal <span>Equity Research</span></div>
+    <div class="brand">ProSignal <span>Equity Research</span></div>
     <div class="topbar-meta">
       <span id="mkt-status"><span class="dot closed"></span>Loading</span>
       <span class="hide-sm" id="mkt-fresh"></span>
@@ -585,7 +623,27 @@ td.r { text-align: right; }
   <div id="live" role="status" aria-live="polite" class="sr"></div>
   <div id="view"></div>
 
-  <div class="foot" id="foot"></div>
+  <footer class="foot">
+    <div class="foot-main">
+      <div class="foot-id">
+        <div class="nm">ProSignal</div>
+        <p>Independent quantitative market research &amp; signal intelligence.</p>
+      </div>
+      <div class="foot-own">
+        <div class="by">Built &amp; owned by <b>Rahul Reddy Allu</b></div>
+        <div class="lnk">
+          <a href="https://www.linkedin.com/in/rahulreddyallu/" target="_blank"
+             rel="noopener noreferrer">LinkedIn<span aria-hidden="true"> &#8599;</span></a>
+          <span class="dot" aria-hidden="true">&middot;</span>
+          <a href="mailto:rahulallu.career@gmail.com">Email<span aria-hidden="true"> &#8599;</span></a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-legal">
+      <span>&copy; 2026 ProSignal. All rights reserved.</span>
+      <span id="foot-note"></span>
+    </div>
+  </footer>
 </main>
 
 <div class="modal-wrap" id="signin" role="dialog" aria-modal="true"
@@ -1176,7 +1234,10 @@ function renderChrome(v) {
     ? "Ranked from the close of " + esc(v.as_of) + "."
     : sub;
 
-  $("#foot").textContent = (v && v.disclaimer) || "";
+  // Preserved from the engine rather than hardcoded: it is the run's own
+  // disclaimer and it belongs on the legal row, not invented in markup.
+  const note = $("#foot-note");
+  if (note) note.textContent = (v && v.disclaimer) || "";
 }
 
 /* Whether the loaded results describe the newest session the store holds.
