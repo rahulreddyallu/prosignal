@@ -331,7 +331,7 @@ def test_ui_states_are_all_reachable(client):
     """
     text = client.get("/").text
     for marker in (
-        "Market data store is empty",      # store not bootstrapped
+        "Building the market data",        # store short of the model's bar
         "Nothing met the bar today",       # the designed common outcome
         "could not be completed",          # failure must not imply a trade
         "Checks that could not run",       # NOT_TESTABLE is not a pass

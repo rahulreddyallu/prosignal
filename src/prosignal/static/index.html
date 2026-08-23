@@ -322,6 +322,23 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .more { color: var(--accent); font-size: 13.5px; font-weight: 550; }
 
 /* ------------------------------------------------------------- progress */
+/* The counter is the answer to "is this doing anything", so it is the largest
+   thing on the screen rather than a note under a button. */
+.build { text-align: center; padding: var(--sp-7) var(--sp-5); }
+.build h3 { font-size: 17px; margin-bottom: var(--sp-5); }
+.build .count { display: flex; align-items: baseline; justify-content: center;
+                gap: 10px; margin-bottom: var(--sp-4); flex-wrap: wrap; }
+.build .count .num { font-size: clamp(38px, 9vw, 52px); font-weight: 600;
+                     letter-spacing: -0.03em; line-height: 1;
+                     font-variant-numeric: tabular-nums;
+                     transition: color .3s ease; }
+.build .count .num.tick { color: var(--accent); }
+.build .count .of { color: var(--ink-3); font-size: 14.5px; }
+.build .track { max-width: 380px; margin: 0 auto var(--sp-4); }
+.build .track .seg { transition: flex .6s ease; }
+.build .sub { color: var(--ink-2); font-size: 13.5px; max-width: 44ch;
+              margin: 0 auto var(--sp-5); line-height: 1.55; }
+
 .progress { background: var(--surface); border: 1px solid var(--line);
             border-radius: var(--r-lg); padding: var(--sp-6);
             box-shadow: var(--shadow); }
@@ -812,58 +829,51 @@ async function bootstrap() {
   if (!btn || btn.disabled) return;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Fetching';
-  const note = $("#boot-note");
-  note.textContent = "Fetching from NSE...";
 
-  // The job's own progress label is written once at the start and once at the
-  // end, so it sat unchanged for 24 minutes and made a working build look
-  // frozen. Polling /ready alongside it shows the session count actually
-  // moving, which is the number that answers "is this doing anything".
+  // ONE poller owns every number on this screen. The job's own progress label
+  // is deliberately NOT rendered: it is written once at the start and once at
+  // the end, so it reported a figure minutes out of date while sitting next to
+  // a live one, and the two disagreed on screen.
   let ticker = null;
-  const startCount = (state.coverage || {}).price_sessions || 0;
-  const showCount = async () => {
+  let last = (state.coverage || {}).price_sessions;
+  const tick = async () => {
     try {
       const r = await rawFetch("/ready");
       const j = await r.json().catch(() => null);
-      const c = (j && j.checks) || {};
-      if (c.price_sessions == null) return;
+      const c = (j && j.checks) || null;
+      if (!c || c.price_sessions == null) return;
       state.coverage = c;
-      const gained = c.price_sessions - startCount;
-      note.textContent =
-        c.price_sessions + " of " + (c.validated_target || "?") + " sessions"
-        + (gained > 0 ? "  (+" + gained + " this block)" : "")
-        + "  \u00b7 fetching...";
-      const bar = document.querySelector(".track .seg.done");
-      if (bar && c.validated_target) {
-        const pct = Math.min(100, Math.round(c.price_sessions / c.validated_target * 100));
-        bar.style.flex = pct;
-        const rest = document.querySelectorAll(".track .seg")[1];
-        if (rest) rest.style.flex = 100 - pct;
+      paintBuild(c);
+      // A brief colour change on the number itself, because sessions land in
+      // batches -- without it a jump of 30 after two quiet minutes reads as
+      // the page having reloaded rather than as progress.
+      if (last != null && c.price_sessions > last) {
+        const el = $("#b-now");
+        if (el) { el.classList.add("tick"); setTimeout(() => el.classList.remove("tick"), 700); }
       }
+      last = c.price_sessions;
     } catch (e) {}
   };
-  showCount();
-  ticker = setInterval(showCount, 8000);
+  tick();
+  ticker = setInterval(tick, 3000);
+
   try {
     const r = await fetch("/admin/bootstrap", { method: "POST" });
     if (!r.ok) throw new Error(await readErr(r));
     const { id } = await r.json();
     for (;;) {
-      await new Promise((res) => setTimeout(res, 1500));
+      await new Promise((res) => setTimeout(res, 2000));
       const s = await fetch("/analysis/" + id);
       if (!s.ok) throw new Error(await readErr(s));
       const job = await s.json();
-      if (job.progress && job.progress.label) note.textContent = job.progress.label;
-      // Refresh the coverage numbers mid-build so the bar advances between
-      // chunks rather than only at the very end.
-      if (job.state === "COMPLETED") { await checkReady(); }
       if (job.state === "COMPLETED") break;
       if (job.state === "FAILED") throw new Error(job.error || "The build did not finish.");
     }
     await checkReady();
     render();
   } catch (e) {
-    note.textContent = e.message || String(e);
+    const sub = $("#b-sub");
+    if (sub) sub.textContent = e.message || String(e);
     btn.disabled = false;
     btn.textContent = "Build data store";
   } finally {
@@ -996,39 +1006,12 @@ function render() {
     return;
   }
 
-  if (state.notReady) {
-    const c = state.coverage || {};
-    const have = c.price_sessions;
-    const need = c.model_minimum;
-    const full = c.validated_target;
-    const pct = (have != null && full) ? Math.min(100, Math.round(have / full * 100)) : 0;
-    $("#view").innerHTML =
-      '<div class="box empty">' +
-      '<h3>' + (have ? "Building the market data" : "Market data store is empty") + '</h3>' +
-      '<p>' + esc(c.status || "There is not enough price history stored to rank " +
-        "anything yet.") + '</p>' +
-      (have != null ? '<div class="track" style="max-width:340px;margin:0 auto ' +
-        'var(--sp-5)"><div class="seg done" style="flex:' + pct + '"></div>' +
-        '<div class="seg" style="flex:' + (100 - pct) + '"></div></div>' : "") +
-      '<button class="btn" id="boot">Build data store</button>' +
-      '<p id="boot-note" style="margin-top:var(--sp-4);font-size:13px"></p></div>';
-    $("#boot").addEventListener("click", bootstrap);
-    return;
-  }
+  if (state.notReady) return buildScreen();
 
   // Enough to fit, but not the depth the coefficients were validated on. The
   // screen must not present a sixteen-month fit as the nine-year one.
   if (state.coverage && state.coverage.matches_validation === false
-      && state.tab === "overview") {
-    const c = state.coverage;
-    $("#view").innerHTML =
-      '<div class="box empty"><h3>Still building</h3>' +
-      '<p>' + esc(c.status || "") + '</p>' +
-      '<button class="btn" id="boot">Continue building</button>' +
-      '<p id="boot-note" style="margin-top:var(--sp-4);font-size:13px"></p></div>';
-    $("#boot").addEventListener("click", bootstrap);
-    return;
-  }
+      && state.tab === "overview") return buildScreen();
 
   const v = state.view;
   if (!v) {
@@ -1044,6 +1027,53 @@ function render() {
   const body = state.tab === "history" ? viewHistory(v) : viewOverview(v);
   $("#view").innerHTML = body;
   wire();
+}
+
+/* The build screen. Everything numeric on it comes from ONE place and is
+   updated by ONE writer, because the previous version had three: a status
+   line frozen at page load, the job's own progress label, and a poller --
+   all rendering at once and disagreeing with each other. */
+function buildScreen() {
+  const c = state.coverage || {};
+  $("#view").innerHTML =
+    '<div class="box build">' +
+      '<h3>Building the market data</h3>' +
+      '<div class="count"><span id="b-now" class="num">' +
+        (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
+        '</span><span class="of">of ' +
+        ((c.validated_target || 2200).toLocaleString("en-IN")) + ' sessions</span></div>' +
+      '<div class="track" id="b-bar"><div class="seg done"></div><div class="seg"></div></div>' +
+      '<p class="sub" id="b-sub"></p>' +
+      '<button class="btn" id="boot">Build data store</button>' +
+    '</div>';
+  paintBuild(c);
+  $("#boot").addEventListener("click", bootstrap);
+  return "";
+}
+
+/* The single writer. Everything that changes during a build changes here. */
+function paintBuild(c) {
+  if (!c || c.price_sessions == null) return;
+  const now = c.price_sessions;
+  const goal = c.validated_target || 2200;
+  const el = $("#b-now");
+  if (el) el.textContent = now.toLocaleString("en-IN");
+
+  const pct = Math.min(100, (now / goal) * 100);
+  const bar = document.querySelector("#b-bar .seg.done");
+  const rest = document.querySelectorAll("#b-bar .seg")[1];
+  if (bar) bar.style.flex = pct;
+  if (rest) rest.style.flex = 100 - pct;
+
+  const sub = $("#b-sub");
+  if (sub) {
+    sub.textContent = c.model_will_fit
+      ? "Enough for the model to fit. Keep going to reach the depth the "
+        + "coefficients were validated on."
+      : "The ranking model needs " + c.model_minimum.toLocaleString("en-IN")
+        + " before it will fit at all \u2014 "
+        + (c.model_minimum - now) + " short.";
+  }
 }
 
 function renderChrome(v) {

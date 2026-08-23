@@ -95,7 +95,7 @@ def test_the_view_is_json_serialisable():
 
 
 @pytest.mark.parametrize("state", [
-    "Market data store is empty",     # nothing ingested yet
+    "Building the market data",       # store short of what the model needs
     "No scan has run yet",            # ingested, never run
     "Nothing met the bar today",      # the designed common outcome
     "No recommendation was produced", # withheld on bad data
