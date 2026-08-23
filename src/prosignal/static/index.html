@@ -643,7 +643,8 @@ const $  = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const state = { view: null, run: null, tab: "overview", busy: false,
-                booting: true, error: null, notReady: false, history: undefined,
+                booting: true, error: null, notReady: false, jobId: null,
+                history: undefined,
                 latestSession: null, slateSize: 5, coverage: null };
 
 /* ---------------------------------------------------------------- theme */
@@ -824,60 +825,111 @@ async function scan() {
   }
 }
 
-async function bootstrap() {
-  const btn = $("#boot");
-  if (!btn || btn.disabled) return;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Fetching';
+/* ---------------------------------------------------------------- monitor
+   A single poller, driven by SERVER state rather than by whoever pressed the
+   button. Everything that runs on this instance is a job the server owns and
+   single-flights, so the browser's only correct role is to observe it.
 
-  // ONE poller owns every number on this screen. The job's own progress label
-  // is deliberately NOT rendered: it is written once at the start and once at
-  // the end, so it reported a figure minutes out of date while sitting next to
-  // a live one, and the two disagreed on screen.
-  let ticker = null;
-  let last = (state.coverage || {}).price_sessions;
-  const tick = async () => {
-    try {
-      const r = await rawFetch("/ready");
-      const j = await r.json().catch(() => null);
-      const c = (j && j.checks) || null;
-      if (!c || c.price_sessions == null) return;
-      state.coverage = c;
+   The previous version had bootstrap() own a `for(;;)` loop. Three things
+   went wrong with that and all three were reported from a real build:
+
+   It broke only on COMPLETED and FAILED. CANCELLED is also terminal -- a
+   reaped or cancelled job left the loop spinning forever against a job that
+   would never change again, which is the endless "Fetching" with a wall of
+   200s in the log and nothing wrong on the server.
+
+   The loop belonged to one call. Switching to History re-rendered the view,
+   the loop kept running against a screen that no longer existed, and the
+   build appeared to stop. It had not: the server was still fetching.
+
+   A refresh abandoned it entirely, so a page reload during a build lost the
+   only thing tracking it.
+
+   The monitor below has none of those properties. It is started by anything
+   that notices a job, it is stopped only when the server says no job is
+   running, and it survives tab switches because it is not attached to a
+   view. */
+let monitorTimer = null;
+let lastCount = null;
+
+function startMonitor() {
+  if (monitorTimer) return;                 // exactly one, ever
+  monitorTimer = setInterval(pollOnce, 3000);
+  pollOnce();
+}
+
+function stopMonitor() {
+  if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null; }
+}
+
+async function pollOnce() {
+  let c;
+  try {
+    const r = await rawFetch("/ready");
+    const j = await r.json().catch(() => null);
+    c = (j && j.checks) || null;
+    if (!c) return;
+  } catch (e) {
+    return;                                  // a dropped poll is not an event
+  }
+
+  const wasRunning = !!state.jobId;
+  state.jobId = c.analysis_in_progress || null;
+  state.coverage = c;
+  state.notReady = !(c.model_will_fit);
+  state.latestSession = c.latest_session || state.latestSession;
+
+  if (state.jobId) {
+    // Two kinds of job reach here. A store that cannot yet fit the model is
+    // being built; anything running against a store that can is a scan. The
+    // server tells us which by what it has, so a reload during either one
+    // resumes the right screen instead of showing an idle button.
+    if (!c.model_will_fit) {
       paintBuild(c);
-      // A brief colour change on the number itself, because sessions land in
-      // batches -- without it a jump of 30 after two quiet minutes reads as
-      // the page having reloaded rather than as progress.
-      if (last != null && c.price_sessions > last) {
+      if (lastCount != null && c.price_sessions > lastCount) {
         const el = $("#b-now");
         if (el) { el.classList.add("tick"); setTimeout(() => el.classList.remove("tick"), 700); }
       }
-      last = c.price_sessions;
-    } catch (e) {}
-  };
-  tick();
-  ticker = setInterval(tick, 3000);
+      lastCount = c.price_sessions;
+    } else if (!state.busy) {
+      // A scan someone else started, or one this tab started before a reload.
+      try {
+        const jr = await rawFetch("/analysis/" + state.jobId);
+        const job = await jr.json();
+        renderProgress((job.progress && job.progress.step) || 0);
+      } catch (e) {}
+    }
+    return;
+  }
 
+  // No job running. If one just finished, re-render so the screen reflects
+  // whatever the run produced -- a deeper store, or a fresh shortlist.
+  stopMonitor();
+  lastCount = null;
+  if (wasRunning) { await boot(); }
+  else { paintBuild(c); setBuildIdle(); }
+}
+
+function setBuildIdle() {
+  const btn = $("#boot");
+  if (btn) { btn.disabled = false; btn.textContent = "Build data store"; }
+}
+
+async function bootstrap() {
+  const btn = $("#boot");
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Fetching'; }
   try {
     const r = await fetch("/admin/bootstrap", { method: "POST" });
     if (!r.ok) throw new Error(await readErr(r));
-    const { id } = await r.json();
-    for (;;) {
-      await new Promise((res) => setTimeout(res, 2000));
-      const s = await fetch("/analysis/" + id);
-      if (!s.ok) throw new Error(await readErr(s));
-      const job = await s.json();
-      if (job.state === "COMPLETED") break;
-      if (job.state === "FAILED") throw new Error(job.error || "The build did not finish.");
-    }
-    await checkReady();
-    render();
+    // The response carries the job whether we started it or joined one already
+    // running -- single-flight makes a second press a no-op, not a second job.
+    const j = await r.json();
+    state.jobId = j.id;
+    startMonitor();
   } catch (e) {
     const sub = $("#b-sub");
     if (sub) sub.textContent = e.message || String(e);
-    btn.disabled = false;
-    btn.textContent = "Build data store";
-  } finally {
-    if (ticker) clearInterval(ticker);
+    setBuildIdle();
   }
 }
 
@@ -890,6 +942,7 @@ async function checkReady() {
     const j = await r.json().catch(() => null);
     state.coverage = (j && j.checks) || null;
     state.notReady = !(j && j.ready);
+    state.jobId = (j && j.checks && j.checks.analysis_in_progress) || null;
     state.latestSession = (j && j.checks && j.checks.latest_session) || null;
   } catch (e) {
     state.notReady = false;
@@ -1047,7 +1100,15 @@ function buildScreen() {
       '<button class="btn" id="boot">Build data store</button>' +
     '</div>';
   paintBuild(c);
-  $("#boot").addEventListener("click", bootstrap);
+  const btn = $("#boot");
+  btn.addEventListener("click", bootstrap);
+  // Re-entering this screen while the server is mid-build must show the build,
+  // not an idle button. This is what makes a refresh harmless.
+  if (state.jobId) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Fetching';
+    startMonitor();
+  }
   return "";
 }
 
@@ -1519,6 +1580,7 @@ async function boot() {
   render();
   try {
     await checkReady();
+    if (state.jobId) startMonitor();       // a build survives the reload
     if (state.notReady) { state.booting = false; render(); return; }
     const r = await fetch("/analysis");
     if (!r.ok) return;

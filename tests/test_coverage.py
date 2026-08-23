@@ -211,11 +211,13 @@ def _ui() -> str:
 def test_the_build_screen_shows_a_moving_session_count():
     """The job's own label is written once at the start and once at the end,
     so it sat unchanged for 24 minutes and made a working build look frozen."""
-    block = _ui()
-    block = block[block.index("async function bootstrap"):block.index("async function checkReady")]
-    assert "setInterval" in block
-    assert "clearInterval" in block, "the poller must stop when the build ends"
-    assert "price_sessions" in block
+    ui = _ui()
+    mon = ui[ui.index("function startMonitor"):ui.index("async function bootstrap")]
+    assert "setInterval" in mon
+    assert "clearInterval" in ui[ui.index("function stopMonitor"):], (
+        "the monitor must stop when the server reports no job"
+    )
+    assert "price_sessions" in mon
 
 
 def test_exactly_one_writer_owns_the_build_numbers():
@@ -226,8 +228,8 @@ def test_exactly_one_writer_owns_the_build_numbers():
     """
     ui = _ui()
     assert "function paintBuild" in ui
-    boot = ui[ui.index("async function bootstrap"):ui.index("async function checkReady")]
-    assert "paintBuild(c)" in boot
+    mon = ui[ui.index("async function pollOnce"):ui.index("function setBuildIdle")]
+    assert "paintBuild(c)" in mon
     assert "job.progress.label" not in ui, (
         "the job label is minutes stale and must not be rendered beside a "
         "live counter"
@@ -250,3 +252,49 @@ def test_a_batched_jump_is_marked_so_it_reads_as_progress():
     and then jump 30. Without a cue that reads as a page reload."""
     ui = _ui()
     assert "tick" in ui[ui.index("async function bootstrap"):]
+
+
+# ------------------------------------------------- long jobs survive the tab
+def test_no_poll_loop_can_hang_on_a_terminal_state():
+    """CANCELLED is terminal. A loop breaking only on COMPLETED and FAILED
+    spins forever against a job that will never change again -- which is what
+    produced an endless "Fetching" with a wall of HTTP 200s in the log and
+    nothing wrong on the server.
+    """
+    ui = _ui()
+    body = ui[ui.index("<script>"):]
+    for block in body.split("for (;;)")[1:]:
+        window = block[:1200]
+        assert "CANCELLED" in window, (
+            "a polling loop that does not handle CANCELLED can hang forever"
+        )
+
+
+def test_the_build_is_owned_by_the_server_not_by_a_view():
+    """The loop used to belong to the bootstrap() call. Switching to History
+    re-rendered the view and the build appeared to stop -- it had not, the
+    server was still fetching, but nothing was watching it any more."""
+    ui = _ui()
+    assert "function startMonitor" in ui and "function stopMonitor" in ui
+    boot = ui[ui.index("async function bootstrap"):ui.index("async function checkReady")]
+    assert "for (;;)" not in boot, "bootstrap must not own a poll loop"
+    assert "startMonitor()" in boot
+
+
+def test_only_one_monitor_can_ever_run():
+    """Two pollers would double the request rate and fight over the same DOM."""
+    ui = _ui()
+    fn = ui[ui.index("function startMonitor"):ui.index("function stopMonitor")]
+    assert "if (monitorTimer) return" in fn
+
+
+def test_a_reload_during_a_job_picks_it_back_up():
+    """The server single-flights and keeps running regardless of the browser.
+    A refresh that ignored that showed an idle button over a busy instance."""
+    ui = _ui()
+    boot = ui[ui.index("async function boot()"):]
+    assert "if (state.jobId) startMonitor()" in boot
+    screen = ui[ui.index("function buildScreen"):ui.index("function paintBuild")]
+    assert "if (state.jobId)" in screen, (
+        "re-entering the build screen mid-build must show the build"
+    )
