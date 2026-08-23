@@ -266,3 +266,39 @@ def build_history(
         "cleared_at": since,
         "note": "",
     }
+
+
+def runs_for_ticker(
+    records: Iterable[Any],
+    ticker: str,
+    *,
+    slots: int = 5,
+    since: Optional[str] = None,
+    limit: int = 400,
+) -> List[Dict[str, Any]]:
+    """Every run that put this name in front of the reader, newest first.
+
+    Membership of the displayed slate is the test, not membership of the
+    watchlist. The engine monitors dozens of names it never surfaces, and a
+    run that ranked something 41st did not tell anyone about it -- listing it
+    as a past call would invent a history that never reached a screen.
+    """
+    wanted = str(ticker).upper()
+    out: List[Dict[str, Any]] = []
+    for day in load_days(records, limit=limit, since=since):
+        slate = _slate(day, slots)
+        status = slate.get(wanted)
+        if status is None:
+            continue
+        entry = day.detail.get(wanted) or {}
+        out.append({
+            "date": day.date,
+            "status": status,
+            "regime": day.regime,
+            "ticker": wanted,
+            "signal_price": entry.get("last_close"),
+            "stop": entry.get("stop"),
+            "target_1": entry.get("target_1"),
+            "strength": entry.get("strength_band"),
+        })
+    return out

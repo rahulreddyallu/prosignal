@@ -216,16 +216,20 @@ button { font: inherit; color: inherit; }
 .market .headline .pill { font-size: 12px; vertical-align: 3px; margin-left: 8px; }
 .market p { color: var(--ink-2); font-size: 14px; margin-top: 6px; max-width: 52ch; }
 .readings { display: grid; gap: var(--sp-2); }
-.reading { display: flex; justify-content: space-between; align-items: baseline;
-           gap: var(--sp-3); padding: 9px 0; border-bottom: 1px solid var(--line); }
+.reading { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+           gap: var(--sp-2) var(--sp-4); padding: 10px 0;
+           border-bottom: 1px solid var(--line); align-items: baseline; }
 .reading:last-child { border-bottom: 0; }
 .reading .k { color: var(--ink-2); font-size: 13.5px; }
-.reading .v { font-weight: 550; font-size: 13.5px; text-align: right; }
-.reading .v small { display: block; color: var(--ink-3); font-weight: 400;
-                    font-size: 12px; }
+.reading .v { font-weight: 550; font-size: 13.5px; text-align: right;
+              white-space: nowrap; }
+/* Its own row across both columns, left aligned. Right-aligning a full
+   sentence under a one-word value is what made this read as broken. */
+.reading .sub { grid-column: 1 / -1; color: var(--ink-3); font-size: 12.5px;
+                margin-top: -2px; }
 
 /* ------------------------------------------------------------- slate */
-.slate-head { display: flex; align-items: baseline; gap: var(--sp-3);
+.slate-head { display: flex; align-items: center; gap: var(--sp-3);
               margin: var(--sp-7) 0 var(--sp-4); flex-wrap: wrap; }
 .slate-head h2 { font-size: 20px; letter-spacing: -0.02em; }
 .slate-head .count { color: var(--ink-2); font-size: 14px; }
@@ -239,6 +243,9 @@ button { font: inherit; color: inherit; }
 .pill.info  { background: var(--accent-soft);color: var(--accent);border-color: var(--accent-line); }
 .pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%;
                 background: currentColor; }
+button.pill { cursor: pointer; font-family: inherit;
+              transition: filter .14s ease, box-shadow .14s ease; }
+button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 
 .cards { display: grid; gap: var(--sp-3); }
 
@@ -325,6 +332,18 @@ button { font: inherit; color: inherit; }
 .jstep.final .n { color: var(--accent); }
 
 /* ---------------------------------------------------------------- panel */
+.modal-wrap { position: fixed; inset: 0; z-index: 60; display: grid;
+              place-items: center; padding: var(--sp-5);
+              background: rgba(12,14,16,.5); }
+.modal-wrap[hidden] { display: none; }
+.modal { background: var(--surface); border: 1px solid var(--line);
+         border-radius: var(--r-lg); padding: var(--sp-5);
+         max-width: 420px; width: 100%; box-shadow: var(--shadow-lift); }
+.modal h3 { font-size: 16px; margin-bottom: var(--sp-2); }
+.modal p { color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+.modal-acts { display: flex; gap: var(--sp-2); justify-content: flex-end;
+              margin-top: var(--sp-5); }
+
 .scrim { position: fixed; inset: 0; background: rgba(12,14,16,.45);
          z-index: 50; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
 .scrim.open { opacity: 1; pointer-events: auto; }
@@ -491,6 +510,17 @@ td.r { text-align: right; }
 </main>
 
 <div class="scrim" id="scrim"></div>
+
+<div class="modal-wrap" id="ask" role="dialog" aria-modal="true" aria-labelledby="ask-title" hidden>
+  <div class="modal">
+    <h3 id="ask-title">Clear the run history?</h3>
+    <p id="ask-body"></p>
+    <div class="modal-acts">
+      <button class="btn ghost sm" id="ask-no">Cancel</button>
+      <button class="btn sm" id="ask-yes">Clear history</button>
+    </div>
+  </div>
+</div>
 <aside class="panel" id="panel" role="dialog" aria-modal="true" aria-labelledby="panel-title" tabindex="-1">
   <div class="panel-head">
     <div style="flex:1;min-width:0">
@@ -556,6 +586,83 @@ function when(iso) {
     { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
 function say(msg) { $("#live").textContent = msg; }
+
+/* "2026-08-21" is a key, not a date. */
+function day(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleDateString("en-IN",
+    { day: "numeric", month: "short", year: "numeric" });
+}
+
+function ask(title, body, confirmLabel) {
+  return new Promise((resolve) => {
+    $("#ask-title").textContent = title;
+    $("#ask-body").textContent = body;
+    $("#ask-yes").textContent = confirmLabel;
+    const box = $("#ask");
+    box.hidden = false;
+    $("#ask-yes").focus();
+    const done = (answer) => {
+      box.hidden = true;
+      $("#ask-yes").onclick = null;
+      $("#ask-no").onclick = null;
+      document.removeEventListener("keydown", onKey);
+      resolve(answer);
+    };
+    const onKey = (e) => { if (e.key === "Escape") done(false); };
+    $("#ask-yes").onclick = () => done(true);
+    $("#ask-no").onclick = () => done(false);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+/* One row per past call, used by both the day view and the stock view.
+   A name flagged today has nothing to report, and saying so plainly beats
+   printing zeroes and dashes into every column. */
+function outcomeRow(o, headline, sub) {
+  const pending = o.resolved === "pending";
+  const verdict =
+    o.resolved === "target" ? '<span class="pill buy">Target reached</span>' :
+    o.resolved === "stop"   ? '<span class="pill watch">Stop touched</span>' :
+    o.resolved === "both"   ? '<span class="chip">Target and stop both touched</span>' :
+    pending                 ? '<span class="chip">Not followed yet</span>' :
+                              '<span class="chip">Still running</span>';
+
+  const move = pending
+    ? '<span class="v-neu">Awaiting the next session</span>'
+    : pctHTML(o.change_pct);
+  const sessions = pending ? "" :
+    '<div style="color:var(--ink-3);font-size:12px">' +
+    o.sessions + (o.sessions === 1 ? " session" : " sessions") + '</div>';
+
+  const prices = pending
+    ? money(o.signal_price) + " when flagged"
+    : money(o.signal_price) + " when flagged  →  " + money(o.last_price) + " now";
+
+  // "Peak" and "trough" are trading desk words. This says what they mean.
+  const range = (!pending && o.peak_gain_pct != null && o.worst_drop_pct != null)
+    ? '<div class="sig" style="border-bottom:0;padding:4px 0 0">' +
+      '<span class="v-neu" style="font-size:12.5px">Best it reached ' +
+      (o.peak_gain_pct > 0 ? "+" : "") + o.peak_gain_pct.toFixed(2) +
+      '%, worst it fell ' + o.worst_drop_pct.toFixed(2) + '%</span></div>'
+    : "";
+
+  return '<div class="ev-row" style="padding:var(--sp-4)">' +
+    '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;' +
+      'gap:var(--sp-3);align-items:start">' +
+      '<div style="min-width:0">' + headline +
+        '<div style="color:var(--ink-3);font-size:12.5px">' + sub + '</div></div>' +
+      '<div style="text-align:right">' + move + sessions + '</div>' +
+    '</div>' +
+    '<div class="sig" style="border-bottom:0;padding-top:var(--sp-3)">' +
+      '<span class="v-neu">' + prices + '</span></div>' + range +
+    '<div style="margin-top:8px">' + verdict + '</div>' +
+    (o.note ? '<p class="prose muted" style="font-size:12.5px;margin-top:8px">' +
+      esc(o.note) + '</p>' : "") +
+  '</div>';
+}
 
 /* --------------------------------------------------------------- stages
    Nine real pipeline stages. The engine reports which one it is on, so the
@@ -720,13 +827,18 @@ function render() {
 function renderChrome(v) {
   const d = (v && v.data) || {};
   const fresh = d.complete !== false;
+  const flags = (d.flags || []).length;
   $("#mkt-status").innerHTML =
     '<span class="dot ' + (fresh ? "live" : "stale") + '"></span>' +
     (v && v.as_of ? esc(v.as_of) : esc(state.latestSession || "—"));
+  $("#mkt-status").title = fresh
+    ? "All expected data was available for this run."
+    : flags + (flags === 1 ? " data note" : " data notes") +
+      " on this run — see Market environment.";
   $("#mkt-fresh").textContent = v ? "Analysed " + when(v.generated_at) : "";
 
   const titles = {
-    overview: ["Today's opportunities", "The names the engine ranks highest today, and the case for each."],
+    overview: ["Today's opportunities", "The names the engine ranks highest, and the case for each."],
     history: ["History", "Past runs, and what the market did afterwards."],
   };
   const [title, sub] = titles[state.tab] || titles.overview;
@@ -813,7 +925,7 @@ function viewOverview(v) {
 
   return marketBlock(v) +
     '<div class="slate-head">' +
-      '<h2>Today\'s shortlist</h2>' +
+      '<h2>Shortlist</h2>' +
       '<div class="count">' + counts.join(" ") + '</div>' +
       '<div class="note">' + esc(s.note || "") + '</div>' +
     '</div>' +
@@ -836,26 +948,39 @@ function marketBlock(v) {
 
   const rows = (m.readings || []).filter((r) => r.value).map((r) =>
     '<div class="reading"><span class="k">' + esc(r.label) + '</span>' +
-    '<span class="v">' + esc(r.value) +
-    (r.detail ? '<small>' + esc(r.detail) + '</small>' : "") + '</span></div>').join("");
+    '<span class="v">' + esc(r.value) + '</span>' +
+    (r.detail ? '<span class="sub">' + esc(r.detail) + '</span>' : "") +
+    '</div>').join("");
 
   // The narrowing, in one line. It is the most concrete thing the run
   // produced about the market and it was previously on a separate screen.
   const narrowing = (universe && eligible)
     ? '<div class="reading"><span class="k">Names examined</span>' +
-      '<span class="v num">' + universe.toLocaleString("en-IN") +
-      '<small>' + eligible.toLocaleString("en-IN") + ' tradable' +
+      '<span class="v num">' + universe.toLocaleString("en-IN") + '</span>' +
+      '<span class="sub">' + eligible.toLocaleString("en-IN") + ' tradable' +
       (survived ? ', ' + survived + ' cleared every risk check' : '') +
-      '</small></span></div>'
+      '</span></div>'
     : "";
 
   const warn = m.allows_new_positions === false
     ? '<span class="pill watch">New positions paused</span>' : "";
+  const notes = ((v.data || {}).flags || []);
+  const notesHTML = notes.length
+    ? '<details class="adv" style="margin-top:var(--sp-4);grid-column:1/-1">' +
+      '<summary>' + notes.length +
+      (notes.length === 1 ? " data note" : " data notes") +
+      ' on this run</summary><div class="adv-body">' +
+      notes.map((n) => '<p class="prose muted" style="font-size:13px;' +
+        'margin-bottom:8px">' + esc(n) + '</p>').join("") +
+      '</div></details>'
+    : "";
+
   return '<div class="market">' +
     '<div><h2>Market environment</h2>' +
       '<div class="headline">' + esc(m.headline || "—") + " " + warn + '</div>' +
       '<p>' + esc(m.summary || "") + '</p></div>' +
-    '<div class="readings">' + rows + narrowing + '</div></div>';
+    '<div class="readings">' + rows + narrowing + '</div>' +
+    notesHTML + '</div>';
 }
 
 function cardHTML(p) {
@@ -894,44 +1019,26 @@ function viewHistory(v) {
       "with what the market did afterwards.") + '</p></div>';
   }
 
-  const lc = h.latest_changes || {};
-  const group = (items, label) => (items && items.length)
-    ? '<div style="margin-bottom:var(--sp-3)"><div style="color:var(--ink-3);' +
-      'font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">' +
-      label + '</div><div class="chips">' + items.map((x) =>
-      '<span class="chip">' + esc(x.company) + '</span>').join("") + '</div></div>'
-    : "";
-
-  const changed = lc.available
-    ? '<div class="box" style="margin-bottom:var(--sp-5)">' +
-        '<h3 style="font-size:15px;margin-bottom:var(--sp-2)">Since ' +
-          esc(lc.compared_with) + '</h3>' +
-        '<p class="prose muted" style="margin-bottom:var(--sp-4)">' +
-          esc(lc.summary) + '</p>' +
-        group(lc.promoted, "Moved to buy") + group(lc.demoted, "Moved to watch") +
-        group(lc.entered, "New to the shortlist") + group(lc.left, "No longer shown") +
-        '<p class="prose muted" style="font-size:12.5px;margin-top:var(--sp-3)">' +
-          esc(lc.reason_note || "") + '</p>' +
-      '</div>'
-    : "";
-
   const rows = h.days.map((d) => {
+    // Each name is its own control. Opening the row shows that day; opening a
+    // name shows every time the engine has flagged it.
     const shown = (d.shown || []).map((x) =>
-      '<span class="pill ' + (x.status === "BUY" ? "buy" : "watch") + '" ' +
-      'style="margin:0 4px 4px 0">' + esc(x.ticker) + '</span>').join("");
+      '<button class="pill ' + (x.status === "BUY" ? "buy" : "watch") + '" ' +
+      'data-stock="' + esc(x.ticker) + '" style="margin:0 4px 4px 0" ' +
+      'title="See every run that flagged ' + esc(x.ticker) + '">' +
+      esc(x.ticker) + '</button>').join("");
     return '<tr data-date="' + esc(d.date) + '">' +
-      '<td class="num">' + esc(d.date) + '</td>' +
+      '<td class="num">' + esc(day(d.date)) + '</td>' +
       '<td class="num">' + d.buy_count + '</td>' +
       '<td class="num">' + d.watch_count + '</td>' +
       '<td>' + esc(d.regime) + '</td>' +
       '<td style="white-space:normal;min-width:230px">' + shown + '</td></tr>';
   }).join("");
 
-  return changed +
-    '<div style="display:flex;align-items:center;gap:var(--sp-3);' +
+  return '<div style="display:flex;align-items:center;gap:var(--sp-3);' +
       'margin-bottom:var(--sp-3);flex-wrap:wrap">' +
       '<span class="prose muted" style="font-size:13px;flex:1">' +
-      'Open a date to see what that run said and what the market did since.</span>' +
+      'Open a date for that run, or a name for every run that flagged it.</span>' +
       '<button class="btn ghost sm" id="wipe">Clear history</button></div>' +
     '<div class="tablewrap"><table><thead><tr>' +
     '<th>Date</th><th>Buy</th><th>Watch</th><th>Market</th><th>Shortlist</th>' +
@@ -939,12 +1046,12 @@ function viewHistory(v) {
 }
 
 async function confirmWipe() {
-  const ok = window.confirm(
-    "Clear the run history?\n\n" +
-    "This screen will start again from your next scan.\n\n" +
-    "The underlying research record is kept -- the trial count used to test " +
-    "whether the strategy beats luck depends on it, so it is hidden here " +
-    "rather than deleted."
+  const ok = await ask(
+    "Clear the run history?",
+    "This screen will start again from your next scan. The underlying " +
+    "research record is kept — the trial count used to test whether the " +
+    "strategy beats luck depends on it — so it is hidden here, not deleted.",
+    "Clear history"
   );
   if (!ok) return;
   try {
@@ -952,7 +1059,6 @@ async function confirmWipe() {
     if (!r.ok) throw new Error(await readErr(r));
     const j = await r.json();
     say(j.message || "History cleared.");
-    state.history = undefined;
     await loadHistory();
   } catch (e) {
     state.error = e.message || String(e);
@@ -960,11 +1066,60 @@ async function confirmWipe() {
   }
 }
 
+/* ---------------------------------------------------------- one stock */
+async function openStock(ticker) {
+  lastFocus = document.activeElement;
+  $("#panel-rank").textContent = "Past calls";
+  $("#panel-title").textContent = ticker;
+  $("#panel-tick").textContent = "";
+  $("#panel-body").innerHTML = '<div class="skel" style="height:200px"></div>';
+  $("#panel").classList.add("open");
+  $("#scrim").classList.add("open");
+  $("#panel").focus();
+  document.body.style.overflow = "hidden";
+
+  let d;
+  try {
+    const r = await fetch("/stock/" + encodeURIComponent(ticker) + "/history");
+    if (!r.ok) throw new Error(await readErr(r));
+    d = await r.json();
+  } catch (e) {
+    $("#panel-body").innerHTML =
+      '<div class="err"><h3>That name could not be loaded</h3><p>' +
+      esc(e.message || String(e)) + '</p></div>';
+    return;
+  }
+
+  $("#panel-title").textContent = d.company;
+  $("#panel-tick").textContent = d.ticker +
+    (d.last_price != null ? " · " + money(d.last_price) + " now" : "");
+  $("#panel-rank").textContent = d.times_flagged === 1
+    ? "Flagged once" : "Flagged " + d.times_flagged + " times";
+
+  if (!d.runs || !d.runs.length) {
+    $("#panel-body").innerHTML = '<div class="prose muted">' +
+      esc((d.summary || {}).text || "") + '</div>';
+    return;
+  }
+  const rows = d.runs.map((r) => outcomeRow(
+    r.outcome,
+    '<div style="font-weight:600">' + esc(day(r.date)) + '</div>',
+    "Flagged as " + (r.status === "BUY" ? "Buy" : "Watch") +
+    (r.regime ? " · " + esc(r.regime) : "")
+  )).join("");
+
+  $("#panel-body").innerHTML =
+    '<div class="section"><h3>How these calls have gone</h3>' +
+      '<p class="prose">' + esc((d.summary || {}).text || "") + '</p></div>' +
+    '<div class="section"><h3>Every call</h3><div class="ev">' + rows + '</div></div>' +
+    '<div class="callout">' + esc(d.disclaimer || "") + '</div>';
+}
+
 /* ------------------------------------------------------------ past day */
 async function openDay(date) {
   lastFocus = document.activeElement;
-  $("#panel-rank").textContent = "Run of " + date;
-  $("#panel-title").textContent = "What happened next";
+  $("#panel-rank").textContent = "Run of";
+  $("#panel-title").textContent = day(date);
   $("#panel-tick").textContent = "";
   $("#panel-body").innerHTML = '<div class="skel" style="height:200px"></div>';
   $("#panel").classList.add("open");
@@ -999,49 +1154,30 @@ function dayHTML(d) {
     return '<div class="prose muted">' + esc((d.summary || {}).text || "") + '</div>';
   }
   const s = d.summary || {};
-  const rows = d.picks.map((p) => {
-    const o = p.outcome || {};
-    // Colour and a word, never colour alone.
-    const state = o.resolved === "target" ? '<span class="pill buy">Target met</span>'
-                : o.resolved === "stop"   ? '<span class="pill watch">Stop touched</span>'
-                : o.resolved === "unknown" ? '<span class="chip">Both touched</span>'
-                : '<span class="chip">Open</span>';
-    return '<div class="ev-row" style="padding:var(--sp-4)">' +
-      '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;' +
-        'gap:var(--sp-3);align-items:start">' +
-        '<div style="min-width:0">' +
-          '<div style="font-weight:600;overflow-wrap:anywhere">' + esc(p.company) + '</div>' +
-          '<div style="color:var(--ink-3);font-size:12.5px">' + esc(p.ticker) +
-            ' · flagged as ' + (p.status === "BUY" ? "Buy" : "Watch") + '</div>' +
-        '</div>' +
-        '<div style="text-align:right">' + pctHTML(o.change_pct) +
-          '<div style="color:var(--ink-3);font-size:12px">' +
-          (o.sessions || 0) + ' sessions</div></div>' +
-      '</div>' +
-      '<div class="sig" style="border-bottom:0;padding-top:var(--sp-3)">' +
-        '<span class="v-neu">' + money(o.signal_price) + ' → ' + money(o.last_price) +
-        '  ·  peak ' + (o.peak_gain_pct == null ? "—" : o.peak_gain_pct.toFixed(2) + "%") +
-        '  ·  trough ' + (o.worst_drop_pct == null ? "—" : o.worst_drop_pct.toFixed(2) + "%") +
-        '</span></div>' +
-      '<div style="margin-top:6px">' + state + '</div>' +
-      (o.note ? '<p class="prose muted" style="font-size:12.5px;margin-top:8px">' +
-        esc(o.note) + '</p>' : "") +
-    '</div>';
-  }).join("");
+  const rows = d.picks.map((p) => outcomeRow(
+    p.outcome,
+    '<div style="font-weight:600;overflow-wrap:anywhere">' + esc(p.company) + '</div>',
+    esc(p.ticker) + " · flagged as " + (p.status === "BUY" ? "Buy" : "Watch")
+  )).join("");
+
+  // Only show the tally when there is something to tally. A run made today
+  // has no sessions behind it, and three cards reading "0 of 0" say nothing.
+  const tally = s.tracked
+    ? '<div class="levels" style="margin-top:var(--sp-3)">' +
+        '<div class="level"><div class="k">Average move</div><div class="v num">' +
+          (s.average_change_pct > 0 ? "+" : "") + s.average_change_pct + '%</div></div>' +
+        '<div class="level"><div class="k">Reached target</div><div class="v num">' +
+          s.targets_hit + ' of ' + s.tracked + '</div></div>' +
+        '<div class="level"><div class="k">Touched stop</div><div class="v num">' +
+          s.stops_hit + ' of ' + s.tracked + '</div></div>' +
+      '</div>'
+    : "";
 
   return '<div class="section">' +
-      '<h3>Since this run</h3>' +
-      '<p class="prose">' + esc(s.text || "") + '</p>' +
-      (s.tracked ? '<div class="levels" style="margin-top:var(--sp-3)">' +
-        '<div class="level"><div class="k">Average</div><div class="v num">' +
-          (s.average_change_pct > 0 ? "+" : "") + s.average_change_pct + '%</div></div>' +
-        '<div class="level"><div class="k">Targets met</div><div class="v num">' +
-          s.targets_hit + ' of ' + s.tracked + '</div></div>' +
-        '<div class="level"><div class="k">Stops touched</div><div class="v num">' +
-          s.stops_hit + ' of ' + s.tracked + '</div></div>' +
-      '</div>' : "") +
+      '<h3>' + (s.tracked ? "Since this run" : "Nothing to measure yet") + '</h3>' +
+      '<p class="prose">' + esc(s.text || "") + '</p>' + tally +
     '</div>' +
-    '<div class="section"><h3>What it said that day</h3>' +
+    '<div class="section"><h3>The shortlist on ' + esc(day(d.date)) + '</h3>' +
       '<div class="ev">' + rows + '</div></div>' +
     '<div class="callout">' + esc(d.disclaimer || "") + '</div>';
 }
@@ -1149,6 +1285,12 @@ function wire() {
   }));
   $$("tbody tr[data-date]").forEach((el) =>
     el.addEventListener("click", () => openDay(el.dataset.date)));
+  // The name sits inside the row, so its click has to stop there or opening a
+  // name would also open the day behind it.
+  $$("button[data-stock]").forEach((el) => el.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openStock(el.dataset.stock);
+  }));
   const wipe = $("#wipe");
   if (wipe) wipe.addEventListener("click", confirmWipe);
 }

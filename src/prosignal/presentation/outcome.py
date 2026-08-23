@@ -43,7 +43,12 @@ class Outcome:
     stop: Optional[float]
     target_hit: Optional[bool]
     stop_hit: Optional[bool]
-    resolved: str          # "target", "stop", "open", "unknown"
+    #: "target" | "stop" | "both" | "open" | "pending"
+    #: `pending` means there is nothing to report yet -- no session has closed
+    #: since the signal. It is NOT the same as an ambiguous result, and
+    #: collapsing the two made a name signalled this morning read as though
+    #: its target and its stop had both already been hit.
+    resolved: str
     note: Optional[str] = None
 
 
@@ -84,7 +89,7 @@ def outcomes_for(
         if rows.empty or signal_price is None or signal_price <= 0:
             out.append(_blank(
                 pick,
-                "This name has no sessions after the signal yet."
+                "No session has closed since this was flagged."
                 if signal_price else "No price was recorded with the signal.",
             ))
             continue
@@ -101,7 +106,7 @@ def outcomes_for(
         # the sequence within a session is not recorded. Saying which came
         # first would be a guess, so it is not said.
         if target_hit and stop_hit:
-            resolved = "unknown"
+            resolved = "both"
         elif target_hit:
             resolved = "target"
         elif stop_hit:
@@ -126,7 +131,7 @@ def outcomes_for(
             resolved=resolved,
             note=("Both the target and the stop were touched in this window; "
                   "daily bars do not record which came first."
-                  if resolved == "unknown" else None),
+                  if resolved == "both" else None),
         ))
     return out
 
@@ -145,7 +150,7 @@ def _blank(pick: Dict[str, Any], note: str) -> Outcome:
         high_since=None, low_since=None, peak_gain_pct=None,
         worst_drop_pct=None,
         target_1=_f(pick.get("target_1")), stop=_f(pick.get("stop")),
-        target_hit=None, stop_hit=None, resolved="unknown", note=note,
+        target_hit=None, stop_hit=None, resolved="pending", note=note,
     )
 
 
@@ -157,7 +162,11 @@ def summarise(outcomes: Sequence[Outcome]) -> Dict[str, Any]:
     """
     tracked = [o for o in outcomes if o.change_pct is not None]
     if not tracked:
-        return {"tracked": 0, "text": "No follow-up prices are available yet."}
+        return {
+            "tracked": 0,
+            "text": ("This run is the most recent one. Nothing can be measured "
+                     "until the market trades again."),
+        }
 
     gains = [o for o in tracked if o.change_pct > 0]
     avg = round(sum(o.change_pct for o in tracked) / len(tracked), 2)
