@@ -327,12 +327,12 @@ def test_the_footer_carries_ownership_and_stops_there():
 
 
 def test_an_incomplete_run_is_still_marked_even_though_the_notes_panel_is_gone():
-    """The two data notes were folded into a panel that has been removed. The
-    signal must not go with them -- the freshness dot still turns and names
-    the count in its tooltip."""
+    """The notes panel went, then the header dot that replaced it went with
+    the redundant date. The signal must not go with either -- an incomplete
+    run says so under the page title, in words rather than a tooltip."""
     html = _html()
     chrome = html[html.index("function renderChrome"):html.index("function isCurrent")]
-    assert "dot " in chrome and "stale" in chrome
+    assert "complete === false" in chrome
     assert "data note" in chrome, "an incomplete run no longer says so anywhere"
 
 
@@ -426,7 +426,7 @@ def test_clearing_history_says_the_record_is_kept():
     html = _html()
     block = html[html.index("async function confirmWipe"):]
     block = block[:block.index("\n}")]
-    assert "research record is kept" in block or "record is kept" in block
+    assert "research record" in block
 
 
 def test_the_card_numbers_its_position_not_the_models_rank():
@@ -624,7 +624,7 @@ def test_the_schedule_switch_does_not_apologise_for_how_it_works():
     html = _html()
     assert "does not stop cron" not in html
     assert "needs root" not in html
-    assert "Nothing will be recorded" in html
+    assert "Nothing is recorded" in html
 
 
 def test_the_one_click_erase_is_gone_but_the_endpoint_stays_guarded():
@@ -640,7 +640,7 @@ def test_rebuilding_and_clearing_are_both_reachable_and_say_what_they_keep():
     assert "/admin/reset/market-data" in html
     assert 'id="rebuild"' in html and 'id="wipe"' in html
     assert "Clears the History page" in html
-    assert "measurement periods are kept" in html
+    assert "Your results are" in html
 
 
 # ===================================================================

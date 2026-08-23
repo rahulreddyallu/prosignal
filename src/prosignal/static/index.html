@@ -392,7 +392,9 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .jstep.final .n { color: var(--accent); }
 
 /* ---------------------------------------------------------------- panel */
-.modal-wrap { position: fixed; inset: 0; z-index: 60; display: grid;
+/* Above the drawer (61), not level with its scrim. A confirmation asked for
+   from inside the drawer was drawn underneath it. */
+.modal-wrap { position: fixed; inset: 0; z-index: 70; display: grid;
               place-items: center; padding: var(--sp-5);
               background: rgba(12,14,16,.5); }
 .modal-wrap[hidden] { display: none; }
@@ -544,13 +546,12 @@ td.r { text-align: right; }
 /* Quiet by construction. The product name is the only thing at full ink; the
    attribution sits a step down and the legal row a step below that, so the
    hierarchy is carried by contrast rather than by size or decoration. */
-.foot { border-top: 1px solid var(--line); margin-top: var(--sp-7);
-        padding-top: var(--sp-5); padding-bottom: var(--sp-7); }
-.foot-main { display: flex; justify-content: space-between; align-items: flex-start;
-             gap: var(--sp-6); flex-wrap: wrap; }
+.foot { border-top: 1px solid var(--line); margin-top: var(--sp-6);
+        padding-top: var(--sp-4); padding-bottom: var(--sp-5); }
+.foot-main { display: flex; align-items: flex-start; gap: var(--sp-4); }
 .foot-id .nm { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em;
                color: var(--ink); }
-.foot-own { text-align: right; }
+.foot-own { text-align: left; }
 .foot-own .by { font-size: 12.5px; color: var(--ink-2); }
 .foot-own .by b { color: var(--ink); font-weight: 550; }
 .foot-own .lnk { margin-top: 5px; display: flex; gap: 9px; justify-content: flex-end;
@@ -566,15 +567,14 @@ td.r { text-align: right; }
 .foot a:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px;
                         border-radius: 2px; }
 
-.foot-legal { margin-top: var(--sp-4); color: var(--ink-3);
+.foot-legal { margin-top: var(--sp-3); color: var(--ink-3);
               font-size: 11.5px; line-height: 1.55; }
 
 @media (max-width: 640px) {
   /* Stacked and left-aligned. The ownership line must not wrap mid-name, so
      the whole block reads as one statement rather than two fragments. */
-  .foot { margin-top: var(--sp-6); padding-bottom: var(--sp-6); }
-  .foot-main { flex-direction: column; gap: var(--sp-4); }
-  .foot-own { text-align: left; }
+  .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-4); }
+  .foot-main { flex-direction: column; gap: var(--sp-3); }
   .foot-own .by { text-wrap: balance; }
   .foot-own .lnk { justify-content: flex-start; }
   .foot-legal { margin-top: var(--sp-3); }
@@ -788,8 +788,6 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
   <div class="topbar-in">
     <div class="brand">ProSignal <span>Equity Research</span></div>
     <div class="topbar-meta">
-      <span id="mkt-status"><span class="dot closed"></span>Loading</span>
-      <span class="hide-sm" id="mkt-fresh"></span>
       <button class="iconbtn" id="gear" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 13.6a7.6 7.6 0 0 0 0-3.2l1.9-1.4-1.9-3.3-2.2.9a7.7 7.7 0 0 0-2.8-1.6L14.1 2H9.9l-.3 2.4a7.7 7.7 0 0 0-2.8 1.6l-2.2-.9-1.9 3.3 1.9 1.4a7.6 7.6 0 0 0 0 3.2l-1.9 1.4 1.9 3.3 2.2-.9a7.7 7.7 0 0 0 2.8 1.6l.3 2.4h4.2l.3-2.4a7.7 7.7 0 0 0 2.8-1.6l2.2.9 1.9-3.3z"/></svg></button>
     </div>
   </div>
@@ -816,9 +814,6 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 
   <footer class="foot">
     <div class="foot-main">
-      <div class="foot-id">
-        <div class="nm">ProSignal</div>
-      </div>
       <div class="foot-own">
         <div class="by">Built &amp; owned by <b>Rahul Reddy Allu</b></div>
         <div class="lnk">
@@ -1628,17 +1623,13 @@ function paintBuild(c) {
 }
 
 function renderChrome(v) {
+  // The header used to carry the session date next to a freshness dot. The
+  // date was already under the page title, so it went -- but the dot was the
+  // only place that said a run had incomplete data, and that is not
+  // redundant with anything. It moves to the subtitle, in words.
   const d = (v && v.data) || {};
-  const fresh = d.complete !== false;
   const flags = (d.flags || []).length;
-  $("#mkt-status").innerHTML =
-    '<span class="dot ' + (fresh ? "live" : "stale") + '"></span>' +
-    (v && v.as_of ? esc(v.as_of) : esc(state.latestSession || "—"));
-  $("#mkt-status").title = fresh
-    ? "All expected data was available for this run."
-    : flags + (flags === 1 ? " data note" : " data notes") +
-      " on this run — see Market environment.";
-  $("#mkt-fresh").textContent = v ? "Analysed " + when(v.generated_at) : "";
+  const incomplete = d.complete === false;
 
   const titles = {
     overview: ["Today's opportunities", "The names the engine ranks highest, and the case for each."],
@@ -1662,8 +1653,11 @@ function renderChrome(v) {
       ? "Scan " + state.latestSession
       : "Scan Market";
   }
+  const note = incomplete
+    ? " \u00b7 " + flags + (flags === 1 ? " data note" : " data notes")
+    : "";
   $("#page-sub").textContent = onResults && isCurrent(v)
-    ? "Ranked from the close of " + esc(v.as_of) + "."
+    ? "Ranked from the close of " + esc(v.as_of) + (note || ".")
     : sub;
 
 }
@@ -1948,11 +1942,10 @@ function viewHistory(v) {
 
 async function confirmWipe() {
   const ok = await ask(
-    "Clear the run history?",
-    "This screen will start again from your next scan. The underlying " +
-    "research record is kept — the trial count used to test whether the " +
-    "strategy beats luck depends on it — so it is hidden here, not deleted.",
-    "Clear history"
+    "Clear recorded results?",
+    "The History page starts again from your next run. The research record " +
+    "underneath is kept.",
+    "Clear"
   );
   if (!ok) return;
   try {
@@ -2195,9 +2188,8 @@ async function toggleSchedule() {
   const paused = !!((state.ops || {}).schedule || {}).paused;
   if (!paused) {
     const ok = await ask("Turn off daily signals?",
-      "Nothing will be recorded until you turn it back on, and the current " +
-      "measurement period closes. Turning it on again starts a new one.",
-      "Turn off");
+      "Nothing is recorded until you turn it back on, and the measurement " +
+      "period closes.", "Turn off");
     if (!ok) { paintSettings(); return; }
   }
   const sw = $("#sw-cron");
@@ -2217,8 +2209,8 @@ async function toggleSchedule() {
 async function confirmResetMarketData() {
   const ok = await ask(
     "Rebuild the data store?",
-    "Every stored session is removed and downloaded again. Your results and " +
-    "measurement periods are kept. It takes several hours.",
+    "Every session is downloaded again \u2014 several hours. Your results are " +
+    "kept.",
     "Rebuild");
   if (!ok) return;
   closeSettings();
