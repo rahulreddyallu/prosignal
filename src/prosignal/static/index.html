@@ -1901,6 +1901,11 @@ function viewHistory(v) {
   const rows = perf.by_ticker || [];
   const open = (perf.open || {}).n || 0;
 
+  if (perf.failed) {
+    return '<div class="box empty"><h3>Could not read the results</h3>' +
+      '<p>' + esc(perf.failed) + '</p></div>';
+  }
+
   if (!rows.length) {
     return '<div class="box empty"><h3>No results yet</h3>' +
       '<p>' + (open
@@ -2241,7 +2246,16 @@ document.addEventListener("keydown", (e) => {
 function goTab(name) {
   state.tab = name;
   render();
-  if (name === "history" && state.history === undefined) loadHistory();
+  // Gate on what the screen actually READS. This was gated on state.history
+  // while viewHistory reads state.perf, and the two go stale separately:
+  // toggling Daily signals from Settings clears perf and only reloads it if
+  // History happens to be the open tab. Toggle it from Today, then open
+  // History, and nothing ever loaded perf back -- the page sat on its
+  // skeleton looking like an empty history rather than a stuck one.
+  if (name === "history" && (state.perf === undefined ||
+                             state.history === undefined)) {
+    loadHistory();
+  }
 }
 $$(".nav button").forEach((b) =>
   b.addEventListener("click", () => goTab(b.dataset.view)));
@@ -2265,9 +2279,14 @@ async function loadPerformance() {
   state.perf = null;
   try {
     const r = await fetch("/performance");
-    state.perf = r.ok ? await r.json() : { headline: { n: 0 }, pending: 0 };
+    state.perf = r.ok
+      ? await r.json()
+      : { headline: { n: 0 }, by_ticker: [], failed: await readErr(r) };
   } catch (e) {
-    state.perf = { headline: { n: 0 }, pending: 0 };
+    // A skeleton that never resolves is indistinguishable from a history
+    // with nothing in it. Say which one this is.
+    state.perf = { headline: { n: 0 }, by_ticker: [],
+                   failed: e.message || String(e) };
   }
   if (state.tab === "history") render();
 }

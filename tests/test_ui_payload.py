@@ -775,3 +775,41 @@ def test_clearing_results_is_applied_where_results_are_read():
     for reader in ("def performance_report", "def stock_calls"):
         r = src[src.index(reader):]
         assert "_resolved_rows()" in r[:1600], reader
+
+
+def test_history_loads_on_what_it_reads_not_on_a_neighbouring_variable():
+    """History sat empty after toggling Daily signals.
+
+    viewHistory reads state.perf. The loader was gated on state.history, and
+    the two go stale separately: toggleSchedule clears perf and only reloads
+    it when History is the open tab. Toggle it from Today -- which is where
+    the Settings drawer opens from -- and nothing ever loaded perf back, so
+    the page kept its skeleton and read as an empty history rather than a
+    stuck one.
+    """
+    html = _html()
+    gate = html[html.index("function goTab"):html.index("\n}", html.index("function goTab"))]
+    assert "state.perf === undefined" in gate, \
+        "the loader must fire on the variable the screen actually reads"
+
+
+def test_a_failed_load_says_so_instead_of_showing_a_skeleton():
+    """A skeleton that never resolves is indistinguishable from a history
+    with nothing in it."""
+    html = _html()
+    loader = html[html.index("async function loadPerformance"):]
+    loader = loader[:loader.index("\n}")]
+    assert "failed" in loader
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nfunction ", 20)]
+    assert "perf.failed" in view
+    assert "Could not read the results" in html
+
+
+def test_clearing_perf_anywhere_is_recoverable():
+    """Every path that invalidates perf must either reload it or leave a
+    gate that will."""
+    html = _html()
+    # The gate is the safety net for the paths that do not reload inline.
+    gate = html[html.index("function goTab"):html.index("\n}", html.index("function goTab"))]
+    assert "loadHistory()" in gate
