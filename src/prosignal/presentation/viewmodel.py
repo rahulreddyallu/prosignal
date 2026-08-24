@@ -246,6 +246,9 @@ def _build_pick(
             for c in categories
         ],
         "contributions": _contributions(card.get("factors") or {}),
+        # The card shows the largest few. Without the denominator a reader
+        # cannot tell whether that is most of the model or a corner of it.
+        "factors_considered": len(card.get("factors") or {}),
         "levels": _levels(card),
         "holding_period": card.get("holding_period"),
         "cost_note": card.get("cost_note"),
