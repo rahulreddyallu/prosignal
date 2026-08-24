@@ -115,3 +115,18 @@ def test_rebuilding_removes_nested_cache_files_not_just_the_top_level(tmp_path):
     left = [f for d in (p.curated, p.cache, p.raw)
             for f in d.rglob("*") if f.is_file()]
     assert left == [], f"still on disk: {left}"
+
+
+def test_clearing_history_also_hides_the_open_calls_it_covered():
+    """open_positions counts signals that have not closed, and it was handed
+    every ledger row ever written while the outcomes beside it were filtered.
+    A clear emptied the results and left the count intact -- one run after a
+    clear reported fourteen open calls it had not made."""
+    from pathlib import Path as _P
+    src = _P("src/prosignal/api.py").read_text(encoding="utf-8")
+    assert "_ledger_after_clear" in src
+    call = src[src.index("op = _perf.open_positions("):]
+    call = call[:call.index("max_hold")]
+    assert "_ledger_after_clear()" in call, \
+        "open positions must be counted from the rows the clear left visible"
+    assert "read_all()" not in call, "unfiltered ledger rows are the bug"
