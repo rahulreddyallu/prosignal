@@ -419,7 +419,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             _out.resolve_pending(store, led, path, cfg)
             rows = _apply_clear_mark(_out.load_outcomes(path))
             horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
-            op = _perf.open_positions(Ledger(cfg.paths.ledger).read_all(), rows,
+            op = _perf.open_positions(_ledger_after_clear(), rows,
                                       store, max_hold=horizon)
             _resolved.update(key=key, rows=rows, open=op)
         return _resolved["rows"], _resolved["open"]
@@ -716,6 +716,28 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             except OSError:
                 continue
         return "|".join(parts)
+
+    def _clear_cut():
+        try:
+            from .presentation.clearmark import read_mark
+            mark = read_mark(cfg.paths.ledger)
+        except Exception:
+            return None
+        return str(mark)[:10] if mark else None
+
+    def _ledger_after_clear():
+        """Ledger rows the clear did not hide.
+
+        open_positions counts signals that have not closed, and it was handed
+        every row ever written while the outcomes beside it were filtered.
+        So a clear emptied the results and left the open count intact -- one
+        run after a clear reported fourteen open calls it had not made.
+        """
+        rows = Ledger(cfg.paths.ledger).read_all()
+        cut = _clear_cut()
+        if not cut:
+            return rows
+        return [r for r in rows if str(r.get("date") or "")[:10] >= cut]
 
     def _apply_clear_mark(rows):
         """Drop resolved results issued before the last clear."""

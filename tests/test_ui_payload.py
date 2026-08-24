@@ -103,7 +103,7 @@ def test_the_view_is_json_serialisable():
     "Checks that could not run",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the near misses stay actionable
     "No results yet",           # history with an empty ledger
-    "has not been scanned yet",       # store moved on, results did not
+    "New market data",       # store moved on, results did not
     "Every name surfaced so far",     # history keyed by name, not by date
     "Not followed yet",               # a call with no sessions behind it
     "Clear the run history?",         # destructive action is confirmed
@@ -884,3 +884,25 @@ def test_boot_loads_the_tab_it_restored():
     boot = html[html.index("async function boot()"):]
     boot = boot[:boot.index("\n}")]
     assert 'state.tab === "history"' in boot and "loadHistory()" in boot
+
+
+def test_open_calls_are_shown_not_just_counted():
+    """"14 calls are still open" and nothing else is the least useful form
+    the information has. A position moves every session, and that movement
+    is the only thing this page has until the first call closes."""
+    html = _html()
+    assert "function openHTML" in html
+    body = html[html.index("function openHTML"):html.index("function viewHistory")]
+    assert "entry_price" in body and "last_price" in body
+    assert "unrealised" in body
+    assert "sessions_held" in body
+    # And it must be reachable with nothing closed at all.
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nfunction ", 20)]
+    assert view.index("openHTML") < view.index("No results yet")
+
+
+def test_an_open_mark_is_never_presented_as_a_result():
+    html = _html()
+    body = html[html.index("function openHTML"):html.index("function viewHistory")]
+    assert "not yet a result" in body

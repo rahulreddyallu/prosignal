@@ -714,6 +714,10 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
          color: var(--ink-3); border-bottom: 1px solid var(--line); }
 .col-h b { font-size: 15px; letter-spacing: 0; text-transform: none;
            font-variant-numeric: tabular-nums; }
+.col-s { padding: 0 var(--sp-4) var(--sp-3); font-size: 11.5px;
+         color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.col.open { margin-bottom: var(--sp-4); border-left: 3px solid var(--accent); }
+.col.open .col-h b { color: var(--ink); }
 .col.up .col-h b { color: var(--buy); }
 .col.dn .col-h b { color: var(--neg); }
 .col-b { max-height: 420px; overflow-y: auto; }
@@ -1741,14 +1745,12 @@ function viewOverview(v) {
   if (!isCurrent(v)) {
     const stale = v && v.as_of;
     return '<div class="box empty">' +
-      '<h3>' + (stale ? "This session has not been scanned yet"
-                      : "No scan has run yet") + '</h3>' +
+      // The long version explained the whole staleness rule to someone who
+      // only needed to know there was a button to press.
+      '<h3>' + (stale ? "New market data" : "No scan yet") + '</h3>' +
       '<p>' + (stale
-        ? "The most recent results are from " + esc(v.as_of) +
-          ". Market data is stored through " + esc(state.latestSession || "—") +
-          ", so those are a previous session's answer and are not shown here."
-        : "The engine ranks every eligible name against the market on the day, " +
-          "then narrows to the setups that clear each risk check.") + '</p>' +
+        ? "Last ranked " + esc(v.as_of) + "."
+        : "Rank the market to see today's shortlist.") + '</p>' +
       '<button class="btn" onclick="document.getElementById(\'scan\').click()">' +
       (state.latestSession ? "Scan " + esc(state.latestSession) : "Scan Market") +
       '</button></div>';
@@ -1966,6 +1968,35 @@ function nameRow(r) {
     '<span class="nr-v">' + signed(r.total_return) + '</span></button>';
 }
 
+/* Calls the market has not closed yet, and what it is doing to them.
+   These were a number in an empty state -- "14 calls are still open" and
+   nothing else -- which is the least useful form the information has. A
+   position moves every session, and that movement is the only thing this
+   page has to show until the first call closes. It is marked to the latest
+   stored close and it is NOT a result: it can reverse tomorrow, which is why
+   it sits apart from the totals rather than inside them. */
+function openHTML(op) {
+  const rows = (op && op.positions) || [];
+  if (!rows.length) return "";
+  const live = rows.slice().sort((a, b) => b.unrealised - a.unrealised);
+  const body = live.map((r) =>
+    '<button class="nr" data-stock="' + esc(r.ticker) + '">' +
+      '<span class="nr-t">' + esc(r.ticker) + '</span>' +
+      '<span class="nr-h">' + money(r.entry_price) + ' \u2192 ' +
+        money(r.last_price) + ' \u00b7 ' + r.sessions_held +
+        (r.sessions_held === 1 ? " session" : " sessions") + '</span>' +
+      '<span class="nr-v">' + signed(r.unrealised) + '</span>' +
+    '</button>').join("");
+  const up = op.up || 0;
+  return '<div class="col open">' +
+      '<div class="col-h"><span>Still open</span>' +
+        '<b>' + signed(op.avg_unrealised) + '</b></div>' +
+      '<div class="col-s">' + up + ' of ' + rows.length + ' above entry \u00b7 ' +
+        'marked to ' + esc(day(op.as_of)) + ', not yet a result</div>' +
+      '<div class="col-b">' + body + '</div>' +
+    '</div>';
+}
+
 function viewHistory(v) {
   const perf = state.perf;
   if (perf === null || perf === undefined) {
@@ -1981,6 +2012,12 @@ function viewHistory(v) {
   }
 
   if (!rows.length) {
+    // Open calls are the whole story until the first one closes.
+    if (open) {
+      return openHTML(perf.open) +
+        '<p class="fine">Nothing has closed yet. A call lands in the totals ' +
+        'the day the market takes it to its target or its stop.</p>';
+    }
     return '<div class="box empty"><h3>No results yet</h3>' +
       '<p>' + (open
         ? '<b>' + open + '</b> ' + (open === 1 ? 'call is' : 'calls are') +
@@ -2004,6 +2041,7 @@ function viewHistory(v) {
     '</div>';
 
   return (
+    openHTML(perf.open) +
     '<div class="box chart">' +
       '<div class="chart-h">' +
         '<div><div class="chart-v">' + signed(h.total_return) + '</div>' +
