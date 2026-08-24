@@ -320,13 +320,67 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
                white-space: nowrap; }
 .contrib .z, .contrib .co { color: var(--ink-3); text-align: right; }
 .contrib .cn { text-align: right; font-weight: 600; }
-.dnote { margin-top: var(--sp-3); font-size: 11.5px; color: var(--ink-3); }
-.dnote summary { cursor: pointer; list-style: none; }
-.dnote summary::-webkit-details-marker { display: none; }
-.dnote summary::before { content: "▸ "; }
-.dnote[open] summary::before { content: "▾ "; }
-.dnote ul { margin: var(--sp-2) 0 0 var(--sp-4); display: grid; gap: 4px;
-            line-height: 1.5; }
+
+/* --- shortlist card: the numbers a decision needs --- */
+.figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--sp-3); margin-top: var(--sp-4);
+        padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.fig { min-width: 0; }
+.fl { display: block; font-size: 10.5px; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--ink-3); }
+.fv { display: block; font-size: 14.5px; font-weight: 600; margin-top: 2px;
+      font-variant-numeric: tabular-nums; color: var(--ink);
+      white-space: nowrap; }
+.fs { display: block; font-size: 11.5px; font-weight: 550; margin-top: 1px;
+      color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.fs.v-pos { color: var(--buy); }
+.fs.v-neg { color: var(--neg); }
+.why { margin-top: var(--sp-3); font-size: 12px; color: var(--ink-2);
+       line-height: 1.5; }
+
+/* --- analysis panel: numbers, drivers, evidence --- */
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+        gap: var(--sp-4); }
+.kl { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--ink-3); }
+.kv { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px;
+      font-variant-numeric: tabular-nums; }
+.ks { font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+.kv.v-pos { color: var(--buy); }
+.kv.v-neg { color: var(--neg); }
+.kentry { margin-top: var(--sp-3); padding-top: var(--sp-3);
+          border-top: 1px solid var(--line);
+          font-size: 12px; color: var(--ink-3); }
+.gate { margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4);
+        background: var(--surface-sunk); border-radius: var(--r-sm);
+        border-left: 2px solid var(--line-strong);
+        font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.gate span { display: block; font-size: 10.5px; letter-spacing: .04em;
+             text-transform: uppercase; color: var(--ink-3); margin-bottom: 3px; }
+.gate.warn { border-left-color: var(--neg); }
+.ph { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+      color: var(--ink-3); margin: var(--sp-5) 0 var(--sp-2); }
+.ftab { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ftab th { text-align: left; font-weight: 500; color: var(--ink-3);
+           font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase;
+           padding: 0 10px 5px 0; white-space: nowrap; }
+.ftab td { padding: 7px 10px 7px 0; border-top: 1px solid var(--line);
+           white-space: nowrap; }
+.ftab .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ftab .fx { color: var(--ink); width: 99%; }
+.ftab code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.adv { margin-top: var(--sp-5); border-top: 1px solid var(--line);
+       padding-top: var(--sp-3); }
+.adv summary { cursor: pointer; list-style: none; font-size: 12px;
+               color: var(--ink-2); }
+.adv summary::-webkit-details-marker { display: none; }
+.adv summary::before { content: "\25B8  "; color: var(--ink-3); }
+.adv[open] summary::before { content: "\25BE  "; }
+.adv > .tw { margin-top: var(--sp-3); }
+.raw { margin-top: var(--sp-3); padding: var(--sp-3); font-family: var(--mono);
+       font-size: 11px; line-height: 1.55; color: var(--ink-2);
+       background: var(--surface-sunk); border-radius: var(--r-sm);
+       white-space: pre-wrap; overflow-x: auto; }
 
 /* --- footer: ownership right, copyright left --- */
 .contrib-n { font-size: 10.5px; color: var(--ink-3); margin-top: 5px;
@@ -722,8 +776,8 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 .col.dn .col-h b { color: var(--neg); }
 .col-b { max-height: 420px; overflow-y: auto; }
 
-.nr { display: grid; grid-template-columns: minmax(0, 1fr) auto;
-      grid-template-areas: "t v" "h v"; align-items: center;
+.nr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+      grid-template-areas: "t s v" "h s v"; align-items: center;
       gap: 0 var(--sp-4); width: 100%; text-align: left;
       padding: 10px var(--sp-4); background: none; border: none;
       border-bottom: 1px solid var(--line); cursor: pointer; font: inherit;
@@ -757,6 +811,15 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 .call-s { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
 .call-v { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+.spark { grid-area: s; width: 64px; height: 20px; display: block;
+         margin-right: var(--sp-3); }
+.spark svg { width: 64px; height: 20px; display: block; overflow: visible; }
+.spark path { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke;
+              stroke-linejoin: round; stroke-linecap: round; }
+.spark path.su { stroke: var(--buy); }
+.spark path.sd { stroke: var(--neg); }
+.spark .sb { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 2 2;
+             vector-effect: non-scaling-stroke; }
 .nr-v { grid-area: v; font-size: 14px; font-variant-numeric: tabular-nums;
         white-space: nowrap; }
 
@@ -1805,78 +1868,82 @@ function marketBlock(v) {
     '</div>').join("");
   if (!rows) return "";
 
-  // Two measured readings and nothing around them: the verdict word and its
-  // paragraph restated what the numbers already say.
-  //
-  // The data notes DO sit here, though, and this is the third place they
-  // have lived. They were a folded panel, then a dot in the header, and the
-  // header went with the redundant date. They are not decoration -- one of
-  // them is the Stage 3 pledging gate reporting NOT_TESTABLE, which is a
-  // limitation the engine is required to state rather than imply.
-  const notes = (d.flags || []).map((f) =>
-    '<li>' + esc(f) + '</li>').join("");
-  const notesHTML = (d.complete === false && notes)
-    ? '<details class="dnote"><summary>' + (d.flags || []).length +
-      ((d.flags || []).length === 1 ? " data note" : " data notes") +
-      '</summary><ul>' + notes + '</ul></details>'
-    : "";
-
+  // Two measured readings and nothing else. The data notes lived here and
+  // are gone at the owner's request; the flags remain on the run payload and
+  // in the ledger for anyone reading the record rather than the screen.
   const warn = m.allows_new_positions === false
     ? '<div class="note" style="margin-bottom:var(--sp-3)">' +
       '<span class="pill watch">New positions paused</span></div>' : "";
   return '<div class="market compact">' +
     '<h2>Market environment</h2>' + warn +
-    '<div class="readings">' + rows + '</div>' + notesHTML + '</div>';
+    '<div class="readings">' + rows + '</div></div>';
 }
 
-/* z x coefficient = contribution, largest first. The prose version of this
-   lives in the panel; the card shows the numbers it was describing. */
-function contribHTML(rows, considered) {
-  if (!rows || !rows.length) return "";
-  const shown = Math.min(4, rows.length);
-  const head = '<div class="hdr"><span class="fx">Factor</span>' +
-    '<span class="z">z</span><span class="co">coef</span>' +
-    '<span class="cn">contrib</span></div>';
-  const body = rows.slice(0, 4).map((r) =>
-    '<div><span class="fx">' + esc(r.factor) + '</span>' +
-    '<span class="z">' + (r.z > 0 ? "+" : "") + r.z.toFixed(2) + '</span>' +
-    '<span class="co">' + (r.coefficient > 0 ? "+" : "") + r.coefficient.toFixed(4) + '</span>' +
-    '<span class="cn ' + (r.contribution > 0 ? "v-pos" : "v-neg") + '">' +
-    (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(4) + '</span></div>').join("");
-  // Four rows out of seventeen factors reads as "here is the model" unless
-  // the denominator is on the card. z x coefficient is the contribution, and
-  // these are the largest of them.
-  const note = considered
-    ? '<div class="contrib-n">Largest ' + shown + ' of ' + considered +
-      ' factors \u00b7 z \u00d7 coefficient</div>'
-    : "";
-  return '<div class="contrib">' + head + body + '</div>' + note;
+/* Shared numbers. The card and the panel disagreed about what mattered --
+   the card showed four coefficients and no price target, the panel showed
+   the target four screens down. Both read from here now. */
+function upside(p) {
+  const t = (p.levels || {}).target_1, c = p.price;
+  if (!t || !c) return null;
+  return t / c - 1;
+}
+function downside(p) {
+  const st = (p.levels || {}).stop, c = p.price;
+  if (!st || !c) return null;
+  return st / c - 1;
+}
+
+/* One line, from the run. The pills said "Momentum strong / Trend Position
+   strong" on nearly every name, which is what a shortlist ranked on momentum
+   will always say -- a label that never varies is not information. This
+   names the factor that actually moved this score most, and by how much. */
+function whyLine(p) {
+  const c = (p.contributions || [])[0];
+  if (!c) return "";
+  const share = (p.contributions || []).slice(0, 3)
+    .reduce((t, r) => t + Math.abs(r.contribution), 0);
+  const total = (p.contributions || [])
+    .reduce((t, r) => t + Math.abs(r.contribution), 0) || 1;
+  return esc(c.label) + " leads at " + (c.z > 0 ? "+" : "") + c.z.toFixed(2) +
+    " sd \u00b7 top three carry " + Math.round((share / total) * 100) +
+    "% of the score";
 }
 
 function cardHTML(p) {
   const isBuy = p.status === "BUY";
-  const chips = (p.highlights || []).map((h) => '<span class="chip">' + esc(h) + '</span>').join("");
+  const up = upside(p), dn = downside(p);
+  const L = p.levels || {};
+  const fig = (label, value, sub, cls) =>
+    '<div class="fig"><span class="fl">' + label + '</span>' +
+    '<span class="fv">' + value + '</span>' +
+    (sub ? '<span class="fs ' + (cls || "") + '">' + sub + '</span>' : "") +
+    '</div>';
+
   return '<button class="card ' + (isBuy ? "is-buy" : "is-watch") + '" ' +
     'data-pos="' + p.position + '">' +
     '<div class="card-top">' +
       '<div class="rank">' + p.position + ' of ' + state.slateSize +
-        ' <span class="tk">· ' + esc(p.ticker) + '</span></div>' +
+        ' <span class="tk">\u00b7 ' + esc(p.ticker) + '</span></div>' +
       '<span class="pill ' + (isBuy ? "buy" : "watch") + '">' +
         (isBuy ? "Buy" : "Watch") + '</span>' +
       '<div class="name">' + esc(p.company) + '</div>' +
       '<div class="p num">' + money(p.price) + '</div>' +
     '</div>' +
-    (chips ? '<div class="chips">' + chips + '</div>' : "") +
-    contribHTML(p.contributions, p.factors_considered) +
-    '<div class="card-foot">' +
-      (p.sector ? '<span class="confirm">' + esc(p.sector) + '</span>' : '<span></span>') +
-      '<span class="more">View analysis →</span>' +
+    '<div class="figs">' +
+      fig("Target", money(L.target_1),
+          up != null ? (up > 0 ? "+" : "") + (up * 100).toFixed(1) + "%" : "",
+          "v-pos") +
+      fig("Stop", money(L.stop),
+          dn != null ? (dn * 100).toFixed(1) + "%" : "", "v-neg") +
+      fig("Hold", esc((p.holding_period || "\u2014").replace(" sessions", "")),
+          "sessions") +
+    '</div>' +
+    '<div class="why">' + whyLine(p) + '</div>' +
+    '<div class="card-foot"><span></span>' +
+      '<span class="more">View analysis \u2192</span>' +
     '</div></button>';
 }
 
-/* --------------------------------------------------------------- history */
-/* Percent with a sign and a colour. Losses are not softened -- the whole
-   point of this page is that a person can see when it did not work. */
 function signed(x, dp) {
   if (x == null || !isFinite(x)) return '<span class="v-neu">\u2014</span>';
   const pct = x * 100;
@@ -1975,6 +2042,28 @@ function nameRow(r) {
    page has to show until the first call closes. It is marked to the latest
    stored close and it is NOT a result: it can reverse tomorrow, which is why
    it sits apart from the totals rather than inside them. */
+/* The path, not just the endpoints. A name up 2% that reached +9% and gave
+   it back is not the same position as one that ground up quietly, and the
+   percentage cannot tell those apart. Entry is the baseline, so the line
+   crossing it is the position going under water. */
+function sparkHTML(path, entry) {
+  if (!path || path.length < 2) return '<span class="spark"></span>';
+  const W = 64, H = 20, P = 2;
+  const all = path.concat([entry]);
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+  const x = (i) => P + (i / (path.length - 1)) * (W - P * 2);
+  const y = (v) => P + (1 - (v - lo) / (hi - lo)) * (H - P * 2);
+  const d = path.map((v, i) =>
+    (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+  const up = path[path.length - 1] >= entry;
+  return '<span class="spark"><svg viewBox="0 0 ' + W + ' ' + H +
+    '" preserveAspectRatio="none" aria-hidden="true">' +
+    '<line x1="0" x2="' + W + '" y1="' + y(entry).toFixed(1) +
+    '" y2="' + y(entry).toFixed(1) + '" class="sb"/>' +
+    '<path d="' + d + '" class="' + (up ? "su" : "sd") + '"/></svg></span>';
+}
+
 function openHTML(op) {
   const rows = (op && op.positions) || [];
   if (!rows.length) return "";
@@ -1985,6 +2074,7 @@ function openHTML(op) {
       '<span class="nr-h">' + money(r.entry_price) + ' \u2192 ' +
         money(r.last_price) + ' \u00b7 ' + r.sessions_held +
         (r.sessions_held === 1 ? " session" : " sessions") + '</span>' +
+      sparkHTML(r.path, r.entry_price) +
       '<span class="nr-v">' + signed(r.unrealised) + '</span>' +
     '</button>').join("");
   const up = op.up || 0;
@@ -2180,15 +2270,11 @@ function pctHTML(value) {
 let lastFocus = null;
 function openPanel(pick) {
   lastFocus = document.activeElement;
-  $("#panel-rank").textContent =
-    (pick.status === "BUY" ? "Qualifying setup" : "Monitored") +
-    (pick.rank ? " · ranked #" + pick.rank + " by the model" : "");
+  // "Qualifying setup - ranked #1 by the model - Strong setup" said the
+  // same thing three ways above a page whose whole job is the numbers.
+  $("#panel-rank").textContent = pick.status === "BUY" ? "Buy" : "Watch";
   $("#panel-title").textContent = pick.company;
-  $("#panel-tick").textContent = [
-    pick.ticker,
-    pick.sector,
-    pick.strength ? pick.strength + " setup" : null,
-  ].filter(Boolean).join(" · ");
+  $("#panel-tick").textContent = pick.ticker;
   $("#panel-body").innerHTML = panelHTML(pick);
   $("#panel").classList.add("open");
   $("#scrim").classList.add("open");
@@ -2208,74 +2294,84 @@ function row(k, val) {
 }
 
 function panelHTML(p) {
-  const isBuy = p.status === "BUY";
-  const ev = (p.evidence || []).map((c) => {
-    const cls = ["Strong","Supportive","Contained"].includes(c.verdict) ? "v-pos"
-              : ["Weak","Soft","Elevated"].includes(c.verdict) ? "v-neg" : "v-neu";
-    // The whole reading on one line. Splitting it into label and value meant
-    // stripping the label back out of a sentence that already contained it,
-    // and the category detail then repeated the first row verbatim.
-    const sigs = (c.signals || []).map((s) =>
-      '<div class="sig"><span class="' +
-      (s.oriented_sd > .35 ? "v-pos" : s.oriented_sd < -.35 ? "v-neg" : "v-neu") +
-      '">' + esc(s.reading) + '</span></div>').join("");
-    return '<details class="ev-row"><summary class="ev-sum">' +
-      '<span class="car">▶</span><span class="lab">' + esc(c.label) + '</span>' +
-      '<span class="vd ' + cls + '">' + esc(c.verdict) + '</span></summary>' +
-      '<div class="ev-detail">' +
-      (sigs ? sigs : '<div class="d">' + esc(c.detail) + '</div>') +
-      '</div></details>';
-  }).join("");
-
   const L = p.levels || {};
-  const lv = [
-    L.entry ? ["Entry zone", money(L.entry[0]) + " – " + money(L.entry[1])] : null,
-    L.stop != null ? ["Initial stop", money(L.stop)] : null,
-    L.invalidation != null ? ["Invalidation", money(L.invalidation)] : null,
-    L.target_1 != null ? ["First target", money(L.target_1)] : null,
-  ].filter(Boolean).map(([k, val]) =>
-    '<div class="level"><div class="k">' + k + '</div><div class="v num">' + val + '</div></div>').join("");
+  const up = upside(p), dn = downside(p);
+  const rows = p.contributions || [];
 
-  const t = p.technical || {};
-  return [
-    '<div class="section"><h3>Why this name</h3>' +
-      '<p class="prose">' + esc(p.thesis || "") + '</p></div>',
-    p.what_would_change
-      ? '<div class="section"><h3>' + (isBuy ? "What would close this" : "What would move this to Buy") +
-        '</h3><div class="callout' + (isBuy ? "" : " watch") + '">' +
-        esc(p.what_would_change) + '</div></div>' : "",
-    ev ? '<div class="section"><h3>Evidence</h3><div class="ev">' + ev + '</div></div>' : "",
-    (p.technical && p.technical.not_testable && p.technical.not_testable.length)
-      ? '<div class="section"><h3>Checks that could not run</h3>' +
-        '<div class="callout watch">' +
-        esc(p.technical.not_testable.join("; ")) +
-        ' — these did not pass. The data needed to test them is not available, ' +
-        'so this name rests on partial evidence.</div></div>' : "",
-    lv ? '<div class="section"><h3>Levels the strategy defines</h3>' +
-         '<div class="levels">' + lv + '</div>' +
-         (p.holding_period ? '<p class="prose muted" style="margin-top:var(--sp-3);font-size:13px">' +
-           'Expected holding period ' + esc(p.holding_period) + '.' +
-           (p.cost_note ? " " + esc(p.cost_note) : "") + '</p>' : "") +
-         '</div>' : "",
-    '<div class="section"><h3>Advanced</h3><details class="adv"><summary>' +
-      'Model detail, raw factor contributions and research basis</summary>' +
-      '<div class="adv-body">' +
-        '<div class="readings" style="margin-bottom:var(--sp-3)">' +
-          row("Model rank", p.rank) +
-          row("Universe percentile", t.percentile) +
-          row("Score after risk checks", t.score) +
-        '</div>' +
-        (t.why_raw && t.why_raw.length
-          ? '<div class="raw">' + esc(t.why_raw.join("\n")) + '</div>' : "") +
-        (t.against_raw && t.against_raw.length
-          ? '<div class="raw" style="margin-top:8px">' + esc(t.against_raw.join("\n")) + '</div>' : "") +
-        (t.warning ? '<p class="prose muted" style="margin-top:var(--sp-3);font-size:12.5px">' +
-          esc(t.warning) + '</p>' : "") +
-      '</div></details></div>',
-  ].join("");
+  // Numbers first. They were four screens down, under three paragraphs and
+  // five collapsed panels, on the page opened to find them.
+  const num = (label, value, sub, cls) =>
+    '<div class="kf"><div class="kl">' + label + '</div>' +
+    '<div class="kv ' + (cls || "") + '">' + value + '</div>' +
+    (sub ? '<div class="ks">' + sub + '</div>' : "") + '</div>';
+
+  const key =
+    '<div class="keys">' +
+      num("Price", money(p.price), esc(p.holding_period || "")) +
+      num("Target", money(L.target_1),
+          up != null ? (up > 0 ? "+" : "") + (up * 100).toFixed(1) + "%" : "",
+          "v-pos") +
+      num("Stop", money(L.stop),
+          dn != null ? (dn * 100).toFixed(1) + "%" : "", "v-neg") +
+      num("Invalidation", money(L.invalidation), "thesis gone") +
+    '</div>' +
+    (L.entry ? '<div class="kentry">Entry ' + money(L.entry[0]) + ' \u2013 ' +
+      money(L.entry[1]) + (p.cost_note ? ' \u00b7 ' + esc(p.cost_note) : "") +
+      '</div>' : "");
+
+  // What moved the score, as a table. It was prose with the numbers spelled
+  // out inside sentences.
+  const top = rows.slice(0, 6).map((r) =>
+    '<tr><td class="fx">' + esc(r.label) + '</td>' +
+    '<td class="num">' + (r.z > 0 ? "+" : "") + r.z.toFixed(2) + '</td>' +
+    '<td class="num ' + (r.contribution > 0 ? "v-pos" : "v-neg") + '">' +
+    (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(4) + '</td></tr>').join("");
+
+  // Kept from the old panel, compressed. A WATCH name that does not say what
+  // would move it is a list entry with no next step, and a check that could
+  // not run is the engine admitting the case rests on partial evidence --
+  // both are the opposite of fluff.
+  const gate = p.what_would_change
+    ? '<div class="gate"><span>' +
+      (p.status === "BUY" ? "What would close this" : "What would move this to Buy") +
+      '</span>' + esc(p.what_would_change) + '</div>'
+    : "";
+  const nt = (p.technical && p.technical.not_testable) || [];
+  const untested = nt.length
+    ? '<div class="gate warn"><span>Checks that could not run</span>' +
+      esc(nt.join("; ")) + ' \u2014 the data needed to test them is not ' +
+      'available, so this name rests on partial evidence.</div>'
+    : "";
+
+  const drivers = rows.length
+    ? '<h4 class="ph">What moved the score</h4>' +
+      '<div class="tw"><table class="ftab"><thead><tr><th>Factor</th>' +
+      '<th class="num">sd vs market</th><th class="num">contribution</th>' +
+      '</tr></thead><tbody>' + top + '</tbody></table></div>'
+    : "";
+
+  // Everything, for the reader who came for the evidence.
+  const all = rows.map((r) =>
+    '<tr><td class="fx"><code>' + esc(r.factor) + '</code></td>' +
+    '<td class="num">' + (r.z > 0 ? "+" : "") + r.z.toFixed(2) + '</td>' +
+    '<td class="num">' + (r.coefficient > 0 ? "+" : "") + r.coefficient.toFixed(5) + '</td>' +
+    '<td class="num ' + (r.contribution > 0 ? "v-pos" : "v-neg") + '">' +
+    (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(4) + '</td></tr>').join("");
+
+  const advanced =
+    '<details class="adv"><summary>All ' + (p.factors_considered || rows.length) +
+      ' factors, and what the run recorded</summary>' +
+      '<div class="tw"><table class="ftab"><thead><tr><th>Factor</th>' +
+      '<th class="num">z</th><th class="num">coef</th>' +
+      '<th class="num">contrib</th></tr></thead><tbody>' + all + '</tbody></table></div>' +
+      (p.technical ? '<pre class="raw">' + esc(p.technical) + '</pre>' : "") +
+      (L.exits && L.exits.length
+        ? '<pre class="raw">' + esc(L.exits.join("\n")) + '</pre>' : "") +
+    '</details>';
+
+  return key + gate + untested + drivers + advanced;
 }
 
-/* ------------------------------------------------------------------ wire */
 function wire() {
   $$(".card").forEach((el) => el.addEventListener("click", () => {
     const p = (state.view.picks || []).find((x) => String(x.position) === el.dataset.pos);
