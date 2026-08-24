@@ -39,3 +39,27 @@ if ! "$PY" -m prosignal.cli analyse run --watch 0 >>"$LOG" 2>&1; then
 fi
 say "observation recorded"
 "$PY" -m prosignal.cli research forward 2>&1 | tail -4 >> "$LOG"
+
+# Resolve outcomes and warm the API's caches while nobody is waiting.
+#
+# Resolution runs on read, which is self-healing and correct, and it means
+# the first person to open History after a new run pays for it. The machine
+# is already awake at 20:35 and has nothing else to do, so it pays instead.
+# Over the loopback, with the token this script already has in its
+# environment -- it never leaves the box.
+#
+# Failures are ignored on purpose: the observation is recorded either way,
+# and a cold cache is slow rather than wrong.
+API="${PROSIGNAL_API:-http://127.0.0.1:8000}"
+warm() {
+  local path="$1"
+  if curl -fsS -m 600 -o /dev/null \
+       ${PROSIGNAL_AUTH_TOKEN:+-H "x-api-key: ${PROSIGNAL_AUTH_TOKEN}"} \
+       "${API}${path}"; then
+    say "warmed ${path}"
+  else
+    say "could not warm ${path} (harmless: it will resolve on first open)"
+  fi
+}
+warm "/performance"
+warm "/ready"

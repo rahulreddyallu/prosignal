@@ -153,3 +153,41 @@ def test_opening_history_cannot_start_a_scan():
         b = api[api.index("def " + name):]
         b = b[:b.index("@app.")] if "@app." in b else b
         assert "jobs.start" not in b, f"{name} must not start a job"
+
+
+# ===================================================================
+# Nothing waits for a person
+# ===================================================================
+
+def test_the_nightly_job_warms_the_caches_it_just_invalidated():
+    """Recording a run changes the ledger, which is exactly what the
+    performance cache keys on -- so the run that produces the evidence is
+    also the thing that makes the next visitor wait for it. The machine is
+    awake at 20:35 with nothing else to do, so it pays instead."""
+    src = Path("scripts/forward_run.sh").read_text(encoding="utf-8")
+    assert "/performance" in src
+    warm = src[src.index("API=\"${PROSIGNAL_API"):]
+    # It must come AFTER the run is recorded, not before.
+    assert src.index("observation recorded") < src.index("API=\"${PROSIGNAL_API")
+    # And it must never fail the observation.
+    assert "harmless" in warm
+
+
+def test_the_warm_up_never_sends_the_token_off_the_box():
+    src = Path("scripts/forward_run.sh").read_text(encoding="utf-8")
+    warm = src[src.index("API=\"${PROSIGNAL_API"):]
+    assert "127.0.0.1" in warm, "the warm-up must stay on the loopback"
+    assert "x-api-key" in warm
+
+
+def test_a_restart_warms_itself_without_blocking_startup():
+    """A deploy or a systemd restart empties an in-process cache, and the
+    nightly job only covers the nightly case."""
+    src = Path("src/prosignal/api.py").read_text(encoding="utf-8")
+    block = src[src.index("def _warm_on_start"):]
+    block = block[:block.index("return app")]
+    assert "daemon=True" in block, "a warm must not keep the process alive"
+    assert "threading.Thread" in block, "it must not block startup"
+    assert "performance_report()" in block, \
+        "warming only the resolution leaves the payload cold"
+    assert "except Exception" in block, "a failed warm must never be fatal"

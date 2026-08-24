@@ -908,12 +908,23 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 const $  = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
-const state = { view: null, run: null, tab: "overview", busy: false,
+/* The tab a refresh comes back to. Only the two real screens are accepted --
+   a stale or hand-edited value must not put the app somewhere it cannot
+   render. */
+function startingTab() {
+  try {
+    const t = localStorage.getItem("signal.tab");
+    return (t === "history" || t === "overview") ? t : "overview";
+  } catch (e) { return "overview"; }
+}
+
+const state = { view: null, run: null, tab: startingTab(), busy: false,
                 booting: true, error: null, notReady: false, jobId: null,
                 jobKind: null,
                 history: undefined,
                 latestSession: null, slateSize: 5, coverage: null,
-                perf: undefined, ops: null, meas: null, shallow: false };
+                perf: undefined, ops: null, meas: null, shallow: false,
+                step: 0 };
 
 /* ---------------------------------------------------------------- theme */
 const THEME_KEY = "signal.theme";
@@ -1051,6 +1062,8 @@ async function scan() {
     const start = await fetch("/analysis/run", { method: "POST" });
     if (!start.ok) throw new Error(await readErr(start));
     const { id } = await start.json();
+    state.jobId = id;
+    renderProgress(0);          // repaint now that Cancel has an id
 
     let last = -1;
     for (;;) {
@@ -1073,6 +1086,7 @@ async function scan() {
     // whatever it loaded first -- so clearing, then scanning, then opening
     // History showed the empty result cached at the moment of the clear.
     state.history = undefined;
+    state.perf = undefined;      // viewHistory reads THIS one
     if (state.tab === "history") loadHistory();
     say("Scan complete. " + state.view.summary.buy + " qualifying, "
         + state.view.summary.watch + " monitored.");
@@ -1081,6 +1095,8 @@ async function scan() {
     say("The scan could not be completed.");
   } finally {
     state.busy = false;
+    state.jobId = null;
+    state.step = 0;
     btn.disabled = false;
     btn.textContent = "Scan Market";
     render();
@@ -1301,6 +1317,11 @@ async function readErr(res) {
 }
 
 function renderProgress(step) {
+  state.step = step;
+  // Only ever paints Today. The poller calls this on a timer and does not
+  // know which tab is open, so without this it wrote the scan card into
+  // whatever screen the reader had moved to.
+  if (state.tab !== "overview") return;
   const total = STAGES.length;
   const segs = STAGES.map((_, i) =>
     '<div class="seg ' + (i < step ? "done" : i === step ? "now" : "") + '"></div>').join("");
@@ -1310,7 +1331,31 @@ function renderProgress(step) {
       '<div class="stage">' + esc(STAGES[Math.min(step, total - 1)]) + '</div>' +
       '<div class="track">' + segs + '</div>' +
       '<div class="steps">Step ' + Math.min(step + 1, total) + ' of ' + total + '</div>' +
+      (state.jobId
+        ? '<button class="btn ghost sm" id="cancel-scan">Cancel scan</button>'
+        : "") +
     '</div>';
+  const c = $("#cancel-scan");
+  if (c) c.addEventListener("click", cancelScan);
+}
+
+/* Stopping a scan that is already running. The server owns the job, so this
+   asks it to stop rather than just walking away from the poll -- abandoning
+   the loop would leave the run finishing invisibly and writing a ledger row
+   for a scan the reader believes they cancelled. */
+async function cancelScan() {
+  const id = state.jobId;
+  if (!id) return;
+  const btn = $("#cancel-scan");
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Stopping'; }
+  try {
+    const r = await fetch("/analysis/" + encodeURIComponent(id) + "/cancel",
+                          { method: "POST" });
+    if (!r.ok) throw new Error(await readErr(r));
+    say("Scan cancelled.");
+  } catch (e) {
+    showError(e.message || String(e));
+  }
 }
 
 /* ---------------------------------------------------------------- render */
@@ -1321,7 +1366,10 @@ function render() {
   });
 
   if (state.error) return renderError();
-  if (state.busy) return;
+  // A running scan owns the Today screen and nothing else. This used to
+  // return early for every tab, so switching to History during a scan left
+  // the progress card sitting there and the tab button looking broken.
+  if (state.busy && state.tab === "overview") { renderProgress(state.step || 0); return; }
   // Boot renders once before it knows anything. Showing the "no scan yet"
   // screen in that gap makes every refresh flash the empty state for a beat
   // and then replace it, which reads as a bug even though the data was on its
@@ -2269,8 +2317,12 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("#settings").hidden) { closeSettings(); return; }
   if (e.key === "Escape" && $("#panel").classList.contains("open")) closePanel();
 });
+const TAB_KEY = "signal.tab";
 function goTab(name) {
   state.tab = name;
+  // Refreshing on History used to land on Today, because the tab lived only
+  // in memory.
+  try { localStorage.setItem(TAB_KEY, name); } catch (e) {}
   render();
   // Gate on what the screen actually READS. This was gated on state.history
   // while viewHistory reads state.perf, and the two go stale separately:
@@ -2336,6 +2388,10 @@ async function loadHistory() {
 async function boot() {
   state.booting = true;
   render();
+  // A refresh can land on History, and that screen loads its own data. Boot
+  // only ever fetched the Today view, so the restored tab would render its
+  // skeleton and wait for a load nobody had started.
+  if (state.tab === "history") loadHistory();
   try {
     await checkReady();
     if (state.jobId) startMonitor();       // a build survives the reload

@@ -823,3 +823,64 @@ def test_clearing_perf_anywhere_is_recoverable():
     # The gate is the safety net for the paths that do not reload inline.
     gate = html[html.index("function goTab"):html.index("\n}", html.index("function goTab"))]
     assert "loadHistory()" in gate
+
+
+# ===================================================================
+# A running scan belongs to Today
+# ===================================================================
+
+def test_a_running_scan_does_not_paint_itself_into_history():
+    """render() returned early for EVERY tab while busy, and renderProgress
+    wrote #view on a timer without knowing which tab was open. Switching to
+    History mid-scan left the progress card sitting inside it."""
+    html = _html()
+    start = html.index("function render()")
+    body = html[start:html.index("\nfunction ", start + 20)]
+    assert 'state.busy && state.tab === "overview"' in body, \
+        "busy must only own Today"
+    prog = html[html.index("function renderProgress"):]
+    prog = prog[:prog.index("\n}")]
+    assert 'state.tab !== "overview"' in prog, \
+        "the poller must not write into whatever tab is open"
+
+
+def test_a_scan_invalidates_the_thing_history_reads():
+    """It cleared state.history, which viewHistory does not read. After a
+    clear-then-scan the page kept the empty result cached at the clear."""
+    html = _html()
+    scan = html[html.index("async function scan()"):]
+    scan = scan[:scan.index("/* ------")]
+    assert "state.perf = undefined" in scan
+
+
+def test_a_running_scan_can_be_cancelled():
+    """Abandoning the poll would leave the run finishing invisibly and
+    writing a ledger row for a scan the reader believes they cancelled."""
+    html = _html()
+    assert "function cancelScan" in html
+    assert 'id="cancel-scan"' in html
+    cancel = html[html.index("async function cancelScan"):]
+    cancel = cancel[:cancel.index("\n}")]
+    assert "/cancel" in cancel and 'method: "POST"' in cancel
+
+
+def test_the_open_tab_survives_a_refresh():
+    """Refreshing on History landed on Today, because the tab lived only in
+    memory."""
+    html = _html()
+    assert "signal.tab" in html
+    assert "function startingTab" in html
+    # A stale or hand-edited value must not strand the app somewhere it
+    # cannot render.
+    st = html[html.index("function startingTab"):]
+    st = st[:st.index("\n}")]
+    assert '"history"' in st and '"overview"' in st
+
+
+def test_boot_loads_the_tab_it_restored():
+    """boot() only ever fetched the Today view, so a refresh onto History
+    rendered its skeleton and waited for a load nobody had started."""
+    html = _html()
+    boot = html[html.index("async function boot()"):]
+    boot = boot[:boot.index("\n}")]
+    assert 'state.tab === "history"' in boot and "loadHistory()" in boot

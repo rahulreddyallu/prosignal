@@ -945,6 +945,34 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         def index() -> FileResponse:
             return FileResponse(str(_STATIC / "index.html"))
 
+    @app.on_event("startup")
+    def _warm_on_start() -> None:
+        """Resolve outcomes once, off the request path, after a restart.
+
+        The performance cache lives in this process, so a deploy or a systemd
+        restart empties it and hands the next visitor the full resolution.
+        The nightly job warms it after each run; this covers every other way
+        the process comes back.
+
+        On a daemon thread, so a slow or failing warm delays nothing and
+        cannot keep the process alive. Failures are swallowed deliberately: a
+        cold cache is slow, not wrong, and the next read rebuilds it.
+        """
+        import threading
+
+        def _run() -> None:
+            try:
+                # The whole payload, not just the resolution behind it.
+                # Warming only the resolution left the first open at 1.0s
+                # instead of 3ms, because the endpoint still had to build
+                # the response it caches separately.
+                performance_report()
+                log.info("performance cache warmed at startup")
+            except Exception as exc:            # noqa: BLE001 - never fatal
+                log.info("startup warm skipped", extra={"reason": str(exc)})
+
+        threading.Thread(target=_run, name="prosignal-warm", daemon=True).start()
+
     return app
 
 
