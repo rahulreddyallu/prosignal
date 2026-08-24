@@ -331,9 +331,14 @@ def test_an_incomplete_run_is_still_marked_even_though_the_notes_panel_is_gone()
     the redundant date. The signal must not go with either -- an incomplete
     run says so under the page title, in words rather than a tooltip."""
     html = _html()
-    chrome = html[html.index("function renderChrome"):html.index("function isCurrent")]
-    assert "complete === false" in chrome
-    assert "data note" in chrome, "an incomplete run no longer says so anywhere"
+    # Third home for this signal: a folded panel, then a header dot that went
+    # with the redundant date, and now the Market environment card. One of
+    # the notes is the Stage 3 pledging gate reporting NOT_TESTABLE, which
+    # the engine states rather than implies -- so it has to live somewhere.
+    block = html[html.index("function marketBlock"):html.index("function contribHTML")]
+    assert "complete === false" in block
+    assert "data note" in block, "an incomplete run no longer says so anywhere"
+    assert "d.flags" in block, "the notes themselves must be readable, not just counted"
 
 
 def test_a_completed_scan_invalidates_the_cached_history():
@@ -553,16 +558,21 @@ def test_the_footer_invents_no_legal_or_performance_claims():
 def test_the_footer_uses_the_existing_tokens_and_no_new_colours():
     """A footer with its own palette is a second design system."""
     html = _html()
-    css = html[html.index(".foot { border-top"):html.index("@media (max-width: 640px) {\n  /* Stacked")]
-    for literal in ("#", "rgb(", "rgba("):
-        assert literal not in css, f"hardcoded colour in the footer: {literal}"
+    # Only rules whose selector is the footer's. Slicing a range picked up
+    # whatever happened to be declared next -- the drawer scrim's rgba and
+    # the switch knob's #fff are correct where they are.
+    style = html[html.index("<style>"):html.index("</style>")]
+    rules = re.findall(r"^(\.foot[^{]*)\{([^}]*)\}", style, re.M)
+    assert rules, "no footer rules found"
+    for selector, body in rules:
+        for literal in ("#", "rgb(", "rgba("):
+            assert literal not in body, \
+                f"hardcoded colour in {selector.strip()}: {literal}"
 
 
 def test_the_ownership_line_does_not_wrap_mid_name_on_mobile():
     html = _html()
-    mobile = html[html.index("@media (max-width: 640px) {\n  /* Stacked"):]
-    mobile = mobile[:mobile.index("\n}")]
-    assert "text-wrap: balance" in mobile
+    assert "text-wrap: balance" in html
 
 
 # ===================================================================

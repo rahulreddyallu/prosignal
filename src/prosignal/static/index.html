@@ -312,12 +312,25 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
    table rather than as prose. */
 .contrib { display: grid; gap: 3px; font-variant-numeric: tabular-nums;
            font-family: var(--mono); font-size: 11.5px; }
-.contrib div { display: grid; grid-template-columns: minmax(0,1fr) 4.6em 5.4em 5.2em;
+/* Fixed px, not em. The header is 10px and the body 11.5px, so an em-based
+   column was 46px in one row and 53px in the next and no column lined up. */
+.contrib div { display: grid; grid-template-columns: minmax(0,1fr) 52px 62px 62px;
                gap: var(--sp-2); align-items: baseline; }
 .contrib .fx { color: var(--ink); overflow: hidden; text-overflow: ellipsis;
                white-space: nowrap; }
 .contrib .z, .contrib .co { color: var(--ink-3); text-align: right; }
 .contrib .cn { text-align: right; font-weight: 600; }
+.dnote { margin-top: var(--sp-3); font-size: 11.5px; color: var(--ink-3); }
+.dnote summary { cursor: pointer; list-style: none; }
+.dnote summary::-webkit-details-marker { display: none; }
+.dnote summary::before { content: "▸ "; }
+.dnote[open] summary::before { content: "▾ "; }
+.dnote ul { margin: var(--sp-2) 0 0 var(--sp-4); display: grid; gap: 4px;
+            line-height: 1.5; }
+
+/* --- footer: ownership right, copyright left --- */
+.contrib-n { font-size: 10.5px; color: var(--ink-3); margin-top: 5px;
+             letter-spacing: .01em; }
 .contrib .hdr { color: var(--ink-3); font-size: 10px; letter-spacing: .06em;
                 text-transform: uppercase; font-family: var(--font);
                 border-bottom: 1px solid var(--line); padding-bottom: 3px;
@@ -546,18 +559,19 @@ td.r { text-align: right; }
 /* Quiet by construction. The product name is the only thing at full ink; the
    attribution sits a step down and the legal row a step below that, so the
    hierarchy is carried by contrast rather than by size or decoration. */
-.foot { border-top: 1px solid var(--line); margin-top: var(--sp-6);
-        padding-top: var(--sp-4); padding-bottom: var(--sp-5); }
-.foot-main { display: flex; align-items: flex-start; gap: var(--sp-4); }
-.foot-id .nm { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em;
-               color: var(--ink); }
-.foot-own { text-align: left; }
-.foot-own .by { font-size: 12.5px; color: var(--ink-2); }
+/* One row: the copyright anchors the left, ownership and links the right.
+   Stacked before, which left the right half of a wide screen empty. */
+.foot { border-top: 1px solid var(--line); margin-top: var(--sp-5);
+        padding: var(--sp-4) 0 var(--sp-5);
+        display: flex; align-items: center; justify-content: space-between;
+        gap: var(--sp-4) var(--sp-5); flex-wrap: wrap;
+        font-size: 11.5px; color: var(--ink-3); line-height: 1.5; }
+.foot-c { flex: none; }
+.foot-own { display: flex; align-items: center; gap: var(--sp-4);
+            flex-wrap: wrap; justify-content: flex-end; }
+.foot-own .by { color: var(--ink-2); }
 .foot-own .by b { color: var(--ink); font-weight: 550; }
-.foot-own .lnk { margin-top: 5px; display: flex; gap: 9px; justify-content: flex-end;
-                 align-items: center; font-size: 12.5px; }
-/* A glyph middot sits on its own baseline and reads low between two links.
-   A drawn circle centres on the flex axis, which is where the eye expects it. */
+.foot-own .lnk { display: flex; align-items: center; gap: 9px; }
 .foot-own .lnk .dot { width: 3px; height: 3px; border-radius: 50%; flex: none;
                       background: var(--line-strong); }
 .foot a { color: var(--ink-2); text-decoration: none;
@@ -567,17 +581,21 @@ td.r { text-align: right; }
 .foot a:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px;
                         border-radius: 2px; }
 
-.foot-legal { margin-top: var(--sp-3); color: var(--ink-3);
-              font-size: 11.5px; line-height: 1.55; }
+@media (max-width: 560px) {
+  /* Too narrow for two ends; stack, copyright last. */
+  .foot { flex-direction: column-reverse; align-items: flex-start;
+          gap: var(--sp-3); margin-top: var(--sp-4); }
+  .foot-own { justify-content: flex-start; gap: var(--sp-3); }
+}
+
+/* A glyph middot sits on its own baseline and reads low between two links.
+   A drawn circle centres on the flex axis, which is where the eye expects it. */
+
 
 @media (max-width: 640px) {
-  /* Stacked and left-aligned. The ownership line must not wrap mid-name, so
-     the whole block reads as one statement rather than two fragments. */
-  .foot { margin-top: var(--sp-5); padding-bottom: var(--sp-4); }
-  .foot-main { flex-direction: column; gap: var(--sp-3); }
+  /* The ownership line must not wrap mid-name -- it reads as one statement
+     rather than two fragments. */
   .foot-own .by { text-wrap: balance; }
-  .foot-own .lnk { justify-content: flex-start; }
-  .foot-legal { margin-top: var(--sp-3); }
 }
 @media (max-width: 640px) {
   .rerun { flex-direction: column; gap: var(--sp-2); }
@@ -813,19 +831,15 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
   <div id="view"></div>
 
   <footer class="foot">
-    <div class="foot-main">
-      <div class="foot-own">
-        <div class="by">Built &amp; owned by <b>Rahul Reddy Allu</b></div>
-        <div class="lnk">
-          <a href="https://www.linkedin.com/in/rahulreddyallu/" target="_blank"
-             rel="noopener noreferrer">LinkedIn<span aria-hidden="true"> &#8599;</span></a>
-          <span class="dot" aria-hidden="true"></span>
-          <a href="mailto:rahulallu.career@gmail.com">Email<span aria-hidden="true"> &#8599;</span></a>
-        </div>
-      </div>
-    </div>
-    <div class="foot-legal">
-      <span>&copy; 2026 ProSignal. All rights reserved.</span>
+    <span class="foot-c">&copy; 2026 ProSignal. All rights reserved.</span>
+    <div class="foot-own">
+      <span class="by">Built &amp; owned by <b>Rahul Reddy Allu</b></span>
+      <span class="lnk">
+        <a href="https://www.linkedin.com/in/rahulreddyallu/" target="_blank"
+           rel="noopener noreferrer">LinkedIn<span aria-hidden="true"> &#8599;</span></a>
+        <span class="dot" aria-hidden="true"></span>
+        <a href="mailto:rahulallu.career@gmail.com">Email<span aria-hidden="true"> &#8599;</span></a>
+      </span>
     </div>
   </footer>
 </main>
@@ -1627,10 +1641,6 @@ function renderChrome(v) {
   // date was already under the page title, so it went -- but the dot was the
   // only place that said a run had incomplete data, and that is not
   // redundant with anything. It moves to the subtitle, in words.
-  const d = (v && v.data) || {};
-  const flags = (d.flags || []).length;
-  const incomplete = d.complete === false;
-
   const titles = {
     overview: ["Today's opportunities", "The names the engine ranks highest, and the case for each."],
     history: ["History", "Every name surfaced so far, and what the market did after."],
@@ -1653,11 +1663,8 @@ function renderChrome(v) {
       ? "Scan " + state.latestSession
       : "Scan Market";
   }
-  const note = incomplete
-    ? " \u00b7 " + flags + (flags === 1 ? " data note" : " data notes")
-    : "";
   $("#page-sub").textContent = onResults && isCurrent(v)
-    ? "Ranked from the close of " + esc(v.as_of) + (note || ".")
+    ? "Ranked from the close of " + esc(v.as_of) + "."
     : sub;
 
 }
@@ -1735,11 +1742,12 @@ function viewOverview(v) {
     '<div class="rerun">' +
       '<button class="btn ghost sm" onclick="document.getElementById(\'scan\').click()">' +
       'Re-run this scan</button>' +
-      '<span>Same data, so the ranking will not change.</span></div>';
+      '<span></span></div>';
 }
 
 function marketBlock(v) {
   const m = v.market || {};
+  const d = (v && v.data) || {};
   const rows = (m.readings || []).filter((r) => r.value).map((r) =>
     '<div class="reading"><span class="k">' + esc(r.label) + '</span>' +
     '<span class="v">' + esc(r.value) + '</span>' +
@@ -1747,24 +1755,35 @@ function marketBlock(v) {
     '</div>').join("");
   if (!rows) return "";
 
-  // Two measured readings and nothing around them. The verdict word and its
-  // paragraph restated what the numbers already say, and the two folded
-  // panels put method and caveats on a screen meant for a decision. The
-  // freshness dot in the header still marks an incomplete run and names the
-  // count in its tooltip, so the signal survives even though the detail does
-  // not sit here.
+  // Two measured readings and nothing around them: the verdict word and its
+  // paragraph restated what the numbers already say.
+  //
+  // The data notes DO sit here, though, and this is the third place they
+  // have lived. They were a folded panel, then a dot in the header, and the
+  // header went with the redundant date. They are not decoration -- one of
+  // them is the Stage 3 pledging gate reporting NOT_TESTABLE, which is a
+  // limitation the engine is required to state rather than imply.
+  const notes = (d.flags || []).map((f) =>
+    '<li>' + esc(f) + '</li>').join("");
+  const notesHTML = (d.complete === false && notes)
+    ? '<details class="dnote"><summary>' + (d.flags || []).length +
+      ((d.flags || []).length === 1 ? " data note" : " data notes") +
+      '</summary><ul>' + notes + '</ul></details>'
+    : "";
+
   const warn = m.allows_new_positions === false
     ? '<div class="note" style="margin-bottom:var(--sp-3)">' +
       '<span class="pill watch">New positions paused</span></div>' : "";
   return '<div class="market compact">' +
     '<h2>Market environment</h2>' + warn +
-    '<div class="readings">' + rows + '</div></div>';
+    '<div class="readings">' + rows + '</div>' + notesHTML + '</div>';
 }
 
 /* z x coefficient = contribution, largest first. The prose version of this
    lives in the panel; the card shows the numbers it was describing. */
-function contribHTML(rows) {
+function contribHTML(rows, considered) {
   if (!rows || !rows.length) return "";
+  const shown = Math.min(4, rows.length);
   const head = '<div class="hdr"><span class="fx">Factor</span>' +
     '<span class="z">z</span><span class="co">coef</span>' +
     '<span class="cn">contrib</span></div>';
@@ -1774,7 +1793,14 @@ function contribHTML(rows) {
     '<span class="co">' + (r.coefficient > 0 ? "+" : "") + r.coefficient.toFixed(4) + '</span>' +
     '<span class="cn ' + (r.contribution > 0 ? "v-pos" : "v-neg") + '">' +
     (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(4) + '</span></div>').join("");
-  return '<div class="contrib">' + head + body + '</div>';
+  // Four rows out of seventeen factors reads as "here is the model" unless
+  // the denominator is on the card. z x coefficient is the contribution, and
+  // these are the largest of them.
+  const note = considered
+    ? '<div class="contrib-n">Largest ' + shown + ' of ' + considered +
+      ' factors \u00b7 z \u00d7 coefficient</div>'
+    : "";
+  return '<div class="contrib">' + head + body + '</div>' + note;
 }
 
 function cardHTML(p) {
@@ -1791,7 +1817,7 @@ function cardHTML(p) {
       '<div class="p num">' + money(p.price) + '</div>' +
     '</div>' +
     (chips ? '<div class="chips">' + chips + '</div>' : "") +
-    contribHTML(p.contributions) +
+    contribHTML(p.contributions, p.factors_considered) +
     '<div class="card-foot">' +
       (p.sector ? '<span class="confirm">' + esc(p.sector) + '</span>' : '<span></span>') +
       '<span class="more">View analysis →</span>' +
