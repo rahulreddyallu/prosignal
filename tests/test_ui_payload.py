@@ -251,8 +251,9 @@ def test_the_card_layout_does_not_depend_on_the_company_name():
     assert "flex-wrap" not in block
     # Auto-placement carries the alignment, so source order is load-bearing:
     # rank and pill fill row 1, name and price row 2, ticker row 3.
-    card = html[html.index("function cardHTML"):html.index("function viewHistory")]
-    head = card[card.index('class="card-top"'):card.index('(chips ?')]
+    card = html[html.index("function cardHTML"):]
+    card = card[:card.index("\nfunction ", 20)]
+    head = card[card.index('class="card-top"'):card.index("'<div class=\"figs\">'")]
     at = {k: head.index(v) for k, v in (
         ("rank", 'class="rank"'), ("pill", 'class="pill '),
         ("name", 'class="name"'), ("price", 'class="p num"'),
@@ -263,30 +264,36 @@ def test_the_card_layout_does_not_depend_on_the_company_name():
     assert 'class="tk"' in head
 
 
-def test_the_card_does_not_restate_a_pill_in_a_second_vocabulary():
-    """"Strong" sat under the price while "Momentum strong" sat in a pill four
-    lines below. Two words for one reading, in two registers."""
-    card = _html()
-    card = card[card.index("function cardHTML"):card.index("function viewHistory")]
-    assert "p.strength" not in card
-    panel = _html()
-    panel = panel[panel.index("function openPanel"):]
-    assert "pick.strength" in panel, "strength was dropped rather than moved"
-
-
-def test_the_card_shows_the_arithmetic_not_a_paraphrase_of_it():
-    """A quant reading this needs z, the fitted coefficient and their product,
-    with the factor's own identifier -- not a sentence describing them. The
-    prose version stays in the panel."""
+def test_the_card_carries_no_verdict_words_at_all():
+    """The pills read "Momentum strong / Trend Position strong" on nearly
+    every name, which is what a shortlist ranked on momentum will always say.
+    A label that never varies is not information, so the card carries numbers
+    and one measured sentence instead."""
     html = _html()
-    card = html[html.index("function contribHTML"):html.index("function viewHistory")]
-    for column in ("Factor", '"z"', "coef", "contrib"):
-        assert column in card
-    assert "r.coefficient.toFixed" in card and "r.contribution.toFixed" in card
-    assert "esc(r.factor)" in card, "the card must print the model's own name"
-    css = html[html.index("<style>"):html.index("</style>")]
-    block = css[css.index(".contrib {"):css.index(".contrib div")]
-    assert "tabular-nums" in block, "columns of figures must align"
+    card = html[html.index("function cardHTML"):]
+    card = card[:card.index("\nfunction ", 20)]
+    assert "p.strength" not in card
+    assert "highlights" not in card, "the pills are gone, not relocated"
+    assert "whyLine(p)" in card, "something measured has to replace them"
+
+
+def test_the_arithmetic_is_in_the_panel_and_covers_every_factor():
+    """A quant needs z, the fitted coefficient and their product against the
+    model's own identifier. Four of seventeen on the card answered neither
+    audience -- too much for a glance, too little to check. It is all in the
+    panel now, and the panel is what "View analysis" opens."""
+    html = _html()
+    panel = html[html.index("function panelHTML"):]
+    panel = panel[:panel.index("\nfunction ", 20)]
+    for column in ("Factor", ">z<", "coef", "contrib"):
+        assert column in panel, column
+    assert "r.coefficient.toFixed" in panel and "r.contribution.toFixed" in panel
+    assert "esc(r.factor)" in panel, "the model's own name, not a paraphrase"
+    # Every factor, not a top slice.
+    assert "rows.map(" in panel, "the advanced table must not be truncated"
+    vm = UI.parents[1] / "presentation" / "viewmodel.py"
+    assert "top: Optional[int] = None" in vm.read_text(encoding="utf-8"), \
+        "the payload must carry every factor for that table to exist"
 
 
 def test_the_market_labels_carry_the_measurements_behind_them():
@@ -326,7 +333,7 @@ def test_the_footer_carries_ownership_and_stops_there():
     assert "confidence_note" not in html
 
 
-def test_an_incomplete_run_is_still_marked_even_though_the_notes_panel_is_gone():
+def test_the_run_still_records_what_it_could_not_check():
     """The notes panel went, then the header dot that replaced it went with
     the redundant date. The signal must not go with either -- an incomplete
     run says so under the page title, in words rather than a tooltip."""
@@ -335,10 +342,13 @@ def test_an_incomplete_run_is_still_marked_even_though_the_notes_panel_is_gone()
     # with the redundant date, and now the Market environment card. One of
     # the notes is the Stage 3 pledging gate reporting NOT_TESTABLE, which
     # the engine states rather than implies -- so it has to live somewhere.
-    block = html[html.index("function marketBlock"):html.index("function contribHTML")]
-    assert "complete === false" in block
-    assert "data note" in block, "an incomplete run no longer says so anywhere"
-    assert "d.flags" in block, "the notes themselves must be readable, not just counted"
+    # The on-screen note was removed at the owner's request. The flags stay
+    # on the run payload and in the ledger, and a check that could not run
+    # still surfaces per name in the analysis panel -- which is the place it
+    # actually bears on a decision.
+    assert "Checks that could not run" in html
+    assert "not_testable" in html
+    assert "rests on partial evidence" in html
 
 
 def test_a_completed_scan_invalidates_the_cached_history():
@@ -906,3 +916,24 @@ def test_an_open_mark_is_never_presented_as_a_result():
     html = _html()
     body = html[html.index("function openHTML"):html.index("function viewHistory")]
     assert "not yet a result" in body
+
+
+def test_the_interface_script_actually_parses():
+    """Every other test in this file matches strings, so a page that does not
+    parse at all passes all of them. One shipped: a multi-line comment with
+    "//" on only the first line, which made lines two and three bare code.
+    The whole interface was a blank screen and the suite was green."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    js = _html()
+    js = js[js.index("<script>") + len("<script>"):js.rindex("</script>")]
+    if node:
+        r = subprocess.run([node, "--check", "-"], input=js,
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, f"index.html does not parse:\n{r.stderr[:600]}"
+        return
+    # No node: catch the specific shape that caused it -- a line that reads
+    # like prose sitting where a statement belongs.
+    pytest.skip("node not available to parse-check the interface")

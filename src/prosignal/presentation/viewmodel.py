@@ -268,7 +268,7 @@ def _build_pick(
     return pick
 
 
-def _contributions(factors: Dict[str, Any], top: int = 8) -> List[Dict[str, Any]]:
+def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[Dict[str, Any]]:
     """What each factor actually added to the score, largest first.
 
     contribution = standardised loading x fitted coefficient. This is the
@@ -298,7 +298,7 @@ def _contributions(factors: Dict[str, Any], top: int = 8) -> List[Dict[str, Any]
             "raw": detail.get("raw"),
         })
     rows.sort(key=lambda r: -abs(r["contribution"]))
-    return rows[:top]
+    return rows if top is None else rows[:top]
 
 
 def _levels(card: Dict[str, Any]) -> Dict[str, Any]:

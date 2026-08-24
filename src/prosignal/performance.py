@@ -447,6 +447,12 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
             held = int((f[DATE] > fut.iloc[0][DATE]).sum())
             if held >= max_hold:
                 continue                       # the resolver owns this one
+            # The path between entry and today, not just the endpoints. A
+            # name up 2% that went to +9% and gave it back is not the same
+            # position as one that ground up quietly, and the number alone
+            # cannot tell those apart.
+            path = [float(v) for v in fut["close"].head(max_hold).tolist()
+                    if np.isfinite(v)]
             out.append({
                 "ticker": ticker,
                 "signal_date": it["date"],
@@ -456,6 +462,7 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
                 "unrealised": last_px / entry - 1.0,
                 "sessions_held": held,
                 "sessions_left": max_hold - held,
+                "path": path if len(path) > 1 else [],
             })
 
     out.sort(key=lambda r: r["unrealised"])
