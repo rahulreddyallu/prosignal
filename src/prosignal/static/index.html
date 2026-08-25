@@ -376,6 +376,10 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .adv summary::-webkit-details-marker { display: none; }
 .adv summary::before { content: "\25B8  "; color: var(--ink-3); }
 .adv[open] summary::before { content: "\25BE  "; }
+/* The escape hatch. These tables fit at 375px today -- measured at 327px
+   and 325px -- but a longer factor name or a narrower phone would push a
+   numeric column off the edge with no way to reach it. */
+.tw { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .adv > .tw { margin-top: var(--sp-3); }
 .tech { margin-top: var(--sp-3); display: grid; gap: var(--sp-3); }
 .tr { display: grid; grid-template-columns: 116px minmax(0, 1fr);
