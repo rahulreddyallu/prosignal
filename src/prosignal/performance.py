@@ -32,7 +32,8 @@ import numpy as np
 from .data.types import DATE
 
 __all__ = ["Trade", "performance", "by_ticker", "equity_curve",
-           "open_positions", "dedupe", "overlaps", "calls_for"]
+           "open_positions", "dedupe", "overlaps", "calls_for",
+           "holding_profile"]
 
 
 @dataclass
@@ -546,4 +547,40 @@ def calls_for(ticker: str, outcomes: Sequence[Dict[str, Any]], store: Any = None
         "holding_since_first": hold,
         "best": max((c["net_return"] for c in calls), default=None),
         "worst": min((c["net_return"] for c in calls), default=None),
+    }
+
+
+def holding_profile(outcomes: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """How long positions actually last, from the record rather than config.
+
+    The card showed "15-63 sessions" on every name, which is the configured
+    backstop pair and says nothing about the name it is printed on. Worse, it
+    is wrong: across 716 closed trades the median hold is 2 sessions.
+
+    A per-name estimate cannot come from the target distance, because the
+    target IS defined in ATR units -- stop = 2.5 ATR and target = 1.5 R, so
+    every name's target sits exactly 3.75 ATR away and any first-passage
+    estimate returns the same number for all of them. Measured across a live
+    slate: target/stop was 1.500 on every pick.
+
+    So this reports the distribution the engine has actually produced, split
+    by how positions ended, which is where the variation really is: names
+    that reach their target and names that stop out do not last the same
+    length of time.
+    """
+    rows = [o for o in outcomes if o.get("sessions_held")]
+    if len(rows) < 20:
+        return {"n": len(rows)}
+    held = np.array([int(o["sessions_held"]) for o in rows], dtype=float)
+    by: Dict[str, Any] = {}
+    for o in rows:
+        by.setdefault(str(o.get("exit_reason") or "other"), []).append(
+            int(o["sessions_held"]))
+    return {
+        "n": len(rows),
+        "median": float(np.median(held)),
+        "p10": float(np.percentile(held, 10)),
+        "p90": float(np.percentile(held, 90)),
+        "by_exit": {k: {"n": len(v), "median": float(np.median(v))}
+                    for k, v in sorted(by.items(), key=lambda x: -len(x[1]))},
     }

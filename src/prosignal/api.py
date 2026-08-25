@@ -854,6 +854,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "calibration": _out.calibration(rows),
             "cohort_cutoff": cutoff,
             "recent": _perf.recent_activity(partial),
+            # What holds actually last, from the record. The card's
+            # configured range is identical on every name and off by an
+            # order of magnitude.
+            "holding": _perf.holding_profile(rows),
             "measurement": state,
             "scope": ("period" if window is not None else "all"),
             # Kept apart from every figure above: a mark is not an outcome.

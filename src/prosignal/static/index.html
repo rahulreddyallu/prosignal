@@ -377,6 +377,14 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .adv summary::before { content: "\25B8  "; color: var(--ink-3); }
 .adv[open] summary::before { content: "\25BE  "; }
 .adv > .tw { margin-top: var(--sp-3); }
+.tech { margin-top: var(--sp-3); display: grid; gap: var(--sp-3); }
+.tr { display: grid; grid-template-columns: 116px minmax(0, 1fr);
+      gap: var(--sp-3); align-items: start; font-size: 12px; line-height: 1.55; }
+.tk2 { color: var(--ink-3); font-size: 10.5px; letter-spacing: .04em;
+       text-transform: uppercase; padding-top: 2px; }
+.tv { color: var(--ink-2); overflow-wrap: anywhere; }
+.exits-l { margin: var(--sp-3) 0 0 var(--sp-4); display: grid; gap: 5px;
+           font-size: 12px; line-height: 1.55; color: var(--ink-2); }
 .raw { margin-top: var(--sp-3); padding: var(--sp-3); font-family: var(--mono);
        font-size: 11px; line-height: 1.55; color: var(--ink-2);
        background: var(--surface-sunk); border-radius: var(--r-sm);
@@ -506,8 +514,12 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .panel-head { padding: var(--sp-5); border-bottom: 1px solid var(--line);
               display: flex; gap: var(--sp-4); align-items: flex-start;
               background: var(--surface); }
-.panel-body { overflow-y: auto; padding: var(--sp-5); display: grid;
-              gap: var(--sp-6); }
+/* The close control kept being squeezed by the title beside it. A flex item
+   with a fixed size still shrinks unless it is told not to. */
+.panel-head .iconbtn { flex: 0 0 38px; }
+.panel-head > div { min-width: 0; }
+.panel-body { overflow-y: auto; padding: var(--sp-5) var(--sp-5) var(--sp-6);
+              display: block; }
 .section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
               color: var(--ink-3); font-weight: 550; margin-bottom: var(--sp-3); }
 .prose { font-size: 14.5px; line-height: 1.65; color: var(--ink); }
@@ -1882,6 +1894,19 @@ function marketBlock(v) {
 /* Shared numbers. The card and the panel disagreed about what mattered --
    the card showed four coefficients and no price target, the panel showed
    the target four screens down. Both read from here now. */
+/* What a hold actually lasts, from the record rather than from config.
+   "15-63 sessions" is the configured backstop pair, identical on every name.
+   The engine's own closed trades say median 14, with a 10th-90th spread of
+   2 to 44 -- so the useful number is a typical hold and its spread, not a
+   policy range printed as though it were a forecast. */
+function holdText() {
+  const h = (state.perf && state.perf.holding) || null;
+  if (!h || !h.n || h.median == null) return null;
+  return { main: "~" + Math.round(h.median),
+           sub: "sessions \u00b7 " + Math.round(h.p10) + "\u2013" +
+                Math.round(h.p90) + " typical" };
+}
+
 function upside(p) {
   const t = (p.levels || {}).target_1, c = p.price;
   if (!t || !c) return null;
@@ -1935,8 +1960,13 @@ function cardHTML(p) {
           "v-pos") +
       fig("Stop", money(L.stop),
           dn != null ? (dn * 100).toFixed(1) + "%" : "", "v-neg") +
-      fig("Hold", esc((p.holding_period || "\u2014").replace(" sessions", "")),
-          "sessions") +
+      (function () {
+        const h = holdText();
+        return h ? fig("Hold", h.main, h.sub)
+                 : fig("Hold",
+                       esc((p.holding_period || "\u2014").replace(" sessions", "")),
+                       "sessions");
+      })() +
     '</div>' +
     '<div class="why">' + whyLine(p) + '</div>' +
     '<div class="card-foot"><span></span>' +
@@ -2293,6 +2323,39 @@ function row(k, val) {
          '<span class="v">' + esc(val == null ? "—" : val) + '</span></div>';
 }
 
+/* `technical` is an object, not a string. esc()-ing it printed
+   "[object Object]" into the advanced block. These are its fields, each
+   rendered as what it actually is. */
+function techHTML(t) {
+  if (!t || typeof t !== "object") return "";
+  const line = (k, v) => v == null || v === "" ? "" :
+    '<div class="tr"><span class="tk2">' + k + '</span>' +
+    '<span class="tv">' + esc(String(v)) + '</span></div>';
+  const list = (k, arr) => !arr || !arr.length ? "" :
+    '<div class="tr"><span class="tk2">' + k + '</span><span class="tv">' +
+    arr.map((x) => esc(String(x))).join("<br>") + '</span></div>';
+  return '<div class="tech">' +
+    line("Score", t.score != null ? Number(t.score).toFixed(3) : null) +
+    line("Percentile", t.percentile != null ? Number(t.percentile).toFixed(1) : null) +
+    line("Rank shown", t.display_rank) +
+    list("Supporting", t.why_raw) +
+    list("Against", t.against_raw) +
+    list("Could not be tested", t.not_testable) +
+    list("Cleared", t.cleared) +
+    line("Warning", t.warning) +
+    line("Research basis", t.research_basis) +
+  '</div>';
+}
+
+/* The exit ladder is an ordered list, so it is rendered as one rather than
+   as a wall of preformatted text. */
+function exitsHTML(exits) {
+  return '<ol class="exits-l">' + exits.map((e) => {
+    const t = String(e).replace(/^\d+\.\s*/, "");
+    return '<li>' + esc(t) + '</li>';
+  }).join("") + '</ol>';
+}
+
 function panelHTML(p) {
   const L = p.levels || {};
   const up = upside(p), dn = downside(p);
@@ -2307,7 +2370,9 @@ function panelHTML(p) {
 
   const key =
     '<div class="keys">' +
-      num("Price", money(p.price), esc(p.holding_period || "")) +
+      num("Price", money(p.price),
+          (function () { const h = holdText();
+            return h ? h.main + " " + h.sub : esc(p.holding_period || ""); })()) +
       num("Target", money(L.target_1),
           up != null ? (up > 0 ? "+" : "") + (up * 100).toFixed(1) + "%" : "",
           "v-pos") +
@@ -2345,8 +2410,8 @@ function panelHTML(p) {
 
   const drivers = rows.length
     ? '<h4 class="ph">What moved the score</h4>' +
-      '<div class="tw"><table class="ftab"><thead><tr><th>Factor</th>' +
-      '<th class="num">sd vs market</th><th class="num">contribution</th>' +
+      '<div class="tw"><table class="ftab drv"><thead><tr><th>Factor</th>' +
+      '<th class="num">sd</th><th class="num">adds</th>' +
       '</tr></thead><tbody>' + top + '</tbody></table></div>'
     : "";
 
@@ -2364,9 +2429,8 @@ function panelHTML(p) {
       '<div class="tw"><table class="ftab"><thead><tr><th>Factor</th>' +
       '<th class="num">z</th><th class="num">coef</th>' +
       '<th class="num">contrib</th></tr></thead><tbody>' + all + '</tbody></table></div>' +
-      (p.technical ? '<pre class="raw">' + esc(p.technical) + '</pre>' : "") +
-      (L.exits && L.exits.length
-        ? '<pre class="raw">' + esc(L.exits.join("\n")) + '</pre>' : "") +
+      techHTML(p.technical) +
+      (L.exits && L.exits.length ? exitsHTML(L.exits) : "") +
     '</details>';
 
   return key + gate + untested + drivers + advanced;
@@ -2526,6 +2590,10 @@ async function boot() {
   // only ever fetched the Today view, so the restored tab would render its
   // skeleton and wait for a load nobody had started.
   if (state.tab === "history") loadHistory();
+  // Today's cards quote the realised holding time, which lives on the
+  // performance payload. Without this the first view of Today falls back to
+  // the configured range until History has been opened once.
+  else if (state.perf === undefined) loadPerformance();
   try {
     await checkReady();
     if (state.jobId) startMonitor();       // a build survives the reload
