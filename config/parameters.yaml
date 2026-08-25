@@ -456,7 +456,17 @@ feeds:
   delivery_data:     { max_age_sessions: 2, required: false }
   corporate_actions: { max_age_sessions: 5, required: false }
   earnings_calendar: { max_age_sessions: 10, required: false }
-  fundamentals:      { max_age_sessions: 130, required: false }
+  # RETIRED 2026-08-25. The NSE Ind-AS filings feed stopped serving on
+  # 2025-03-11 and its columns had gone constant before that. The ranking
+  # model does not read it: stage4_core_score takes valuation from
+  # `statements` (yfinance) precisely because this block was occupying five
+  # of the model's columns while contributing nothing.
+  #
+  # It survives as an input to the composite fallback, which is itself gated
+  # off and was measured at t = -0.11. Marked retired rather than deleted so
+  # the staleness check stops flagging a feed nobody is waiting for, and so
+  # the reason is on the record rather than in a commit message.
+  fundamentals:      { max_age_sessions: 99999, required: false }
   pledging:          { max_age_sessions: 130, required: false }
   regulatory_events: { max_age_sessions: 999, required: false }
 
