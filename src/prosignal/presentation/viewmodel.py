@@ -13,9 +13,12 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Sequence
 
+from ..core.logging import get_logger
 from .evidence import build_evidence, category_summary, confirmation_count
 from .narrative import build_narrative
 from .selection import BUY, SLOTS, WATCH, select_slate
+
+log = get_logger(__name__)
 
 #: Engine vocabulary -> the words the interface uses. The funnel keys are the
 #: engine's own and would otherwise reach the screen verbatim.
@@ -129,7 +132,12 @@ def build_view(
     watchlist = list(payload.get("watchlist") or [])
 
     flags = list(payload.get("data_quality_flags") or [])
-    slate = select_slate(recommendations, watchlist, slots=slots)
+    # The run decided the screen and recorded it. Rendering it is all that is
+    # left to do here. Recomputing it would reintroduce exactly the divergence
+    # this field exists to close -- a reader cannot see the previous screen, so
+    # anything it computes is a fresh top-N with no memory, whatever the engine
+    # actually held.
+    slate = _recorded_slate(payload, recommendations, watchlist, slots=slots)
 
     # Only the slate is shipped. The full ranked watchlist had its own screen
     # and no longer does -- serialising forty-odd extra names that nothing
@@ -153,6 +161,12 @@ def build_view(
             "withheld": slate.withheld_reason,
         },
         "picks": picks,
+        "departures": list(payload.get("slate_departures") or []),
+        "new_entries_blocked": payload.get("new_entries_blocked"),
+        # Held names the run could not evaluate: suspended, dropped from the
+        # universe, or delisted. This is the risk the screen was least able to
+        # show, because the position simply stopped being mentioned.
+        "open_position_alerts": _position_alerts(payload),
         "scorer": _scorer_used(recommendations + watchlist),
         "concentration": _concentration(picks),
         "journey": _journey(payload.get("funnel") or {}, slate),
@@ -160,6 +174,112 @@ def build_view(
         "disclaimer": payload.get("disclaimer"),
         "confidence_note": payload.get("probability_note"),
     }
+
+
+def _recorded_slate(payload, recommendations, watchlist, *, slots):
+    """Render the slate the run recorded; compute one only if it did not.
+
+    The fallback is for payloads produced before the slate became part of the
+    run record. It is deliberately the old stateless top-N -- there is no
+    previous screen available at read time, so pretending to apply the hold
+    band here would produce a different list every time it was called and
+    label it "held".
+    """
+    from .selection import Slate
+
+    recorded = list(payload.get("slate") or [])
+    if not recorded:
+        return select_slate(recommendations, watchlist, slots=slots)
+
+    by_ticker = {}
+    for card in list(recommendations) + list(watchlist):
+        by_ticker.setdefault(str(card.get("ticker")), card)
+
+    picks = []
+    n_buy = n_watch = carried = 0
+    for entry in recorded:
+        ticker = str(entry.get("ticker") or "")
+        card = by_ticker.get(ticker)
+        if card is None:
+            # The run named a row its own payload does not carry. Dropping it
+            # is right -- there is nothing to render -- but it is a contract
+            # breach, not a normal state, so it must not pass unremarked.
+            log.warning("slate names a ticker absent from the payload",
+                        extra={"ticker": ticker})
+            continue
+        row = dict(card)
+        row["slate_position"] = entry.get("position")
+        row["status"] = entry.get("status") or WATCH
+        row["carried"] = bool(entry.get("carried"))
+        row["slate_reason"] = entry.get("reason") or ""
+        row["shown_since"] = entry.get("shown_since")
+        if row["status"] == BUY:
+            n_buy += 1
+        else:
+            n_watch += 1
+        carried += 1 if row["carried"] else 0
+        picks.append(row)
+
+    return Slate(
+        picks=picks, buy_count=n_buy, watch_count=n_watch,
+        ranked_buys=list(recommendations), ranked_watch=list(watchlist),
+        selection_note=_recorded_note(n_buy, n_watch, carried, payload),
+        carried_count=carried,
+    )
+
+
+def _recorded_note(n_buy: int, n_watch: int, carried: int, payload) -> str:
+    total = n_buy + n_watch
+    if not total:
+        return "No names qualified or came close enough to monitor."
+    parts = []
+    if n_buy:
+        parts.append(f"{n_buy} qualifying {'setup' if n_buy == 1 else 'setups'}")
+    if n_watch:
+        parts.append(f"{n_watch} closest {'candidate' if n_watch == 1 else 'candidates'}")
+    note = " and ".join(parts) + "."
+    if carried:
+        note += (f" {carried} of {total} {'was' if carried == 1 else 'were'} held "
+                 f"from the previous run rather than picked again today.")
+    departures = list(payload.get("slate_departures") or [])
+    if departures:
+        note += (f" {len(departures)} left the screen: "
+                 + "; ".join(f"{d.get('ticker')} -- {d.get('reason')}"
+                             for d in departures) + ".")
+    return note
+
+
+#: Engine vocabulary -> what the reader needs to do about it.
+_EVENT_LABEL = {
+    "index_removal": "No longer in the tradeable universe",
+    "trading_suspension": "Not trading",
+    "delisting": "Delisted",
+}
+
+
+def _position_alerts(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Open positions the run could not evaluate, in the reader's words.
+
+    A name in this list is one the engine still considers held but produced no
+    card for. It is the only place the screen can say so: the position is not
+    among the picks, so without this it is invisible exactly when it matters.
+    """
+    alerts: List[Dict[str, Any]] = []
+    for directive in payload.get("position_directives") or []:
+        if not isinstance(directive, dict):
+            continue
+        event = str(directive.get("event") or "")
+        if event == "none":
+            continue
+        alerts.append({
+            "ticker": directive.get("ticker"),
+            "label": _EVENT_LABEL.get(event, event.replace("_", " ").capitalize()),
+            "exit_required": directive.get("action") == "force_exit",
+            "detail": directive.get("reason") or "",
+            "last_price": directive.get("last_tradeable_price"),
+            "last_date": directive.get("last_tradeable_date"),
+        })
+    return alerts
 
 
 def _concentration(picks: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -227,6 +347,14 @@ def _build_pick(
         "rank": card.get("model_rank"),
         "confirmation": {"agree": agree, "judged": judged},
         "highlights": category_summary(categories)[:4],
+        # Whether this row is a new idea or a position the engine has been
+        # carrying. The screen showed neither, so a name that had been held for
+        # six sessions and one first seen this morning were indistinguishable,
+        # and the "hold ~14 sessions" figure on the card had nothing to sit
+        # against.
+        "carried": bool(card.get("carried")),
+        "shown_since": card.get("shown_since"),
+        "why_shown": card.get("slate_reason") or "",
     }
     narrative = build_narrative(
         card, categories, status=status,

@@ -14,7 +14,7 @@ Every rejection is counted so the NO-TRADE output can show the funnel.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -57,10 +57,14 @@ def run(
     closes: pd.DataFrame,
     config,
     company_names: Optional[Dict[str, str]] = None,
+    held: Optional[Sequence[str]] = None,
 ) -> Tuple[List[Recommendation], List[Recommendation], Optional[NoTradeReport]]:
     p = config.params
     cfg = p.stage8_final_signal
     names = company_names or {}
+    # The book Stage 6 was asked to maintain. Everything below distinguishes
+    # adding a position from keeping one, and the two obey different rules.
+    open_book = {str(t) for t in (held or ())}
 
     gate_counts: Dict[str, int] = {
         "universe_considered": eligibility.universe_considered,
@@ -74,17 +78,29 @@ def run(
     }
 
     # -- market-wide blocks -------------------------------------------------
+    # These stop NEW entries. They do NOT close the book, and the difference is
+    # the whole of this stage's contract with Stage 6.
+    #
+    # Returning an empty `buys` list here used to be how a risk-off regime was
+    # expressed. But `buys` IS the book: the ledger records it as
+    # `signals_generated`, and the next run rebuilds Stage 6's `held` set from
+    # that record. So one blocked session did not pause the strategy, it
+    # liquidated it -- every open position was dropped without an exit, the
+    # hysteresis state was destroyed, and the run after the block started from
+    # an empty book. Measured on the recorded ledger: 10 of 63 runs blocked,
+    # and book turnover of 89.3% against a strategy validated at a median hold
+    # far longer than one session.
+    #
+    # A regime that forbids opening positions says nothing about closing them.
+    # What closes a position is Stage 6's exit band, and only that.
+    blocked_reason: Optional[str] = None
     if not regime.allow_new_entries:
-        return [], [], _no_trade(
+        blocked_reason = (
             f"Market regime '{regime.regime_bucket}' blocks new entries. "
-            f"{regime.block_reason or ''}".strip(),
-            scores, gate_counts, cfg,
-        )
-    if defense.market_halt:
-        return [], [], _no_trade(
-            f"Market-wide defense halt: {defense.market_halt_reason}",
-            scores, gate_counts, cfg,
-        )
+            f"{regime.block_reason or ''}"
+        ).strip()
+    elif defense.market_halt:
+        blocked_reason = f"Market-wide defense halt: {defense.market_halt_reason}"
 
     min_score = fv(cfg.scarcity.min_composite_score)
     min_pct = fv(cfg.scarcity.min_universe_percentile)
@@ -100,7 +116,6 @@ def run(
     watch: List[Recommendation] = []
 
     sector_used: Dict[str, int] = {}
-    sector_unknown: List[str] = []
     max_per_sector = iv(cfg.portfolio.max_signals_per_sector)
     max_signals = iv(cfg.portfolio.max_signals_per_run)
     max_corr = fv(cfg.portfolio.max_pairwise_correlation)
@@ -119,56 +134,154 @@ def run(
         return res.score_after if res is not None else float("-inf")
 
     survivors = sorted(survivors, key=_final_of, reverse=True)
+    #: Display position among the defended set. Fixed here from the single
+    #: score ordering so that it does not depend on which pass admits a name.
+    positions = {sym: i for i, sym in enumerate(survivors, start=1)}
 
-    for position, sym in enumerate(survivors, start=1):
+    def _build(sym: str) -> Optional[Recommendation]:
+        score = by_ticker.get(sym)
+        decision = entries.decisions.get(sym)
+        if score is None or decision is None:
+            return None
+        defense_res = defense.per_stock[sym]
+        return _card(sym, names.get(sym), score, defense_res, decision,
+                     plans.get(sym), regime, eligibility, scores,
+                     defense_res.score_after, cfg, position=positions[sym])
+
+    # -- the score gate, applied once, in score order ------------------------
+    # Score gate first, then the entry trigger. Counting the trigger before
+    # the score meant the two lines measured different populations and the
+    # funnel ran backwards: triggered=1 followed by passed_score=8. Counted
+    # in decision order it is monotonic and reads as what it is.
+    # These read as two independent gates and are one. percentile is
+    # rank_to_unit_interval(score) * 100, so min_composite_score = 0.60 is
+    # arithmetically percentile >= 60 and is already implied by
+    # min_universe_percentile = 90. Measured over 27,478 scored names in the
+    # holdout: 8,244 pass the score gate and fail the percentile gate, and
+    # zero pass the percentile gate and fail the score gate. Both are kept
+    # -- a Stage 5 penalty lands on final_score and can pull it below 0.60
+    # while the pre-defence percentile stands -- but only one of them
+    # selects, and tuning the other has no effect.
+    qualified: List[str] = []
+    for sym in survivors:
         score = by_ticker.get(sym)
         decision = entries.decisions.get(sym)
         if score is None or decision is None:
             continue
-
-        defense_res = defense.per_stock[sym]
-        final_score = defense_res.score_after
-
-        # Score gate first, then the entry trigger. Counting the trigger before
-        # the score meant the two lines measured different populations and the
-        # funnel ran backwards: triggered=1 followed by passed_score=8. Counted
-        # in decision order it is monotonic and reads as what it is.
-        # These read as two independent gates and are one. percentile is
-        # rank_to_unit_interval(score) * 100, so min_composite_score = 0.60 is
-        # arithmetically percentile >= 60 and is already implied by
-        # min_universe_percentile = 90. Measured over 27,478 scored names in the
-        # holdout: 8,244 pass the score gate and fail the percentile gate, and
-        # zero pass the percentile gate and fail the score gate. Both are kept
-        # -- a Stage 5 penalty lands on final_score and can pull it below 0.60
-        # while the pre-defence percentile stands -- but only one of them
-        # selects, and tuning the other has no effect.
-        if final_score < min_score or score.percentile < min_pct:
+        if defense.per_stock[sym].score_after < min_score or score.percentile < min_pct:
             continue
         gate_counts["passed_score_threshold"] += 1
-
+        qualified.append(sym)
         if decision.status is EntryStatus.TRIGGERED:
             gate_counts["triggered"] += 1
 
-        plan = plans.get(sym)
-        rec = _card(sym, names.get(sym), score, defense_res, decision, plan,
-                    regime, eligibility, scores, final_score, cfg,
-                    position=position)
+    def _accept(rec: Recommendation, sym: str, sector: str) -> None:
+        gate_counts["passed_portfolio_limits"] += 1
+        sector_used[sector] = sector_used.get(sector, 0) + 1
+        accepted_symbols.append(sym)
+        accepted.append(by_ticker[sym])
+        buys.append(rec)
 
-        if decision.status is not EntryStatus.TRIGGERED:
-            watch.append(rec)
-            continue
-
-        # portfolio limits apply only to actual BUYs
+    def _sector_of(sym: str) -> str:
         # An unknown sector is not evidence that two names share one. Pooling
         # every unclassified name into a single "Unknown" bucket would cap the
         # whole run at max_per_sector for a reason that is a gap in reference
         # data, not concentration. Each unclassified name gets its own key; the
         # pairwise correlation cap below still applies to all of them, and it is
         # computed from prices, so it never depends on a membership file.
-        sector = score.sector or ""
+        sector = by_ticker[sym].sector or ""
         if not sector or sector == "Unknown":
-            sector = f"Unclassified:{sym}"
-            sector_unknown.append(sym)
+            return f"Unclassified:{sym}"
+        return sector
+
+    # ======================================================================
+    # PASS 1 -- the existing book.
+    #
+    # Every constraint below this stage owns is an ENTRY constraint: the sector
+    # cap, the pairwise correlation cap and max_signals_per_run all answer "may
+    # this position be opened?". They were being applied to names the engine
+    # had already opened, in score order, as though each session were the first.
+    # A held name that drifted below a fresher one in its sector was demoted to
+    # WATCH -- and because the ledger's `signals_generated` is the only record
+    # of the book, that demotion deleted the position with no exit recorded and
+    # no way for the next run to know it had ever existed.
+    #
+    # Measured on the recorded ledger, restricted to ADJACENT sessions so that
+    # backfill runs months apart are not counted as a position being held: of
+    # 54 held-name transitions only 12 stayed in the book, and 19 were demoted
+    # this way. Stage 6's hysteresis was correct and this stage threw it away.
+    #
+    # What closes a position is Stage 6's exit band. If Stage 6 still admits the
+    # name, it is held here, and it seeds the constraint state so that new
+    # entries are measured against the book that actually exists.
+    # ======================================================================
+    # Every name pass 1 disposes of, whether it accepted it or set it aside.
+    # Tracking only the accepted ones let a held name the cap dropped fall
+    # through to pass 2 and be appended to `watch` a second time.
+    settled: set = set()
+    for sym in qualified:
+        if sym not in open_book:
+            continue
+        if entries.decisions[sym].status is not EntryStatus.TRIGGERED:
+            # Stage 6 closed it: the rank left the exit band. It falls through
+            # to pass 2 and is reported as monitored, which is what it now is.
+            continue
+        rec = _build(sym)
+        if rec is None:
+            continue
+        if len(buys) >= max_signals:
+            # Only reachable when max_signals_per_run is lowered below a book
+            # that is already larger -- in steady state the entry band bounds
+            # the book at or under this cap, so this never fires. When it does,
+            # the book shrinks from the bottom and says so, rather than growing
+            # without limit or being cut by whichever name happened to sort
+            # last.
+            rec.decision = Decision.WATCHLIST
+            rec.why_this_signal_exists.append(
+                f"Closed: the book is capped at {max_signals} and this was the "
+                f"lowest-scoring position held. The cap was reduced below the "
+                f"size of the existing book."
+            )
+            watch.append(rec)
+            settled.add(sym)
+            continue
+        rec.why_this_signal_exists.append(
+            f"Held from a previous run. {entries.decisions[sym].reason or ''} "
+            f"The sector, correlation and book-size limits govern what may be "
+            f"opened; they do not close a position that is already open."
+            .strip()
+        )
+        _accept(rec, sym, _sector_of(sym))
+        settled.add(sym)
+
+    # ======================================================================
+    # PASS 2 -- new entries, measured against the book above.
+    # ======================================================================
+    for sym in qualified:
+        if sym in settled:
+            continue
+        rec = _build(sym)
+        if rec is None:
+            continue
+        decision = entries.decisions[sym]
+        score = by_ticker[sym]
+
+        if decision.status is not EntryStatus.TRIGGERED:
+            rec.decision = Decision.WATCHLIST
+            watch.append(rec)
+            continue
+
+        if blocked_reason is not None:
+            rec.decision = Decision.WATCHLIST
+            rec.why_this_signal_exists.append(
+                f"Not opened: {blocked_reason} Positions already held are "
+                f"unaffected -- what closes one is the Stage 6 exit band."
+            )
+            watch.append(rec)
+            continue
+
+        # portfolio limits apply only to actual BUYs
+        sector = _sector_of(sym)
         if sector_used.get(sector, 0) >= max_per_sector:
             rec.decision = Decision.WATCHLIST
             rec.why_this_signal_exists.append(
@@ -224,15 +337,37 @@ def run(
             watch.append(rec)
             continue
 
-        gate_counts["passed_portfolio_limits"] += 1
-        sector_used[sector] = sector_used.get(sector, 0) + 1
-        accepted_symbols.append(sym)
-        accepted.append(score)
-        buys.append(rec)
+        _accept(rec, sym, sector)
+
+
+    # The funnel's last line. It used to be added by the pipeline only on the
+    # path where no_trade was absent, so a run that reported a block carried a
+    # funnel that stopped one step short -- and a blocked regime can now hold a
+    # live book, which makes that the exact case where the count matters.
+    gate_counts["buys"] = len(buys)
 
     if buys:
-        log.info("stage 8 complete", extra={"buys": len(buys), "watch": len(watch)})
+        log.info("stage 8 complete",
+                 extra={"buys": len(buys), "watch": len(watch),
+                        "held": len(open_book & set(accepted_symbols)),
+                        "blocked": blocked_reason is not None})
+        # A live book with new entries blocked is not NO TRADE -- it is a book
+        # that is not being added to. Saying "no trade" over five open positions
+        # would be false, and saying nothing would hide the block.
+        if blocked_reason is not None:
+            return buys, watch, _no_trade(
+                f"{blocked_reason} No new positions were opened. The "
+                f"{len(buys)} position(s) already held are unchanged: what "
+                f"closes one is the Stage 6 exit band, not the regime.",
+                scores, gate_counts, cfg, defense=defense, entries=entries,
+            )
         return buys, watch, None
+
+    if blocked_reason is not None:
+        return [], watch, _no_trade(
+            f"{blocked_reason} No position was open to carry.",
+            scores, gate_counts, cfg, defense=defense, entries=entries,
+        )
 
     return [], watch, _no_trade(
         "No candidate cleared every gate. This is the designed outcome when the "

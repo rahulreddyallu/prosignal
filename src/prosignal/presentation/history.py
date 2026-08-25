@@ -44,6 +44,10 @@ class Day:
     #: this since October 2023, which is why past days can be followed up
     #: without having recorded anything new for the purpose.
     detail: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: The screen that run actually produced, as it recorded it. Empty for runs
+    #: recorded before the slate was part of the record; `_slate` falls back for
+    #: those and says so rather than presenting a guess as history.
+    shown: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def buy_count(self) -> int:
@@ -104,6 +108,7 @@ def load_days(records: Iterable[Any], *, limit: int = 30,
             detail=detail,
             buys=[str(t) for t in (row.get("signals_generated") or [])],
             watch=[str(t) for t in (row.get("watchlist_generated") or [])],
+            shown=[e for e in (row.get("slate_shown") or []) if isinstance(e, dict)],
             regime=_regime_label(regime),
             allows_new_positions=bool(regime.get("allow_new_entries", True)),
             universe=gates.get("universe_considered"),
@@ -157,11 +162,36 @@ def changes(today: Day, previous: Optional[Day], *, slots: int = 5) -> Dict[str,
 
 
 def _slate(day: Day, slots: int) -> Dict[str, str]:
-    """Reconstruct what that day's screen showed: buys first, then near misses."""
-    out: Dict[str, str] = {}
-    for ticker in day.buys[:slots]:
+    """What that day's screen showed.
+
+    Read from the run's own record where it exists. It used to be reconstructed
+    here from `signals_generated` in the order Stage 8 emitted them, while the
+    live screen sorted the same names by model rank and applied a hold band --
+    so the history page and the screen disagreed about a past run, and no
+    number in either could be checked against the other.
+
+    The reconstruction survives for rows recorded before the slate was part of
+    the record. It is the closest available statement about those days, not an
+    exact one, and it is ordered by model rank where the row carries it so that
+    it matches what the screen would have done with the same names.
+    """
+    if day.shown:
+        out: Dict[str, str] = {}
+        for entry in sorted(day.shown, key=lambda e: e.get("position") or 0):
+            ticker = str(entry.get("ticker") or "")
+            if ticker:
+                out[ticker] = str(entry.get("status") or WATCH)
+        return out
+
+    def _rank(ticker: str) -> float:
+        entry = day.detail.get(ticker) or {}
+        rank = entry.get("model_rank")
+        return float(rank) if isinstance(rank, (int, float)) else float("inf")
+
+    out = {}
+    for ticker in sorted(day.buys, key=_rank)[:slots]:
         out[ticker] = BUY
-    for ticker in day.watch:
+    for ticker in sorted(day.watch, key=_rank):
         if len(out) >= slots:
             break
         if ticker not in out:

@@ -45,6 +45,19 @@ MODEL_SOURCES: List[str] = [
     "stages/stage6_entry.py",
     "stages/stage7_risk.py",
     "stages/stage8_final_signal.py",
+    # These two decide what the engine HOLDS and what it SHOWS, which the
+    # forward test's secondary criterion measures directly -- it is a pooled
+    # rank IC "of the daily shortlist". They sit outside the stages, so a
+    # change to either altered the tested object while leaving both the config
+    # hash and this fingerprint untouched.
+    #
+    # This is not the interface. `presentation/viewmodel.py` and the static
+    # page are deliberately still absent: they render the decision and cannot
+    # change it. `selection.py` chooses which names are on the list and
+    # `positions.py` decides whether a position survives an event, and both of
+    # those are decisions.
+    "presentation/selection.py",
+    "positions.py",
 ]
 
 #: Training depth is bucketed rather than exact. A store gains a session a

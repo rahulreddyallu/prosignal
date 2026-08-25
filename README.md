@@ -367,17 +367,46 @@ Corrected at portfolio level, 2.5× is near-optimal and was left unchanged.
 ### Presentation — the slate of five
 
 Not a pipeline stage; it curates the engine's output without touching the
-criteria.
+criteria. The slate is decided by the **run** and recorded with it, so the live
+screen, the History page and the ledger all render one list rather than three
+reconstructions of it.
 
-- Buys fill first, in **model-rank** order
-- Remainder fills from the ranked near-misses
+- A name already on the screen **keeps its slot while its model rank stays
+  inside `exit_rank`** — the same band Stage 6 admits on
+- Only the slots it does not hold are filled: buys first, in **model-rank**
+  order, then the ranked near-misses
 - **It cannot manufacture a fifth.** 3 buys + 1 near-miss returns **4**, and
   says why
+- Every departure is recorded with its reason
 
-Real history confirms this: **2026-08-14 had two candidates in the entire
-market and the slate showed two.**
+Real history confirms the last point: **2026-08-14 had two candidates in the
+entire market and the slate showed two.**
+
+**Why the hold band is on the screen too.** Without it the slate was a fresh
+top-5 snapshot with no memory of the previous session, while the strategy
+underneath it was patient. Measured on the recorded ledger: mean top-5 turnover
+**74.9%**, median **80%**, and the median number of sessions a name survived on
+the screen was **one** — under a card quoting a hold of roughly fourteen. The
+displayed list and the validated strategy were two different products.
 
 `presentation/selection.py`
+
+### What holds a position open
+
+Three separate mechanisms had to agree before the book could actually be
+patient, and none of them did.
+
+| | Was | Is |
+|---|---|---|
+| Stage 8 entry caps | Sector, correlation and book-size caps applied to held names in score order, demoting them to WATCH — which deleted the position, since `signals_generated` is the only record of the book | Applied to **new entries only**, measured against the book that exists |
+| Regime block | Returned an empty book, which did not pause the strategy but liquidated it | Stops new entries; the book is untouched. What closes a position is the exit band |
+| A held name that fell out of the universe | Stopped appearing; the position left the book by omission with no exit recorded | `positions.review_open_position` decides: hold-and-flag a reconstitution or suspension, force an exit on a delisting, and say so on the screen |
+
+Measured on the recorded ledger over adjacent sessions, of 54 held-name
+transitions only **12 stayed in the book**: 19 were demoted by an entry cap and
+23 left the payload entirely.
+
+`stages/stage8_final_signal.py`, `positions.py`
 
 ---
 
@@ -715,6 +744,7 @@ a run scored on a half-updated store does not.
 |---|---|---|
 | Position (`1 of 5`) | Rank | Place in today's shortlist |
 | Status | Decision | `BUY` admitted; `WATCH` ranked but not admitted |
+| `Held N sessions` | Derived | The name kept its slot under the exit band rather than being picked again |
 | Price | Raw | Decision-date close |
 | Factor / z / coef / contrib | Derived | z-score, fitted coefficient, product |
 | Evidence categories | Derived | Weighted by how much each factor moves the score |

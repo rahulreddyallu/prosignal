@@ -57,6 +57,11 @@ __all__ = ["run_analysis", "AnalysisRun", "PipelineBlocked"]
 
 log = get_logger(__name__)
 
+#: How far back the open-position review needs to see to tell a quiet name
+#: from a delisted one. positions.DELISTING_SESSIONS is 30; the margin
+#: covers the gap itself plus enough prior history to find the last print.
+DELISTING_LOOKBACK_SESSIONS = 90
+
 #: Ordered stage labels the UI shows as progress.
 STAGE_LABELS = [
     "Loading market data",
@@ -211,7 +216,13 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # what the previous run committed to. The engine holds no live position
     # state -- the ledger is the record of the open book.
     ranks = {s.ticker: s.rank for s in scores.ranked_scores}
-    open_book = Ledger(config.paths.ledger).open_book(before=resolved)
+    # One read. Both the open book and the previous screen come out of the same
+    # row, and this file grows without bound -- scanning it twice per run for
+    # two fields of one record was waste.
+    ledger = Ledger(config.paths.ledger)
+    previous = ledger.previous_run(before=resolved)
+    open_book = list(previous.get("signals_generated") or []) if previous else []
+    previous_slate = list(previous.get("slate_shown") or []) if previous else []
     entries = stage6_entry.run(defended, frames, config, resolved,
                                ranks=ranks, held=open_book)
     timings[stage6_entry.STAGE_NAME] = t()
@@ -254,8 +265,40 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         closes=closes,
         config=config,
         company_names=dict(universe.company_names),
+        # Stage 8 needs the same book Stage 6 got. Its sector, correlation and
+        # book-size limits are ENTRY limits; without knowing what is already
+        # held it applied them to open positions and evicted them, which is how
+        # Stage 6's hysteresis was being undone one session after it worked.
+        held=open_book,
     )
     timings[stage8_final_signal.STAGE_NAME] = t()
+
+    # ---- open positions the run never reached -----------------------------
+    # A held name that fails eligibility, fails a data-quality check or leaves
+    # the universe never reaches Stage 8 at all. It simply stopped appearing,
+    # the next run rebuilt the book without it, and the position left with no
+    # recorded exit -- measured on the recorded ledger, that is how 23 of 54
+    # held-name transitions on adjacent sessions ended.
+    #
+    # `positions.review_open_position` was written for exactly this, with the
+    # rules and the tests to go with it, and nothing in the engine had ever
+    # called it. It is called here.
+    directives = _review_open_positions(
+        open_book, buys, watch, store, universe, calendar, resolved
+    )
+
+    # ---- the slate --------------------------------------------------------
+    # The screen is decided HERE, by the run, and recorded with it. It used to
+    # be recomputed by the presentation layer on every request from a payload
+    # with no memory of the previous screen, which made a stable list
+    # impossible and let the live view, the history page and the outcome record
+    # each derive a different list from the same run.
+    admission = config.params.stage6_entry.admission
+    slate_entries, slate_departures = _build_slate(
+        buys, watch, previous_slate,
+        exit_rank=int(v(admission.exit_rank)),
+        as_of=resolved,
+    )
 
     flags = list(quality.market_wide_soft_flags)
     if quality.failed_symbols:
@@ -275,6 +318,13 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         recommendations=buys,
         watchlist=watch,
         no_trade=no_trade,
+        slate=slate_entries,
+        slate_departures=slate_departures,
+        position_directives=directives,
+        new_entries_blocked=(
+            None if regime.allow_new_entries and not defense.market_halt
+            else (no_trade.reason if no_trade else None)
+        ),
         data_quality_flags=flags,
         manifest=manifest,
         stage_timings_ms={k: round(v, 1) for k, v in timings.items()},
@@ -312,6 +362,122 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
 
 
 # =============================================================================
+def _build_slate(buys, watch, previous_slate, *, exit_rank: int, as_of: dt.date):
+    """Decide the screen for this run, carrying the previous one where the band allows.
+
+    Returns the ordered slate and the departures. The selection rule itself
+    lives in `presentation.selection` so that there is exactly one of it; what
+    happens here is the part only the run can do -- supplying the previous
+    screen and stamping how long each name has held its slot.
+    """
+    from .core.contracts import SlateEntry
+    from .presentation.selection import select_slate
+
+    def _card(rec) -> Dict[str, object]:
+        return {
+            "ticker": rec.ticker,
+            "model_rank": rec.model_rank,
+            "percentile": rec.universe_percentile,
+            "score": rec.composite_score,
+        }
+
+    held_tickers = [str(e.get("ticker")) for e in previous_slate if e.get("ticker")]
+    # When a name is carried, the session it entered on carries with it. That is
+    # what makes dwell readable straight off the record instead of needing a
+    # walk back through the ledger to reconstruct it.
+    since = {
+        str(e.get("ticker")): e.get("shown_since")
+        for e in previous_slate if e.get("ticker")
+    }
+
+    slate = select_slate(
+        [_card(r) for r in buys],
+        [_card(r) for r in watch],
+        held_slate=held_tickers,
+        exit_rank=exit_rank,
+    )
+
+    entries: List = []
+    for pick in slate.picks:
+        ticker = str(pick["ticker"])
+        first = since.get(ticker) if pick.get("carried") else None
+        if isinstance(first, str):
+            try:
+                first = dt.date.fromisoformat(first[:10])
+            except ValueError:
+                first = None
+        entries.append(SlateEntry(
+            ticker=ticker,
+            position=int(pick["slate_position"]),
+            status=str(pick["status"]),
+            model_rank=pick.get("model_rank"),
+            carried=bool(pick.get("carried")),
+            shown_since=first or as_of,
+            reason=str(pick.get("slate_reason") or ""),
+        ))
+    return entries, [d.to_dict() for d in slate.departures]
+
+
+def _review_open_positions(open_book, buys, watch, store, universe, calendar,
+                           as_of: dt.date) -> List[Dict[str, object]]:
+    """Decide what happens to held names the run never produced a card for.
+
+    A name in `buys` is still held and a name in `watch` was seen and set aside
+    by a rule that recorded its reason. Neither needs a directive. What needs
+    one is a held name that appears in neither: the run did not evaluate it, so
+    nothing decided anything about it, and the position would otherwise leave
+    the book by omission.
+
+    Entry-time gates do not govern open positions. Leaving the tradeable
+    universe changes who must own a stock, not whether it can be sold, and
+    exiting into a reconstitution pays the worst price available for a reason
+    the thesis never priced. So the default here is to hold and flag; only a
+    name that has stopped trading long enough to read as delisted is exited,
+    at the last price that actually existed.
+    """
+    from .positions import PositionAction, review_open_position
+
+    accounted = {r.ticker for r in buys} | {r.ticker for r in watch}
+    orphans = [t for t in dict.fromkeys(open_book) if t not in accounted]
+    if not orphans:
+        return []
+
+    in_universe = set(universe.symbols)
+    frames: Dict[str, pd.DataFrame] = {}
+    try:
+        window = calendar.trailing_window(as_of, DELISTING_LOOKBACK_SESSIONS)
+        start = window[0] if window else calendar.first
+        prices = store.read_prices(symbols=orphans, start=start, end=as_of)
+        if not prices.empty:
+            prices = prices.copy()
+            prices[DATE] = pd.to_datetime(prices[DATE]).dt.normalize()
+            frames = {s: f.sort_values(DATE).reset_index(drop=True)
+                      for s, f in prices.groupby(SYMBOL, sort=False, observed=True)}
+    except Exception as exc:
+        # No price history is itself informative -- review_open_position reads
+        # an absent frame as a name that has not printed -- so this must not
+        # fail the run. It must also not silently look like "trading normally",
+        # which is why the failure is logged rather than passed over.
+        log.warning("could not read prices for open-position review",
+                    extra={"error": str(exc), "tickers": len(orphans)})
+
+    out: List[Dict[str, object]] = []
+    for ticker in orphans:
+        directive = review_open_position(
+            ticker, frames.get(ticker), as_of,
+            in_universe=ticker in in_universe,
+            sessions=calendar.sessions,
+        )
+        out.append(directive.to_dict())
+        log.info("open position reviewed",
+                 extra={"ticker": ticker, "event": directive.event.value,
+                        "action": directive.action.value})
+    exits = sum(1 for d in out if d["action"] == PositionAction.FORCE_EXIT.value)
+    log.info("open-position review complete",
+             extra={"reviewed": len(out), "forced_exits": exits})
+    return out
+
+
 def _stepper(progress):
     def step(i: int) -> None:
         if progress:
