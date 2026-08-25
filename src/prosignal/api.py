@@ -38,6 +38,22 @@ log = get_logger(__name__)
 _STATIC = Path(__file__).parent / "static"
 
 
+def _in_outcome_basis(record: Dict[str, Any], outcome) -> Dict[str, Any]:
+    """One price basis per row.
+
+    `outcomes_for` re-bases the recorded levels onto the prices the store serves
+    now, because a corporate action since the call makes the two different
+    currencies. The raw record still carries the originals, so merging them
+    verbatim shipped both: a stop of 8195.05 beside a re-based stop of 819.51
+    for the same call, and the interface free to render either.
+    """
+    merged = dict(record)
+    merged["signal_price"] = outcome.signal_price
+    merged["stop"] = outcome.stop
+    merged["target_1"] = outcome.target_1
+    return merged
+
+
 def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     cfg = config or load_config()
     log_cfg = cfg.params.runtime.logging
@@ -399,7 +415,11 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 [{"ticker": row["ticker"], "signal_price": row["first_price"]}],
                 _dt.date.fromisoformat(row["first_seen"]), prices,
             )[0]
-            out.append({**row, "company": company, "outcome": outcome.__dict__})
+            # Same basis rule as the other two views: the row's own price is
+            # the recorded one, the outcome's is re-based onto today's prices,
+            # and shipping both lets the interface render either.
+            out.append({**row, "first_price": outcome.signal_price,
+                        "company": company, "outcome": outcome.__dict__})
         return {"names": out, "note": ""}
 
     _resolved: Dict[str, Any] = {"key": None, "rows": None, "open": None}
@@ -486,7 +506,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             out = outcomes_for([{**run, "ticker": symbol}],
                                _dt.date.fromisoformat(run["date"]), prices)[0]
             outcomes.append(out)
-            merged.append({**run, "outcome": out.__dict__})
+            merged.append({**_in_outcome_basis(run, out), "outcome": out.__dict__})
 
         latest = None
         if prices is not None and not prices.empty:
@@ -554,7 +574,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
         merged = []
         for pick, out in zip(picks, outcomes):
-            merged.append({**pick, "company": company(pick["ticker"]),
+            merged.append({**_in_outcome_basis(pick, out),
+                           "company": company(pick["ticker"]),
                            "outcome": out.__dict__})
         return {
             "date": date,

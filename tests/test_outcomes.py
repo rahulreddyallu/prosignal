@@ -45,7 +45,7 @@ def test_stop_wins_when_a_bar_touches_both(live_cfg, tmp_path):
     (led / "runs-2024.jsonl").write_text(json.dumps({
         "run_id": "r1", "date": "2024-01-01", "config_version": "c", "engine_version": "e",
         "signals_generated": ["AAA"],
-        "stocks_scored": [{"ticker": "AAA", "stop": 90.0, "target_1": 110.0,
+        "stocks_scored": [{"ticker": "AAA", "last_close": 100.0, "stop": 90.0, "target_1": 110.0,
                            "target_2": 115.0, "composite_score": 0.9}],
     }) + "\n")
     O.resolve_pending(store, led, out, live_cfg, as_of=f["date"].iloc[-1].date())
@@ -63,7 +63,7 @@ def test_does_not_score_before_the_horizon_elapses(live_cfg, tmp_path):
     led.mkdir()
     (led / "runs-2024.jsonl").write_text(json.dumps({
         "run_id": "r2", "date": "2024-01-01", "signals_generated": ["BBB"],
-        "stocks_scored": [{"ticker": "BBB", "stop": 1.0, "target_1": 9999.0,
+        "stocks_scored": [{"ticker": "BBB", "last_close": 100.0, "stop": 1.0, "target_1": 9999.0,
                            "composite_score": 0.8}],
     }) + "\n")
     res = O.resolve_pending(store, led, out, live_cfg, as_of=f["date"].iloc[-1].date())
@@ -80,7 +80,7 @@ def test_resolution_is_idempotent(live_cfg, tmp_path):
     led.mkdir()
     (led / "runs-2024.jsonl").write_text(json.dumps({
         "run_id": "r3", "date": "2024-01-01", "signals_generated": ["CCC"],
-        "stocks_scored": [{"ticker": "CCC", "stop": 50.0, "target_1": 200.0,
+        "stocks_scored": [{"ticker": "CCC", "last_close": 100.0, "stop": 50.0, "target_1": 200.0,
                            "composite_score": 0.7}],
     }) + "\n")
     a = O.resolve_pending(store, led, out, live_cfg, as_of=f["date"].iloc[-1].date())
@@ -134,11 +134,11 @@ def test_one_call_is_resolved_once_however_many_runs_issued_it():
     from prosignal import outcomes as O
     rows = [
         {"run_id": "a", "date": "2024-01-09", "signals_generated": ["X"],
-         "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]},
+         "stocks_scored": [{"ticker": "X", "last_close": 100.0, "stop": 1.0, "target_1": 2.0}]},
         {"run_id": "b", "date": "2024-01-09", "signals_generated": ["X"],
-         "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]},
+         "stocks_scored": [{"ticker": "X", "last_close": 100.0, "stop": 1.0, "target_1": 2.0}]},
         {"run_id": "c", "date": "2024-01-10", "signals_generated": ["X"],
-         "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]},
+         "stocks_scored": [{"ticker": "X", "last_close": 100.0, "stop": 1.0, "target_1": 2.0}]},
     ]
     got = O._pending(rows, set())
     assert len(got) == 2, "two distinct calls, not three runs"
@@ -150,6 +150,6 @@ def test_a_call_already_on_file_is_not_retried_under_another_run_id():
     are re-scanned on every single request."""
     from prosignal import outcomes as O
     rows = [{"run_id": "b", "date": "2024-01-09", "signals_generated": ["X"],
-             "stocks_scored": [{"ticker": "X", "stop": 1.0, "target_1": 2.0}]}]
+             "stocks_scored": [{"ticker": "X", "last_close": 100.0, "stop": 1.0, "target_1": 2.0}]}]
     assert O._pending(rows, set()) != []
     assert O._pending(rows, set(), {("X", "2024-01-09")}) == []

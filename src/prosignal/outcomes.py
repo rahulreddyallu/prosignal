@@ -5,10 +5,32 @@ today produces no evidence tomorrow. Without resolved outcomes there is no
 calibration, no live validation and no paper-trading record -- and every day the
 engine runs without one is a day of evidence permanently lost.
 
-Execution follows `backtest._simulate` exactly: entry at the next session's
-open, and a bar touching both stop and target counts as the stop, since daily
-bars cannot order intraday events. A second convention here would make live
-results incomparable with the backtest.
+Execution follows `backtest._simulate`: entry at the next session's open, and a
+bar touching both stop and target counts as the stop, since daily bars cannot
+order intraday events.
+
+THE ENGINE'S OWN EXIT. A position also closes when the engine stops holding it.
+Stage 6 admits at rank <= entry_rank and holds while the name stays inside
+exit_rank, so the book is the exit rule; the stop and the target are the two
+ways a position can end EARLY. That rule was missing here, and the record it
+produced described a strategy the engine does not run.
+
+Measured on the recorded record before this was added: the simulation held past
+the engine's own exit in 94% of trades, by a median of 14 sessions. Median
+simulated hold was 15 sessions against a book that had let the name go after 1.
+Every figure the History page showed -- win rate, average return, target and
+stop counts -- was computed over those phantom sessions.
+
+The book is read from the ledger, which records `signals_generated` for every
+run. A session with no recorded run carries no information about the book and
+is not treated as an exit; a session that ran and did not name the ticker is.
+The exit fills at the NEXT session's open, because the engine decides at the
+close and that is the first price the decision could reach.
+
+MODEL VERSIONING. Outcomes carry the `exit_model` they were resolved under and
+`load_outcomes` serves only the current one. Changing the exit rule without
+that would leave one file holding two strategies' results and average them
+together, which is the failure this module exists to detect elsewhere.
 
 Outcomes are appended to their own JSONL file rather than written back into the
 ledger, which is append-only. Resolution is idempotent on ``(run_id, ticker)``.
@@ -29,9 +51,19 @@ from .costs import CostModel
 from .data.store import DataStore
 from .data.types import DATE
 
-__all__ = ["Outcome", "resolve_pending", "load_outcomes", "summarise", "calibration"]
+__all__ = ["Outcome", "EXIT_MODEL", "resolve_pending", "load_outcomes",
+           "summarise", "calibration"]
 
 log = get_logger(__name__)
+
+#: Which exit rule produced a row. Bump this whenever the rule changes, so that
+#: results from two different strategies can never be pooled into one average.
+#:
+#:   stop-target-v1  stop, target or the holding-period limit. No book exit,
+#:                   so a position ran on after the engine had closed it.
+#:   book-band-v2    the above, plus the engine's own exit: the position ends
+#:                   when the run stops naming it in `signals_generated`.
+EXIT_MODEL = "book-band-v2"
 
 
 class Outcome(dict):
@@ -66,8 +98,55 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def load_outcomes(path: Path) -> List[Dict[str, Any]]:
-    return _read_jsonl(Path(path))
+def load_outcomes(path: Path, *, model: Optional[str] = EXIT_MODEL) -> List[Dict[str, Any]]:
+    """Resolved outcomes for one exit model.
+
+    Defaults to the current model. Rows written under an older rule stay in the
+    file -- it is append-only and they are the record of what was believed --
+    but they are not served, because averaging them with the current ones would
+    report two strategies as one. Pass ``model=None`` to read everything.
+    """
+    rows = _read_jsonl(Path(path))
+    if model is None:
+        return rows
+    # A row with no stamp predates versioning, which means stop-target-v1.
+    return [r for r in rows if (r.get("exit_model") or "stop-target-v1") == model]
+
+
+def book_by_date(ledger_rows) -> Dict[dt.date, set]:
+    """What the engine held at the close of each recorded session.
+
+    The last run recorded for a date is the one that stands: a date is often
+    run several times and only the final one reflects what the engine finally
+    said. Dates with no run are absent rather than empty, and the difference
+    matters -- an absent date says nothing about the book, while an empty one
+    would say the engine held nothing.
+    """
+    latest: Dict[dt.date, tuple] = {}
+    for row in ledger_rows:
+        raw = row.get("date")
+        if not raw or row.get("error"):
+            continue
+        try:
+            when = raw if isinstance(raw, dt.date) else dt.date.fromisoformat(str(raw)[:10])
+        except ValueError:
+            continue
+        stamp = str(row.get("logged_at") or "")
+        held = latest.get(when)
+        if held is None or stamp >= held[0]:
+            latest[when] = (stamp, set(row.get("signals_generated") or []))
+    return {when: names for when, (_, names) in latest.items()}
+
+
+def _closed_by_engine(book: Dict[dt.date, set], when: dt.date, ticker: str) -> bool:
+    """Did the run at ``when``'s close stop holding ``ticker``?
+
+    False when no run was recorded for that session. An absent run is missing
+    information, not an exit, and treating it as one would close positions on
+    days the engine simply was not run.
+    """
+    names = book.get(when)
+    return names is not None and ticker not in names
 
 
 def _pending(ledger_rows, resolved_keys, resolved_calls=frozenset()) -> List[Dict[str, Any]]:
@@ -123,7 +202,11 @@ def resolve_pending(
     ledger_path, outcomes_path = Path(ledger_path), Path(outcomes_path)
     outcomes_path.parent.mkdir(parents=True, exist_ok=True)
     ledger_rows = _read_jsonl(ledger_path)
-    existing = _read_jsonl(outcomes_path)
+    # Only rows resolved under the CURRENT exit model count as done. A row from
+    # an older rule describes a different strategy, so it is re-resolved rather
+    # than left to sit in the same averages as the new ones.
+    existing = [r for r in _read_jsonl(outcomes_path)
+                if (r.get("exit_model") or "stop-target-v1") == EXIT_MODEL]
     resolved_keys = {(r.get("run_id"), r.get("ticker")) for r in existing}
     resolved_calls = {(r.get("ticker"), str(r.get("signal_date") or "")[:10])
                       for r in existing}
@@ -139,6 +222,7 @@ def resolve_pending(
     max_hold = int(config.params.stage7_risk.holding_period.max_holding_sessions.value)
     costs = CostModel(config)
 
+    book = book_by_date(ledger_rows)
     tickers = sorted({p["rec"]["ticker"] for p in pending})
     earliest = min(pd.to_datetime(p["date"]).date() for p in pending)
     bars = store.read_prices(symbols=tickers, start=earliest, end=as_of)
@@ -149,9 +233,14 @@ def resolve_pending(
 
     written = 0
     still_open = 0
+    refused = 0
     with outcomes_path.open("a", encoding="utf-8") as fh:
         for item in pending:
-            res = _resolve_one(item, by_symbol, max_hold, costs, config, as_of)
+            res = _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
+                               book)
+            if res is _REFUSED:
+                refused += 1
+                continue
             if res is None:
                 still_open += 1
                 continue
@@ -161,11 +250,81 @@ def resolve_pending(
         import os
         os.fsync(fh.fileno())
 
-    log.info("outcomes resolved", extra={"resolved": written, "still_open": still_open})
-    return {"pending": len(pending), "resolved": written, "still_open": still_open}
+    if refused:
+        log.warning("outcomes refused: price basis unreconcilable",
+                    extra={"refused": refused})
+    log.info("outcomes resolved",
+             extra={"resolved": written, "still_open": still_open,
+                    "refused": refused})
+    return {"pending": len(pending), "resolved": written,
+            "still_open": still_open, "refused": refused}
 
 
-def _resolve_one(item, by_symbol, max_hold, costs, config, as_of) -> Optional[Dict[str, Any]]:
+#: How far the recorded close may drift from the stored one before the levels
+#: are treated as belonging to a different price basis. Wide enough to absorb
+#: rounding in the ledger, far tighter than any real corporate action.
+_BASIS_TOLERANCE = 0.005
+
+#: Returned when a trade cannot be priced honestly, as distinct from None,
+#: which means the position is still running.
+_REFUSED: Dict[str, Any] = {}
+
+#: Beyond this the ratio is not an adjustment, it is a broken record. A 1:10
+#: split gives 0.1 and a 10:1 reverse gives 10; anything outside is refused
+#: rather than guessed at.
+_BASIS_MIN, _BASIS_MAX = 0.001, 1000.0
+
+
+def _basis_factor(rec, frame, signal_date) -> Optional[float]:
+    """Put the recorded decision levels into the basis the store serves TODAY.
+
+    The stop and the targets were computed at run time from the prices as they
+    were adjusted THEN, and the ledger stores them as plain numbers. The store
+    re-adjusts its whole history whenever a corporate action lands, so after a
+    split those levels and these prices are no longer the same currency.
+
+    Measured on the recorded record: BAJFINANCE was signalled on 2025-05-02 with
+    a stop of 8195.05 against a close of 8862.50. A 4:1 bonus with a 2:1 face
+    split landed on 2025-06-16, and the store now serves that same session at a
+    close of 886.25. The stop sat ten times above every subsequent low, so the
+    position "stopped out" on its first bar at 8195.05 against an entry of
+    887.75 -- a loss recorded as **+823%**. Twenty-nine trades cleared +50% this
+    way, and the mean return of the whole record read +53%.
+
+    The factor is the recorded close over the stored close for the signal
+    session, which IS the cumulative adjustment applied since the run. It needs
+    no corporate-action lookup and it corrects any adjustment, including ones
+    the actions table happens to be missing.
+
+    Returns None when the basis cannot be established, and the caller refuses
+    the trade rather than scoring it. A trade that cannot be priced honestly is
+    not evidence.
+    """
+    recorded = rec.get("last_close")
+    if recorded is None:
+        return None
+    try:
+        recorded = float(recorded)
+    except (TypeError, ValueError):
+        return None
+    if recorded <= 0:
+        return None
+    row = frame[frame[DATE] == pd.Timestamp(signal_date)]
+    if row.empty:
+        return None
+    stored = float(row.iloc[0]["close"])
+    if not np.isfinite(stored) or stored <= 0:
+        return None
+    factor = stored / recorded
+    if not (_BASIS_MIN <= factor <= _BASIS_MAX):
+        log.warning("refusing an outcome: price basis is not reconcilable",
+                    extra={"ticker": rec.get("ticker"), "factor": factor})
+        return None
+    return factor
+
+
+def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
+                 book: Optional[Dict[dt.date, set]] = None) -> Optional[Dict[str, Any]]:
     rec = item["rec"]
     ticker = rec["ticker"]
     frame = by_symbol.get(ticker)
@@ -182,14 +341,27 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of) -> Optional[Di
     if not np.isfinite(entry_price) or entry_price <= 0:
         return None
 
-    stop, t1 = float(rec["stop"]), float(rec["target_1"])
-    t2 = float(rec["target_2"]) if rec.get("target_2") else t1
+    # The levels were recorded in the price basis of the run date; these bars
+    # are adjusted to today. Reconcile them or refuse the trade.
+    factor = _basis_factor(rec, frame, signal_date)
+    if factor is None:
+        # Distinct from "still open". A refused trade is not running, it is
+        # unscoreable, and collapsing the two would report a shrinking sample
+        # as patience.
+        return _REFUSED
+    stop, t1 = float(rec["stop"]) * factor, float(rec["target_1"]) * factor
+    t2 = float(rec["target_2"]) * factor if rec.get("target_2") else t1
     walk = future.iloc[1:].head(max_hold)
 
     exit_price = exit_date = None
     reason = "open"
     held = 0
     mae = mfe = 0.0
+    book = book or {}
+    # The last session whose close the engine had already acted on when this
+    # bar opened. The book exit is decided at a close and fills at the next
+    # open, so it is this date -- not the bar's own -- that is consulted.
+    decided_on = entry_row[DATE].date()
     for held, (_, bar) in enumerate(walk.iterrows(), start=1):
         low, high = float(bar["low"]), float(bar["high"])
         mae = min(mae, (low - entry_price) / entry_price)
@@ -203,6 +375,17 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of) -> Optional[Di
         if exit_price is not None:
             exit_date = bar[DATE].date()
             break
+        # The engine's own exit, checked only after the intraday levels. A stop
+        # and a book exit can land on the same bar, and the stop happened
+        # DURING the session while the book decision was taken at the previous
+        # close -- but the stop is the worse outcome and daily bars cannot
+        # order them, so the pessimistic reading stands.
+        if _closed_by_engine(book, decided_on, ticker):
+            exit_price = float(bar["open"])
+            exit_date = bar[DATE].date()
+            reason = "book_exit"
+            break
+        decided_on = bar[DATE].date()
     if exit_price is None:
         # Nothing triggered. Only a FULLY elapsed window turns that into a
         # time exit -- a partially elapsed one is a position still running,
@@ -246,6 +429,10 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of) -> Optional[Di
         "percentile": rec.get("percentile"),
         "config_version": item.get("config_version"),
         "engine_version": item.get("engine_version"),
+        "exit_model": EXIT_MODEL,
+        # 1.0 unless a corporate action re-based the store's prices after the
+        # signal. Recorded so a surprising outcome can be checked against it.
+        "price_basis_factor": factor,
         "resolved_at": dt.datetime.now().isoformat(timespec="seconds"),
     }
 
