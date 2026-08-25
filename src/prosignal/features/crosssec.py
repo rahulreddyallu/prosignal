@@ -17,7 +17,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-__all__ = ["FEATURES", "build_panel", "cross_sectional_rank"]
+__all__ = ["FEATURES", "build_panel", "cross_sectional_rank",
+           "liquidity_mask"]
 
 #: name -> (lookback sessions needed, description)
 #:
@@ -132,7 +133,12 @@ def _features_at(
     # far less of the beta exposure that drives momentum crashes.
     win = ret.tail(252)
     out["resid_mom"] = pd.Series(np.nan, index=hist.columns, dtype="float64")
-    if len(win) >= 60 and len(bench_ret) >= len(win):
+    # An all-NaN benchmark slice is a real state, not a defect: under a
+    # point-in-time universe the earliest dates have no eligible names, so the
+    # equal-weight market is undefined there. nanmean warns and returns NaN on
+    # such a slice, so the emptiness is tested before it is averaged.
+    if (len(win) >= 60 and len(bench_ret) >= len(win)
+            and np.isfinite(np.asarray(bench_ret[-len(win):], dtype="float64")).any()):
         b = np.asarray(bench_ret[-len(win):], dtype="float64")
         bc = b - np.nanmean(b)
         bvar = float(np.nanmean(bc * bc))
@@ -145,7 +151,13 @@ def _features_at(
             out["resid_mom"] = resid.iloc[:-21].sum(axis=0)
 
     r120 = ret.tail(120)
-    bench = bench_ret[-len(r120):] if len(bench_ret) >= len(r120) else bench_ret
+    # Lengths must match before they are masked together. When the benchmark is
+    # shorter than the window, both are cut to the overlap rather than left to
+    # broadcast -- an unequal `&` raises, and a silent pad would align a stock's
+    # returns against the wrong sessions.
+    bench = np.asarray(bench_ret[-len(r120):], dtype="float64")
+    if len(bench) < len(r120):
+        r120 = r120.tail(len(bench))
     betas = {}
     for s in r120.columns:
         y = r120[s].to_numpy(dtype="float64")
@@ -194,6 +206,59 @@ def cross_sectional_rank(s: pd.Series) -> pd.Series:
     return (r - 0.5) * 2.0
 
 
+def liquidity_mask(
+    close: pd.DataFrame,
+    turnover: pd.DataFrame,
+    *,
+    min_adtv_inr: float,
+    lookback_sessions: int,
+    max_names: int,
+    min_history_sessions: int,
+    min_price_inr: float,
+) -> pd.DataFrame:
+    """Which names the liquidity screen would have admitted on each date.
+
+    A boolean frame shaped like ``close``. Mirrors
+    ``UniverseResolver.resolve_liquidity_pit`` -- median turnover over the
+    trailing window, a price floor, a listing-history floor, then the top
+    ``max_names`` by turnover -- computed across every date at once instead of
+    one date at a time.
+
+    WHY THIS EXISTS. The panel was built from ONE universe: the names eligible
+    on the most recent session, projected backwards over every training date.
+    Measured against the screen resolved properly per date, that set is wrong in
+    both directions and by a lot:
+
+        as of 2024-08-12   750 eligible, 203 of them (27%) absent from today's
+        as of 2021-07-19   523 eligible, 148 of them (28%) absent from today's
+
+    A name eligible in 2024 that has since fallen out contributed no training
+    row -- it was excluded for what happened afterwards. A name eligible today
+    that was not eligible in 2024 contributed 2024 rows it could never have been
+    traded on. That is look-ahead selection on both sides, in the training set
+    and in the validation built from it.
+
+    History counts SESSIONS SINCE THE FIRST PRINT, not prints, which is what
+    ``UniverseResolver._listed_at_least`` means by listed history. Counting
+    prints instead penalises a name for a suspension it has since come back
+    from, and the two disagreed on 10-15% of the universe.
+    """
+    # min_periods=1 matches the resolver, which takes the median of whatever
+    # rows the window holds and sets no minimum count. Requiring a full window
+    # here would apply a stricter screen to training than to the decision.
+    adtv = turnover.rolling(int(lookback_sessions), min_periods=1).median()
+    listed = close.notna().cummax().cumsum()
+    ok = (
+        (adtv >= float(min_adtv_inr))
+        & (close >= float(min_price_inr))
+        & (listed >= int(min_history_sessions))
+    )
+    # The cap is a ranking, so it has to be applied per date rather than
+    # globally. `first` breaks ties deterministically.
+    rank = adtv.where(ok).rank(axis=1, ascending=False, method="first")
+    return (ok & (rank <= int(max_names))).fillna(False)
+
+
 def build_panel(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -201,19 +266,39 @@ def build_panel(
     step: int = 21,
     min_names: int = 40,
     delivery: Optional[pd.DataFrame] = None,
+    eligible: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
     ``label`` is the forward return from i to i+horizon, so it uses only prices
     strictly after the feature date.
+
+    ``eligible`` is a boolean frame shaped like ``close`` saying which names the
+    universe screen would have admitted on each date -- see
+    :func:`liquidity_mask`. Without it the panel is drawn from whatever columns
+    ``close`` happens to carry on every date, which in practice meant today's
+    universe projected backwards: names excluded for what happened after the
+    date, and names included on dates they could not have been traded on.
+
+    The benchmark is built from the eligible names too. An equal-weight mean
+    over today's survivors is not the market as it stood.
     """
     dates = list(close.index)
-    bench_full = close.mean(axis=1).pct_change(fill_method=None).to_numpy(dtype="float64")
+    if eligible is not None:
+        eligible = eligible.reindex(index=close.index,
+                                    columns=close.columns).fillna(False)
+        bench_src = close.where(eligible)
+    else:
+        bench_src = close
+    bench_full = bench_src.mean(axis=1).pct_change(fill_method=None).to_numpy(dtype="float64")
     rows: List[pd.DataFrame] = []
     for i in range(MIN_LOOKBACK, len(dates) - horizon, step):
         feats = _features_at(close, turnover, i, bench_full[: i + 1], delivery=delivery)
         fwd = close.iloc[i + horizon] / close.iloc[i] - 1.0
         feats = feats.assign(label=fwd)
+        if eligible is not None:
+            # Point-in-time: only the names the screen admitted on THIS date.
+            feats = feats[eligible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
         feats = feats[np.isfinite(feats["label"]) & feats["label"].abs().lt(1.0)]
         required = [c for c in FEATURES if c not in NEUTRAL_WHEN_MISSING]
         feats = feats.dropna(subset=required, thresh=int(len(required) * 0.7))

@@ -107,9 +107,18 @@ def test_an_empty_delivery_panel_stops_the_model_rather_than_zeroing_it():
     import tempfile
     from pathlib import Path
 
+    class _Universe:
+        """The liquidity screen, for the per-date training mask. Unused on this
+        path -- the delivery check fires first -- but the signature carries it."""
+        class pit_min_adtv_inr: value = 5e7
+        class pit_adtv_lookback_sessions: value = 60
+        class pit_max_names: value = 750
+        class min_history_sessions: value = 300
+        class min_price_inr: value = 20.0
+
     with tempfile.TemporaryDirectory() as tmp:
         scores, model, reason, feats, verdict = _cross_sectional_model(
-            _Store(Path(tmp)), ["AAA"], dt.date(2026, 1, 19), _Cfg()
+            _Store(Path(tmp)), ["AAA"], dt.date(2026, 1, 19), _Cfg(), _Universe()
         )
         assert scores is None
         assert reason is not None
