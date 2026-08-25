@@ -177,14 +177,16 @@ def test_several_runs_issuing_a_name_on_one_day_is_one_call():
     """SUZLON read as five calls returning +70.71% when it was three calls
     returning +43.17% -- a day can produce several ledger runs and each
     wrote its own outcome row for the same signal."""
-    rows = [_o("SUZLON", "2024-01-09", 0.1023, 12),
-            _o("SUZLON", "2024-01-09", 0.1023, 12),      # same call, other run
-            _o("SUZLON", "2024-01-16", 0.1731, 10),
-            _o("SUZLON", "2024-01-16", 0.1731, 10),
-            _o("SUZLON", "2024-08-02", 0.1563, 6)]
+    # Non-overlapping windows, so this tests deduplication of duplicate
+    # run_ids and not the separate re-entry merge.
+    rows = [_o("SUZLON", "2024-01-09", 0.1023, 12, exit_date="2024-01-25"),
+            _o("SUZLON", "2024-01-09", 0.1023, 12, exit_date="2024-01-25"),
+            _o("SUZLON", "2024-03-16", 0.1731, 10, exit_date="2024-03-30"),
+            _o("SUZLON", "2024-03-16", 0.1731, 10, exit_date="2024-03-30"),
+            _o("SUZLON", "2024-08-02", 0.1563, 6, exit_date="2024-08-13")]
     assert len(P.dedupe(rows)) == 3
     got = P.by_ticker(rows, None)[0]
-    assert got["n"] == 3
+    assert got["n"] == 3, "three separate positions, not one held throughout"
     assert abs(got["total_return"] - 0.4317) < 1e-6
 
 
@@ -200,7 +202,9 @@ def test_calls_held_at_the_same_time_are_counted_as_overlapping():
 
 def test_a_name_reports_both_ways_of_totalling_it():
     """They answer different questions and the screen shows both."""
-    rows = [_o("X", "2024-01-09", 0.10, 12), _o("X", "2024-08-02", 0.15, 6)]
+    # Two separate positions -- the second opens long after the first closed.
+    rows = [_o("X", "2024-01-09", 0.10, 12, exit_date="2024-01-25"),
+            _o("X", "2024-08-02", 0.15, 6, exit_date="2024-08-13")]
     d = P.calls_for("X", rows, None)
     assert d["n_calls"] == 2 and d["n_paid_off"] == 2
     assert abs(d["taking_every_call"] - 0.25) < 1e-9
@@ -248,3 +252,51 @@ def test_two_different_stores_never_share_a_cached_benchmark():
         bare = _Store(pd.DataFrame({"date": pd.date_range("2026-01-01", periods=30),
                                     "close": range(30)}))
         assert P.performance([_t()], bare)["benchmark_covered"] == 0
+
+
+# ===================================================================
+# A name re-signalled while held is one position
+# ===================================================================
+
+def _oc(ticker, entry, exit_, net, held=10):
+    return {"ticker": ticker, "signal_date": entry, "entry_date": entry,
+            "exit_date": exit_, "entry_price": 100.0,
+            "exit_price": 100.0 * (1 + net), "sessions_held": held,
+            "net_return": net, "gross_return": net, "exit_reason": "target_1"}
+
+
+def test_a_name_resignalled_while_held_is_one_position():
+    """Stage 6 enters at rank 8 and holds while the name stays inside rank
+    16, so a name reappearing tomorrow is the position being maintained. On a
+    live slate two of twenty-one open positions were re-entries of names
+    already held, and 137 closed trades collapsed to 86."""
+    rows = [_oc("X", "2024-01-15", "2024-02-02", 0.10),
+            _oc("X", "2024-01-17", "2024-02-02", 0.17)]
+    merged = P.merge_reentries(rows)
+    assert len(merged) == 1
+    assert merged[0]["entry_date"] == "2024-01-15", "the first entry opens it"
+    assert merged[0]["merged_legs"] == 2
+
+
+def test_separate_positions_in_one_name_are_kept_apart():
+    """Re-entering after the first has closed IS a second position."""
+    rows = [_oc("X", "2024-01-15", "2024-02-02", 0.10),
+            _oc("X", "2024-08-05", "2024-08-13", 0.15)]
+    assert len(P.merge_reentries(rows)) == 2
+
+
+def test_the_merged_return_is_measured_not_summed():
+    """Summing two overlapping legs is the double-count this removes."""
+    rows = [_oc("X", "2024-01-15", "2024-02-02", 0.10),
+            _oc("X", "2024-01-17", "2024-02-02", 0.17)]
+    got = P.merge_reentries(rows)[0]
+    assert abs(got["net_return"] - 0.10) < 1e-9, \
+        "one entry, one exit -- not 0.27"
+
+
+def test_every_reader_of_closed_trades_goes_through_the_merge():
+    src = open(P.__file__, encoding="utf-8").read()
+    for fn in ("def performance(", "def by_ticker(", "def equity_curve("):
+        body = src[src.index(fn):]
+        body = body[:body.index("\n\n\ndef ")] if "\n\n\ndef " in body else body
+        assert "merge_reentries(" in body[:1200], fn

@@ -2054,7 +2054,7 @@ function nameRow(r) {
   let sub;
   if (r.n > 1) {
     const won = Math.round(r.win_rate * r.n);
-    sub = r.n + " calls \u00b7 " + won + " paid off";
+    sub = r.n + " positions \u00b7 " + won + " paid off";
   } else {
     const only = Object.keys(r.exit_mix || {})[0];
     sub = how[only] || "closed";
@@ -2103,7 +2103,9 @@ function openHTML(op) {
       '<span class="nr-t">' + esc(r.ticker) + '</span>' +
       '<span class="nr-h">' + money(r.entry_price) + ' \u2192 ' +
         money(r.last_price) + ' \u00b7 ' + r.sessions_held +
-        (r.sessions_held === 1 ? " session" : " sessions") + '</span>' +
+        (r.sessions_held === 1 ? " session" : " sessions") +
+        (r.reaffirmed ? ' \u00b7 re-signalled ' + r.reaffirmed +
+          (r.reaffirmed === 1 ? " time" : " times") : "") + '</span>' +
       sparkHTML(r.path, r.entry_price) +
       '<span class="nr-v">' + signed(r.unrealised) + '</span>' +
     '</button>').join("");
@@ -2112,7 +2114,8 @@ function openHTML(op) {
       '<div class="col-h"><span>Still open</span>' +
         '<b>' + signed(op.avg_unrealised) + '</b></div>' +
       '<div class="col-s">' + up + ' of ' + rows.length + ' above entry \u00b7 ' +
-        'marked to ' + esc(day(op.as_of)) + ', not yet a result</div>' +
+        'marked to ' + esc(day(op.as_of)) + ', not yet a result. A name the ' +
+        'engine re-signals while it is still held stays one position.</div>' +
       '<div class="col-b">' + body + '</div>' +
     '</div>';
 }
