@@ -1027,7 +1027,7 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .data.types import DATE, SYMBOL
     from .data.universe import UniverseResolver
     from .features import crossmodel as cm
-    from .features.crosssec import build_panel
+    from .features.crosssec import build_panel, liquidity_mask
     from .stages._cfg import fv, iv, v
     from .validation.harness import run_cpcv
     from .validation.metrics import deflated_sharpe_ratio
@@ -1058,7 +1058,14 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     symbols = list(snap.symbols)
 
     _rule("Building the panel")
-    px = store.read_prices(symbols=symbols, start=sessions[0], end=end,
+    # UNRESTRICTED. `symbols` is the screen resolved for the LATEST session, and
+    # building the panel from it projected today's survivors backwards over
+    # every training date. Measured against the screen resolved properly per
+    # date: 27% of the names eligible on 2024-08-12 are absent from today's set,
+    # excluded for what happened afterwards, while names eligible today
+    # contributed rows on dates they could not have been traded on. The panel is
+    # masked per date by `liquidity_mask` below instead.
+    px = store.read_prices(start=sessions[0], end=end,
                            columns=[DATE, SYMBOL, "close", "turnover"])
     px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
     close = px.pivot_table(index=DATE, columns=SYMBOL, values="close",
@@ -1067,14 +1074,23 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
                               aggfunc="last", observed=True).sort_index()
     del px
     delivery = None
-    dl = store.read_delivery(symbols=symbols, start=sessions[0], end=end)
+    dl = store.read_delivery(start=sessions[0], end=end)
     if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
         dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
         delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
                                   aggfunc="last", observed=True).sort_index()
     del dl
     horizon = iv(c4.model_horizon_sessions)
-    panel = build_panel(close, turnover, horizon=horizon, step=21, delivery=delivery)
+    eligible = liquidity_mask(
+        close, turnover,
+        min_adtv_inr=fv(u.pit_min_adtv_inr),
+        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
+        max_names=iv(u.pit_max_names),
+        min_history_sessions=iv(u.min_history_sessions),
+        min_price_inr=fv(u.min_price_inr),
+    )
+    panel = build_panel(close, turnover, horizon=horizon, step=21,
+                        delivery=delivery, eligible=eligible)
     panel = cm._attach_fundamentals(panel, store.read_statements(), close,
                                     iv(c4.max_fundamental_age_days))
     _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
@@ -1138,7 +1154,12 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 
 def _portfolio_inputs(cfg: AppConfig, store, sessions, symbols, end):
-    """Aligned OHLCV panels plus ATR, the structure MA and ADTV."""
+    """Aligned OHLCV panels plus ATR, the structure MA and ADTV.
+
+    ``symbols`` of None reads every name in the store. The portfolio CPCV needs
+    that: its panel must span every name the universe screen would have admitted
+    on each past date, not the names it admits today.
+    """
     import numpy as np
     import pandas as pd
 
@@ -1294,7 +1315,7 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .data.types import DATE, SYMBOL
     from .data.universe import UniverseResolver
     from .features import crossmodel as cm
-    from .features.crosssec import build_panel
+    from .features.crosssec import build_panel, liquidity_mask
     from .stages._cfg import fv, iv, v
     from .validation.harness import run_portfolio_cpcv
 
@@ -1323,18 +1344,29 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     symbols = list(snap.symbols)
 
     _rule("Building panels")
-    panels = _portfolio_inputs(cfg, store, sessions, symbols, end)
+    # UNRESTRICTED, then masked per date. `symbols` is the screen resolved for
+    # the LATEST session; building the panel from it projects today's survivors
+    # backwards over every training date.
+    panels = _portfolio_inputs(cfg, store, sessions, None, end)
     turnover_panel = (panels["close"] * panels["volume"])
     delivery = None
-    dl = store.read_delivery(symbols=symbols, start=sessions[0], end=end)
+    dl = store.read_delivery(start=sessions[0], end=end)
     if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
         dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
         delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
                                   aggfunc="last", observed=True).sort_index()
     del dl
     horizon = iv(c4.model_horizon_sessions)
+    eligible = liquidity_mask(
+        panels["close"], turnover_panel,
+        min_adtv_inr=fv(u.pit_min_adtv_inr),
+        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
+        max_names=iv(u.pit_max_names),
+        min_history_sessions=iv(u.min_history_sessions),
+        min_price_inr=fv(u.min_price_inr),
+    )
     panel = build_panel(panels["close"], turnover_panel, horizon=horizon,
-                        step=21, delivery=delivery)
+                        step=21, delivery=delivery, eligible=eligible)
     panel = cm._attach_fundamentals(panel, store.read_statements(), panels["close"],
                                     iv(c4.max_fundamental_age_days))
     params = _portfolio_params(cfg)

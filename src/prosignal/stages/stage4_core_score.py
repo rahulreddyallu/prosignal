@@ -41,6 +41,7 @@ from ..core.logging import get_logger
 from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
+from ..features.crosssec import liquidity_mask
 from ..features.refit_gate import review_refit
 from ..features.crossmodel import (
     contributions as cm_contributions,
@@ -251,7 +252,8 @@ def run(
     # history the model abstains and the hand-weighted composite stands, which
     # is stated on the card rather than substituted quietly.
     (model_scores, model, model_unavailable, model_features,
-     refit_verdict) = _cross_sectional_model(store, symbols, as_of, cfg)
+     refit_verdict) = _cross_sectional_model(store, symbols, as_of, cfg,
+                                            p.universe)
     if refit_verdict is not None and not refit_verdict.accepted:
         notes.append(
             f"Refit held back: {refit_verdict.summary()}. The previous "
@@ -561,7 +563,7 @@ _MODEL_CITE = {
 }
 
 
-def _cross_sectional_model(store, symbols, as_of, cfg):
+def _cross_sectional_model(store, symbols, as_of, cfg, universe):
     """Fit the ridge ranker on history strictly before ``as_of``.
 
     Failure is reported, never swallowed: a model that could not be fitted must
@@ -581,8 +583,20 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         need = ((cm.MIN_LOOKBACK + 10) if cached
                 else int(iv(cfg.model_max_train_sessions)) + int(iv(cfg.model_horizon_sessions)) + 5)
         start = sessions[-need] if len(sessions) > need else sessions[0]
+        # On a REFIT the training panel must span every name the universe screen
+        # would have admitted on each past date -- not the names it admits
+        # today. Restricting the read to today's universe is what made the panel
+        # a projection of today's survivors backwards: measured against the
+        # screen resolved per date, 27% of the names eligible on 2024-08-12 are
+        # absent from today's set, and they were excluded for what happened
+        # afterwards.
+        #
+        # The cheap cached path scores today only, so it keeps the narrow read
+        # that the instance's memory budget was designed around. The wide read
+        # is 3.8s and 31 MB as float32, and it happens on refit days.
+        refitting = cached is None
         px = store.read_prices(
-            symbols=list(symbols), start=start, end=as_of,
+            symbols=None if refitting else list(symbols), start=start, end=as_of,
             columns=[DATE, SYMBOL, "close", "turnover"],
         )
         if px.empty:
@@ -617,7 +631,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
         # the run reports nothing. Per-name gaps stay neutral; an empty or
         # unreadable panel is a failure and is raised, which the outer handler
         # turns into a non-benign reason and Stage 4 into ModelUnavailable.
-        dl = store.read_delivery(symbols=list(symbols), start=start, end=as_of)
+        dl = store.read_delivery(
+            symbols=None if refitting else list(symbols), start=start, end=as_of)
         if dl is None or dl.empty or "deliv_pct" not in dl.columns:
             raise PipelineError(
                 STAGE_NAME,
@@ -653,6 +668,16 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
                 return None, None, "no symbol had a complete feature set today", None, None
             return cm.score_with(cached, feats), cached, None, feats, None
 
+        # The screen as it stood on every training date. `symbols` is the same
+        # screen resolved for TODAY, and it stays the scoring universe.
+        eligible = liquidity_mask(
+            close, turnover,
+            min_adtv_inr=float(fv(universe.pit_min_adtv_inr)),
+            lookback_sessions=int(iv(universe.pit_adtv_lookback_sessions)),
+            max_names=int(iv(universe.pit_max_names)),
+            min_history_sessions=int(iv(universe.min_history_sessions)),
+            min_price_inr=float(fv(universe.min_price_inr)),
+        )
         scores, model, reason = cm.fit_predict(
             close, turnover, as_of,
             fundamentals=fundamentals, max_fundamental_age_days=max_age,
@@ -661,6 +686,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg):
             max_train_sessions=int(iv(cfg.model_max_train_sessions)),
             min_train_rows=int(iv(cfg.model_min_train_rows)),
             delivery=delivery,
+            eligible=eligible,
+            score_symbols=list(symbols),
         )
         if model is not None:
             # A refit is proposed, not installed. This is the one path where a

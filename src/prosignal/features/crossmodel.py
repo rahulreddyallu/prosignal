@@ -21,7 +21,7 @@ so no observation used in the fit can know anything about the decision date.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -349,11 +349,18 @@ def fit_predict(
     max_train_sessions: Optional[int] = None,
     min_train_rows: Optional[int] = None,
     delivery: Optional[pd.DataFrame] = None,
+    eligible: Optional[pd.DataFrame] = None,
+    score_symbols: Optional[Sequence[str]] = None,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
     Returns ``(scores, model, reason_unavailable)``. Scores are in [-1, 1] and
     comparable only within this run, since the fit is refitted each time.
+
+    ``eligible`` masks the TRAINING panel to the names the universe screen would
+    have admitted on each date. ``score_symbols`` restricts what is ranked
+    today, which is a different question: the training set has to be
+    point-in-time, and today's ranking is over today's eligible universe.
     """
     H = int(horizon if horizon is not None else HORIZON)
     A = float(alpha if alpha is not None else ALPHA)
@@ -375,7 +382,8 @@ def fit_predict(
     # model exists to avoid.
     train_close = hist.iloc[: len(hist) - H]
     train_turnover = turnover.reindex(train_close.index)
-    panel = build_panel(train_close, train_turnover, horizon=H, step=21, delivery=delivery)
+    panel = build_panel(train_close, train_turnover, horizon=H, step=21,
+                        delivery=delivery, eligible=eligible)
     if not panel.empty:
         panel = _attach_fundamentals(panel, fundamentals, train_close, max_fundamental_age_days)
         panel = panel.dropna(subset=[c for c in FEATURE_COLUMNS if c in panel.columns]
@@ -392,12 +400,20 @@ def fit_predict(
 
     # Features for the decision date itself, from the same builder, so training
     # and inference cannot drift apart in definition.
-    live = build_panel(hist.tail(MIN_LOOKBACK + 5),
-                       turnover.reindex(hist.index).tail(MIN_LOOKBACK + 5),
+    # Today's ranking covers the names eligible TODAY. Training spans every name
+    # that was ever eligible, which is a much wider matrix, and computing live
+    # features across all of it would cost several times what the decision needs.
+    live_cols = ([c for c in hist.columns if c in set(score_symbols)]
+                 if score_symbols is not None else list(hist.columns))
+    if not live_cols:
+        return None, None, "no eligible symbol survived into the scoring universe"
+    live_hist = hist[live_cols].tail(MIN_LOOKBACK + 5)
+    live = build_panel(live_hist,
+                       turnover.reindex(hist.index)[live_cols].tail(MIN_LOOKBACK + 5),
                        horizon=1, step=21, delivery=delivery)
     if live.empty:
         return None, None, "features could not be computed for the decision date"
-    live = _attach_fundamentals(live, fundamentals, hist, max_fundamental_age_days)
+    live = _attach_fundamentals(live, fundamentals, live_hist, max_fundamental_age_days)
     latest = live[live["date"] == live["date"].max()]
     latest = latest.dropna(subset=[c for c in FEATURE_COLUMNS if c in latest.columns])
     if latest.empty:

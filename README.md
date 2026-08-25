@@ -22,15 +22,36 @@ It issues opinions. It has no order-routing code and no broker connection.
 | **Execution** | None. No orders, no broker, no automation |
 | **Status** | Forward test registered, not yet started |
 
-**The central finding, stated up front:** on the holdout, the top decile
-returned **+4.35% per 63-session period** at an overlap-corrected
-**t = 3.13**, which clears the project's own t ≥ 3.0 bar. Regressed against
-six long-short factors built from the engine's own definitions, that excess
-has an **R² of 0.730** and an **alpha of −1.01% at t = −0.38**.
+> [!IMPORTANT]
+> **The validation figures below are withdrawn pending a re-run.** They were
+> computed on a training panel built from ONE universe — the names the
+> liquidity screen admits on the most recent session, projected backwards over
+> every training date. Measured against the screen resolved properly per date,
+> **13–28% of the names eligible on each historical date are absent from that
+> set**, excluded for what happened afterwards, while names eligible today
+> contributed rows on dates they could not have been traded on.
+>
+> The panel is now point-in-time (`crosssec.liquidity_mask`). Refitting on the
+> corrected panel moves the model in the shape survivorship predicts:
+>
+> | factor | biased panel | point-in-time | |
+> |---|---|---|---|
+> | `amihud` (illiquidity) | +0.00737 | −0.00917 | **sign flip** |
+> | `beta_120` | +0.00298 | −0.00274 | **sign flip** |
+> | `mom_6_1` | +0.01389 | +0.00288 | −79% |
+>
+> Illiquidity and beta look rewarded when only the survivors are kept, because
+> the risky illiquid names that did not make it are missing. **Every number in
+> this section needs recomputing before it can be quoted again.**
 
-The ranking carries real out-of-sample information. Most of what it captures
-appears to be momentum and a small-cap tilt. **The incremental alpha is not
-demonstrated.**
+**The central finding as last measured — on the biased panel, and therefore
+not currently standing:** on the holdout, the top decile returned **+4.35% per
+63-session period** at an overlap-corrected **t = 3.13**. Regressed against six
+long-short factors built from the engine's own definitions, that excess had an
+**R² of 0.730** and an **alpha of −1.01% at t = −0.38**.
+
+That the incremental alpha was **not** demonstrated is the one conclusion the
+correction does not threaten — it was already negative.
 
 ---
 
@@ -176,9 +197,18 @@ It is **not** a static NIFTY 200 list. The index snapshot is stored for
 breadth and benchmark purposes; the tradable universe is rebuilt from
 liquidity as it stood on each date.
 
-**Survivorship.** The measured disappearance rate is **4.3%/year**. Because
-the universe is rebuilt per date from stored data rather than from today's
-listings, a name that delisted in 2021 is present in 2020's universe. This is
+**Survivorship.** The measured disappearance rate is **4.3%/year**. The
+decision universe is rebuilt per date from stored data rather than from today's
+listings, so a name that delisted in 2021 is present in 2020's universe.
+
+The **training panel** did not do this until recently: it was built from the
+screen resolved once, on the latest session. `crosssec.liquidity_mask` now
+applies the same screen per date to the panel and to the equal-weight benchmark
+that beta and residual momentum are measured against. It agrees with
+`UniverseResolver.resolve_liquidity_pit` on about **88%** of names; the
+remainder is window handling at the edges, and it is stated rather than implied.
+
+The disappearance rate is also
 the main reason history cannot be extended: vendors serving candles back to
 2000 carry only currently-listed instruments, and a 26-year reconstruction
 would be missing **68%** of the companies that actually traded.
