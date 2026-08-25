@@ -32,7 +32,8 @@ import numpy as np
 from .data.types import DATE
 
 __all__ = ["Trade", "performance", "by_ticker", "equity_curve",
-           "open_positions", "dedupe", "overlaps", "calls_for"]
+           "open_positions", "dedupe", "overlaps", "calls_for", "merge_reentries",
+           "holding_profile"]
 
 
 @dataclass
@@ -228,7 +229,7 @@ def performance(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
                 step: int = 21) -> Dict[str, Any]:
     """Headline comparison. Every ratio carries the count behind it."""
     idx = _index_frame(store, benchmark) if store is not None else None
-    trades = _trades(dedupe(outcomes), idx)
+    trades = _trades(merge_reentries(outcomes), idx)
     n = len(trades)
     if n == 0:
         return {"n": 0, "benchmark": benchmark,
@@ -289,6 +290,50 @@ def dedupe(outcomes: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def merge_reentries(outcomes: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse a name re-signalled while it was still held into one position.
+
+    Stage 6 enters at rank 8 and holds while the name stays inside rank 16,
+    so a name that reappears tomorrow is the position being MAINTAINED, not a
+    second one being opened. Counting it twice reports a return on two slots
+    of capital the strategy never committed -- and it is not rare: on a live
+    slate two of twenty-one open positions were re-entries of names already
+    held.
+
+    One position runs from the first entry to the last exit. The return is
+    recomputed across that whole span rather than summed, because summing
+    two overlapping legs is the double-count this exists to remove.
+    """
+    rows = sorted(dedupe(outcomes),
+                  key=lambda o: (str(o.get("ticker") or ""),
+                                 str(o.get("entry_date") or "")))
+    out: List[Dict[str, Any]] = []
+    for o in rows:
+        prev = out[-1] if out else None
+        same = prev and prev.get("ticker") == o.get("ticker")
+        held = same and str(o.get("entry_date") or "") <= str(prev.get("exit_date") or "")
+        if not held:
+            out.append(dict(o))
+            continue
+        # Extend the position rather than opening a second one.
+        if str(o.get("exit_date") or "") > str(prev.get("exit_date") or ""):
+            prev["exit_date"] = o.get("exit_date")
+            prev["exit_price"] = o.get("exit_price")
+            prev["exit_reason"] = o.get("exit_reason")
+        entry = float(prev.get("entry_price") or 0.0)
+        exit_p = float(prev.get("exit_price") or 0.0)
+        if entry > 0 and np.isfinite(exit_p):
+            gross = exit_p / entry - 1.0
+            # Costs were charged per leg; one position pays one round trip.
+            slip = float(prev.get("gross_return") or 0.0) - float(prev.get("net_return") or 0.0)
+            prev["gross_return"] = gross
+            prev["net_return"] = gross - slip
+        prev["sessions_held"] = int(prev.get("sessions_held") or 0) + \
+            int(o.get("sessions_held") or 0)
+        prev["merged_legs"] = int(prev.get("merged_legs") or 1) + 1
+    return out
+
+
 def overlaps(trades: Sequence[Dict[str, Any]]) -> int:
     """How many calls on this name were held at the same time as another.
 
@@ -310,7 +355,7 @@ def by_ticker(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
               benchmark: str = "Nifty 200") -> List[Dict[str, Any]]:
     """Per-name record, worst first -- the losses are the part worth reading."""
     idx = _index_frame(store, benchmark) if store is not None else None
-    trades = _trades(dedupe(outcomes), idx)
+    trades = _trades(merge_reentries(outcomes), idx)
     grouped: Dict[str, List[Trade]] = {}
     for t in trades:
         grouped.setdefault(t.ticker, []).append(t)
@@ -349,7 +394,7 @@ def equity_curve(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
     equal-slot book actually accumulates.
     """
     idx = _index_frame(store, benchmark) if store is not None else None
-    trades = sorted(_trades(dedupe(outcomes), idx), key=lambda t: t.exit_date or "")
+    trades = sorted(_trades(merge_reentries(outcomes), idx), key=lambda t: t.exit_date or "")
     curve, run, bench_run = [], 0.0, 0.0
     for t in trades:
         if not t.exit_date:
@@ -465,6 +510,17 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
                 "path": path if len(path) > 1 else [],
             })
 
+    # Same rule for positions still running: the earliest entry is the
+    # position, and a later signal on the same name is it being maintained.
+    first: Dict[str, Any] = {}
+    for r in sorted(out, key=lambda r: (r["ticker"], r["signal_date"])):
+        cur = first.get(r["ticker"])
+        if cur is None:
+            first[r["ticker"]] = r
+        else:
+            cur["sessions_left"] = min(cur["sessions_left"], r["sessions_left"])
+            cur["reaffirmed"] = int(cur.get("reaffirmed") or 0) + 1
+    out = list(first.values())
     out.sort(key=lambda r: r["unrealised"])
     marks = np.array([r["unrealised"] for r in out], dtype=float) if out else np.array([])
     return {
@@ -497,7 +553,8 @@ def calls_for(ticker: str, outcomes: Sequence[Dict[str, Any]], store: Any = None
     why it is a comparison and not a result.
     """
     sym = str(ticker).upper()
-    mine = dedupe([o for o in outcomes if str(o.get("ticker", "")).upper() == sym])
+    mine = merge_reentries([o for o in outcomes
+                            if str(o.get("ticker", "")).upper() == sym])
     mine.sort(key=lambda o: str(o.get("signal_date") or ""))
     still = [o for o in (open_rows or [])
              if str(o.get("ticker", "")).upper() == sym]
@@ -546,4 +603,40 @@ def calls_for(ticker: str, outcomes: Sequence[Dict[str, Any]], store: Any = None
         "holding_since_first": hold,
         "best": max((c["net_return"] for c in calls), default=None),
         "worst": min((c["net_return"] for c in calls), default=None),
+    }
+
+
+def holding_profile(outcomes: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """How long positions actually last, from the record rather than config.
+
+    The card showed "15-63 sessions" on every name, which is the configured
+    backstop pair and says nothing about the name it is printed on. Worse, it
+    is wrong: across 716 closed trades the median hold is 2 sessions.
+
+    A per-name estimate cannot come from the target distance, because the
+    target IS defined in ATR units -- stop = 2.5 ATR and target = 1.5 R, so
+    every name's target sits exactly 3.75 ATR away and any first-passage
+    estimate returns the same number for all of them. Measured across a live
+    slate: target/stop was 1.500 on every pick.
+
+    So this reports the distribution the engine has actually produced, split
+    by how positions ended, which is where the variation really is: names
+    that reach their target and names that stop out do not last the same
+    length of time.
+    """
+    rows = [o for o in outcomes if o.get("sessions_held")]
+    if len(rows) < 20:
+        return {"n": len(rows)}
+    held = np.array([int(o["sessions_held"]) for o in rows], dtype=float)
+    by: Dict[str, Any] = {}
+    for o in rows:
+        by.setdefault(str(o.get("exit_reason") or "other"), []).append(
+            int(o["sessions_held"]))
+    return {
+        "n": len(rows),
+        "median": float(np.median(held)),
+        "p10": float(np.percentile(held, 10)),
+        "p90": float(np.percentile(held, 90)),
+        "by_exit": {k: {"n": len(v), "median": float(np.median(v))}
+                    for k, v in sorted(by.items(), key=lambda x: -len(x[1]))},
     }
