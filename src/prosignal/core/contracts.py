@@ -73,6 +73,7 @@ __all__ = [
     "Recommendation",
     "ClosestCandidate",
     "NoTradeReport",
+    "SlateEntry",
     "FinalSignalOutput",
     "LedgerRow",
 ]
@@ -512,7 +513,14 @@ class Recommendation(_Contract):
     initial_stop: Optional[float] = None
     target_1: Optional[float] = None
     target_2: Optional[float] = None
-    position_risk_category: RiskCategory
+    #: Optional because a candidate can reach the card with no risk plan: Stage
+    #: 7 builds one only when Stage 6 produced a reference price, and Stage 6
+    #: declines to for a name with under 70 sessions of history or an ATR it
+    #: cannot compute. Every other plan-derived field on this contract is
+    #: already guarded that way; this one was declared required, so `_card`'s
+    #: own `if plan else None` raised a ValidationError and took down the whole
+    #: run over one name. `api._card` has always read it as optional.
+    position_risk_category: Optional[RiskCategory] = None
 
     last_close: Optional[float] = None
     #: Score after Stage 5. This is what the gates compare against, so it is
@@ -569,6 +577,30 @@ class NoTradeReport(_Contract):
     gate_summary: Dict[str, int] = Field(default_factory=dict)
 
 
+class SlateEntry(_Contract):
+    """One row of the screen, as the run itself decided it.
+
+    The slate used to be recomputed by the presentation layer on every request,
+    from a payload that carried no memory of the previous screen. That made it
+    impossible to hold a name across sessions, and it meant the live screen, the
+    history page and the outcome record each reconstructed a different list from
+    the same run. The run decides once, here, and every reader renders this.
+    """
+
+    ticker: str
+    position: int
+    status: str
+    model_rank: Optional[int] = None
+    #: True when this name kept its slot under the Stage 6 exit band rather
+    #: than being chosen fresh today.
+    carried: bool = False
+    #: The session this name entered the screen and has held it since. With
+    #: `as_of_date` this gives the dwell directly, which is the figure the
+    #: turnover defect was invisible without.
+    shown_since: Optional[dt.date] = None
+    reason: str = ""
+
+
 class FinalSignalOutput(_Contract):
     run_id: str
     trial_id: str
@@ -581,6 +613,18 @@ class FinalSignalOutput(_Contract):
     recommendations: List[Recommendation] = Field(default_factory=list)
     watchlist: List[Recommendation] = Field(default_factory=list)
     no_trade: Optional[NoTradeReport] = None
+    #: What the screen leads with, decided by the run and not by the reader.
+    slate: List[SlateEntry] = Field(default_factory=list)
+    #: Names that were on the previous screen and are not on this one, each
+    #: with the reason. A name vanishing silently is how an eviction hides.
+    slate_departures: List[Dict[str, str]] = Field(default_factory=list)
+    #: Set when the regime or a defence halt refused NEW entries. The book is
+    #: unaffected -- what closes a position is the Stage 6 exit band.
+    new_entries_blocked: Optional[str] = None
+    #: What happens to held names the run produced no card for -- suspended,
+    #: dropped from the universe, or delisted. Without this a position left the
+    #: book by omission and no exit was ever recorded.
+    position_directives: List[Dict[str, Any]] = Field(default_factory=list)
 
     data_quality_flags: List[str] = Field(default_factory=list)
     manifest: Optional[RawDataManifest] = None
@@ -629,7 +673,19 @@ class LedgerRow(_Contract):
     stocks_scored: List[Dict[str, Any]] = Field(default_factory=list)
     signals_generated: List[str] = Field(default_factory=list)
     watchlist_generated: List[str] = Field(default_factory=list)
+    #: What the screen actually showed, in order. Without this the record could
+    #: not answer "what did the user see on that day?" -- the history page was
+    #: re-deriving it from `signals_generated` in emission order while the live
+    #: screen sorted by model rank, so the two disagreed about a past run.
+    slate_shown: List[Dict[str, Any]] = Field(default_factory=list)
+    #: Held names the run never evaluated, and what was decided about each.
+    #: `Ledger.open_book` unions the ones still held into the next run's book,
+    #: so a temporary eligibility gap no longer closes a position silently.
+    position_directives: List[Dict[str, Any]] = Field(default_factory=list)
     no_trade: bool = False
+    #: Set when new entries were refused while the book stood. Distinct from
+    #: `no_trade`, which used to absorb this case and report an empty book.
+    new_entries_blocked: Optional[str] = None
     no_trade_reason: Optional[str] = None
 
     gate_counts: Dict[str, int] = Field(default_factory=dict)

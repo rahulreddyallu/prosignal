@@ -80,3 +80,42 @@ def test_the_forward_test_reports_drift_the_config_hash_cannot_see():
     pr = progress(cfg.paths.ledger, rows)
     assert any("model fingerprints" in b for b in pr.broken)
     assert sorted(pr.model_fingerprints) == ["aaa/8", "bbb/8"]
+
+
+def test_the_modules_that_decide_the_shortlist_are_fingerprinted():
+    """The forward test's secondary criterion is a rank IC "of the daily
+    shortlist". Which names are on that shortlist is decided by
+    `presentation/selection.py`, and whether a position survives an event is
+    decided by `positions.py`. Neither is a stage, so a change to either used
+    to alter the object under test while leaving both the config hash and this
+    fingerprint identical.
+    """
+    from prosignal.modelprint import MODEL_SOURCES
+
+    assert "presentation/selection.py" in MODEL_SOURCES
+    assert "positions.py" in MODEL_SOURCES
+
+
+def test_rendering_code_is_still_outside_the_fingerprint():
+    """The line has to hold in both directions. A fingerprint that churns when
+    a stylesheet changes gets ignored, and an ignored integrity check is worse
+    than none."""
+    from prosignal.modelprint import MODEL_SOURCES
+
+    assert "presentation/viewmodel.py" not in MODEL_SOURCES
+    assert not any(s.startswith("static/") for s in MODEL_SOURCES)
+    assert "api.py" not in MODEL_SOURCES
+
+
+def test_a_change_to_the_selection_rule_moves_the_fingerprint(tmp_path):
+    """The property that matters, exercised rather than asserted about a list."""
+    from prosignal.modelprint import MODEL_SOURCES, source_digest
+
+    for rel in MODEL_SOURCES:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("original\n")
+    before = source_digest(tmp_path)
+
+    (tmp_path / "presentation/selection.py").write_text("changed\n")
+    assert source_digest(tmp_path) != before

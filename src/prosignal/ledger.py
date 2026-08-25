@@ -106,20 +106,20 @@ class Ledger:
             last = row
         return last
 
-    def open_book(self, before: Optional[dt.date] = None) -> List[str]:
-        """Names the most recent recorded run issued as BUY.
+    def previous_run(self, before: Optional[dt.date] = None) -> Optional[Dict[str, Any]]:
+        """The most recent recorded run strictly before ``before``.
 
         The engine holds no live position state -- every run rebuilds its view
-        from the store. The ledger is the only record of what the previous run
-        committed to, and Stage 6's exit band needs it: a name is kept while it
-        stays inside the wider band, which cannot be evaluated without knowing
-        whether it was held.
+        from the store -- so this row is the entire memory the next run has.
+        Both the open book and the previous screen come out of it, and they are
+        read together because this is a full scan of a file that grows without
+        bound; doing it twice per run was pure waste.
 
-        Returns the empty list when nothing has been recorded yet, which is the
-        correct starting state rather than an error -- a first run holds
-        nothing.
+        Rows whose date will not parse are skipped rather than crashing the
+        run: one bad line must not become "the engine holds nothing".
         """
-        latest, latest_date = [], None
+        latest: Optional[Dict[str, Any]] = None
+        latest_date: Optional[dt.date] = None
         for row in self.iter_rows():
             raw = row.get("date")
             try:
@@ -129,8 +129,50 @@ class Ledger:
             if before is not None and when >= before:
                 continue
             if latest_date is None or when >= latest_date:
-                latest_date, latest = when, list(row.get("signals_generated") or [])
+                latest_date, latest = when, row
         return latest
+
+    def open_book(self, before: Optional[dt.date] = None) -> List[str]:
+        """Names the most recent recorded run issued as BUY.
+
+        Stage 6's exit band needs it: a name is kept while it stays inside the
+        wider band, which cannot be evaluated without knowing whether it was
+        held.
+
+        Returns the empty list when nothing has been recorded yet, which is the
+        correct starting state rather than an error -- a first run holds
+        nothing.
+        """
+        row = self.previous_run(before=before)
+        if not row:
+            return []
+        book = list(row.get("signals_generated") or [])
+        # Positions the previous run could not evaluate but did not close. A
+        # suspended name has no price to exit at and a name dropped from the
+        # universe is still tradeable, so both are still held -- and both used
+        # to leave the book simply by not being in `signals_generated`.
+        seen = set(book)
+        for directive in row.get("position_directives") or []:
+            if not isinstance(directive, dict):
+                continue
+            ticker = str(directive.get("ticker") or "")
+            if not ticker or ticker in seen:
+                continue
+            if str(directive.get("action") or "").startswith("hold"):
+                book.append(ticker)
+                seen.add(ticker)
+        return book
+
+    def shown_slate(self, before: Optional[dt.date] = None) -> List[Dict[str, Any]]:
+        """The screen the most recent recorded run produced, in order.
+
+        Empty for a run recorded before the slate was part of the record, which
+        is the correct answer: there is no previous screen to carry, so the next
+        one is chosen fresh. It is not an error and must not be inferred from
+        `signals_generated` -- that is the book, which is a different list.
+        """
+        row = self.previous_run(before=before)
+        return list(row.get("slate_shown") or []) if row else []
 
     def signals_for(self, ticker: str) -> List[Dict[str, Any]]:
         """Every run that produced a signal for one ticker -- the audit question."""
@@ -159,7 +201,16 @@ def row_from_output(
                 "decision": rec.decision.value,
                 "composite_score": rec.composite_score,
                 "percentile": rec.universe_percentile,
+                # BOTH, because they are different numbers and only one of them
+                # decides anything. `rank` is the display position among the
+                # defended survivors; `model_rank` is the name's place in the
+                # full eligible universe and is the only input to Stage 6's
+                # admission band. The record carried `rank` alone, so it could
+                # not answer "was this name inside the band?" -- the single
+                # question the whole hysteresis design turns on -- and every
+                # reconstruction from the ledger silently used the wrong one.
                 "rank": rec.rank,
+                "model_rank": rec.model_rank,
                 "sector": rec.sector,
                 "last_close": rec.last_close,
                 "entry_zone": list(rec.entry_zone) if rec.entry_zone else None,
@@ -196,7 +247,10 @@ def row_from_output(
         stocks_scored=scored,
         signals_generated=[r.ticker for r in output.recommendations],
         watchlist_generated=[r.ticker for r in output.watchlist],
+        slate_shown=[e.model_dump(mode="json") for e in output.slate],
+        position_directives=list(output.position_directives),
         no_trade=output.no_trade is not None,
+        new_entries_blocked=output.new_entries_blocked,
         no_trade_reason=output.no_trade.reason if output.no_trade else None,
         gate_counts=dict(funnel),
         data_quality_flags=list(output.data_quality_flags),

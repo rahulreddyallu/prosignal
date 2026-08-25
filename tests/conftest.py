@@ -127,10 +127,29 @@ def prices(sessions) -> pd.DataFrame:
 
 
 @pytest.fixture(scope="session")
-def live_cfg():
-    """The REAL project config and store, for end-to-end pipeline tests.
+def live_cfg(tmp_path_factory):
+    """The REAL project store, with every WRITE path redirected to a temp dir.
 
-    Skips when the store has no data, so the suite still runs on a clean clone.
+    The store is real because that is the point: these tests exercise the
+    pipeline against actual market data. The ledger is NOT, and it used to be.
+
+    `run_analysis` appends a permanent row to `paths.ledger` on every call, so
+    each pipeline test wrote into the production research record. That record is
+    not a log:
+
+      * `Ledger.trial_count()` is the multiple-testing input to the Deflated
+        Sharpe Ratio, so a test run raised the penalty applied to every real
+        result;
+      * `validation.forward.progress()` counts rows by market date, so test
+        runs were being counted as forward-test observations;
+      * the next real run reads the newest row back as its open book, so a
+        test's book could seed production hysteresis.
+
+    Measured on this repository: 41 rows were written into the research ledger
+    by test runs in a single afternoon.
+
+    Redirecting the write paths keeps the tests end-to-end and keeps the record
+    clean. `curated` and `snapshots` stay real and are only read.
     """
     from pathlib import Path as _P
 
@@ -142,6 +161,12 @@ def live_cfg():
     store = _DS(cfg.paths.curated, cfg.paths.snapshots)
     if not store.price_sessions():
         pytest.skip("no ingested data; run `prosignal data ingest --full`")
+
+    sandbox = tmp_path_factory.mktemp("live_cfg_writes")
+    for attr in ("ledger", "logs", "raw", "cache"):
+        target = sandbox / attr
+        target.mkdir(parents=True, exist_ok=True)
+        setattr(cfg.paths, attr, target)
     return cfg
 
 

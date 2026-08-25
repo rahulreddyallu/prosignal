@@ -198,6 +198,8 @@ _AMBIENT = {
     "requestAnimationFrame", "cancelAnimationFrame", "matchMedia", "now",
     "concat", "isArray", "keys", "reverse", "toUpperCase", "casefold",
     "reduce",
+    # Date instance methods, used to count sessions a name has been held
+    "getDate", "setDate", "getDay",
     # CSS function names picked up by the same scan
     "var", "rgba", "rect", "minmax", "clamp", "repeat", "translateX",
     "translateY", "scaleX", "rotate", "brightness", "saturate", "blur",

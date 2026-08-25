@@ -1074,6 +1074,13 @@ def _shape(run) -> Dict[str, Any]:
         ),
         "recommendations": [_card(x) for x in o.recommendations],
         "watchlist": [_card(x) for x in o.watchlist],
+        # The screen the RUN decided, not one the reader re-derives. Serialising
+        # only the two lists left every consumer to reconstruct the slate, and
+        # they did not agree with each other.
+        "slate": [e.model_dump(mode="json") for e in o.slate],
+        "slate_departures": list(o.slate_departures),
+        "new_entries_blocked": o.new_entries_blocked,
+        "position_directives": list(o.position_directives),
         "data_quality_flags": o.data_quality_flags,
         "stage_timings_ms": o.stage_timings_ms,
         "disclaimer": o.disclaimer,
