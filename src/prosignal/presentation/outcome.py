@@ -60,6 +60,44 @@ def _f(value: Any) -> Optional[float]:
     return out if pd.notna(out) else None
 
 
+#: Ratio bounds outside which the record is broken rather than merely adjusted.
+#: A 1:10 split gives 0.1 and a 10:1 reverse gives 10.
+_BASIS_MIN, _BASIS_MAX = 0.001, 1000.0
+
+
+def _basis_factor(frame, ticker: str, cutoff, signal_price: float) -> Optional[float]:
+    """Stored close on the signal session over the close recorded that day.
+
+    That ratio IS the cumulative price adjustment applied since the call was
+    made, so multiplying the recorded levels by it puts them in the basis these
+    bars are quoted in. It needs no corporate-action lookup and it corrects any
+    adjustment, including one the actions table is missing.
+
+    Uses the last session at or before the signal date, so a signal dated on a
+    holiday still reconciles.
+
+    Returns 1.0 when the window holds no session at or before the signal date.
+    That is missing information about adjustment, not evidence of it, and the
+    unadjusted case is overwhelmingly the common one -- refusing there would
+    blank every outcome for any caller that passes a forward-only window. The
+    production caller reads prices from the first run date onward, so the
+    factor is always computable where it matters.
+
+    Returns None only when a factor CAN be computed and is not credible, which
+    is a broken record rather than a corporate action.
+    """
+    rows = frame[(frame["symbol"] == ticker) & (frame["date"] <= cutoff)]
+    if rows.empty:
+        return 1.0
+    stored = _f(rows.sort_values("date")["close"].iloc[-1])
+    if stored is None or stored <= 0 or signal_price <= 0:
+        return 1.0
+    factor = stored / signal_price
+    if not (_BASIS_MIN <= factor <= _BASIS_MAX):
+        return None
+    return factor
+
+
 def outcomes_for(
     picks: Sequence[Dict[str, Any]],
     as_of: dt.date,
@@ -94,11 +132,31 @@ def outcomes_for(
             ))
             continue
 
+        # The recorded price and levels are in the basis that existed on the
+        # signal date; these bars are adjusted to today. A corporate action in
+        # between makes them different currencies, and comparing them produces
+        # nonsense of exactly one shape: the level sits far outside every
+        # subsequent bar, so it reads as instantly hit or never reachable.
+        # BAJFINANCE's stop of 8195.05 against a re-based close of 886.25 is
+        # the case this was found on.
+        factor = _basis_factor(frame, ticker, cutoff, signal_price)
+        if factor is None:
+            out.append(_blank(
+                pick,
+                "The price basis for this signal could not be reconciled with "
+                "the stored history, so no change is reported. A corporate "
+                "action has re-based the prices since the call was made.",
+            ))
+            continue
+        signal_price *= factor
+        target = _f(pick.get("target_1"))
+        stop = _f(pick.get("stop"))
+        target = target * factor if target is not None else None
+        stop = stop * factor if stop is not None else None
+
         last = _f(rows["close"].iloc[-1])
         high = _f(rows["high"].max())
         low = _f(rows["low"].min())
-        target = _f(pick.get("target_1"))
-        stop = _f(pick.get("stop"))
 
         target_hit = (high is not None and target is not None and high >= target)
         stop_hit = (low is not None and stop is not None and low <= stop)

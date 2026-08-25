@@ -146,3 +146,54 @@ def test_a_run_with_no_follow_up_says_so_rather_than_reporting_zero():
     s = summarise(outcomes_for([pick()], SIG, bars([])))
     assert s["tracked"] == 0
     assert "until the market trades again" in s["text"]
+
+
+# ------------------------------------------------------------ price basis
+def test_levels_recorded_before_a_split_are_rebased_against_adjusted_bars():
+    """The recorded price and levels are in the basis that existed on the
+    signal date; the store re-adjusts its whole history when a corporate action
+    lands. BAJFINANCE was signalled on 2025-05-02 with a stop of 8195.05 against
+    a close of 8862.50, and a 4:1 bonus with a 2:1 face split on 2025-06-16 left
+    the store serving that session at 886.25. Compared raw, the stop sits ten
+    times above every subsequent low and the call reads as instantly stopped.
+    """
+    frame = bars([
+        ("2026-01-05", "AAA", 10.2, 9.8, 10.0),      # signal session, post-split
+        ("2026-01-06", "AAA", 10.5, 9.9, 10.4),
+    ])
+    # Recorded that day in the pre-split basis: 10x these numbers.
+    out = outcomes_for([pick(price=100.0, stop=90.0, target=120.0)], SIG, frame)[0]
+    assert out.stop == pytest.approx(9.0)
+    assert out.target_1 == pytest.approx(12.0)
+    assert out.stop_hit is False, "the raw stop of 90 would sit above every bar"
+    assert out.change_pct == pytest.approx(4.0)
+
+
+def test_an_unadjusted_call_is_left_alone():
+    frame = bars([
+        ("2026-01-05", "AAA", 101.0, 99.0, 100.0),
+        ("2026-01-06", "AAA", 112.0, 108.0, 110.0),
+    ])
+    out = outcomes_for([pick(price=100.0, stop=90.0, target=120.0)], SIG, frame)[0]
+    assert out.stop == pytest.approx(90.0)
+    assert out.target_1 == pytest.approx(120.0)
+    assert out.change_pct == pytest.approx(10.0)
+
+
+def test_a_window_with_no_signal_session_assumes_the_same_basis():
+    """Absence of the signal bar is missing information about adjustment, not
+    evidence of it, and refusing there would blank every outcome for a caller
+    that passes a forward-only window."""
+    frame = bars([("2026-01-06", "AAA", 112.0, 108.0, 110.0)])
+    out = outcomes_for([pick(price=100.0)], SIG, frame)[0]
+    assert out.change_pct == pytest.approx(10.0)
+
+
+def test_an_incredible_basis_ratio_reports_nothing_rather_than_a_wrong_number():
+    frame = bars([
+        ("2026-01-05", "AAA", 1.0, 1.0, 1.0),
+        ("2026-01-06", "AAA", 1.0, 1.0, 1.0),
+    ])
+    out = outcomes_for([pick(price=1e9)], SIG, frame)[0]
+    assert out.change_pct is None
+    assert "could not be reconciled" in (out.note or "")

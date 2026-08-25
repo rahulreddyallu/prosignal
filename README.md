@@ -408,6 +408,37 @@ transitions only **12 stayed in the book**: 19 were demoted by an entry cap and
 
 `stages/stage8_final_signal.py`, `positions.py`
 
+### How a realised outcome is scored
+
+A position ends at the **earliest** of: the stop, a target, the engine's own
+exit, or the holding-period limit. Entry is at the next session's open, and a
+bar touching both stop and target counts as the stop.
+
+**The engine's own exit was missing.** The book is the exit rule — Stage 6 holds
+while the name stays inside `exit_rank` — and outcome resolution modelled only
+the levels. Measured on the recorded record: the simulation held past the
+engine's actual exit in **94% of trades**, by a median of **14 sessions**. Every
+figure the History page showed was computed over those phantom sessions.
+
+**Decision levels are re-based before they are compared.** The stop and targets
+are stored as plain numbers in the price basis of the run date; the store
+re-adjusts its whole history whenever a corporate action lands. BAJFINANCE was
+signalled on 2025-05-02 with a stop of 8195.05 against a close of 8862.50; a 4:1
+bonus with a 2:1 face split landed on 2025-06-16, and that session now reads at
+a close of 886.25. The stop sat ten times above every subsequent low, so the
+position "stopped out" on its first bar — a loss recorded as **+823%**. Twenty-
+nine trades cleared +50% this way and the record's mean return read **+53%**.
+
+The correction is the stored close over the recorded close for the signal
+session, which *is* the cumulative adjustment since the run. It needs no
+corporate-action lookup. A trade whose basis cannot be established is **refused
+and counted**, never scored on whichever basis was handy.
+
+Outcomes carry the `exit_model` that produced them and only the current model is
+served, so two exit rules can never be averaged together.
+
+`outcomes.py`
+
 ---
 
 ## Feature reference
