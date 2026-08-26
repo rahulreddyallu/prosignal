@@ -1677,6 +1677,38 @@ stage7_risk:
 # -----------------------------------------------------------------------------
 # 13. STAGE 8  --  FINAL SIGNAL
 # -----------------------------------------------------------------------------
+  # PORTFOLIO-LEVEL VOLATILITY SCALING -- disabled, and the reason is measured.
+  #
+  # Moreira & Muir (2017) show that scaling a portfolio by the inverse of its
+  # recent realised variance raises the Sharpe ratio, because volatility is far
+  # more forecastable at short horizons than return is. Measured here over 50
+  # out-of-sample rebalances it does not:
+  #
+  #   target vol    mean ret      sd    Sharpe   avg scale
+  #   off             +3.12%   7.87%    +0.79      1.00
+  #   10%             +2.69%   7.40%    +0.73      0.74
+  #   15%             +3.37%   9.22%    +0.73      1.01
+  #   20%             +3.83%  10.15%    +0.76      1.21
+  #   25%             +4.22%  11.04%    +0.77      1.35
+  #
+  # A 25% target returns +1.11% more per period than no overlay at all, at
+  # t +2.24 -- and none of it is alpha. Average exposure is 1.35x, volatility
+  # rises from 7.87% to 11.04%, and the SHARPE FALLS. Read on mean return the
+  # overlay looks like it works; read on the only measure invariant to leverage,
+  # no setting beats switching it off.
+  #
+  # Position sizing is ALREADY inverse-volatility through the ATR stop:
+  # risk_budget / (entry * atr_distance) gives a high-ATR name a smaller
+  # position by construction. This block is the separate, aggregate question of
+  # how much book to have on at all, and that is the part the data does not
+  # support.
+  volatility_scaling:
+    enabled: false
+    target_vol_annual: 0.20
+    window_sessions: 21
+    max_scale: 1.5
+    min_scale: 0.5
+
 stage8_final_signal:
   # Portfolio-level sanity: don't present five versions of the same trade.
   portfolio:
