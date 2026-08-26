@@ -163,3 +163,31 @@ def test_a_breach_names_the_pair_rather_than_only_counting_them():
     assert "pairs" in block and "{a}/{b}" in block, (
         "a count alone does not say which factors are the same bet"
     )
+
+
+def test_the_panel_says_score_and_contributions_are_different_units():
+    """A reader adding up contributions of ~0.12 and seeing a score of 0.898 has
+    no way to connect them. The chain is: the model's raw prediction (which the
+    contributions DO sum to), ranked across the day's eligible universe, mapped
+    onto [0,1]. So 0.898 is the 89.8th percentile of today's names."""
+    import pathlib
+
+    page = pathlib.Path("src/prosignal/static/index.html").read_text()
+    assert "percentile of today's universe" in page
+    assert "not to Score" in page
+
+
+def test_the_score_is_a_percentile_of_the_days_universe():
+    """The property itself, not the label: the transform is order-preserving and
+    lands the best name at 1.0 and the worst at 0.0."""
+    import pandas as pd
+
+    from prosignal.indicators.crosssection import rank_to_unit_interval
+
+    raw = pd.Series({"worst": -0.05, "mid": 0.01, "best": 0.12})
+    out = rank_to_unit_interval(raw)
+    assert out["best"] == pytest.approx(1.0)
+    assert out["worst"] == pytest.approx(0.0)
+    assert out["mid"] == pytest.approx(0.5)
+    # and it does NOT preserve the magnitudes the contributions carried
+    assert out["best"] != pytest.approx(0.12)
