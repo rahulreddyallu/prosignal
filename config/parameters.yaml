@@ -1966,9 +1966,24 @@ validation:
     max_tier_a_parameters: 6
     # Product of all A_SEARCH grid sizes. Multiplicative, so it bites fast.
     max_grid_configurations: 512
-    # Trials already spent across previous campaigns. Feeds the DSR trial count.
-    # Update this from the research ledger after every campaign.
-    cumulative_trials_logged: 0
+    # Trials spent OUTSIDE the research commands, which record their own into
+    # data/curated/trial_registry.jsonl. This field covers comparisons made
+    # while building the engine that no command re-runs, and it is not zero:
+    #
+    #   4  triple-barrier calibrations   2.0/1.5, 1.5/1.0, 1.0/0.75, 0.8/0.6
+    #   3  risk-family orientations      beta+dd, -beta+dd, dd alone
+    #   2  shrinkage targets             zero, prior_mean
+    #   2  significance floors           2.0, 1.65
+    #   2  tau-squared estimators        plain moment, DerSimonian-Laird
+    #   5  meta-label shortlist widths   8, 15, 25, 50, 100
+    #   2  meta-label readings           per-name, per-date
+    #  --
+    #  20
+    #
+    # Everything before this registry existed is still uncounted. That cannot be
+    # reconstructed and is not being silently assumed to be nothing -- see
+    # `prosignal research trials`.
+    cumulative_trials_logged: 20
     # A configuration with PBO above this cannot be promoted to VALIDATED.
     # A high PBO is an instruction to SIMPLIFY the model, not to keep searching
     # for a configuration that happens to score better.

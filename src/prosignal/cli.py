@@ -1027,11 +1027,17 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .data.types import DATE, SYMBOL
     from .data.universe import UniverseResolver
     from .features import crossmodel as cm
-    from .features.crosssec import build_panel, liquidity_mask
     from .stages._cfg import fv, iv, v
-    from .validation.harness import run_cpcv
-    from .validation.metrics import deflated_sharpe_ratio
+    from .validation.harness import configuration_matrix, run_cpcv
+    from .validation.metrics import compute_pbo, deflated_sharpe_ratio
+    from .validation.registry import TrialRegistry, registry_path
     from .validation.research_panel import build_research_panel
+
+    def _short_f(name: str) -> str:
+        for suffix in ("_r", "_f"):
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
 
     p = cfg.params
     val, c4 = p.validation, p.stage4_core_score
@@ -1099,14 +1105,45 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
         ["path Sharpe -- sd", f"{spread.get('sd', float('nan')):.2f}"],
         ["paths below zero", f"{spread.get('share_negative', float('nan')):.0%}"],
     ])
-    trials = args.trials
+    # The trial count is COUNTED, not typed. It was a command-line default of
+    # 24 plus a config field shipped at 0 with a comment asking a human to
+    # update it after every campaign -- so the engine's central defence against
+    # selection bias was a constant somebody entered once.
+    reg = TrialRegistry(registry_path(cfg.paths.curated))
+    carried = int(val.search_budget.cumulative_trials_logged)
+    counted = reg.effective_trials(carried)
+    trials = counted if args.trials is None else int(args.trials)
+
+    _rule("What this result is being charged for")
+    by_cmd = reg.by_command()
+    if by_cmd:
+        for cmd, n in sorted(by_cmd.items(), key=lambda kv: -kv[1]):
+            _print(f"  {cmd:<28}{n:>5} configuration(s) compared")
+    else:
+        _print("  the registry is empty -- no research command has recorded a "
+               "comparison yet")
+    _print(f"  {'carried from earlier campaigns':<28}{carried:>5}")
+    _print(f"  {'CHARGED':<28}{trials:>5}")
+    if args.trials is not None and int(args.trials) < counted:
+        _print()
+        _print(_tag(f"OVERRIDDEN DOWNWARD: the registry counts {counted}"))
+        _print("  Charging fewer trials than were actually looked at is exactly")
+        _print("  the bias the Deflated Sharpe exists to remove.")
+
     dsr = result.deflated(n_trials=trials)
     t_bar = fv(val.significance.t_stat_bar)
     pbo_bar = float(val.search_budget.max_acceptable_pbo)
     paths = np.asarray(result.path_sharpes, dtype="float64")
     _print()
-    _print(f"  pooled top-decile excess {np.mean(result.excess):+.2%} per "
-           f"{horizon}-session period")
+    ex = np.asarray(result.excess, dtype="float64")
+    ex = ex[np.isfinite(ex)]
+    if ex.size:
+        _print(f"  pooled top-decile excess {ex.mean():+.2%} per "
+               f"{horizon}-session period, over {ex.size:,} scored test dates")
+    else:
+        # Printing "+nan%" here read as a number. It is the absence of one.
+        _print("  pooled top-decile excess: NOT MEASURABLE -- no test date "
+               "produced a top decile to measure")
     _print(f"  Deflated Sharpe {dsr.deflated_sr:.3f} charging {trials} trials -- "
            f"{'PASS' if dsr.passes else 'FAIL'}")
     worst = float(paths.min()) if paths.size else float("nan")
@@ -1122,6 +1159,68 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
            "from either is inflated. What CPCV honestly gives is the SPREAD: "
            "where the worst path landed, and how much of the distribution sits "
            "below zero.")
+    # ---- PBO -------------------------------------------------------------
+    # `compute_pbo` has existed, tested, and been called by NOTHING. The line
+    # above quotes "PBO for promotion to VALIDATED" against a number the engine
+    # never computed. The configurations compared are the ones a person would
+    # actually choose between: the full theme set, and each single-theme and
+    # drop-one variant of it.
+    _rule("Probability of Backtest Overfitting")
+    configurations = {"all themes": list(features)}
+    for f in features:
+        configurations[f"{_short_f(f)} alone"] = [f]
+        if len(features) > 2:
+            configurations[f"without {_short_f(f)}"] = [c for c in features if c != f]
+    matrix = None
+    try:
+        matrix = configuration_matrix(
+            panel, configurations, step_sessions=21,
+            alpha=fv(c4.model_ridge_alpha),
+            purge_sessions=iv(val.cpcv.purge_sessions),
+            estimator=str(c4.estimator.method))
+    except ValueError as exc:
+        _print(f"  not computable: {exc}")
+        _print()
+        _print("  Under the gated estimator a single-theme arm that never")
+        _print("  clears the significance floor produces no coefficients at")
+        _print("  all -- so it is not a configuration anyone could have chosen,")
+        _print("  and there is nothing for PBO to rank it against.")
+    if matrix is not None:
+        gone = matrix.attrs.get("dropped_configurations") or []
+        if gone:
+            _print(f"  {len(gone)} configuration(s) the estimator refused "
+                   f"outright and could never have been chosen: "
+                   f"{', '.join(sorted(gone))}")
+        n_splits = min(16, (len(matrix) // 2) * 2)
+        if n_splits < 4:
+            _print(f"  {len(matrix)} common dates cannot form enough symmetric "
+                   f"sub-matrices; PBO needs at least 4")
+        else:
+            pbo = compute_pbo(matrix.to_numpy("float64"), n_splits=n_splits)
+            _print(f"  {len(matrix)} dates scored by all "
+                   f"{len(configurations)} configurations, S={n_splits}")
+            _print(f"  PBO {pbo.pbo:.0%} -- "
+                   f"{'PASS' if pbo.pbo <= pbo_bar else 'FAIL'} against the "
+                   f"{pbo_bar:.0%} bar for promotion to VALIDATED")
+            if len(matrix) < 24:
+                _print()
+                _print(_tag(f"ON {len(matrix)} COMMON DATES, THIS PASS MEANS "
+                            f"ALMOST NOTHING"))
+                _print("  The configurations refuse on different splits, so the")
+                _print("  dates ALL of them scored are few. A PBO computed on")
+                _print("  this many observations has a sampling error wider")
+                _print("  than the bar it is being compared to, and passing it")
+                _print("  is not evidence of anything. It is reported because")
+                _print("  the alternative -- quoting a bar against a number the")
+                _print("  engine never computed -- is worse.")
+            _print()
+            _print("  PBO is the share of symmetric train/test splits where the")
+            _print("  configuration that won in-sample landed BELOW the median")
+            _print("  out-of-sample. A high figure is an instruction to")
+            _print("  simplify, not to keep searching for a configuration that")
+            _print("  happens to score better.")
+            reg.record("research cpcv (pbo)", sorted(configurations))
+
     if result.notes:
         _print()
         for note in result.notes[:5]:
@@ -1404,6 +1503,7 @@ def cmd_research_estimator(cfg: AppConfig, args: argparse.Namespace) -> int:
                                        score_from_lambda)
     from .features.linear import predict, purged_walk_forward, rank_ic, ridge_fit
     from .stages._cfg import fv, iv
+    from .validation.registry import TrialRegistry, registry_path
     from .validation.research_panel import build_research_panel
 
     p = cfg.params
@@ -1497,6 +1597,11 @@ def cmd_research_estimator(cfg: AppConfig, args: argparse.Namespace) -> int:
                f"{ex.mean():>+12.2%}{ex.mean() / newey_west_se(ex, 2):>+7.2f}"
                f"{refused.get(name, 0):>10}")
 
+    # Every arm above was compared and could have been chosen. That is the
+    # definition of a trial, and the DSR charges for it whether or not it won.
+    TrialRegistry(registry_path(cfg.paths.curated)).record(
+        "research estimator", sorted(per.keys()))
+
     if "equal weight 1/N" in per:
         base = {d: b for d, b, _ in per["equal weight 1/N"]}
         _rule("Paired against the control, on the dates both scored")
@@ -1576,6 +1681,7 @@ def cmd_research_spread(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .features.crossmodel import fit_coefficients
     from .stages._cfg import fv, iv
     from .validation.portfolio_sim import phase_summary
+    from .validation.registry import TrialRegistry, registry_path
     from .validation.research_panel import build_research_panel
 
     p = cfg.params
@@ -1655,6 +1761,10 @@ def cmd_research_spread(cfg: AppConfig, args: argparse.Namespace) -> int:
     if not rows:
         _print("  no band produced a tradeable book")
         return 1
+
+    TrialRegistry(registry_path(cfg.paths.curated)).record(
+        "research spread",
+        [f"entry={r['entry']},exit={r['exit']}" for r in rows])
 
     frame = pd.DataFrame(rows)
     if any(e > base.max_positions for e in args.entries):
@@ -1737,6 +1847,7 @@ def cmd_research_metalabel(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .features.linear import predict, purged_walk_forward
     from .features.metalabel import (auc, fit_meta_out_of_sample, meta_label,
                                      reliability, shortlist)
+    from .validation.registry import TrialRegistry, registry_path
     from .stages._cfg import fv, iv
     from .validation.research_panel import build_research_panel
 
@@ -1809,6 +1920,9 @@ def cmd_research_metalabel(cfg: AppConfig, args: argparse.Namespace) -> int:
         _print("  history; that is the binding constraint, not the code.")
         return 1
 
+    TrialRegistry(registry_path(cfg.paths.curated)).record(
+        "research metalabel", [f"top_k={top_k},l2={fv(c4.metalabel.l2):g}"])
+
     all_rows = pd.concat(collected, ignore_index=True)
     per_date = []
     for _, g in all_rows.groupby("date", observed=True):
@@ -1858,6 +1972,44 @@ def cmd_research_metalabel(cfg: AppConfig, args: argparse.Namespace) -> int:
            f"min_win_probability = {floor:g}")
     if not enabled or floor <= 0:
         _print("  The veto is inert. Nothing above is gating the book.")
+    return 0
+
+
+def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Every configuration this engine has been compared at.
+
+    The Deflated Sharpe charges a result for the number of configurations tried
+    before it. That number used to be a command-line default of 24 and a config
+    field shipped at 0 with a comment asking a human to update it. This is the
+    audit trail behind it.
+    """
+    from .validation.registry import TrialRegistry, registry_path
+
+    reg = TrialRegistry(registry_path(cfg.paths.curated))
+    trials = reg.load()
+    carried = int(cfg.params.validation.search_budget.cumulative_trials_logged)
+
+    _rule("Trial registry")
+    _print(f"  {registry_path(cfg.paths.curated)}")
+    if not trials:
+        _print("  empty. No research command has recorded a comparison yet, so "
+               "the Deflated Sharpe would charge only the carried count.")
+    else:
+        by_cmd = reg.by_command()
+        for cmd_name, n in sorted(by_cmd.items(), key=lambda kv: -kv[1]):
+            _print(f"\n  {cmd_name}  ({n})")
+            for t in trials:
+                if t.command == cmd_name:
+                    _print(f"      {t.recorded_at[:10]}  {t.label}")
+    _print()
+    _print(f"  recorded                        {len(trials):>5}")
+    _print(f"  carried from earlier campaigns  {carried:>5}")
+    _print(f"  CHARGED BY THE DSR              {reg.effective_trials(carried):>5}")
+    if carried == 0 and trials:
+        _print()
+        _print("  `cumulative_trials_logged` is 0. Everything before this "
+               "registry existed is therefore uncounted -- it cannot be "
+               "reconstructed, and is not being silently assumed to be nothing.")
     return 0
 
 def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
@@ -2161,9 +2313,13 @@ def build_parser() -> argparse.ArgumentParser:
     cpcv_p.add_argument("--test-groups", type=int, default=3,
                         help="k in C(N,k). Higher k means more paths and less "
                              "training data per split (default 3 -> 36 paths)")
-    cpcv_p.add_argument("--trials", type=int, default=24,
-                        help="configurations tried, charged against the Deflated "
-                             "Sharpe. Understating it inflates the result")
+    cpcv_p.add_argument("--trials", type=int, default=None,
+                        help="configurations charged against the Deflated Sharpe. "
+                             "Defaults to the TRIAL REGISTRY count plus "
+                             "validation.search_budget.cumulative_trials_logged. "
+                             "Overriding it downward is announced, because "
+                             "charging fewer trials than were looked at is the "
+                             "bias the DSR exists to remove")
     cpcv_p.add_argument("--include-holdout", action="store_true",
                         help="extend the panel through the reserved holdout. "
                              "This spends the one honest test -- do not use it "
@@ -2223,6 +2379,10 @@ def build_parser() -> argparse.ArgumentParser:
     meta_p.add_argument("--include-holdout", action="store_true",
                         help="spend the reserved holdout; normally left alone")
     meta_p.set_defaults(func=cmd_research_metalabel)
+
+    trials_p = research_sub.add_parser(
+        "trials", help="every configuration compared, and what the DSR charges")
+    trials_p.set_defaults(func=cmd_research_trials)
 
     fwd_p = research_sub.add_parser(
         "forward", help="status of the pre-registered forward test")
