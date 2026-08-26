@@ -326,3 +326,49 @@ def test_the_reversal_window_degrades_rather_than_excluding_short_history():
     assert "resid.tail(REVERSAL_STD_WINDOW).std" in src, (
         "tail() takes what is there rather than requiring the full window"
     )
+
+
+# --------------------------------------------------- the card must add up
+def test_the_card_shows_the_coefficient_that_produced_the_contribution():
+    """`contributions` stripped `_r` and not `_f`, so a family arrived
+    downstream still called `mom_f`, and a lookup appending `_r` asked for
+    `mom_f_r` and got nothing. The card printed a factor moving the score by
+    0.0390 at a coefficient of +0.00000 -- self-contradictory on its face."""
+    assert cm._bare("mom_f") == "mom"
+    assert cm._bare("amihud_r") == "amihud"
+    assert cm._bare("plain") == "plain"
+
+    m = cm.CrossSectionalModel(
+        coef={"mom_f": 0.025, "lottery_f": -0.019},
+        n_train=1000, train_end=pd.Timestamp("2026-01-01").date(),
+        features=["mom_f", "lottery_f"],
+    )
+    m.mu = np.array([0.0, 0.0]); m.sd = np.array([1.0, 1.0]); m.intercept = 0.0
+    feats = pd.DataFrame({"symbol": ["A"], "mom_f": [1.0], "lottery_f": [1.0]})
+    contrib = cm.contributions(m, feats)
+    assert list(contrib.columns) == ["mom", "lottery"], (
+        "the family suffix must be stripped so the coefficient can be found"
+    )
+    # And the lookup stage 4 performs finds a real number for that name.
+    for name in contrib.columns:
+        assert m.coef.get(name + "_f", m.coef.get(name + "_r", 0.0)) != 0.0
+
+
+def test_every_scored_family_has_a_citation():
+    """The card names the family, so the citation has to as well. It was
+    printing `(None)` under each one."""
+    from prosignal.stages.stage4_core_score import _MODEL_CITE as _CITATIONS
+
+    for family in cm.FAMILIES:
+        assert family in _CITATIONS, f"{family} would render as (None)"
+
+
+def test_a_held_name_reads_as_one_sentence():
+    import inspect
+
+    from prosignal.stages import stage8_final_signal as s8
+
+    src = inspect.getsource(s8.run)
+    assert '" ".join(filter(None, [' in src, (
+        "an empty Stage 6 reason left a double space mid-sentence"
+    )
