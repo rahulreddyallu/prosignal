@@ -525,6 +525,71 @@ is not its maximum.
 
 ---
 
+### The NO TRADE veto, and why it is switched off
+
+A rank is relative by construction: somebody is always top of the list, on the
+best day of the decade and on the worst. The primary model is good at saying
+which of two names is better and says nothing about whether the better one is
+worth buying — and the engine buys the top of that list every rebalance.
+
+Meta-labelling (López de Prado, ch. 3) splits the two questions. A second binary
+model, fitted **only on the trades the primary would actually have taken**,
+predicts whether one reaches its profit barrier before its stop. It has no long
+side — it cannot propose a name the primary did not — so its only power is to
+veto. That is exactly the shape a NO TRADE gate needs, and the triple-barrier
+label already supplies the ground truth.
+
+It is built, wired, tested, and **disabled**, because it does not work here:
+
+| | |
+|---|---|
+| pooled AUC | **0.5698** |
+| mean per-date AUC | **0.4996** (t vs 0.5 = **−0.02**) |
+| dates above 0.5 | **50%** |
+| top-half minus bottom-half | −0.16% per period, t −0.15 |
+
+The pooled figure is the pooled-N illusion in a new place. Pooling across dates
+lets *"this was a good period"* masquerade as *"this was a good name"*. Within a
+date — the only question a per-name veto can answer — it is a coin. Calibration
+is wrong in the direction that matters too: the top bucket predicts **0.817** and
+realises **0.547**.
+
+Read as a **date-level** gate the signal reappears (trading only the
+higher-probability half of dates returns +8.62% against +0.86%), but that is
+market timing rather than trade selection, it rests on ~13 independent windows
+once the 63-session overlap is counted rather than 40, and it was found by
+looking a second time after the first look failed.
+
+The binding constraint is **data**, not code: eight positions over seventy
+rebalances is roughly 370 decided trades in the entire history. Re-run
+`research metalabel` when the panel is longer.
+
+**Two defects the wiring exposed, both found by running it rather than by a
+test.** The classifier was not being cached, so on the 20-of-21 sessions that
+score from a cached model no probability existed — and a gate whose rule is
+"unknown is not approved" silently refused the whole book. Buys fell 8 → 4 (the
+4 being held positions, which are exempt) with no error anywhere. And an enabled
+veto that cannot score now *states* a refusal rather than skipping candidates
+one at a time, which had produced an empty book under a full funnel — the exact
+shape of a day the market offered nothing.
+
+`features/metalabel.py`, `research metalabel`
+
+---
+
+### The funnel was not the funnel
+
+Chasing the veto through the interface turned up something older: the pipeline
+**rebuilt the funnel by hand** whenever a run produced a trade, using
+`entries.triggered()` — the population *before* the score gate. Stage 8
+documents having fixed exactly that non-monotonic ordering; the fix never
+reached the screen, because the screen was reading a different dict.
+
+Stage 8 now returns its own counts on every exit path, and the pipeline renders
+them. An AST-parsed test asserts every exit hands them back.
+
+---
+
 ### What the buy/hold spread actually buys
 
 The engine enters at rank 8 and holds until rank 16. That gap is the whole of

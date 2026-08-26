@@ -58,7 +58,16 @@ def run(
     config,
     company_names: Optional[Dict[str, str]] = None,
     held: Optional[Sequence[str]] = None,
-) -> Tuple[List[Recommendation], List[Recommendation], Optional[NoTradeReport]]:
+) -> Tuple[List[Recommendation], List[Recommendation], Optional[NoTradeReport],
+             Dict[str, int]]:
+    """Returns (buys, watchlist, no_trade, gate_counts).
+
+    `gate_counts` is returned on EVERY path, not only the no-trade one. The
+    pipeline used to rebuild the funnel by hand when a trade was produced --
+    reading `entries.triggered()` for the trigger count, which is the population
+    BEFORE the score gate. That is the exact non-monotonic funnel this stage
+    documents having fixed, still being displayed on the path that matters most.
+    """
     p = config.params
     cfg = p.stage8_final_signal
     names = company_names or {}
@@ -66,6 +75,10 @@ def run(
     # adding a position from keeping one, and the two obey different rules.
     open_book = {str(t) for t in (held or ())}
 
+    # In NARROWING ORDER. This dict is the funnel the interface renders, and a
+    # key appended later lands at the bottom -- which is how a gate that runs in
+    # the middle of the loop ends up displayed below the ones it precedes,
+    # making the funnel look non-monotonic when it is not.
     gate_counts: Dict[str, int] = {
         "universe_considered": eligibility.universe_considered,
         "passed_eligibility": len(eligibility.eligible_universe),
@@ -73,9 +86,11 @@ def run(
         "defended": len(defense.per_stock),
         "survived_defense": 0,
         "passed_score_threshold": 0,
-        "triggered": 0,
-        "passed_portfolio_limits": 0,
     }
+    if fv(cfg.scarcity.min_win_probability) > 0:
+        gate_counts["passed_meta_label"] = 0
+    gate_counts["triggered"] = 0
+    gate_counts["passed_portfolio_limits"] = 0
 
     # -- market-wide blocks -------------------------------------------------
     # These stop NEW entries. They do NOT close the book, and the difference is
@@ -187,6 +202,33 @@ def run(
     # while the pre-defence percentile stands -- but only one of them
     # selects, and tuning the other has no effect.
     qualified: List[str] = []
+    # THE NO TRADE VETO. A second model, fitted only on the trades this engine
+    # would have taken, predicting whether one reaches its profit barrier before
+    # its stop. It has no long side -- it cannot propose a name the primary did
+    # not -- so its only power is to refuse. Disabled by default; the reason is
+    # measured and recorded in MetaLabelConfig.
+    #
+    # It applies to NEW entries only. A held position is governed by the Stage 6
+    # exit band, and letting a freshly refitted classifier close an open trade
+    # would put the book at the mercy of a model that changes every 21 sessions.
+    win_probs = scores.win_probability or {}
+    min_win = fv(cfg.scarcity.min_win_probability)
+    vetoed = 0
+
+    # An ENABLED veto that produced no probabilities has not approved anybody
+    # and has not refused anybody -- it did not run. Skipping every candidate
+    # one at a time turns that into a silent empty book with a full funnel
+    # above it, which reads exactly like a day the market offered nothing. It
+    # is a stated refusal instead.
+    if min_win > 0 and not win_probs and blocked_reason is None:
+        blocked_reason = (
+            "The NO TRADE veto is switched on and could not score today's "
+            "candidates"
+            + (f": {scores.win_probability_unavailable}"
+               if scores.win_probability_unavailable else ".")
+            + " No new position is opened on a gate that did not run."
+        )
+
     for sym in survivors:
         score = by_ticker.get(sym)
         decision = entries.decisions.get(sym)
@@ -194,10 +236,32 @@ def run(
             continue
         if defense.per_stock[sym].score_after < min_score or score.percentile < min_pct:
             continue
+        # Counted BEFORE the veto, so the funnel shows what each gate removed
+        # rather than attributing both cuts to whichever ran last.
         gate_counts["passed_score_threshold"] += 1
+        if min_win > 0 and sym not in open_book:
+            prob = win_probs.get(sym)
+            # An absent probability is NOT an approval. A name the veto could
+            # not score has not been cleared by it, and treating a gap as a pass
+            # is how a gate quietly stops gating.
+            if prob is None or prob < min_win:
+                vetoed += 1
+                continue
         qualified.append(sym)
         if decision.status is EntryStatus.TRIGGERED:
             gate_counts["triggered"] += 1
+
+    # Reported as SURVIVORS, because that is what every other rung of this
+    # funnel counts -- a removal count sitting among them reads as a survivor
+    # count and inverts the narrowing. Present only when the veto actually ran,
+    # so a disabled gate does not add a row that always repeats the one above.
+    # A SURVIVOR count, like every other rung. The number vetoed is the drop
+    # from the line above and does not need a row that inverts the narrowing.
+    if min_win > 0:
+        gate_counts["passed_meta_label"] = len(qualified)
+        log.info("meta-label veto applied",
+                 extra={"floor": min_win, "vetoed": vetoed,
+                        "passed": len(qualified)})
 
     def _accept(rec: Recommendation, sym: str, sector: str) -> None:
         gate_counts["passed_portfolio_limits"] += 1
@@ -387,20 +451,20 @@ def run(
                 f"{len(buys)} position(s) already held are unchanged: what "
                 f"closes one is the Stage 6 exit band, not the regime.",
                 scores, gate_counts, cfg, defense=defense, entries=entries,
-            )
-        return buys, watch, None
+            ), gate_counts
+        return buys, watch, None, gate_counts
 
     if blocked_reason is not None:
         return [], watch, _no_trade(
             f"{blocked_reason} No position was open to carry.",
             scores, gate_counts, cfg, defense=defense, entries=entries,
-        )
+        ), gate_counts
 
     return [], watch, _no_trade(
         "No candidate cleared every gate. This is the designed outcome when the "
         "evidence does not justify risking capital.",
         scores, gate_counts, cfg, defense=defense, entries=entries,
-    )
+    ), gate_counts
 
 
 # =============================================================================

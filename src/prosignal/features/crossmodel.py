@@ -36,6 +36,7 @@ from .fundamental_factors import available_as_of, build_fundamental_panel, winso
 from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
 from .famamacbeth import (FMResult, SIGNIFICANCE_FLOOR, fama_macbeth,
                           gated_shrink, is_degenerate)
+from .metalabel import MetaModel, fit_meta_out_of_sample, shortlist
 from .linear import predict, ridge_fit
 
 __all__ = ["CrossSectionalModel", "fit_predict", "load_cached", "save_cache",
@@ -197,6 +198,39 @@ class CrossSectionalModel:
                 f"strongest: {parts}")
 
 
+
+def _meta_blob(meta) -> Optional[Dict[str, object]]:
+    """The veto classifier, flattened for the cache."""
+    if meta is None:
+        return None
+    return {
+        "features": list(meta.features),
+        "coef": [float(c) for c in meta.coef],
+        "intercept": float(meta.intercept),
+        "mu": [float(x) for x in meta.mu],
+        "sd": [float(x) for x in meta.sd],
+        "n_train": int(meta.n_train),
+        "base_rate": float(meta.base_rate),
+    }
+
+
+def _meta_from_blob(blob) -> Optional["MetaModel"]:
+    if not blob:
+        return None
+    try:
+        return MetaModel(
+            features=list(blob["features"]),
+            coef=np.array(blob["coef"], dtype="float64"),
+            intercept=float(blob["intercept"]),
+            mu=np.array(blob["mu"], dtype="float64"),
+            sd=np.array(blob["sd"], dtype="float64"),
+            n_train=int(blob["n_train"]),
+            base_rate=float(blob["base_rate"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def load_cached(path, as_of: dt.date,
                 refit_every_sessions: Optional[int] = None,
                 estimator: Optional[str] = None) -> Optional[CrossSectionalModel]:
@@ -246,6 +280,8 @@ def load_cached(path, as_of: dt.date,
         m.sd = np.array(blob["sd"], dtype="float64")
         m.intercept = float(blob["intercept"])
         m.estimator = str(blob.get("estimator", "ridge"))
+        m.meta = _meta_from_blob(blob.get("meta"))
+        m.meta_prob = None                 # scored per run, never cached
         m.fm_t_stat = dict(blob.get("fm_t_stat") or {})
         m.fm_lambda = dict(blob.get("fm_lambda") or {})
         m.fm_n_dates = int(blob.get("fm_n_dates", 0) or 0)
@@ -317,6 +353,11 @@ def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
         "fm_lambda": {k: float(v) for k, v in
                       (getattr(model, "fm_lambda", {}) or {}).items()},
         "fm_n_dates": int(getattr(model, "fm_n_dates", 0) or 0),
+        # The veto travels with the model. Without this the cheap path -- 20 of
+        # every 21 sessions -- reloads a model with no classifier, every new
+        # entry scores as unknown, and a gate whose rule is "unknown is not
+        # approved" silently refuses the whole book.
+        "meta": _meta_blob(getattr(model, "meta", None)),
         "dropped_for_coverage": getattr(model, "dropped_for_coverage", {}) or {},
         "mu": list(map(float, model.mu)),
         "sd": list(map(float, model.sd)),
@@ -394,6 +435,19 @@ def score_with(model: CrossSectionalModel, features: pd.DataFrame,
     coef = np.array([model.coef[c] for c in cols], dtype="float64")
     raw = ((x - model.mu) / model.sd) @ coef + model.intercept
     s = pd.Series(raw, index=features["symbol"].to_numpy())
+    # The cheap path scores today from a cached model, and the veto has to come
+    # with it -- otherwise 20 of every 21 sessions produce no probability at
+    # all, and a gate whose rule is "unknown is not approved" refuses the book.
+    meta = getattr(model, "meta", None)
+    if meta is not None:
+        scored = features.copy()
+        scored["_meta_score"] = raw
+        try:
+            model.meta_prob = pd.Series(meta.predict_proba(scored),
+                                        index=features["symbol"].to_numpy())
+        except (KeyError, ValueError) as exc:
+            model.meta_prob = None
+            model.meta_unavailable = f"the veto could not score today's names: {exc}"
     return ((s.rank(pct=True) - 0.5) * 2.0).sort_values(ascending=False)
 
 
@@ -775,6 +829,9 @@ def fit_predict(
     significance_floor: Optional[float] = None,
     fm_window_dates: Optional[int] = None,
     shrink_toward: str = "zero",
+    metalabel: bool = False,
+    metalabel_top_k: int = 50,
+    metalabel_l2: float = 1.0,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
@@ -913,10 +970,39 @@ def fit_predict(
 
     n_train = len(panel)
     train_end = pd.Timestamp(panel["date"].max()).date()
+
+    # THE NO TRADE VETO. A second model, fitted only on the trades this engine
+    # would actually have taken, predicting whether one reaches its profit
+    # barrier before its stop. It cannot pick a name the primary did not; it can
+    # only refuse one. Off by default -- see MetaLabelConfig for the measurement.
+    meta_model = None
+    meta_reason = None
+    if metalabel:
+        def _inner_primary(inner_train, frame):
+            inner_fit, _fm2, _why2 = fit_coefficients(
+                inner_train, features, estimator=estimator, alpha=A, horizon=H,
+                step=21, significance_floor=significance_floor,
+                shrink_toward=shrink_toward,
+                weights=(inner_train["uniqueness"].to_numpy("float64")
+                         if "uniqueness" in inner_train.columns else None))
+            if inner_fit is None:
+                return None
+            return predict(inner_fit, frame[features].to_numpy("float64"))
+
+        meta_model, meta_reason = fit_meta_out_of_sample(
+            panel, list(features) + ["_meta_score"], _inner_primary,
+            top_k=int(metalabel_top_k), l2=float(metalabel_l2))
+        if meta_model is None:
+            log.info("meta-label model unavailable; the veto is inert this refit",
+                     extra={"reason": meta_reason})
+
     del panel, x, y
     latest = apply_family_multipliers(latest, multipliers)
     raw = predict(fit, latest[features].to_numpy("float64"))
     scores = pd.Series(raw, index=latest["symbol"].to_numpy())
+    # The veto reads the primary score as one of its inputs, under the same
+    # name it was trained with.
+    latest["_meta_score"] = raw
     ranked = (scores.rank(pct=True) - 0.5) * 2.0
     # How far apart the model actually placed the universe today, BEFORE the
     # rank transform flattens it. The ranked score is uniform by construction
@@ -930,7 +1016,23 @@ def fit_predict(
         train_end=train_end,
         features=features,
     )
+    # P(target before stop) for the names being ranked today, or None when the
+    # veto could not be fitted. Computed here rather than in stage 8 so the
+    # probability comes from the SAME feature frame the score did.
+    model_meta_prob = None
+    if meta_model is not None:
+        try:
+            model_meta_prob = pd.Series(
+                meta_model.predict_proba(latest), index=latest["symbol"].to_numpy())
+        except (KeyError, ValueError) as exc:
+            meta_reason = f"the veto could not score today's names: {exc}"
+            log.warning("meta-label scoring failed; the veto is inert",
+                        extra={"reason": meta_reason})
+
     model.dropped_for_coverage = dropped
+    model.meta_prob = model_meta_prob
+    model.meta = meta_model
+    model.meta_unavailable = meta_reason
     model.estimator = estimator
     if fm is not None:
         model.fm_t_stat = dict(fm.t_stat)

@@ -95,6 +95,13 @@ def _entries(rows, triggered) -> EntryReport:
 
 
 def _run(cfg, rows, triggered, *, held=(), allow_entries=True):
+    """(buys, watch, no_trade). Stage 8 also returns its gate counts now; the
+    tests that want them call `_run_full`."""
+    return _run_full(cfg, rows, triggered, held=held,
+                     allow_entries=allow_entries)[:3]
+
+
+def _run_full(cfg, rows, triggered, *, held=(), allow_entries=True):
     return s8.run(
         regime=_regime(allow_entries),
         eligibility=EligibilityReport(as_of_date=AS_OF, universe_considered=600,
@@ -206,7 +213,7 @@ def test_a_market_halt_also_keeps_the_book(cfg):
     defense = _defense(rows)
     defense.market_halt = True
     defense.market_halt_reason = "feed integrity"
-    buys, _, no_trade = s8.run(
+    buys, _, no_trade, _gates = s8.run(
         regime=_regime(True),
         eligibility=EligibilityReport(as_of_date=AS_OF, universe_considered=600),
         scores=_scores(rows), defense=defense,

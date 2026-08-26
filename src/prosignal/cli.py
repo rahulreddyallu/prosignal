@@ -1713,6 +1713,153 @@ def cmd_research_spread(cfg: AppConfig, args: argparse.Namespace) -> int:
     _print("  with turnover -- not for a winner.")
     return 0
 
+
+def cmd_research_metalabel(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Does a second model know when the first one is wrong?
+
+    Meta-labelling (Lopez de Prado ch. 3) fits a binary classifier on the trades
+    the PRIMARY model would actually have taken, predicting whether one reaches
+    its profit barrier before its stop. It cannot pick a name the primary did
+    not, so its only power is to veto -- which is the shape the NO TRADE gate
+    needs.
+
+    The number that matters is the PER-DATE one. A veto chooses between names on
+    a single day; pooling across dates lets "this was a good period" masquerade
+    as "this was a good name", and a pooled AUC can look convincing while the
+    within-date figure is a coin.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .features.crossmodel import fit_coefficients
+    from .features.famamacbeth import newey_west_se
+    from .features.linear import predict, purged_walk_forward
+    from .features.metalabel import (auc, fit_meta_out_of_sample, meta_label,
+                                     reliability, shortlist)
+    from .stages._cfg import fv, iv
+    from .validation.research_panel import build_research_panel
+
+    p = cfg.params
+    val, c4 = p.validation, p.stage4_core_score
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = (sessions[-1] if args.include_holdout
+           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+
+    _rule("Building the panel")
+    rp = build_research_panel(cfg, store, end)
+    panel, fams, horizon = rp.panel, rp.features, rp.horizon
+    if rp.barriers is None:
+        _print("  the label is not triple-barrier, so there is no meta-label "
+               "to fit. Nothing to measure.")
+        return 1
+    _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
+    decided = int((panel["barrier_side"] != 0).sum())
+    _print(f"  {decided:,} rows reached a barrier; "
+           f"{len(panel) - decided:,} timed out and are excluded")
+
+    top_k = int(args.top_k)
+
+    def primary(train, frame):
+        fit, _fm, _why = fit_coefficients(
+            train, fams, estimator=str(c4.estimator.method),
+            alpha=fv(c4.model_ridge_alpha), horizon=horizon, step=21,
+            significance_floor=fv(c4.estimator.significance_floor),
+            shrink_toward=str(c4.estimator.shrink_toward),
+            weights=(train["uniqueness"].to_numpy("float64")
+                     if "uniqueness" in train.columns else None))
+        if fit is None:
+            return None
+        return predict(fit, frame[fams].to_numpy("float64"))
+
+    _rule(f"Purged walk-forward, shortlist = top {top_k}")
+    feats = list(fams) + ["_meta_score"]
+    collected = []
+    for f in purged_walk_forward(panel, fams, horizon=horizon,
+                                 n_splits=args.splits, embargo=args.embargo):
+        model, why = fit_meta_out_of_sample(
+            f["train"], feats, primary, top_k=top_k,
+            l2=fv(c4.metalabel.l2), min_rows=args.min_rows)
+        if model is None:
+            _print(f"  fold {f['fold']}: no veto fitted -- {why}")
+            continue
+        test_scores = primary(f["train"], f["test"])
+        if test_scores is None:
+            continue
+        rows = shortlist(f["test"], test_scores, top_k).copy()
+        rows["_meta_y"] = meta_label(rows["barrier_side"])
+        rows = rows.dropna(subset=feats + ["_meta_y"])
+        if len(rows) < 40:
+            continue
+        rows["p"] = model.predict_proba(rows)
+        collected.append(rows[["date", "p", "_meta_y", "label"]])
+        _print(f"  fold {f['fold']}: trained on {model.n_train} shortlist rows "
+               f"(base {model.base_rate:.1%}), tested on {len(rows)}, "
+               f"AUC {auc(rows['_meta_y'].to_numpy(), rows['p'].to_numpy()):.3f}")
+
+    if not collected:
+        _print()
+        _print("  NO FOLD COULD FIT A VETO. Eight positions over seventy")
+        _print("  rebalances is roughly 370 decided trades in the entire")
+        _print("  history; that is the binding constraint, not the code.")
+        return 1
+
+    all_rows = pd.concat(collected, ignore_index=True)
+    per_date = []
+    for _, g in all_rows.groupby("date", observed=True):
+        if len(g) < 20 or g["_meta_y"].nunique() < 2:
+            continue
+        cut = g["p"].median()
+        per_date.append((auc(g["_meta_y"].to_numpy(), g["p"].to_numpy()),
+                         float(g[g["p"] >= cut]["label"].mean()
+                               - g[g["p"] < cut]["label"].mean())))
+    _rule("Discrimination")
+    pooled = auc(all_rows["_meta_y"].to_numpy(), all_rows["p"].to_numpy())
+    _print(f"  {len(all_rows):,} out-of-sample shortlist rows over "
+           f"{all_rows['date'].nunique()} dates")
+    _print(f"  pooled AUC                 {pooled:.4f}")
+    if len(per_date) >= 5:
+        a = np.array([x for x, _ in per_date])
+        sp = np.array([y for _, y in per_date])
+        t_auc = (a.mean() - 0.5) / newey_west_se(a, 2)
+        _print(f"  mean per-date AUC          {a.mean():.4f}   "
+               f"t vs 0.5 {t_auc:+.2f}   above 0.5 on {(a > 0.5).mean():.0%} of dates")
+        _print(f"  top-half minus bottom-half {sp.mean():+.2%} per period   "
+               f"t {sp.mean() / newey_west_se(sp, 2):+.2f}")
+        _print()
+        if abs(t_auc) < 2.0:
+            _print(_tag("THE VETO DOES NOT DISCRIMINATE WITHIN A DATE"))
+            _print("  which is the only question it can answer. A pooled AUC")
+            _print("  above 0.5 with a per-date AUC at 0.5 means the classifier")
+            _print("  is separating good PERIODS from bad ones, not good names")
+            _print("  from bad ones -- and a gate built on that is market")
+            _print("  timing wearing a trade-selection costume.")
+
+    _rule("Calibration -- a gate reads the LEVEL, not the ordering")
+    table = reliability(all_rows["_meta_y"].to_numpy(), all_rows["p"].to_numpy(),
+                        bins=args.bins)
+    if table.empty:
+        _print("  not enough rows to bucket")
+    else:
+        _print(f"  {'bucket':>8}{'n':>7}{'predicted':>12}{'realised':>11}{'error':>9}")
+        for _, r in table.iterrows():
+            _print(f"  {int(r['bucket']):>8}{int(r['n']):>7}{r['predicted']:>12.3f}"
+                   f"{r['realised']:>11.3f}{r['realised'] - r['predicted']:>+9.3f}")
+
+    enabled = bool(c4.metalabel.enabled)
+    floor = fv(p.stage8_final_signal.scarcity.min_win_probability)
+    _print()
+    _print(f"  shipped: metalabel.enabled = {enabled}, "
+           f"min_win_probability = {floor:g}")
+    if not enabled or floor <= 0:
+        _print("  The veto is inert. Nothing above is gating the book.")
+    return 0
+
 def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     """How far the pre-registered forward test has run.
 
@@ -2059,6 +2206,23 @@ def build_parser() -> argparse.ArgumentParser:
     spread_p.add_argument("--include-holdout", action="store_true",
                           help="spend the reserved holdout; normally left alone")
     spread_p.set_defaults(func=cmd_research_spread)
+
+    meta_p = research_sub.add_parser(
+        "metalabel", help="measure the NO TRADE veto: does a second model know "
+                          "when the first is wrong?")
+    meta_p.add_argument("--top-k", type=int, default=50, dest="top_k",
+                        help="shortlist depth (default 50)")
+    meta_p.add_argument("--splits", type=int, default=6,
+                        help="purged walk-forward splits (default 6)")
+    meta_p.add_argument("--embargo", type=int, default=5,
+                        help="embargo in sampled dates (default 5)")
+    meta_p.add_argument("--min-rows", type=int, default=100, dest="min_rows",
+                        help="minimum shortlist rows to fit a fold (default 100)")
+    meta_p.add_argument("--bins", type=int, default=5,
+                        help="calibration buckets (default 5)")
+    meta_p.add_argument("--include-holdout", action="store_true",
+                        help="spend the reserved holdout; normally left alone")
+    meta_p.set_defaults(func=cmd_research_metalabel)
 
     fwd_p = research_sub.add_parser(
         "forward", help="status of the pre-registered forward test")

@@ -339,6 +339,13 @@ class CoreScoreReport(_Contract):
     #: panel. The gate is a ratio to this, because the level is a function of
     #: the ridge penalty rather than of the market.
     typical_dispersion: Optional[float] = None
+    #: P(target barrier before stop barrier) per ticker, from the meta-label
+    #: veto. None when the veto is disabled or could not be fitted -- which is
+    #: the shipped default; see MetaLabelConfig for why.
+    win_probability: Optional[Dict[str, float]] = None
+    #: Why the veto is inert, when it is. An absent probability with no reason
+    #: is indistinguishable from a veto that ran and approved everything.
+    win_probability_unavailable: Optional[str] = None
     weighting_mode: str
     standardisation: str
     effective_weights: Dict[str, float] = Field(default_factory=dict)
