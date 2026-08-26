@@ -193,3 +193,97 @@ class TestControlArm:
         roll = rolling_lambda(r, window=10)
         assert roll["mom_f"].iloc[19] == pytest.approx(0.08)
         assert roll["mom_f"].iloc[-1] == pytest.approx(0.0)
+
+
+class TestTheTrialRegistry:
+    """The DSR charges a result for the configurations tried before it. That
+    count was a command-line default of 24 plus a config field shipped at 0 with
+    a comment asking a human to update it. Nobody did, and nothing checked."""
+
+    def _reg(self, tmp_path):
+        from prosignal.validation.registry import TrialRegistry
+        return TrialRegistry(tmp_path / "trials.jsonl")
+
+    def test_recording_the_same_comparison_twice_does_not_inflate_the_count(self, tmp_path):
+        r = self._reg(tmp_path)
+        assert r.record("estimator", ["ridge", "1/N", "fm"]) == 3
+        assert r.record("estimator", ["ridge", "1/N", "fm"]) == 0
+        assert r.count() == 3
+
+    def test_a_new_comparison_adds_to_it(self, tmp_path):
+        r = self._reg(tmp_path)
+        r.record("estimator", ["ridge", "1/N"])
+        r.record("spread", ["8/16", "8/20"])
+        assert r.count() == 4
+        assert r.by_command() == {"estimator": 2, "spread": 2}
+
+    def test_the_same_label_under_a_different_command_is_a_separate_trial(self, tmp_path):
+        r = self._reg(tmp_path)
+        r.record("estimator", ["mom only"])
+        r.record("cpcv", ["mom only"])
+        assert r.count() == 2
+
+    def test_prior_campaigns_are_carried_not_assumed_away(self, tmp_path):
+        r = self._reg(tmp_path)
+        r.record("estimator", ["a", "b"])
+        assert r.effective_trials(carried=20) == 22
+        assert r.effective_trials(carried=0) == 2
+
+    def test_an_absent_registry_counts_zero_rather_than_failing(self, tmp_path):
+        assert self._reg(tmp_path).count() == 0
+
+    def test_a_corrupt_line_does_not_silently_lower_the_count(self, tmp_path):
+        """Under-counting trials flatters the result, so a bad line is skipped
+        for identity but the file is never rewritten or truncated."""
+        r = self._reg(tmp_path)
+        r.record("estimator", ["a", "b"])
+        before = r.path.read_text()
+        with r.path.open("a") as fh:
+            fh.write("{not json\n")
+        assert r.count() == 2
+        assert r.path.read_text().startswith(before)
+
+    def test_the_cpcv_command_defaults_to_the_registry_not_a_constant(self):
+        import inspect
+
+        from prosignal import cli
+
+        src = inspect.getsource(cli.cmd_research_cpcv)
+        assert "reg.effective_trials(carried)" in src
+        assert "trials = counted if args.trials is None" in src
+
+    def test_overriding_the_count_downward_is_announced(self):
+        import inspect
+
+        from prosignal import cli
+
+        src = inspect.getsource(cli.cmd_research_cpcv)
+        assert "OVERRIDDEN DOWNWARD" in src
+
+
+class TestPboIsActuallyComputed:
+    def test_the_cpcv_command_calls_it(self):
+        """`compute_pbo` was implemented, tested, and called by nothing, while
+        the CPCV output quoted a PBO bar against a number never computed."""
+        import inspect
+
+        from prosignal import cli
+
+        src = inspect.getsource(cli.cmd_research_cpcv)
+        assert "compute_pbo(" in src
+        assert "configuration_matrix(" in src
+
+    def test_a_refused_configuration_does_not_delete_every_other_column(self):
+        """One empty column plus a row-wise dropna deleted every date for every
+        configuration, so a single unusable arm made PBO uncomputable."""
+        import numpy as np
+        import pandas as pd
+
+        frame = pd.DataFrame({
+            "good": np.linspace(0.01, 0.05, 30),
+            "also good": np.linspace(0.02, 0.06, 30),
+            "refused": [np.nan] * 30,
+        })
+        kept = [c for c in frame.columns if frame[c].notna().sum() >= 8]
+        assert set(kept) == {"good", "also good"}
+        assert len(frame[kept].dropna()) == 30

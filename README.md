@@ -525,6 +525,79 @@ is not its maximum.
 
 ---
 
+### The trial count was a number somebody typed
+
+The Deflated Sharpe Ratio charges a result for the configurations tried before
+it. That number was a command-line default of **24**, plus a config field
+`cumulative_trials_logged` shipped at **0** with a comment asking a human to
+update it after every campaign. Nobody ever did, and nothing checked. The
+engine's central defence against selection bias was a constant entered once.
+
+Trials are **counted** now, by the research commands themselves, into an
+append-only registry keyed by (command, configuration) — so re-running the same
+comparison does not inflate the count, and running a new one does.
+
+| | |
+|---|---|
+| `research spread` | 18 configurations |
+| `research estimator` | 5 |
+| `research metalabel` | 1 |
+| carried from earlier campaigns | 20 |
+| **charged by the DSR** | **44** |
+
+The carried 20 are the comparisons made while building the engine that no
+command re-runs — four barrier calibrations, three risk-family orientations, two
+shrinkage targets, two significance floors, two τ² estimators, five meta-label
+shortlist widths, two meta-label readings — enumerated in the config so they can
+be argued with. Everything before the registry existed is still uncounted; that
+cannot be reconstructed and is not silently assumed to be nothing.
+
+`research trials` prints the audit trail. Overriding the count downward is
+announced, because charging fewer trials than were looked at is the bias the DSR
+exists to remove.
+
+### CPCV under the new label and estimator
+
+| | |
+|---|---|
+| splits fitted / paths woven | 120 / 36 of 36 |
+| pooled rank IC | +0.0288 |
+| top-decile excess | **+0.87%** per 63-session period, over 2,401 scored dates |
+| path Sharpe — min / median / max | **+0.03** / +0.27 / +0.55 |
+| paths below zero | **0%** |
+| Deflated Sharpe, charging 44 trials | 1.000, pass |
+
+**A NaN was being printed as a number.** The top-decile excess read `+nan%`. A
+model that predicts the same value for every name has no top decile —
+`rank(pct=True)` gives every tied element the midrank, the mask selects nothing,
+and the mean of an empty slice is NaN, which then poisoned the pooled average
+while every other line in the table read normally. 98 such dates are now
+excluded and reported rather than averaged in.
+
+### PBO existed, and was called by nothing
+
+`compute_pbo` had been implemented and tested for months, and no code path
+invoked it — while the CPCV output printed *"PBO for promotion to VALIDATED:
+≤ 50%"*, quoting a bar against a number the engine never computed.
+
+It is computed now, over the full theme set and every single-theme and drop-one
+variant. **PBO 35%, pass.** Two configurations — `lottery alone`, `reversal
+alone` — the estimator refuses outright and are excluded, because a
+configuration that cannot be traded is not one anybody could have chosen. That
+exclusion is itself a fix: one empty column plus a row-wise `dropna` had deleted
+every date for every *other* configuration, so a single unusable arm made PBO
+uncomputable rather than merely absent.
+
+**The pass means almost nothing.** The configurations refuse on different
+splits, so only **7 dates** were scored by all of them. A PBO on seven
+observations has a sampling error wider than the bar it is compared to. It is
+reported with that stated, because the alternative — quoting a bar against a
+number never computed — is worse.
+
+`validation/registry.py`, `research trials`
+
+---
+
 ### The NO TRADE veto, and why it is switched off
 
 A rank is relative by construction: somebody is always top of the list, on the

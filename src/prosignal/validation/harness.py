@@ -177,6 +177,7 @@ def run_cpcv(
     # path_id -> per-date results, so each path can be scored as one backtest
     paths: Dict[int, List[Dict[str, float]]] = {}
     seen: Dict[int, int] = {}
+    degenerate = 0
 
     for n, split in enumerate(cv.split(len(dates)), start=1):
         if progress:
@@ -209,16 +210,36 @@ def run_cpcv(
             ok = np.isfinite(pred) & np.isfinite(lab)
             if ok.sum() >= 40:
                 r = pd.Series(pred[ok]).rank(pct=True).to_numpy()
-                ex = float(lab[ok][r >= top_decile].mean() - lab[ok].mean())
+                top = r >= top_decile
+                # A model that predicted the same number for every name has no
+                # top decile: `rank(pct=True)` gives every tied element the
+                # midrank, so the mask selects NOTHING and the mean of an empty
+                # slice is a NaN. That NaN then poisoned the pooled figure --
+                # the headline economic number printed as "+nan%" while every
+                # other line in the table read normally.
+                if not top.any():
+                    degenerate += 1
+                    continue
+                ex = float(lab[ok][top].mean() - lab[ok].mean())
+                if not np.isfinite(ex):
+                    degenerate += 1
+                    continue
                 result.excess.append(ex)
                 # Weave: the k-th time a date is tested it belongs to path k.
                 pid = seen.get(hash(d), 0)
                 seen[hash(d)] = pid + 1
                 paths.setdefault(pid, []).append({"date": d, "excess": ex, "ic": ic})
 
+    if degenerate:
+        result.notes.append(
+            f"{degenerate} test date(s) produced no top decile -- the model "
+            f"predicted the same value for every name -- and were excluded "
+            f"rather than averaged in as NaN")
+
     for pid, rows in sorted(paths.items()):
         vals = np.asarray([r["excess"] for r in rows], dtype="float64")
         ics = np.asarray([r["ic"] for r in rows], dtype="float64")
+        ics = ics[np.isfinite(ics)]
         if vals.size < 4:
             continue
         result.path_sharpes.append(
@@ -242,6 +263,7 @@ def configuration_matrix(
     min_train_dates: int = 30,
     min_train_rows: int = 2000,
     top_decile: float = 0.90,
+    min_dates: int = 8,
     estimator: str = _ESTIMATOR_DEFAULT,
 ) -> pd.DataFrame:
     """Per-period performance of every configuration, on one common index.
@@ -284,12 +306,35 @@ def configuration_matrix(
             if ok.sum() < 40:
                 continue
             r = pd.Series(pred[ok]).rank(pct=True).to_numpy()
-            series[dates[i]] = float(lab[ok][r >= top_decile].mean() - lab[ok].mean())
+            top = r >= top_decile
+            # No top decile means every prediction tied. The `dropna` below
+            # would drop that date for EVERY configuration, not just this one,
+            # so a single degenerate arm silently shortens the shared index.
+            if not top.any():
+                continue
+            series[dates[i]] = float(lab[ok][top].mean() - lab[ok].mean())
         out[name] = series
 
-    frame = pd.DataFrame(out).dropna()
-    if frame.empty:
-        raise ValueError("no date was scored by every configuration")
+    frame = pd.DataFrame(out)
+    # A configuration the ESTIMATOR REFUSES scores nothing at all -- under the
+    # gated Fama-MacBeth a single-theme arm that never clears |t| >= 2 produces
+    # no coefficients on any split. Its column is entirely empty, and the row
+    # `dropna` below would then delete every date for every OTHER configuration
+    # too, so one unusable arm made PBO uncomputable rather than merely absent.
+    #
+    # A configuration that cannot be traded is not a configuration that could
+    # have been chosen, so it is dropped from the comparison and named.
+    kept = [c for c in frame.columns if frame[c].notna().sum() >= min_dates]
+    dropped = [c for c in frame.columns if c not in kept]
+    frame = frame[kept].dropna()
+    if frame.empty or len(kept) < 2:
+        raise ValueError(
+            f"only {len(kept)} configuration(s) produced a tradeable score on "
+            f"{min_dates}+ dates"
+            + (f"; {', '.join(dropped)} produced none" if dropped else "")
+        )
+    if dropped:
+        frame.attrs["dropped_configurations"] = dropped
     return frame
 
 
