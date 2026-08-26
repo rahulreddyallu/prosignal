@@ -269,11 +269,14 @@ def run(
             watch.append(rec)
             settled.add(sym)
             continue
+        reason = (entries.decisions[sym].reason or "").strip()
         rec.why_this_signal_exists.append(
-            f"Held from a previous run. {entries.decisions[sym].reason or ''} "
-            f"The sector, correlation and book-size limits govern what may be "
-            f"opened; they do not close a position that is already open."
-            .strip()
+            " ".join(filter(None, [
+                "Held from a previous run.",
+                reason if not reason.endswith(".") else reason,
+                "The sector, correlation and book-size limits govern what may "
+                "be opened; they do not close a position that is already open.",
+            ]))
         )
         _accept(rec, sym, _sector_of(sym))
         settled.add(sym)

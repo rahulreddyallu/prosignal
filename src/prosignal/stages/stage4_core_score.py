@@ -320,7 +320,11 @@ def run(
                     name=name,
                     raw_value=contribution,
                     standardised=_f(zrow.get(name)) if zrow is not None else None,
-                    weight=round(float(model.coef.get(name + "_r", 0.0)), 5),
+                    # Families are `_f`, individual factors `_r`. Appending
+                    # only `_r` asked for `mom_f_r` and got zero.
+                    weight=round(float(
+                        model.coef.get(name + "_f",
+                                       model.coef.get(name + "_r", 0.0))), 5),
                     available=pd.notna(row.get(name)),
                     evidence_tier="model",
                     citation=_MODEL_CITE.get(name),
@@ -543,6 +547,14 @@ _MODEL_CITE = {
     "mom_6_1": "Jegadeesh & Titman (1993)",
     "mom_3_1": "Jegadeesh & Titman (1993)",
     "resid_reversal": "Blitz, Huij, Lansdorp & Martens (2013)",
+    # Families. The card names the family, so the citation has to as well.
+    "mom": "Jegadeesh & Titman (1993); George & Hwang (2004); Blitz, Huij & Martens (2011)",
+    "reversal": "Blitz, Huij, Lansdorp & Martens (2013)",
+    "lottery": "Bali, Cakici & Whitelaw (2011); Ang, Hodrick, Xing & Zhang (2006)",
+    "risk": "Ang, Hodrick, Xing & Zhang (2006)",
+    "delivery": "NSE delivered-quantity data; no direct analogue outside India",
+    "value": "Fama & French (1992); Basu (1977)",
+    "quality": "Novy-Marx (2013); Sloan (1996); Cooper, Gulen & Schill (2008)",
     "idio_vol": "Ang, Hodrick, Xing & Zhang (2006)",
     "idio_skew": "Bali, Cakici & Whitelaw (2011)",
     "vol_60": "Ang, Hodrick, Xing & Zhang (2006)",

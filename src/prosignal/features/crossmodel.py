@@ -309,6 +309,17 @@ def apply_family_multipliers(
     return out
 
 
+def _bare(column: str) -> str:
+    """Drop the rank or family suffix. `_r` was stripped and `_f` was not, so a
+    family arrived downstream still called `mom_f`, and a coefficient lookup
+    that appends `_r` to it asked for `mom_f_r` and got zero -- the card printed
+    a factor moving the score by 0.039 at a coefficient of +0.00000."""
+    for suffix in ("_r", "_f"):
+        if column.endswith(suffix):
+            return column[: -len(suffix)]
+    return column
+
+
 def prediction_dispersion(raw: pd.Series) -> float:
     """Gap between the top decile's predicted rank and the median's.
 
@@ -355,7 +366,7 @@ def contributions(model: CrossSectionalModel, features: pd.DataFrame) -> pd.Data
     return pd.DataFrame(
         z * coef,
         index=features["symbol"].to_numpy(),
-        columns=[c[:-2] if c.endswith("_r") else c for c in cols],
+        columns=[_bare(c) for c in cols],
     )
 
 
@@ -367,7 +378,7 @@ def standardised_features(model: CrossSectionalModel, features: pd.DataFrame) ->
     return pd.DataFrame(
         z,
         index=features["symbol"].to_numpy(),
-        columns=[c[:-2] if c.endswith("_r") else c for c in cols],
+        columns=[_bare(c) for c in cols],
     )
 
 
