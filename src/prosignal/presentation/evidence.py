@@ -36,7 +36,9 @@ FACTOR_MAP: Dict[str, Tuple[str, str, bool]] = {
     # Momentum -- the model's largest and most concentrated block.
     "resid_mom":      ("momentum", "Momentum vs the market", True),
     "mom_6_1":        ("momentum", "Six-month momentum", True),
-    "reversal_1m":    ("momentum", "Recent one-month move", False),
+    "resid_reversal": ("momentum", "Recent one-month move, market-adjusted", False),
+    "idio_vol":       ("risk", "Stock-specific volatility", False),
+    "idio_skew":      ("risk", "Lottery-like payoff shape", False),
     # Trend position -- where price sits in its own range.
     "prox_52w":       ("trend", "Position in the 52-week range", True),
     # Participation -- Indian delivery data, not just traded volume.

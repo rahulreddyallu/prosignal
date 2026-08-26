@@ -330,6 +330,15 @@ class RedundancyReport(_Contract):
 
 class CoreScoreReport(_Contract):
     as_of_date: dt.date
+    #: Gap between the top decile's PREDICTED rank and the median's, before the
+    #: rank transform flattens it. The score itself is uniform every day, so
+    #: nothing else in the pipeline can tell a day the model had a view from a
+    #: day it did not.
+    prediction_dispersion: Optional[float] = None
+    #: What this model's spread normally is, measured on its own training
+    #: panel. The gate is a ratio to this, because the level is a function of
+    #: the ridge penalty rather than of the market.
+    typical_dispersion: Optional[float] = None
     weighting_mode: str
     standardisation: str
     effective_weights: Dict[str, float] = Field(default_factory=dict)

@@ -421,6 +421,109 @@ displayed list and the validated strategy were two different products.
 
 `presentation/selection.py`
 
+### What is deliberately not here
+
+Six things worth adding that the data does not support, recorded so the gap is
+visible rather than quietly absent.
+
+| wanted | blocked by |
+|---|---|
+| Gross profitability, cash operating profitability, ROCE | statements cover **192 of 750** names |
+| Accruals, asset growth, net share issuance | same feed, same 26% |
+| SUE and EAR (post-earnings drift) | `earnings_calendar.csv` is **empty** — no announcement dates, so neither the surprise nor the announcement return is computable |
+| Promoter pledge as a veto | `promoter_pledging.csv` is **empty**. The gate exists and reports `NOT_TESTABLE` — it does not pass |
+| ASM / GSM surveillance exclusion | no feed. Trade-for-trade settlement and 100% margin make backtest fills there fiction |
+| Free-float-scaled market impact | no float data. Impact currently scales with traded value, and Indian promoter holdings are high enough that two identical-cap names can have floats differing threefold |
+
+**The binding constraint is the feed, not the factor list.** Adding quality or
+surprise factors now would add more constants of exactly the kind the value block
+turned out to be. Fixing the statements ingest to cover the universe rather than
+its largest quarter unlocks the first two rows in one step.
+
+Two more, deliberately not done rather than blocked:
+
+- **Continuous volatility-scaled momentum exposure** (Barroso & Santa-Clara;
+  Daniel & Moskowitz). The engine's analogue is Stage 2's regime multiplier,
+  which now actually reaches the fitted model — it did not before, and was
+  computed, logged, written to the ledger, printed on the card and never applied
+  to a score. A continuous inverse-volatility weight needs a momentum
+  factor-return series the engine does not build.
+- **Splitting into fast and slow sleeves.** Real tension, and it only bites once
+  there are slow signals to split off. Every family that survives today decays on
+  a comparable horizon.
+
+---
+
+### Families, not seventeen coefficients
+
+Seventeen coefficients over a set this collinear is not estimable, and the
+near-uniform coefficient band was the model saying so. Members are averaged as
+ranks first and **one coefficient is fitted per family**:
+
+| family | members | coefficient |
+|---|---|---|
+| `mom` | `resid_mom`, `prox_52w`, `mom_6_1` | **+0.0255** |
+| `lottery` | `max5_21`, `idio_vol`, `idio_skew`, `downside_vol` | **−0.0190** |
+| `delivery` | `deliv_pct`, `deliv_trend` | **+0.0156** |
+| `reversal` | `resid_reversal` | +0.0047 |
+| `risk` | `beta_120`, `max_dd_120` | +0.0039 |
+| `value` | five ratios | *dropped — 12% coverage* |
+
+**Liquidity is not scored at all.** The illiquidity premium is real but it is
+compensation *for* trading costs, and a manual executor pays that cost rather
+than collecting it — a positive `amihud` loading walks the book into names where
+realised slippage exceeds forecast alpha. It stays in the universe screen as a
+floor, which is where `universe.pit_min_adtv_inr` already put it.
+
+The measurement agrees with the argument. Standalone rank IC over 70 dates:
+
+| factor | IC | ICIR | t |
+|---|---|---|---|
+| `prox_52w` | +0.0660 | +0.462 | +3.87 |
+| `mom_6_1` | +0.0549 | +0.434 | +3.63 |
+| `resid_mom` | +0.0536 | +0.418 | +3.50 |
+| `max_dd_120` | +0.0541 | +0.327 | +2.74 |
+| **`amihud`** | **+0.0087** | **+0.090** | **+0.75** |
+| **`turnover_ratio`** | **−0.0155** | **−0.175** | **−1.47** |
+
+And the families beat their own best member on ICIR, which is what averaging
+correlated members is supposed to do:
+
+| family | ICIR | best member |
+|---|---|---|
+| `mom` | **+0.505** | +0.462 (`prox_52w`) |
+| `risk` | **+0.488** | +0.327 (`max_dd_120`) |
+| `delivery` | **+0.420** | +0.388 (`deliv_trend`) |
+
+Run it yourself: `prosignal research factors`.
+
+**All ranks are taken within sector** where the sector holds at least 12 names.
+Ranking across the whole market compares a bank's leverage with an IT firm's, so
+every factor otherwise carries an unintended sector bet on top of what it
+measures. A thin or absent sector falls back to the universe rank — common here,
+because the point-in-time universe reaches past any index constituent file.
+
+### The flat-day gate
+
+`min_universe_percentile = 90` cannot express "flat day": the score is a rank, so
+its distribution is uniform every session and the top 10% is admitted whether or
+not it is any better than the middle.
+
+Stage 8 gates on the model's **raw** spread instead — the gap between its top
+decile's prediction and its median's, as a fraction of what that model normally
+manages on its own training panel.
+
+A ratio, not a level, and the reason is worth recording: the level is a function
+of the ridge penalty rather than of the market. Measured across 88 panel dates
+the entire range was **0.0355 to 0.0607**, so a floor of 0.15 — which is where
+this started — would have blocked **100% of days**. That number was tried,
+measured, and replaced.
+
+A flat day **blocks new entries and keeps the book**. A day with no view is a day
+to add nothing, not a day to liquidate.
+
+---
+
 ### What SCORE is, in units
 
 The card shows a SCORE of e.g. 0.898 and factor contributions summing to

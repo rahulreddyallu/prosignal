@@ -253,7 +253,7 @@ def run(
     # is stated on the card rather than substituted quietly.
     (model_scores, model, model_unavailable, model_features,
      refit_verdict) = _cross_sectional_model(store, symbols, as_of, cfg,
-                                            p.universe)
+                                            p.universe, regime)
     if refit_verdict is not None and not refit_verdict.accepted:
         notes.append(
             f"Refit held back: {refit_verdict.summary()}. The previous "
@@ -373,6 +373,10 @@ def run(
     log.info("stage 4 complete", extra={"scored": len(scores), "factors": list(effective)})
     return CoreScoreReport(
         as_of_date=as_of,
+        prediction_dispersion=(float(getattr(model, "dispersion", 0.0))
+                               if model is not None else None),
+        typical_dispersion=(float(getattr(model, "train_dispersion", 0.0))
+                            if model is not None else None),
         weighting_mode=str(v(cfg.weighting_mode)),
         standardisation=method,
         effective_weights={k: round(v, 4) for k, v in effective.items()},
@@ -538,7 +542,9 @@ _MODEL_CITE = {
     "mom_12_1": "Jegadeesh & Titman (1993)",
     "mom_6_1": "Jegadeesh & Titman (1993)",
     "mom_3_1": "Jegadeesh & Titman (1993)",
-    "reversal_1m": "Jegadeesh (1990)",
+    "resid_reversal": "Blitz, Huij, Lansdorp & Martens (2013)",
+    "idio_vol": "Ang, Hodrick, Xing & Zhang (2006)",
+    "idio_skew": "Bali, Cakici & Whitelaw (2011)",
     "vol_60": "Ang, Hodrick, Xing & Zhang (2006)",
     "downside_vol": "Ang, Chen & Xing (2006)",
     "beta_120": "Frazzini & Pedersen (2014)",
@@ -578,13 +584,42 @@ _MODEL_CITE = {
 }
 
 
-def _cross_sectional_model(store, symbols, as_of, cfg, universe):
+def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
     """Fit the ridge ranker on history strictly before ``as_of``.
 
     Failure is reported, never swallowed: a model that could not be fitted must
     leave the hand-weighted composite visibly in charge.
     """
     from ..features import crossmodel as cm
+
+    # Factors rank within sector where the sector is big enough. Without this a
+    # value ratio compares a bank with an IT firm and every factor carries an
+    # unintended sector bet on top of what it measures.
+    # A store that cannot serve sectors falls back to universe-wide ranking
+    # rather than failing the run. Sectors are genuinely absent for part of this
+    # universe anyway -- it reaches past any index constituent file -- so
+    # partial coverage is the normal state and total absence is the same state
+    # taken to its limit.
+    try:
+        smap = store.read_sector_map()
+        sector_map = (dict(zip(smap["symbol"], smap["sector"]))
+                      if smap is not None and not smap.empty else {})
+    except Exception as exc:
+        log.warning("sector map unavailable; ranking against the whole universe",
+                    extra={"error": str(exc)})
+        sector_map = {}
+
+    # Stage 2 measures the regime and produces these. They were applied only to
+    # the hand-weighted composite's weights, so the fitted model -- the one that
+    # ranks -- never saw them: the multiplier was computed, logged, written to
+    # the ledger, printed on the card, and never reached a score.
+    multipliers = None
+    if regime is not None:
+        multipliers = {
+            "mom": float(regime.momentum_multiplier),
+            "reversal": float(regime.momentum_multiplier),
+            "value": float(regime.quality_multiplier),
+        }
 
     cache = store.curated / "crosssec_model.json"
     try:
@@ -678,10 +713,11 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe):
             feats = cm.today_features(close, turnover, as_of,
                                       fundamentals=fundamentals,
                                       max_fundamental_age_days=max_age,
-                                      delivery=delivery)
+                                      delivery=delivery, sectors=sector_map)
             if feats is None:
                 return None, None, "no symbol had a complete feature set today", None, None
-            return cm.score_with(cached, feats), cached, None, feats, None
+            return (cm.score_with(cached, feats, multipliers), cached, None,
+                    feats, None)
 
         # The screen as it stood on every training date. `symbols` is the same
         # screen resolved for TODAY, and it stays the scoring universe.
@@ -703,6 +739,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe):
             delivery=delivery,
             eligible=eligible,
             score_symbols=list(symbols),
+            sectors=sector_map,
+            multipliers=multipliers,
         )
         if model is not None:
             # A refit is proposed, not installed. This is the one path where a

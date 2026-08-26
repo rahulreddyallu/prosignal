@@ -1231,6 +1231,130 @@ def _portfolio_params(cfg: AppConfig):
     )
 
 
+def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Standalone IC, ICIR, decay and breakeven turnover -- per factor.
+
+    Answers the three questions that have to be answered BEFORE any blending and
+    were not being answered at all: does this factor carry information on its
+    own, how reliably date to date, and for how long does the information last.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .data.types import DATE, SYMBOL
+    from .features import crossmodel as cm
+    from .features.crosssec import FEATURES, build_panel, liquidity_mask
+    from .stages._cfg import fv, iv
+    from .costs import CostModel
+    from .validation.factor_ic import breakeven_turnover, factor_ic, net_of_cost
+
+    def _short(name: str) -> str:
+        """Strip only the TRAILING suffix. `str.replace` took the `_r` out of
+        the middle of `resid_reversal_r` and printed `resideversal`."""
+        for suffix in ("_r", "_f"):
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+
+
+    p = cfg.params
+    val, c4, u = p.validation, p.stage4_core_score, p.universe
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = (sessions[-1] if args.include_holdout
+           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+
+    _rule("Building the panel")
+    px = store.read_prices(start=sessions[0], end=end,
+                           columns=[DATE, SYMBOL, "close", "turnover"])
+    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
+    close = px.pivot_table(index=DATE, columns=SYMBOL, values="close",
+                           aggfunc="last", observed=True).sort_index()
+    turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
+                              aggfunc="last", observed=True).sort_index()
+    del px
+    delivery = None
+    dl = store.read_delivery(start=sessions[0], end=end)
+    if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
+        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
+        delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
+                                  aggfunc="last", observed=True).sort_index()
+    del dl
+    sectors = store.read_sector_map()
+    sector_map = (dict(zip(sectors["symbol"], sectors["sector"]))
+                  if sectors is not None and not sectors.empty else {})
+    eligible = liquidity_mask(
+        close, turnover, min_adtv_inr=fv(u.pit_min_adtv_inr),
+        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
+        max_names=iv(u.pit_max_names),
+        min_history_sessions=iv(u.min_history_sessions),
+        min_price_inr=fv(u.min_price_inr))
+    horizon = iv(c4.model_horizon_sessions)
+    panel = build_panel(close, turnover, horizon=horizon, step=21,
+                        delivery=delivery, eligible=eligible, sectors=sector_map)
+    panel = cm._attach_fundamentals(panel, store.read_statements(), close,
+                                    iv(c4.max_fundamental_age_days))
+    _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
+
+    _rule("Standalone rank IC, before any blending")
+    _print(f"  {'factor':<20}{'dates':>7}{'IC':>9}{'ICIR':>8}{'t':>8}{'hit':>7}")
+    rows = []
+    columns = [f + "_r" for f in FEATURES] + [
+        f + "_r" for f in cm.FUNDAMENTAL_FEATURES]
+    for col in columns:
+        result = factor_ic(panel, col, label="label")
+        if result is None:
+            _print(f"  {_short(col):<20}{'not computable':>39}")
+            continue
+        rows.append(result)
+        _print(f"  {_short(result.factor):<20}{result.n_dates:>7}"
+               f"{result.ic_mean:>+9.4f}{result.icir:>+8.3f}"
+               f"{result.t_stat:>+8.2f}{result.hit_rate:>7.0%}")
+
+    _rule("The families, and the same question of them")
+    built = cm.build_families(panel, columns)
+    for col in built:
+        result = factor_ic(panel, col, label="label")
+        if result is not None:
+            _print(f"  {_short(result.factor):<20}{result.n_dates:>7}"
+                   f"{result.ic_mean:>+9.4f}{result.icir:>+8.3f}"
+                   f"{result.t_stat:>+8.2f}{result.hit_rate:>7.0%}")
+
+    _rule("Correlation, and what is not independent evidence")
+    cutoff = fv(c4.redundancy.max_abs_spearman)
+    block = panel[[c for c in columns if c in panel.columns]].dropna(axis=1, how="all")
+    corr = block.rank().corr()
+    breaches = []
+    names = list(corr.columns)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            r = corr.loc[a, b]
+            if pd.notna(r) and abs(r) >= cutoff:
+                breaches.append((a, b, float(r)))
+    if breaches:
+        for a, b, r in sorted(breaches, key=lambda t: -abs(t[2])):
+            _print(f"  {_short(a):<20}{_short(b):<20}{r:>+8.3f}")
+    else:
+        _print(f"  no pair reaches |rho| = {cutoff}")
+
+    _rule("Breakeven turnover")
+    costs = CostModel(cfg)
+    round_trip = float(costs.round_trip(300.0, 400).total_bps_of_buy)
+    _print(f"  round trip modelled at {round_trip:.0f} bps")
+    _print(f"  {'gross annual edge':<24}{'round trips it pays for':>26}")
+    for gross in (0.02, 0.04, 0.08):
+        _print(f"  {gross:<24.0%}{breakeven_turnover(gross, round_trip):>26.2f}")
+    _print()
+    _print("  A factor whose implied turnover exceeds T* loses money however")
+    _print("  good the gross IC looks. STT alone is 20 bps round trip.")
+    return 0
+
+
 def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     """How far the pre-registered forward test has run.
 
@@ -1551,6 +1675,15 @@ def build_parser() -> argparse.ArgumentParser:
                              "This spends the one honest test -- do not use it "
                              "while still choosing between models")
     cpcv_p.set_defaults(func=cmd_research_cpcv)
+
+    fac_p = research_sub.add_parser(
+        "factors",
+        help="standalone IC, ICIR and correlation per factor, BEFORE blending",
+    )
+    fac_p.add_argument("--include-holdout", action="store_true",
+                       help="extend the panel through the reserved holdout. "
+                            "This spends the one honest test")
+    fac_p.set_defaults(func=cmd_research_factors)
 
     fwd_p = research_sub.add_parser(
         "forward", help="status of the pre-registered forward test")

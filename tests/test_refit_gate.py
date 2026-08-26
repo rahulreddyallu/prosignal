@@ -19,13 +19,15 @@ from prosignal.features.refit_gate import (
 
 #: A plausible live fit over the model's actual columns, so load_cached (which
 #: checks the feature set) accepts a restored version in the rollback drill.
+# Families, because that is what a fitted model now carries: one coefficient per
+# family rather than seventeen over a collinear set. A cache naming individual
+# factors is a pre-family fit and `load_cached` refuses it on purpose.
 LIVE = {name: value for name, value in zip(
-    cm.FEATURE_COLUMNS,
-    [0.0100, 0.0080, -0.0060, 0.0200, 0.0040, 0.0090, -0.0030, 0.0070,
-     0.0050, -0.0020, 0.0110, 0.0060, 0.0035, -0.0045, 0.0025, 0.0015, 0.0055],
+    cm.FAMILY_COLUMNS,
+    [0.0255, 0.0047, -0.0190, 0.0039, 0.0156, 0.0060],
 )}
-_FIRST = cm.FEATURE_COLUMNS[0]
-_SECOND = cm.FEATURE_COLUMNS[4]
+_FIRST = cm.FAMILY_COLUMNS[0]
+_SECOND = cm.FAMILY_COLUMNS[2]
 
 
 def test_an_ordinary_refit_is_accepted():

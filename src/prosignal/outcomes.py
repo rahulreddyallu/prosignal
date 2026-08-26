@@ -50,6 +50,7 @@ from .core.logging import get_logger
 from .costs import CostModel
 from .data.store import DataStore
 from .data.types import DATE
+from .indicators.circuit import band_state, is_untradeable
 
 __all__ = ["Outcome", "EXIT_MODEL", "resolve_pending", "load_outcomes",
            "summarise", "calibration"]
@@ -63,7 +64,12 @@ log = get_logger(__name__)
 #:                   so a position ran on after the engine had closed it.
 #:   book-band-v2    the above, plus the engine's own exit: the position ends
 #:                   when the run stops naming it in `signals_generated`.
-EXIT_MODEL = "book-band-v2"
+#:   book-band-circuit-v3
+#:                   the above, plus two execution facts the backtest already
+#:                   modelled and this did not: a stop is filled at the OPEN
+#:                   when the bar gapped through it, and it is not filled at all
+#:                   on a session locked at the price band.
+EXIT_MODEL = "book-band-circuit-v3"
 
 
 class Outcome(dict):
@@ -362,12 +368,32 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
     # bar opened. The book exit is decided at a close and fills at the next
     # open, so it is this date -- not the bar's own -- that is consulted.
     decided_on = entry_row[DATE].date()
+    unfilled_stop_sessions = 0
     for held, (_, bar) in enumerate(walk.iterrows(), start=1):
         low, high = float(bar["low"]), float(bar["high"])
         mae = min(mae, (low - entry_price) / entry_price)
         mfe = max(mfe, (high - entry_price) / entry_price)
+
+        # A bar locked at its price band offered exactly one price all session.
+        # Filling a stop there records a trade that could not have happened --
+        # the seller had no bid to hit. `backtest._simulate` has modelled this
+        # since it was written; this record did not, so the live figures assumed
+        # a fill the backtest knew was fiction.
+        state = band_state(high, low, float(bar["close"]),
+                           float(bar.get("prev_close", np.nan)),
+                           float(bar.get("volume", np.nan)))
+        if is_untradeable(state):
+            if low <= stop:
+                unfilled_stop_sessions += 1
+            continue
+
         if low <= stop:
-            exit_price, reason = stop, "stop"
+            # A gap-down opens below the stop, so the fill is the open, not the
+            # stop. Filling at the stop credits a price that was never available
+            # and flatters every stopped trade.
+            bar_open = float(bar["open"]) if "open" in bar else float("nan")
+            exit_price = min(bar_open, stop) if np.isfinite(bar_open) else stop
+            reason = "stop_gap" if exit_price < stop else "stop"
         elif high >= t2:
             exit_price, reason = t2, "target_2"
         elif high >= t1:
@@ -402,6 +428,17 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
         last = walk.iloc[-1]
         exit_price, exit_date, reason = float(last["close"]), last[DATE].date(), "time_exit"
         held = len(walk)
+        if unfilled_stop_sessions:
+            # Breached on a session that could not be traded, then ran to the
+            # time exit. Named distinctly so it stays out of the ordinary
+            # time-exit population, where it would look like a trade that simply
+            # never hit its stop.
+            reason = "stop_unfilled_circuit"
+
+    if unfilled_stop_sessions and reason != "stop_unfilled_circuit":
+        # Filled eventually, but only after a locked session. The trade is real;
+        # the name records that the exit is later than the stop implies.
+        reason = f"{reason}_after_circuit"
 
     slot = float(config.params.capital.position_value_inr())
     qty = max(int(slot / entry_price), 1)

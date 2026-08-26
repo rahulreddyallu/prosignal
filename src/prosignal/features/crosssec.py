@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 __all__ = ["FEATURES", "build_panel", "cross_sectional_rank",
-           "liquidity_mask"]
+           "liquidity_mask", "sector_neutral_rank", "MIN_SECTOR_NAMES"]
 
 #: name -> (lookback sessions needed, description)
 #:
@@ -43,7 +43,12 @@ __all__ = ["FEATURES", "build_panel", "cross_sectional_rank",
 #: holdout -0.0003 (t -0.02).
 FEATURES: Dict[str, Tuple[int, str]] = {
     "mom_6_1":       (147, "6-1 momentum"),
-    "reversal_1m":   (22,  "last 21-session return; short-horizon reversal (Jegadeesh 1990)"),
+    # Residual, not raw. Blitz, Huij, Lansdorp & Martens (2013): conventional
+    # short-term reversal carries dynamic exposure to the market and size
+    # factors, and building it on residual returns avoids them and earns
+    # roughly twice the risk-adjusted return. Standardised by the residual's own
+    # trailing dispersion so a volatile name does not dominate by construction.
+    "resid_reversal": (253, "21-session residual return over its trailing residual sd (Blitz, Huij, Lansdorp & Martens 2013)"),
     "downside_vol":  (61,  "downside deviation of daily returns, 60 sessions"),
     "beta_120":      (121, "OLS beta against the equal-weight universe, 120 sessions"),
     "amihud":        (61,  "Amihud (2002) illiquidity: mean(|ret| / turnover)"),
@@ -52,6 +57,8 @@ FEATURES: Dict[str, Tuple[int, str]] = {
     "prox_52w":      (253, "close / 252-session high - 1 (George & Hwang 2004)"),
     "max5_21":       (22,  "mean of the 5 largest daily returns in 21 sessions; lottery demand (Bali, Cakici & Whitelaw 2011)"),
     "resid_mom":     (253, "momentum of market-residual returns, 252 to 21 back (Blitz, Huij & Martens 2011)"),
+    "idio_vol":      (253, "annualised std of market-residual returns, 126 sessions (Ang, Hodrick, Xing & Zhang 2006)"),
+    "idio_skew":     (253, "skewness of market-residual returns, 126 sessions; lottery demand"),
     "deliv_pct":     (61,  "mean delivered fraction of traded volume, 60 sessions"),
     "deliv_trend":   (127, "delivered fraction, 21-session mean less 126-session mean"),
 }
@@ -62,6 +69,11 @@ FEATURES: Dict[str, Tuple[int, str]] = {
 #: over a feed gap. This matches how Stage 4 treats an unavailable factor and
 #: how _attach_fundamentals treats a name with no usable filing.
 NEUTRAL_WHEN_MISSING = frozenset({"deliv_pct", "deliv_trend"})
+
+#: Window for the idiosyncratic moments. Long enough for a third moment to
+#: mean anything -- skewness on 60 points is mostly noise -- and short enough to
+#: describe the name as it is now.
+RESID_WINDOW = 126
 
 MIN_LOOKBACK = max(v[0] for v in FEATURES.values())
 
@@ -120,7 +132,6 @@ def _features_at(
         return hist.iloc[-1 - k] if len(hist) > k else pd.Series(index=hist.columns, dtype="float64")
 
     out["mom_6_1"] = past(21) / past(147) - 1.0
-    out["reversal_1m"] = last / past(21) - 1.0
 
     r60 = ret.tail(60)
     out["downside_vol"] = r60.where(r60 < 0).std(ddof=1) * np.sqrt(252)
@@ -132,7 +143,8 @@ def _features_at(
     # Huij & Martens (2011) find the residual carries the momentum premium with
     # far less of the beta exposure that drives momentum crashes.
     win = ret.tail(252)
-    out["resid_mom"] = pd.Series(np.nan, index=hist.columns, dtype="float64")
+    for name in ("resid_mom", "idio_vol", "idio_skew", "resid_reversal"):
+        out[name] = pd.Series(np.nan, index=hist.columns, dtype="float64")
     # An all-NaN benchmark slice is a real state, not a defect: under a
     # point-in-time universe the earliest dates have no eligible names, so the
     # equal-weight market is undefined there. nanmean warns and returns NaN on
@@ -149,6 +161,34 @@ def _features_at(
             resid = win.sub(np.outer(b, beta_m.to_numpy()), fill_value=np.nan)
             resid.columns = win.columns
             out["resid_mom"] = resid.iloc[:-21].sum(axis=0)
+
+            # -- the rest of the residual block ---------------------------
+            # One regression, four factors. Everything below is a moment of the
+            # SAME residual series, so computing it here costs nothing and
+            # guarantees the four cannot drift apart in definition.
+            r_tail = resid.tail(RESID_WINDOW)
+            sd = r_tail.std(ddof=1)
+
+            # Idiosyncratic volatility. Ang, Hodrick, Xing & Zhang (2006), and
+            # in India one of the lottery-demand measures that is NOT subsumed
+            # by the others.
+            out["idio_vol"] = sd * np.sqrt(252)
+
+            # Idiosyncratic skewness. Positive skew is what a lottery buyer is
+            # paying for, and it is priced negatively.
+            demeaned = r_tail.sub(r_tail.mean())
+            m3 = (demeaned ** 3).mean()
+            out["idio_skew"] = m3 / (sd.replace(0.0, np.nan) ** 3)
+
+            # Residual reversal, standardised by its own trailing dispersion.
+            # Blitz, Huij, Lansdorp & Martens (2013): conventional short-term
+            # reversal carries dynamic exposure to the market and size factors,
+            # and reversal built on RESIDUAL returns avoids them and earns
+            # roughly twice the risk-adjusted return. The sign is the raw
+            # factor's: a name that has run up over the last month is expected
+            # to give some back.
+            recent = resid.tail(21).sum(axis=0)
+            out["resid_reversal"] = recent / sd.replace(0.0, np.nan)
 
     r120 = ret.tail(120)
     # Lengths must match before they are masked together. When the benchmark is
@@ -259,6 +299,43 @@ def liquidity_mask(
     return (ok & (rank <= int(max_names))).fillna(False)
 
 
+#: Below this a sector is too thin to rank within: a bucket of three names
+#: produces ranks of -1, 0 and +1 regardless of what the values were. Names in
+#: such a sector fall back to the whole-universe rank.
+MIN_SECTOR_NAMES = 12
+
+
+def sector_neutral_rank(
+    values: pd.Series, sectors: Optional[pd.Series] = None
+) -> pd.Series:
+    """Cross-sectional rank taken WITHIN sector where the sector is big enough.
+
+    Ranking a value ratio across the whole market compares a bank's book-to-price
+    with an IT services firm's, and the difference between those is an accounting
+    convention rather than a signal. Every factor ranked that way picks up an
+    unintended sector bet: the model ends up long whichever sector happens to
+    screen cheap or fast, which is not what any of these factors claim to
+    measure.
+
+    A sector under ``MIN_SECTOR_NAMES`` is not ranked within -- three names give
+    ranks of -1, 0 and +1 whatever the values were -- and falls back to the
+    universe rank. A name with no sector does the same, which is common here:
+    the point-in-time universe reaches past any index constituent file, so
+    sectors are genuinely absent for part of it.
+    """
+    universe = cross_sectional_rank(values)
+    if sectors is None:
+        return universe
+    sectors = sectors.reindex(values.index)
+    out = universe.copy()
+    for name, idx in values.groupby(sectors, observed=True).groups.items():
+        if name is None or str(name) in ("", "Unknown"):
+            continue
+        if len(idx) < MIN_SECTOR_NAMES:
+            continue
+        out.loc[idx] = cross_sectional_rank(values.loc[idx])
+    return out
+
 def build_panel(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -267,6 +344,7 @@ def build_panel(
     min_names: int = 40,
     delivery: Optional[pd.DataFrame] = None,
     eligible: Optional[pd.DataFrame] = None,
+    sectors: Optional[Dict[str, str]] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
@@ -306,6 +384,8 @@ def build_panel(
             continue
         feats["date"] = dates[i]
         feats["symbol"] = feats.index
+        if sectors is not None:
+            feats["sector"] = feats.index.map(sectors)
         rows.append(feats.reset_index(drop=True))
     if not rows:
         return pd.DataFrame()
@@ -318,8 +398,20 @@ def build_panel(
         if panel[c].dtype == "float64" and c != "label":
             panel[c] = panel[c].astype("float32")
     panel["label_rank"] = panel.groupby("date")["label"].transform(cross_sectional_rank)
+    # Ranked WITHIN sector where the sector is big enough. Ranking across the
+    # whole market compares a bank's leverage with an IT firm's, and every
+    # factor then carries an unintended sector bet on top of what it measures.
+    has_sector = "sector" in panel.columns and panel["sector"].notna().any()
     for f in FEATURES:
-        r = panel.groupby("date")[f].transform(cross_sectional_rank)
+        if has_sector:
+            # Built group by group into one flat Series. `groupby().apply()`
+            # returns a DataFrame when the groups line up, which then cannot be
+            # assigned to a single column.
+            r = pd.Series(np.nan, index=panel.index, dtype="float64")
+            for _, g in panel.groupby("date", sort=False, observed=True):
+                r.loc[g.index] = sector_neutral_rank(g[f], g["sector"]).to_numpy()
+        else:
+            r = panel.groupby("date")[f].transform(cross_sectional_rank)
         # A neutral rank is 0.0 by construction, so a name with no delivery
         # print contributes nothing to the score instead of being discarded.
         panel[f + "_r"] = r.fillna(0.0) if f in NEUTRAL_WHEN_MISSING else r
