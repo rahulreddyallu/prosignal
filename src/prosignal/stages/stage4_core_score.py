@@ -257,12 +257,13 @@ def run(
             + (" ..." if len(unscoreable) > 8 else "")
         )
     # ---- fitted cross-sectional model -------------------------------------
-    # The hand-set factor weights above rank the universe with an excess return
-    # over an equal-weight benchmark of +0.14%/month at t = 0.30 -- not
-    # distinguishable from zero. A ridge fit over the same factors plus the
-    # standard liquidity and risk controls reaches +1.11%/month at t = 3.44 on
-    # 8.8 years of purged walk-forward. The factors are unchanged; only the
-    # weighting moves from judgement to measurement.
+    # The hand-set factor weights above are not distinguishable from zero, and
+    # a fitted model over the same factors beats them. The figures that used to
+    # be quoted here (+1.11%/month at t = 3.44, 8.8 years of purged
+    # walk-forward) measured a RIDGE against the HORIZON return, and the engine
+    # now fits Fama-MacBeth against its own exit geometry -- so they described a
+    # model no code path could produce and have been removed rather than
+    # refreshed. `research estimator` measures what is actually running.
     #
     # The fit uses history ending one full label horizon before the decision
     # date, so nothing in training overlaps today. When there is too little
@@ -278,14 +279,14 @@ def run(
             f"coefficients remain live and this needs manual review."
         )
     if model_unavailable and _is_model_failure(model_unavailable) and not _model_optional(cfg):
-        # The hand-weighted composite this would fall back to was measured at
-        # -0.047%/month excess over an equal-weight benchmark, t = -0.11. Quietly
-        # substituting it produces a watchlist that looks exactly like a healthy
-        # one while being scored by something known not to work.
+        # The hand-weighted composite this would fall back to has never been
+        # shown to work. Quietly substituting it produces a watchlist that looks
+        # exactly like a healthy one while being scored by something that was
+        # measured at no better than zero.
         raise ModelUnavailable(
             f"the cross-sectional model could not score this run "
             f"({model_unavailable}). Falling back to the hand-weighted composite "
-            f"would issue signals from a scorer measured at t = -0.11 against an "
+            f"would issue signals from a scorer never shown to beat an "
             f"equal-weight benchmark. Set stage4_core_score.allow_composite_fallback "
             f"to true to accept that explicitly."
         )
@@ -306,10 +307,21 @@ def run(
                 except Exception as exc:
                     log.warning("model attribution unavailable",
                                 extra={"error": str(exc)})
+            # No performance claim here. This line used to print
+            # "IC +0.052 (t 3.64) versus +0.025 (t 1.28)" over "8.8 years of
+            # purged walk-forward" on every single run. That measured the RIDGE
+            # against the HORIZON label, and neither exists any more -- the
+            # estimator is Fama-MacBeth and the label is the engine's own exit
+            # geometry. A number that describes a model no code path can produce
+            # is worse than no number, because it reads as current.
+            #
+            # `prosignal research estimator` and `research cpcv` measure the
+            # model that is actually running, on demand, and say what they
+            # measured it on.
             notes.append(
-                f"Ranking from the fitted cross-sectional model ({model.summary()}). "
-                f"Measured against the hand-weighted composite over 8.8 years of "
-                f"purged walk-forward: IC +0.052 (t 3.64) versus +0.025 (t 1.28)."
+                f"Ranking from the fitted cross-sectional model "
+                f"({model.summary()}). Run `prosignal research estimator` for "
+                f"its out-of-sample standing against an equal-weight control."
             )
         else:
             notes.append(
@@ -379,7 +391,15 @@ def run(
     # roughly one bet carrying three coefficients.
     model_block = None
     if model_features is not None and not model_features.empty:
-        cols = [c for c in model_features.columns if c.endswith("_r")]
+        # Only factors that can actually reach the score. A breach between
+        # two UNSCORED_DIAGNOSTICS -- amihud and turnover_ratio sit at
+        # -0.905 -- is the loudest line in the report and describes two
+        # columns neither of which is fitted.
+        from ..features.crossmodel import (UNSCORED_CONTROLS,
+                                           UNSCORED_DIAGNOSTICS)
+        _ignore = set(UNSCORED_DIAGNOSTICS) | set(UNSCORED_CONTROLS)
+        cols = [c for c in model_features.columns
+                if c.endswith("_r") and c not in _ignore]
         if len(cols) >= 2:
             model_block = model_features[cols].rename(columns=lambda c: c[:-2])
 
@@ -651,9 +671,16 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
     # the ledger, printed on the card, and never reached a score.
     multipliers = None
     if regime is not None:
+        # `reversal` no longer takes the momentum multiplier. It is the
+        # OPPOSITE side of that axis, and under the engine's own exit geometry
+        # its fitted coefficient is negative -- a bet against names that have
+        # run up, which is a DEFENSIVE tilt. Scaling it down with momentum in a
+        # crash weakened the defence exactly when it was most wanted. The
+        # comment that justified pairing them ("the opposite side of the same
+        # axis") is the reason not to, once the sign is measured rather than
+        # assumed.
         multipliers = {
             "mom": float(regime.momentum_multiplier),
-            "reversal": float(regime.momentum_multiplier),
             "value": float(regime.quality_multiplier),
             # Quality is the other crash stabiliser and tracks the same
             # multiplier as value, for the same reason.
@@ -915,7 +942,7 @@ def _is_model_failure(reason: str) -> bool:
     A fresh store with too little history is an expected state: the composite
     scores it and the card says the model was unavailable. An exception inside
     the model is not expected, and falling back there hands the run to a scorer
-    measured at t = -0.11 while looking exactly like a healthy result.
+    never shown to work while looking exactly like a healthy result.
     """
     text = str(reason).lower()
     return not any(b in text for b in _BENIGN_REASONS)
