@@ -525,6 +525,58 @@ is not its maximum.
 
 ---
 
+### A theme with a small coefficient, and a theme that is dying
+
+The gated estimator already zeroes a theme that cannot clear |t| ≥ 2, so a dead
+theme stops being traded. That is a **control**, not a monitor: it acts, then
+says nothing about why — and a theme flickering in and out of the book across
+refits looks identical to one quietly dying.
+
+The two call for opposite responses. A small coefficient this quarter is noise
+and should be left alone. A coefficient that has walked monotonically to zero
+over years is a dead factor, and refitting it every 21 sessions in the hope it
+returns is how a strategy outlives its edge.
+
+**The kill criterion, declared in config before the numbers were looked at:**
+
+> A theme is killed when its trailing 24-date Newey-West t has been
+> **non-positive** on every check across a **complete refresh** of that window.
+
+Both halves are chosen for a reason, not for a score. *Non-positive* rather than
+a threshold, because a t at or below zero says there is no positive relationship
+left at all — a sign test, not a level somebody picked. *A complete refresh*
+rather than "a few checks", because the rolling windows overlap almost entirely;
+requiring the breach to persist until every observation in the window arrived
+*after* it began means no single bad quarter can end a theme.
+
+| theme | full λ | t | recent λ | t | expected | of exp. | breach | verdict |
+|---|---|---|---|---|---|---|---|---|
+| `mom` | +0.0704 | +3.35 | +0.0587 | +2.63 | +0.0296 | **198%** | 0 | keep |
+| `delivery` | +0.0454 | +3.35 | +0.0493 | +1.65 | +0.0191 | **258%** | 0 | keep |
+| `risk` | +0.0188 | +0.97 | +0.0229 | +1.10 | +0.0079 | — | 0 | keep |
+| `reversal` | −0.0027 | −0.22 | −0.0096 | −0.50 | −0.0011 | — | **9** | keep |
+| `lottery` | +0.0065 | +0.10 | +0.1180 | +1.11 | +0.0027 | — | 0 | keep |
+
+**No theme meets the criterion.** `reversal` is breaching but for 9 checks, not
+24 — breaching is not dying, and that distinction is the whole reason the rule
+requires a full window refresh.
+
+**The haircut.** McLean & Pontiff (2016) measured 97 published anomalies and
+found returns fall roughly 58% out of sample after publication — about a third
+statistical bias, the rest real arbitrage once the paper was read. Every theme
+here comes from a published paper, so the honest expectation is the *haircut*
+coefficient, and a theme merely meeting it is behaving exactly as the literature
+predicts. `mom` and `delivery` sit at 198% and 258% of theirs.
+
+`of exp.` is blank where the full-sample coefficient is itself indistinguishable
+from zero: there is no expectation to fall short of. Dividing by noise had
+printed `reversal` at **837%** and `lottery` at **4341%**, both reading as though
+the theme were thriving.
+
+`validation/decay.py`, `research decay`
+
+---
+
 ### Volatility scaling: leverage is not alpha
 
 Moreira & Muir (2017) show that scaling a portfolio by the inverse of its recent

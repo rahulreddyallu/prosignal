@@ -2153,6 +2153,107 @@ def cmd_research_volscale(cfg: AppConfig, args: argparse.Namespace) -> int:
     _print(f"  shipped: volatility_scaling.enabled = {enabled}")
     return 0
 
+
+def cmd_research_decay(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Is a theme still working, or did it used to work?
+
+    Evaluates the kill criterion declared in
+    `stage4_core_score.decay_monitor`. This command does NOT choose it: a rule
+    picked after seeing which themes it would remove is the selection it exists
+    to prevent.
+    """
+    import numpy as np
+
+    from .data.store import DataStore
+    from .stages._cfg import fv, iv
+    from .validation.decay import assess_decay
+    from .validation.research_panel import build_research_panel
+
+    p = cfg.params
+    val, c4 = p.validation, p.stage4_core_score
+    dm = c4.decay_monitor
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = (sessions[-1] if args.include_holdout
+           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+
+    _rule("Building the panel")
+    rp = build_research_panel(cfg, store, end)
+    _print(f"  {len(rp.panel):,} rows over {rp.n_dates} dates")
+
+    _rule("The criterion, declared before the numbers")
+    _print(f"  A theme is killed when its trailing {int(dm.window_dates)}-date "
+           f"Newey-West t has been")
+    _print(f"  at or below {float(dm.kill_t_stat):+.2f} on every check across "
+           f"{int(dm.required_breaches)} consecutive checks --")
+    _print(f"  a complete refresh of the window, so no single bad quarter can "
+           f"end a theme.")
+
+    verdict = assess_decay(
+        rp.panel, rp.features,
+        window=int(dm.window_dates), kill_t=float(dm.kill_t_stat),
+        required_breaches=int(dm.required_breaches),
+        haircut=float(dm.post_publication_haircut),
+        horizon=rp.horizon, step=21)
+    if verdict is None:
+        _print("  not enough cross-sections to estimate any theme")
+        return 1
+
+    _rule("Theme health")
+    _print(f"  {'theme':<12}{'full':>9}{'t':>7}{'recent':>9}{'t':>7}"
+           f"{'expected':>10}{'of exp.':>9}{'breach':>8}{'verdict':>9}")
+    for h in verdict.themes:
+        share = h.share_of_expected
+        _print(f"  {h.theme.removesuffix('_f'):<12}{h.full_lambda:>+9.4f}"
+               f"{h.full_t:>+7.2f}{h.recent_lambda:>+9.4f}{h.recent_t:>+7.2f}"
+               f"{h.expected_lambda:>+10.4f}"
+               f"{(f'{share:.0%}' if np.isfinite(share) else 'n/a'):>9}"
+               f"{h.breaches:>8}"
+               f"{('KILL' if h.killed else 'keep'):>9}")
+    _print()
+    _print("  'of exp.' is blank where the FULL-SAMPLE coefficient is itself")
+    _print("  indistinguishable from zero: there is no expectation to fall")
+    _print("  short of, and dividing by noise printed reversal at 837% and")
+    _print("  lottery at 4341% -- both reading as though the theme thrived.")
+    _print()
+    _print(f"  'expected' applies the McLean-Pontiff haircut of "
+           f"{float(dm.post_publication_haircut):.0%} to the full-sample")
+    _print("  coefficient. Every theme here comes from a published paper, so a")
+    _print("  theme merely MEETING that expectation is behaving exactly as the")
+    _print("  literature predicts -- not underperforming. Above 100% of")
+    _print("  expected is the honest definition of still working.")
+
+    if verdict.notes:
+        _print()
+        for note in verdict.notes:
+            _print(f"  note: {note}")
+
+    _rule("Verdict")
+    if verdict.killed:
+        _print(f"  KILL: {', '.join(t.removesuffix('_f') for t in verdict.killed)}")
+        for h in verdict.themes:
+            if h.killed:
+                _print(f"    {h.theme.removesuffix('_f')}: {h.reason}")
+        _print()
+        _print("  This is a pre-committed removal, not a suggestion. The theme")
+        _print("  is removed from FAMILIES; it is not left in at a small")
+        _print("  coefficient to see whether it recovers.")
+    else:
+        _print("  No theme meets the kill criterion.")
+        weak = [h for h in verdict.themes
+                if np.isfinite(h.recent_t) and h.recent_t <= float(dm.kill_t_stat)]
+        if weak:
+            _print(f"  {len(weak)} theme(s) currently breaching but not for long "
+                   f"enough: "
+                   f"{', '.join(h.theme.removesuffix('_f') for h in weak)}")
+            _print("  Breaching is not dying. That distinction is the whole")
+            _print("  reason the criterion requires a full window refresh.")
+    return 0
+
 def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     """How far the pre-registered forward test has run.
 
@@ -2535,6 +2636,12 @@ def build_parser() -> argparse.ArgumentParser:
     vol_p.add_argument("--include-holdout", action="store_true",
                        help="spend the reserved holdout; normally left alone")
     vol_p.set_defaults(func=cmd_research_volscale)
+
+    decay_p = research_sub.add_parser(
+        "decay", help="evaluate the pre-committed kill criterion per theme")
+    decay_p.add_argument("--include-holdout", action="store_true",
+                         help="spend the reserved holdout; normally left alone")
+    decay_p.set_defaults(func=cmd_research_decay)
 
     fwd_p = research_sub.add_parser(
         "forward", help="status of the pre-registered forward test")
