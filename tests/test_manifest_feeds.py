@@ -93,6 +93,8 @@ def test_an_empty_delivery_panel_stops_the_model_rather_than_zeroing_it():
         def read_delivery(self, **kw):
             return pd.DataFrame()          # the feed is gone
 
+    from prosignal.config.schema import EstimatorConfig, LabelConfig
+
     class _Cfg:
         class max_fundamental_age_days: value = 450
         class model_horizon_sessions: value = 63
@@ -102,14 +104,14 @@ def test_an_empty_delivery_panel_stops_the_model_rather_than_zeroing_it():
         class model_refit_every_sessions: value = 21
         class min_name_factor_coverage: value = 0.60
 
-        class labels:
-            """Triple-barrier settings. Present because Stage 4 reads them
-            while assembling the price columns for a refit."""
-            triple_barrier = True
-            upper_sigma = 1.0
-            lower_sigma = 0.75
-            vol_window_sessions = 60
-            uniqueness_weighting = True
+        # Taken from the REAL schema rather than transcribed by hand. Every
+        # block Stage 4 reads had to be re-copied here whenever the config grew,
+        # and a stub that silently lacks a field fails as an AttributeError
+        # wearing the costume of the behaviour under test -- this very test once
+        # reported "delivery" missing from a reason string that actually said
+        # "'_Cfg' object has no attribute 'estimator'".
+        labels = LabelConfig()
+        estimator = EstimatorConfig()
 
     # The outer handler converts this to a reason string; what matters is that a
     # PipelineError is what travels, not a silently zeroed factor.

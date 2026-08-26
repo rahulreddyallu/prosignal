@@ -207,10 +207,22 @@ def test_both_research_entry_points_build_a_point_in_time_panel():
 
     from prosignal import cli
 
-    for fn in (cli.cmd_research_cpcv, cli.cmd_research_portfolio):
+    from prosignal.validation import research_panel
+
+    # Both now reach the mask through the shared builder. The guard follows the
+    # indirection rather than being relaxed: the mask must still exist, still be
+    # applied, and the read must still be unrestricted.
+    shared = inspect.getsource(research_panel.build_research_panel)
+    assert "liquidity_mask(" in shared
+    assert "eligible=eligible" in shared
+
+    for fn in (cli.cmd_research_cpcv, cli.cmd_research_portfolio,
+               cli.cmd_research_factors, cli.cmd_research_estimator):
         src = inspect.getsource(fn)
-        assert "liquidity_mask(" in src, f"{fn.__name__} builds no per-date mask"
-        assert "eligible=eligible" in src, f"{fn.__name__} does not apply it"
+        direct = "liquidity_mask(" in src and "eligible=eligible" in src
+        assert direct or "build_research_panel(" in src, (
+            f"{fn.__name__} builds no per-date mask and does not delegate"
+        )
         assert "symbols=symbols" not in src, (
             f"{fn.__name__} still restricts the panel read to today's universe"
         )

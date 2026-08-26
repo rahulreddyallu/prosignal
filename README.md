@@ -525,6 +525,101 @@ is not its maximum.
 
 ---
 
+### N is 70, not 33,569
+
+The pooled ridge stacked every (symbol, date) row into one design matrix and
+solved once. With ~33,000 rows it behaves as though it has 33,000 independent
+observations. It does not — the panel is **70 cross-sections**, and within a
+date every name shares the same market, the same policy news and the same flow.
+A pooled standard error divides by the square root of the wrong number.
+
+Coefficients are now estimated by **Fama-MacBeth (1973)**: one cross-sectional
+regression per date, and the slope series is the sample. Newey-West at 2 lags
+charges for the overlap a 63-session label sampled every 21 induces. On the real
+panel:
+
+| theme | λ | se (NW) | t |
+|---|---|---|---|
+| `mom` | +0.0704 | 0.0210 | **+3.35** |
+| `delivery` | +0.0454 | 0.0136 | **+3.35** |
+| `risk` | +0.0188 | 0.0194 | +0.97 |
+| `reversal` | −0.0027 | 0.0123 | −0.22 |
+| `lottery` | +0.0065 | 0.0648 | **+0.10** |
+
+**Three of five themes the ridge was weighting cannot be distinguished from
+zero.** And `lottery` is worse than useless: the pooled fit gave it **−0.0143**,
+while lottery measures **IC +0.0485** in this universe. The blend was betting
+against it, and `mom_f − lottery_f` reads IC **+0.0031** against `mom_f` alone at
+**+0.0481**. One wrong-signed theme was cancelling the one theme that works.
+
+### The control arm the engine had never been run against
+
+DeMiguel, Garlappi & Uppal (2009) found 1/N beat fourteen optimising rules out of
+sample, because estimation error cost more than optimisation gained. Purged
+walk-forward, 50 out-of-sample dates:
+
+| arm | IC | t (NW) | hit | top-decile | t |
+|---|---|---|---|---|---|
+| ridge — *was production* | +0.0021 | +0.06 | 48% | −0.11% | −0.17 |
+| **equal weight 1/N** | −0.0022 | −0.07 | 50% | −0.38% | −0.79 |
+| Fama-MacBeth raw | +0.0100 | +0.31 | 58% | −0.06% | −0.11 |
+| shrunk, no gate | +0.0434 | +2.25 | 62% | +0.71% | +1.54 |
+| **gate \|t\|≥2, then shrink** | **+0.0516** | **+3.25** | **78%** | **+1.12%** | **+2.33** |
+| momentum alone | +0.0481 | +2.36 | 68% | **+1.52%** | **+3.20** |
+
+The production ridge did not beat the control it exists to justify.
+
+**Two honest caveats.** Momentum *alone* still has the best top-decile excess —
+the gated estimator is not kept because it beats a single factor today, but
+because it collapses to momentum on its own when nothing else measures, and
+admits `delivery` on the windows where delivery earns it. A one-factor engine
+can do neither. And these arms were compared on the same dates that informed the
+design, so every row above counts as a trial when a Sharpe is deflated.
+
+### Shrinkage, and two ways to get it wrong
+
+Surviving themes are shrunk by precision (Jensen, Kelly & Pedersen 2023):
+`λ_shrunk = τ²/(τ² + se²) · λ`. Two things had to be got right.
+
+**τ² by DerSimonian–Laird, not by the plain moment estimator.** `mean(λ²) −
+mean(se²)` assumes the themes are measured equally well. They are not — standard
+errors differ by 5× between `mom` and `lottery` — so one badly-measured theme
+drove τ² to zero and took a theme sitting at **t = 6** down with it, zeroing an
+entire walk-forward fold. Inverse-variance weighting gives each theme a say
+proportional to how well it is known. A test caught this, not a run.
+
+**Shrink toward zero, not toward the prior-oriented pool.** Pooling is the
+Jensen–Kelly–Pedersen reading, and it is only safe when the orientation is
+trustworthy. `lottery` carries a documented negative prior and measures positive
+here, and because its standard error is large the pool hands it *nearly the full
+prior mean* — a confident coefficient built out of nothing but the assumption.
+
+The floor is pre-committed at **|t| ≥ 2**. A floor of 1.65 measured *better* out
+of sample (IC +0.0553 against +0.0510) and was rejected for exactly that reason.
+
+`features/famamacbeth.py`
+
+---
+
+### What `risk` actually measures
+
+Its two members are **−0.35** correlated within date, so the equal-weight
+composite cancels the common low-risk axis and keeps the residual — names whose
+drawdown is shallow *relative to what their beta implies*.
+
+| composite | IC | ICIR | t |
+|---|---|---|---|
+| `(beta + max_dd)/2` — as built | +0.0326 | **+0.384** | +3.21 |
+| `(−beta + max_dd)/2` — proper BAB | +0.0224 | +0.089 | +0.75 |
+| `max_dd` alone | +0.0389 | +0.176 | +1.47 |
+
+The correctly oriented low-risk composite is the **weakest** of the three, so
+the Frazzini–Pedersen prior cannot be claimed for this column. `risk` is
+therefore given no prior sign at all rather than one read off the same data the
+shrinkage is meant to discipline.
+
+---
+
 ### The label is the trade, not the horizon return
 
 The engine promises a stop and a holding period, and used to fit against the

@@ -259,10 +259,23 @@ def test_the_fit_and_the_research_paths_share_one_definition():
 
     from prosignal import cli
 
+    from prosignal.validation import research_panel
+
+    # The shared definition may be reached DIRECTLY or through the shared panel
+    # builder. What must never happen is a research command assembling its own.
+    shared = inspect.getsource(research_panel.build_research_panel)
+    assert "prepare_features" in shared
+
     assert "prepare_features" in inspect.getsource(cm.fit_predict)
-    for fn in (cli.cmd_research_cpcv, cli.cmd_research_portfolio):
+    for fn in (cli.cmd_research_cpcv, cli.cmd_research_portfolio,
+               cli.cmd_research_factors, cli.cmd_research_estimator):
         src = inspect.getsource(fn)
-        assert "prepare_features" in src, (
+        assert ("prepare_features" in src
+                or "build_research_panel(" in src), (
             f"{fn.__name__} builds its own feature set and would validate a "
             f"different model than the one that runs"
+        )
+        assert "build_panel(" not in src, (
+            f"{fn.__name__} calls build_panel directly, which bypasses the "
+            f"shared builder and can silently drop the barrier label"
         )
