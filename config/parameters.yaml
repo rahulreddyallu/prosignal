@@ -1631,6 +1631,27 @@ stage8_final_signal:
       value: 90.0
       status: UNVALIDATED
       search_range: [70.0, 99.0]
+    # A percentile gate cannot say "flat day". min_universe_percentile admits
+    # the top 10% by construction, whether or not the top 10% is any better
+    # than the middle -- the score is a RANK, so its distribution is uniform
+    # every single day and an absolute threshold on it can never bind.
+    #
+    # This gates on the RAW predicted spread instead: the gap between the top
+    # decile's prediction and the median's, as a FRACTION of what this model's
+    # spread normally is on its own training panel.
+    #
+    # A ratio, not a level. The level is a function of the ridge penalty --
+    # measured across 88 panel dates the entire range was 0.0355 to 0.0607, so
+    # a floor of 0.15 (the label spans -1 to +1) would have blocked 100% of
+    # days. That number was tried and measured before this one replaced it.
+    min_dispersion_ratio:
+      value: 0.50
+      status: UNVALIDATED
+      search_range: [0.0, 0.9]
+      note: >-
+        Half the model's own typical spread. Deliberately loose: it is meant to
+        catch a day the fit has degenerated, not to tune signal count. At 0.50
+        none of the 88 measured panel dates would have been blocked.
     # A run producing zero signals is a legitimate, expected outcome.
     expect_frequent_no_trade: true
 

@@ -38,7 +38,7 @@ def test_every_factor_the_engine_fits_is_mapped():
     # Any factor named in the model source but absent from the map.
     missing = [
         n for n in (
-            "resid_mom", "mom_6_1", "reversal_1m", "prox_52w", "deliv_pct",
+            "resid_mom", "mom_6_1", "resid_reversal", "prox_52w", "deliv_pct",
             "deliv_trend", "turnover_ratio", "earnings_yield", "fcf_yield",
             "ebitda_to_ev", "book_to_price", "sales_to_price", "downside_vol",
             "max_dd_120", "max5_21", "beta_120", "amihud",
@@ -85,7 +85,7 @@ def test_the_category_is_weighted_by_how_much_each_factor_moves_the_score():
     carrying the block."""
     cats = {c.key: c for c in build_evidence({
         "resid_mom": factor(2.0, weight=0.05),
-        "reversal_1m": factor(-2.0, weight=0.001),
+        "resid_reversal": factor(-2.0, weight=0.001),
     })}
     assert cats["momentum"].verdict == "Strong"
 

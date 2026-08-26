@@ -105,6 +105,30 @@ def run(
     min_score = fv(cfg.scarcity.min_composite_score)
     min_pct = fv(cfg.scarcity.min_universe_percentile)
 
+    # A flat day. The percentile gate cannot express one: the score is a rank,
+    # so its distribution is uniform every session and `min_universe_percentile`
+    # admits the top 10% whether or not the top 10% is any better than the
+    # middle. This reads the model's RAW spread instead, and a day where it
+    # ordered the universe without distinguishing it produces no signal rather
+    # than a shortlist of noise.
+    #
+    # It does NOT close the book. A day with no view is a day to add nothing,
+    # not a day to liquidate -- what closes a position is the Stage 6 exit band.
+    min_ratio = fv(cfg.scarcity.min_dispersion_ratio)
+    dispersion = scores.prediction_dispersion
+    typical = scores.typical_dispersion
+    if (blocked_reason is None and min_ratio > 0
+            and dispersion is not None and typical):
+        ratio = dispersion / typical
+        if ratio < min_ratio:
+            blocked_reason = (
+                f"The model separated the universe by {dispersion:.4f} between "
+                f"its top decile and its median, against the {typical:.4f} it "
+                f"normally manages -- {ratio:.0%} of its usual spread, below the "
+                f"{min_ratio:.0%} floor. It ranked the names without "
+                f"distinguishing them, so today's ordering carries no view."
+            )
+
     survivors: List[str] = []
     for sym, res in defense.per_stock.items():
         if res.final_status != "REJECTED":

@@ -1167,6 +1167,15 @@ class PortfolioCheckConfig(_Base):
 class ScarcityConfig(_Base):
     min_composite_score: TF
     min_universe_percentile: TF
+    #: Today's prediction spread as a FRACTION of what this model's spread
+    #: normally is, measured on its own training panel. A percentile gate cannot
+    #: express a flat day -- `min_universe_percentile = 90` admits the top 10% by
+    #: construction whether or not the top 10% is any better than the middle.
+    #:
+    #: A ratio rather than a level, because the level is a function of the ridge
+    #: penalty: measured across 88 panel dates the entire range was 0.0355 to
+    #: 0.0607, so any absolute floor near the label's own scale blocks every day.
+    min_dispersion_ratio: TF
     expect_frequent_no_trade: bool = True
 
 

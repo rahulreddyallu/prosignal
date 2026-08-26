@@ -83,9 +83,27 @@ def test_scoring_follows_the_models_feature_list_not_the_module_constant():
     assert "earnings_yield" not in contrib.columns
 
 
-def test_a_cached_model_with_fewer_factors_is_accepted(tmp_path):
-    """A stored model may legitimately carry fewer factors than the code
-    declares -- one the feed could not serve was dropped, not renamed."""
+def test_a_cached_model_with_fewer_families_is_accepted(tmp_path):
+    """A stored model may legitimately carry fewer families than the code
+    declares -- one whose members the feed could not serve was never built."""
+    import datetime as dt
+    import json
+
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps({
+        "fitted_for": "2026-01-05", "train_end": "2025-10-01", "n_train": 5000,
+        "features": ["mom_f", "lottery_f"],
+        "coef": {"mom_f": 0.01, "lottery_f": 0.02},
+        "mu": [0.0, 0.0], "sd": [1.0, 1.0], "intercept": 0.0,
+    }))
+    m = cm.load_cached(path, dt.date(2026, 1, 6), 21)
+    assert m is not None
+    assert m.features == ["mom_f", "lottery_f"]
+
+
+def test_a_cache_from_before_the_family_fit_forces_a_refit(tmp_path):
+    """Individual-factor coefficients describe a different model. Reusing them
+    against a family frame would standardise against the wrong columns."""
     import datetime as dt
     import json
 
@@ -96,9 +114,7 @@ def test_a_cached_model_with_fewer_factors_is_accepted(tmp_path):
         "coef": {"mom_6_1_r": 0.01, "prox_52w_r": 0.02},
         "mu": [0.0, 0.0], "sd": [1.0, 1.0], "intercept": 0.0,
     }))
-    m = cm.load_cached(path, dt.date(2026, 1, 6), 21)
-    assert m is not None
-    assert m.features == ["mom_6_1_r", "prox_52w_r"]
+    assert cm.load_cached(path, dt.date(2026, 1, 6), 21) is None
 
 
 def test_a_cached_model_naming_an_unknown_factor_forces_a_refit(tmp_path):
@@ -110,8 +126,8 @@ def test_a_cached_model_naming_an_unknown_factor_forces_a_refit(tmp_path):
     path = tmp_path / "m.json"
     path.write_text(json.dumps({
         "fitted_for": "2026-01-05", "train_end": "2025-10-01", "n_train": 5000,
-        "features": ["mom_6_1_r", "a_factor_we_deleted_r"],
-        "coef": {"mom_6_1_r": 0.01, "a_factor_we_deleted_r": 0.02},
+        "features": ["mom_f", "a_family_we_deleted_f"],
+        "coef": {"mom_f": 0.01, "a_family_we_deleted_f": 0.02},
         "mu": [0.0, 0.0], "sd": [1.0, 1.0], "intercept": 0.0,
     }))
     assert cm.load_cached(path, dt.date(2026, 1, 6), 21) is None
@@ -126,12 +142,12 @@ def test_the_stored_feature_order_is_preserved(tmp_path):
     path = tmp_path / "m.json"
     path.write_text(json.dumps({
         "fitted_for": "2026-01-05", "train_end": "2025-10-01", "n_train": 5000,
-        "features": ["prox_52w_r", "mom_6_1_r"],       # deliberately not sorted
-        "coef": {"mom_6_1_r": 0.01, "prox_52w_r": 0.02},
+        "features": ["lottery_f", "mom_f"],            # deliberately not sorted
+        "coef": {"mom_f": 0.01, "lottery_f": 0.02},
         "mu": [1.0, 2.0], "sd": [1.0, 1.0], "intercept": 0.0,
     }))
     m = cm.load_cached(path, dt.date(2026, 1, 6), 21)
-    assert m.features == ["prox_52w_r", "mom_6_1_r"]
+    assert m.features == ["lottery_f", "mom_f"]
 
 
 # --------------------------------------------------------- redundancy

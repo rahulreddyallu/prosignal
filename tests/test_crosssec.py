@@ -123,10 +123,10 @@ def test_stale_cache_is_rejected_rather_than_used(tmp_path):
 
     from prosignal.features import crossmodel as cm
 
-    m = cm.CrossSectionalModel(coef={c: 0.0 for c in cm.FEATURE_COLUMNS},
+    m = cm.CrossSectionalModel(coef={c: 0.0 for c in cm.FAMILY_COLUMNS},
                                n_train=1000, train_end=dt.date(2020, 1, 1))
-    m.mu = np.zeros(len(cm.FEATURE_COLUMNS))
-    m.sd = np.ones(len(cm.FEATURE_COLUMNS))
+    m.mu = np.zeros(len(cm.FAMILY_COLUMNS))
+    m.sd = np.ones(len(cm.FAMILY_COLUMNS))
     m.intercept = 0.0
     path = tmp_path / "m.json"
     cm.save_cache(path, m, dt.date(2020, 1, 1))

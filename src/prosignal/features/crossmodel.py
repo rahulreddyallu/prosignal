@@ -170,8 +170,14 @@ def load_cached(path, as_of: dt.date,
         # dropped rather than neutral-filled. What must not happen is a stored
         # factor the code no longer knows, which means the definitions moved.
         stored = list(blob.get("features") or blob["coef"].keys())
-        if not set(stored) <= set(FEATURE_COLUMNS):
+        # Families now, individual factors before. Either is a legitimate stored
+        # shape; a name from NEITHER means the definitions moved and the stored
+        # coefficients describe a different model.
+        known = set(FEATURE_COLUMNS) | set(FAMILY_COLUMNS)
+        if not set(stored) <= known:
             return None                      # feature set changed; refit
+        if not set(stored) <= set(FAMILY_COLUMNS):
+            return None                      # pre-family fit; refit on families
         if sorted(stored) != sorted(blob["coef"]):
             return None                      # blob is internally inconsistent
         m = CrossSectionalModel(
@@ -179,6 +185,8 @@ def load_cached(path, as_of: dt.date,
             train_end=dt.date.fromisoformat(blob["train_end"]),
             features=stored,
         )
+        m.dispersion = float(blob.get("dispersion") or 0.0)
+        m.train_dispersion = float(blob.get("train_dispersion") or 0.0)
         m.mu = np.array(blob["mu"], dtype="float64")
         m.sd = np.array(blob["sd"], dtype="float64")
         m.intercept = float(blob["intercept"])
@@ -237,6 +245,8 @@ def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
         # IN FIT ORDER. `mu` and `sd` are positional and align to it, so a dict
         # whose iteration order changed would silently mis-standardise.
         "features": list(model.features),
+        "dispersion": float(getattr(model, "dispersion", 0.0) or 0.0),
+        "train_dispersion": float(getattr(model, "train_dispersion", 0.0) or 0.0),
         "coef": model.coef,
         "dropped_for_coverage": getattr(model, "dropped_for_coverage", {}) or {},
         "mu": list(map(float, model.mu)),
@@ -245,8 +255,60 @@ def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
     }), encoding="utf-8")
 
 
-def score_with(model: CrossSectionalModel, features: pd.DataFrame) -> pd.Series:
+def apply_family_multipliers(
+    frame: pd.DataFrame, multipliers: Optional[Dict[str, float]]
+) -> pd.DataFrame:
+    """Scale family columns before they are scored.
+
+    Stage 2 measures the regime and produces a momentum multiplier -- 0.5 in a
+    momentum-crash bucket, 1.0 in a clean uptrend. It was applied ONLY to the
+    hand-weighted composite's weights, so for the fitted model, which is the one
+    that actually ranks, the entire regime layer was decorative: the multiplier
+    was computed, logged, written to the ledger, printed on the card, and never
+    reached a score.
+
+    The families are rank averages in [-1, 1], so scaling one by 0.5 halves what
+    it can contribute, which is what the multiplier means.
+
+    This is also the engine's analogue of volatility-scaled momentum exposure
+    (Barroso & Santa-Clara 2015; Daniel & Moskowitz 2016). It is regime-bucket
+    scaling rather than a continuous inverse-volatility weight, because the
+    latter needs a momentum FACTOR-return series the engine does not build.
+    """
+    if not multipliers:
+        return frame
+    out = frame
+    for family, m in multipliers.items():
+        col = family + "_f"
+        if col in out.columns and m is not None and float(m) != 1.0:
+            if out is frame:
+                out = frame.copy()
+            out[col] = out[col] * float(m)
+    return out
+
+
+def prediction_dispersion(raw: pd.Series) -> float:
+    """Gap between the top decile's predicted rank and the median's.
+
+    In predicted-rank units, where the fitted label spans -1 to +1. Near zero
+    means the model ordered the universe without distinguishing it, and that
+    day's ranking is noise wearing a shortlist.
+
+    This exists because the SCORE cannot express it. The score is a
+    cross-sectional rank, so its distribution is uniform every single day and an
+    absolute threshold on it -- `min_universe_percentile = 90` -- admits the top
+    10% whether or not the top 10% is any better than the middle.
+    """
+    clean = pd.Series(raw).dropna()
+    if len(clean) < 20:
+        return 0.0
+    return float(clean.quantile(0.90) - clean.quantile(0.50))
+
+
+def score_with(model: CrossSectionalModel, features: pd.DataFrame,
+               multipliers: Optional[Dict[str, float]] = None) -> pd.Series:
     """Apply stored coefficients to today's features."""
+    features = apply_family_multipliers(features, multipliers)
     cols = model.features
     x = features.reindex(columns=cols).fillna(0.0).to_numpy("float64")
     coef = np.array([model.coef[c] for c in cols], dtype="float64")
@@ -285,6 +347,72 @@ def standardised_features(model: CrossSectionalModel, features: pd.DataFrame) ->
         index=features["symbol"].to_numpy(),
         columns=[c[:-2] if c.endswith("_r") else c for c in cols],
     )
+
+
+# =============================================================================
+# Factor families
+# =============================================================================
+#
+# Seventeen coefficients over a set this collinear is not estimable, and the
+# near-uniform coefficient band was the model saying so. Measured on the live
+# universe:
+#
+#     amihud / turnover_ratio   -0.869    one factor measured from two sides
+#     resid_mom / mom_6_1       +0.770
+#     resid_mom / prox_52w      +0.601
+#
+# Ridge does not pick a winner among collinear inputs, it spreads the penalty
+# across the block, so three momentum coefficients that each look small carry an
+# effective weight of roughly three times any one of them.
+#
+# The members are averaged as ranks FIRST and one coefficient is fitted per
+# family. Five or six coefficients over several hundred names and a decade of
+# cross-sections is estimable; seventeen is not.
+#
+# LIQUIDITY IS NOT HERE, deliberately. The illiquidity premium is real but it is
+# compensation FOR trading costs, and a manual executor pays that cost rather
+# than collecting it -- a positive amihud loading walks the book into names
+# where realised slippage exceeds forecast alpha. It belongs in the universe
+# screen as a floor, which is where `universe.pit_min_adtv_inr` already puts it.
+FAMILIES: Dict[str, Tuple[str, ...]] = {
+    # Three names for one bet. Averaged, not fitted separately.
+    "mom": ("mom_6_1_r", "prox_52w_r", "resid_mom_r"),
+    # Reversal is the opposite side of the same axis and stays on its own: it is
+    # a different horizon, and folding it into `mom` would net out against it.
+    "reversal": ("resid_reversal_r",),
+    # Lottery demand. In India this is stronger than the US literature suggests,
+    # because the marginal buyer is retail. Signs are aligned so that a HIGHER
+    # composite means MORE lottery-like, and the fit is free to price it
+    # negatively.
+    "lottery": ("max5_21_r", "idio_vol_r", "idio_skew_r", "downside_vol_r"),
+    # What is left of risk once the lottery moments are taken out.
+    "risk": ("beta_120_r", "max_dd_120_r"),
+    # Delivered share of traded volume. No clean analogue outside India.
+    "delivery": ("deliv_pct_r", "deliv_trend_r"),
+    "value": ("earnings_yield_r", "book_to_price_r", "ebitda_to_ev_r",
+              "fcf_yield_r", "sales_to_price_r"),
+}
+
+#: Families whose members are all price-derived, so they are always computable.
+FAMILY_COLUMNS = [f + "_f" for f in FAMILIES]
+
+
+def build_families(frame: pd.DataFrame, available: Sequence[str]) -> List[str]:
+    """Average each family's available members into one column, in place.
+
+    Returns the family columns that could be built. A family with no available
+    member is not built at all rather than filled -- the same rule the factors
+    themselves follow.
+    """
+    built: List[str] = []
+    have = set(available)
+    for family, members in FAMILIES.items():
+        present = [m for m in members if m in have and m in frame.columns]
+        if not present:
+            continue
+        frame[family + "_f"] = frame[present].mean(axis=1)
+        built.append(family + "_f")
+    return built
 
 
 def _attach_fundamentals(
@@ -391,6 +519,8 @@ def fit_predict(
     delivery: Optional[pd.DataFrame] = None,
     eligible: Optional[pd.DataFrame] = None,
     score_symbols: Optional[Sequence[str]] = None,
+    sectors: Optional[Dict[str, str]] = None,
+    multipliers: Optional[Dict[str, float]] = None,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
@@ -423,7 +553,7 @@ def fit_predict(
     train_close = hist.iloc[: len(hist) - H]
     train_turnover = turnover.reindex(train_close.index)
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
-                        delivery=delivery, eligible=eligible)
+                        delivery=delivery, eligible=eligible, sectors=sectors)
     features = list(FEATURE_COLUMNS)
     dropped: Dict[str, float] = {}
     if not panel.empty:
@@ -460,6 +590,15 @@ def fit_predict(
             f"only {len(features)} factor(s) cleared the "
             f"{MIN_FACTOR_COVERAGE:.0%} coverage floor"
         )
+    # Fit on FAMILIES, not on the individual factors. See FAMILIES for the
+    # measured collinearity that makes seventeen coefficients unestimable.
+    member_features = list(features)
+    fitted_families = build_families(panel, features)
+    if len(fitted_families) < 2:
+        return None, None, (
+            f"only {len(fitted_families)} factor famil(y/ies) could be built"
+        )
+    features = fitted_families
     x = panel[features].to_numpy("float64")
     y = panel["label_rank"].to_numpy("float64")
     fit = ridge_fit(x, y, alpha=A)
@@ -480,7 +619,7 @@ def fit_predict(
     live_hist = hist[live_cols].tail(MIN_LOOKBACK + 5)
     live = build_panel(live_hist,
                        turnover.reindex(hist.index)[live_cols].tail(MIN_LOOKBACK + 5),
-                       horizon=1, step=21, delivery=delivery)
+                       horizon=1, step=21, delivery=delivery, sectors=sectors)
     if live.empty:
         return None, None, "features could not be computed for the decision date"
     live = _attach_fundamentals(live, fundamentals, live_hist, max_fundamental_age_days)
@@ -489,16 +628,38 @@ def fit_predict(
         if c in features and c in latest.columns:
             latest = latest.copy()
             latest[c] = latest[c].fillna(0.0)
+    latest = latest.copy()
+    build_families(latest, member_features)
     latest = latest.dropna(subset=[c for c in features if c in latest.columns])
     if latest.empty:
         return None, None, "no symbol had a complete feature set on the decision date"
 
+    # What this model's dispersion normally looks like, measured on its own
+    # training panel. An ABSOLUTE floor cannot work here: ridge at alpha=20000
+    # shrinks predictions hard, so the achievable spread is small and entirely
+    # a function of the penalty. Measured across 88 panel dates the whole range
+    # was 0.0355 to 0.0607, and a floor set anywhere near the label's own scale
+    # would block every single day. Changing alpha would move the range again.
+    #
+    # The ratio to the model's own median is scale-free and survives a penalty
+    # change, which an absolute number does not.
+    train_pred = predict(fit, x)
+    by_date = pd.Series(train_pred, index=panel["date"].to_numpy())
+    per_date = by_date.groupby(level=0).apply(prediction_dispersion)
+    train_dispersion = float(per_date.median()) if len(per_date) else 0.0
+
     n_train = len(panel)
     train_end = pd.Timestamp(panel["date"].max()).date()
     del panel, x, y
+    latest = apply_family_multipliers(latest, multipliers)
     raw = predict(fit, latest[features].to_numpy("float64"))
     scores = pd.Series(raw, index=latest["symbol"].to_numpy())
     ranked = (scores.rank(pct=True) - 0.5) * 2.0
+    # How far apart the model actually placed the universe today, BEFORE the
+    # rank transform flattens it. The ranked score is uniform by construction
+    # every day, so nothing downstream can tell a day the model had a view from
+    # a day it did not.
+    dispersion = prediction_dispersion(scores)
 
     model = CrossSectionalModel(
         coef=dict(zip(features, fit["coef"].tolist())),
@@ -507,6 +668,8 @@ def fit_predict(
         features=features,
     )
     model.dropped_for_coverage = dropped
+    model.dispersion = dispersion
+    model.train_dispersion = train_dispersion
     model.mu, model.sd, model.intercept = fit["mu"], fit["sd"], fit["intercept"]
     release_memory()
     log.info(
@@ -520,7 +683,8 @@ def fit_predict(
 def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
                    fundamentals: Optional[pd.DataFrame] = None,
                    max_fundamental_age_days: Optional[int] = None,
-                   delivery: Optional[pd.DataFrame] = None):
+                   delivery: Optional[pd.DataFrame] = None,
+                   sectors: Optional[Dict[str, str]] = None):
     """Features for the decision date only.
 
     The cheap path: one date rather than a full training panel, so a cached
@@ -531,12 +695,22 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
     if len(hist) < MIN_LOOKBACK:
         return None
     live = build_panel(hist, turnover.reindex(hist.index), horizon=1, step=21,
-                       delivery=delivery)
+                       delivery=delivery, sectors=sectors)
     if live.empty:
         return None
     live = _attach_fundamentals(live, fundamentals, hist, max_fundamental_age_days)
     latest = live[live["date"] == live["date"].max()].dropna(
         subset=[c for c in FEATURE_COLUMNS
                 if c in live.columns and not c.endswith(
-                    tuple(f + "_r" for f in FUNDAMENTAL_FEATURES))])
-    return latest if not latest.empty else None
+                    tuple(f + "_r" for f in FUNDAMENTAL_FEATURES))]).copy()
+    if latest.empty:
+        return None
+    # The model is fitted on families, so the scoring frame has to carry them.
+    # A fundamental the feed cannot serve is absent rather than zero, and
+    # `build_families` averages over the members that ARE present -- so a value
+    # family with two of five members is the mean of those two, not a mean
+    # diluted by three imputed zeros.
+    available = [c for c in FEATURE_COLUMNS if c in latest.columns
+                 and latest[c].notna().any()]
+    build_families(latest, available)
+    return latest
