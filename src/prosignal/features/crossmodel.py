@@ -31,6 +31,7 @@ import json
 from ..core.logging import get_logger
 from ..core.memory import release_memory
 from .crosssec import FEATURES, MIN_LOOKBACK, build_panel
+from .exits import ExitRules, rules_from_config
 from .labels import BarrierSpec
 from .fundamental_factors import available_as_of, build_fundamental_panel, winsorise
 from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
@@ -822,6 +823,8 @@ def fit_predict(
     multipliers: Optional[Dict[str, float]] = None,
     actions: Optional[pd.DataFrame] = None,
     barriers: Optional["BarrierSpec"] = None,
+    exit_rules: Optional["ExitRules"] = None,
+    open_: Optional[pd.DataFrame] = None,
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
     uniqueness_weighting: bool = True,
@@ -865,9 +868,10 @@ def fit_predict(
     train_turnover = turnover.reindex(train_close.index)
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
                         delivery=delivery, eligible=eligible, sectors=sectors,
-                        barriers=barriers,
+                        barriers=barriers, exit_rules=exit_rules,
                         high=(high.reindex(train_close.index) if high is not None else None),
-                        low=(low.reindex(train_close.index) if low is not None else None))
+                        low=(low.reindex(train_close.index) if low is not None else None),
+                        open_=(open_.reindex(train_close.index) if open_ is not None else None))
     features: List[str] = []
     dropped: Dict[str, float] = {}
     member_features: List[str] = []

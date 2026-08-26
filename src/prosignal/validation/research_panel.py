@@ -25,6 +25,7 @@ import pandas as pd
 from ..data.types import DATE, SYMBOL
 from ..features import crossmodel as cm
 from ..features.crosssec import build_panel, liquidity_mask
+from ..features.exits import ExitRules, rules_from_config
 from ..features.labels import BarrierSpec
 from ..stages._cfg import fv, iv
 
@@ -39,6 +40,7 @@ class ResearchPanel:
     close: pd.DataFrame
     horizon: int
     barriers: Optional[BarrierSpec]
+    exit_rules: Optional[ExitRules]
     sector_map: Dict[str, str]
 
     @property
@@ -68,10 +70,11 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
     # often the stop was hit.
     if prices is not None and turnover is not None:
         close, high, low = prices["close"], prices["high"], prices["low"]
+        open_ = prices.get("open")
     else:
         px = store.read_prices(
             start=sessions[0], end=end,
-            columns=[DATE, SYMBOL, "close", "turnover", "high", "low"])
+            columns=[DATE, SYMBOL, "close", "turnover", "high", "low", "open"])
         px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
 
         def piv(col: str) -> pd.DataFrame:
@@ -79,7 +82,7 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
                                   aggfunc="last", observed=True).sort_index()
 
         close, turnover = piv("close"), piv("turnover")
-        high, low = piv("high"), piv("low")
+        high, low, open_ = piv("high"), piv("low"), piv("open")
         del px
 
     delivery = None
@@ -106,14 +109,18 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
 
     horizon = iv(c4.model_horizon_sessions)
     lab = c4.labels
+    engine_geometry = (bool(lab.triple_barrier)
+                       and str(lab.barrier_source) == "engine")
+    rules = rules_from_config(c4, p.stage7_risk) if engine_geometry else None
     spec = (BarrierSpec(upper=fv(lab.upper_sigma), lower=fv(lab.lower_sigma),
                         horizon=horizon, vol_window=iv(lab.vol_window_sessions))
-            if bool(lab.triple_barrier) else None)
+            if bool(lab.triple_barrier) and not engine_geometry else None)
 
     panel = build_panel(close, turnover, horizon=horizon, step=step,
                         delivery=delivery, eligible=eligible,
                         sectors=(sector_map if sector_neutral else None),
-                        barriers=spec, high=high, low=low)
+                        barriers=spec, exit_rules=rules,
+                        high=high, low=low, open_=open_)
     try:
         actions = store.read_corporate_actions()
     except Exception:
@@ -124,4 +131,4 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
     panel, features, dropped = cm.prepare_features(panel)
     return ResearchPanel(panel=panel, features=features, dropped=dropped,
                          close=close, horizon=horizon, barriers=spec,
-                         sector_map=sector_map)
+                         exit_rules=rules, sector_map=sector_map)

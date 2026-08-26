@@ -1024,6 +1024,27 @@ stage4_core_score:
   #     0.8/0.6       42%     45%     13%      0.682          23
   labels:
     triple_barrier: true
+    # WHERE THE BARRIERS COME FROM.
+    #
+    # "engine" derives them from the stop and target Stage 7 actually places --
+    # 2.5 x ATR, clipped to [2%, 15%], and a target at 3.0R -- plus the thesis
+    # invalidation exit. The model is then fitted against the trade the engine
+    # takes rather than one it never takes.
+    #
+    # The sigma geometry below shipped first and was measurably wrong. Across
+    # 156,446 observations:
+    #
+    #                      label (sigma)     engine        ratio
+    #   stop                12.9% median     9.0% median   1.48x looser
+    #   target              17.2% median    27.0% median   1.57x tighter
+    #   reward:risk          1.33 : 1        3.00 : 1
+    #
+    # 88% of names had a tighter real stop than the label assumed, 16% of labels
+    # disagreed outright, and 14% of everything the sigma label called a WINNER
+    # would have been stopped out. The two errors compounded rather than
+    # cancelled, and a 1.33:1 profile selects the opposite style to a 3:1 one --
+    # high-hit-rate grinders against low-hit-rate trend names.
+    barrier_source: engine
     upper_sigma: 1.0
     lower_sigma: 0.75
     vol_window_sessions: 60

@@ -1013,6 +1013,25 @@ def cmd_data_purge_cache(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 
 
+
+def _label_name(rp) -> str:
+    """What the panel was actually labelled with, named honestly.
+
+    "triple-barrier" alone hid the distinction that mattered: sigma barriers and
+    the engine's own stop/target are both triple-barrier and they disagree on
+    16% of outcomes.
+    """
+    if getattr(rp, "exit_rules", None) is not None:
+        r = rp.exit_rules
+        return (f"engine exits ({r.stop_atr_multiple:g}x ATR stop, "
+                f"{r.target_r_multiple:g}R target, invalidation, "
+                f"{r.horizon}-session cap)")
+    if rp.barriers is not None:
+        return (f"sigma barriers ({rp.barriers.upper:g}/{rp.barriers.lower:g} "
+                f"horizon-sigma) -- RESEARCH GEOMETRY, not what ships")
+    return "horizon return"
+
+
 def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Combinatorial purged cross-validation over the cross-sectional model.
 
@@ -1072,7 +1091,7 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     rp = build_research_panel(cfg, store, end)
     panel, features, dropped, horizon = rp.panel, rp.features, rp.dropped, rp.horizon
     _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
-    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
+    _print(f"  label: {_label_name(rp)}")
     _print(f"  fitting {len(features)} famil(y/ies): {', '.join(features)}")
     if dropped:
         _print(f"  {len(dropped)} factor(s) dropped on coverage")
@@ -1362,7 +1381,7 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
     rp = build_research_panel(cfg, store, end)
     panel, horizon, sector_map, close = rp.panel, rp.horizon, rp.sector_map, rp.close
     _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
-    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
+    _print(f"  label: {_label_name(rp)}")
 
     _rule("Standalone rank IC, before any blending")
     _print(f"  {'factor':<20}{'dates':>7}{'IC':>9}{'ICIR':>8}{'t':>8}{'hit':>7}")
@@ -1529,7 +1548,7 @@ def cmd_research_estimator(cfg: AppConfig, args: argparse.Namespace) -> int:
     rp = build_research_panel(cfg, store, end)
     panel, fams, horizon = rp.panel, rp.features, rp.horizon
     _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
-    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
+    _print(f"  label: {_label_name(rp)}")
     if len(fams) < 2:
         _print("  too few families to compare estimators")
         return 1
@@ -1873,7 +1892,7 @@ def cmd_research_metalabel(cfg: AppConfig, args: argparse.Namespace) -> int:
     _rule("Building the panel")
     rp = build_research_panel(cfg, store, end)
     panel, fams, horizon = rp.panel, rp.features, rp.horizon
-    if rp.barriers is None:
+    if rp.barriers is None and rp.exit_rules is None:
         _print("  the label is not triple-barrier, so there is no meta-label "
                "to fit. Nothing to measure.")
         return 1
@@ -2377,7 +2396,7 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     rp = build_research_panel(cfg, store, end, prices=panels,
                               turnover=turnover_panel)
     panel, features, dropped, horizon = rp.panel, rp.features, rp.dropped, rp.horizon
-    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
+    _print(f"  label: {_label_name(rp)}")
     _print(f"  fitting {len(features)} famil(y/ies): {', '.join(features)}")
     _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
     params = _portfolio_params(cfg)

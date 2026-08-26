@@ -42,6 +42,7 @@ from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
 from ..features.crosssec import liquidity_mask
+from ..features.exits import rules_from_config
 from ..features.labels import BarrierSpec
 from ..features.refit_gate import review_refit
 from ..features.crossmodel import (
@@ -269,7 +270,8 @@ def run(
     # is stated on the card rather than substituted quietly.
     (model_scores, model, model_unavailable, model_features,
      refit_verdict) = _cross_sectional_model(store, symbols, as_of, cfg,
-                                            p.universe, regime)
+                                            p.universe, regime,
+                                            risk_cfg=p.stage7_risk)
     if refit_verdict is not None and not refit_verdict.accepted:
         notes.append(
             f"Refit held back: {refit_verdict.summary()}. The previous "
@@ -617,7 +619,8 @@ _MODEL_CITE = {
 }
 
 
-def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
+def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
+                           risk_cfg=None):
     """Fit the ridge ranker on history strictly before ``as_of``.
 
     Failure is reported, never swallowed: a model that could not be fitted must
@@ -691,7 +694,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
         lab = cfg.labels
         est = cfg.estimator
         if refitting and bool(lab.triple_barrier):
-            cols += ["high", "low"]
+            # `open` too: a bar that gaps through the stop fills at the OPEN,
+            # not at the stop price, and assuming otherwise is the optimistic
+            # error. The label reads it through the shared exit resolver.
+            cols += ["high", "low", "open"]
         px = store.read_prices(
             symbols=None if refitting else list(symbols), start=start, end=as_of,
             columns=cols,
@@ -703,12 +709,15 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
                                aggfunc="last", observed=True).sort_index()
         turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
                                   aggfunc="last", observed=True).sort_index()
-        high = low = None
+        high = low = open_ = None
         if "high" in px.columns and "low" in px.columns:
             high = px.pivot_table(index=DATE, columns=SYMBOL, values="high",
                                   aggfunc="last", observed=True).sort_index()
             low = px.pivot_table(index=DATE, columns=SYMBOL, values="low",
                                  aggfunc="last", observed=True).sort_index()
+        if "open" in px.columns:
+            open_ = px.pivot_table(index=DATE, columns=SYMBOL, values="open",
+                                   aggfunc="last", observed=True).sort_index()
         del px
 
         # Value and quality: the only inputs not derived from price and volume.
@@ -802,12 +811,21 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
             sectors=sector_map,
             multipliers=multipliers,
             actions=actions,
+            # The engine's own geometry by default. `sigma` is research only.
+            # The label's geometry IS the engine's, read from stage 7's own
+            # config. If stage 7 is not reachable the label cannot be built
+            # honestly, so it falls back to the sigma geometry and says so
+            # rather than silently inventing a stop.
+            exit_rules=(rules_from_config(cfg, risk_cfg)
+                        if bool(lab.triple_barrier) and risk_cfg is not None
+                        and str(lab.barrier_source) == "engine" else None),
             barriers=(BarrierSpec(
                 upper=float(lab.upper_sigma), lower=float(lab.lower_sigma),
                 horizon=int(iv(cfg.model_horizon_sessions)),
                 vol_window=int(lab.vol_window_sessions))
-                if bool(lab.triple_barrier) else None),
-            high=high, low=low,
+                if bool(lab.triple_barrier)
+                and str(lab.barrier_source) == "sigma" else None),
+            high=high, low=low, open_=open_,
             uniqueness_weighting=bool(lab.uniqueness_weighting),
             estimator=str(est.method),
             significance_floor=float(est.significance_floor),

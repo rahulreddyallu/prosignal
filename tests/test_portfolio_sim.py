@@ -130,8 +130,12 @@ def test_the_invalidation_level_exits_before_the_horizon():
     from prosignal.validation.portfolio_sim import _hold
 
     p = _prices()
-    tight = _params(invalidation_buffer_atr=0.0)
+    tight = _params(invalidation_buffer_atr=0.5)
     loose = _params(invalidation_buffer_atr=100.0)   # unreachable
+    # A name must be VALID at entry to have a trade at all. With a buffer of
+    # 0.0 the level sits exactly on the moving average, and any name below its
+    # MA on the decision date is not a candidate -- Stage 6 would never trigger
+    # it -- so it correctly yields no label rather than a day-one loss.
     a = _hold("S00", 200, p["close"], p["low"], p["open"], p["ma"], p["atr"], tight)
     b = _hold("S00", 200, p["close"], p["low"], p["open"], p["ma"], p["atr"], loose)
     assert a is not None and b is not None

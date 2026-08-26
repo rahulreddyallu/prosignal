@@ -14,12 +14,22 @@ FIRST (Lopez de Prado, Advances in Financial Machine Learning, ch. 3). What
 comes back is the return the trade would have realised, and a side saying which
 barrier ended it.
 
-THE BARRIERS ARE VOLATILITY-SCALED. A flat 8% means something different to a
-large cap at 1.2% daily sigma and a midcap at 4%. Scaled in units of the name's
-own volatility they mean the same thing everywhere. Calibration matters in both
-directions: too tight against the noise and the labels are close to random, too
-wide and everything times out and the label collapses back to the horizon
-return it was meant to replace.
+THE BARRIERS ARE THE ENGINE'S OWN. They were volatility-scaled -- a stop at
+0.75 horizon-sigmas, a target at 1.0 -- which sounded principled and described a
+trade this engine never takes. Stage 7 places its stop at 2.5 x ATR and its
+target at 3.0R, and measured across 156,446 observations the sigma barriers were
+1.48x looser on the stop for 88% of names and 1.57x tighter on the target. The
+two errors compounded: the label carried a 1.33:1 reward-to-risk profile against
+the engine's 3.0:1, and 14% of everything it called a winner would have been
+stopped out.
+
+So the barriers now come from `exits.ExitRules`, which reads the same config
+Stage 7 does. A change to the traded stop moves the training label with it. See
+`features/exits.py` for what is still not modelled.
+
+Volatility scaling remains available for RESEARCH (`BarrierSpec`), because the
+calibration table below was measured with it and a sensitivity test needs the
+old geometry to compare against. It is not what ships.
 
 OVERLAP IS NOT OPTIONAL TO HANDLE. A label spanning 63 sessions, sampled every
 21, shares two thirds of its window with its neighbour. Consecutive rows are not
@@ -37,7 +47,8 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
-    "BarrierSpec", "triple_barrier", "average_uniqueness", "concurrency",
+    "BarrierSpec", "triple_barrier", "engine_barrier", "average_uniqueness",
+    "concurrency",
 ]
 
 
@@ -203,3 +214,31 @@ def average_uniqueness(t0: np.ndarray, t1: np.ndarray,
             continue
         out[k] = float(np.mean(1.0 / safe[int(a): int(b) + 1]))
     return out
+
+
+def engine_barrier(
+    close: pd.DataFrame,
+    i: int,
+    rules,
+    *,
+    high: Optional[pd.DataFrame] = None,
+    low: Optional[pd.DataFrame] = None,
+    open_: Optional[pd.DataFrame] = None,
+    atr: Optional[pd.DataFrame] = None,
+    ma: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """The label, using the engine's own exit geometry.
+
+    A thin pass-through to `exits.resolve_exits` so that the label and the book
+    cannot drift apart again: there is one implementation of "what happened to
+    this trade" and both callers reach it through here.
+
+    ``side`` may be -2 (thesis invalidation), which `triple_barrier` had no way
+    to express. It is a loss in intent even when the price is above entry -- the
+    reason for the trade is gone -- and anything reducing side to a binary must
+    treat it as "not a win".
+    """
+    from .exits import resolve_exits
+
+    return resolve_exits(close, i, rules, high=high, low=low, open_=open_,
+                         atr=atr, ma=ma)
