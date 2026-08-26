@@ -26,21 +26,58 @@ __all__ = [
 ]
 
 
-def _standardise(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    mu = x.mean(axis=0)
-    sd = x.std(axis=0, ddof=0)
-    sd[sd < 1e-12] = 1.0
+def _standardise(x: np.ndarray, w: Optional[np.ndarray] = None
+                 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if w is None:
+        mu = x.mean(axis=0)
+        sd = x.std(axis=0, ddof=0)
+    else:
+        tw = w.sum()
+        mu = (x * w[:, None]).sum(axis=0) / tw
+        sd = np.sqrt((((x - mu) ** 2) * w[:, None]).sum(axis=0) / tw)
+    sd = np.where(sd < 1e-12, 1.0, sd)
     return (x - mu) / sd, mu, sd
 
 
-def ridge_fit(x: np.ndarray, y: np.ndarray, alpha: float = 1.0) -> Dict[str, np.ndarray]:
-    """Closed-form ridge on standardised columns. The intercept is not penalised."""
-    xs, mu, sd = _standardise(x)
+def ridge_fit(x: np.ndarray, y: np.ndarray, alpha: float = 1.0,
+              weights: Optional[np.ndarray] = None) -> Dict[str, np.ndarray]:
+    """Closed-form ridge on standardised columns. The intercept is not penalised.
+
+    ``weights`` are per-observation and exist for label overlap. A 63-session
+    label sampled every 21 shares two thirds of its window with its neighbour,
+    so consecutive rows are not independent draws and an unweighted fit counts
+    one market shock once per overlapping row. Weighting by average uniqueness
+    (Lopez de Prado, ch. 4) charges each row only for the part of its span it
+    holds alone: on this panel's geometry that is 0.395, so 33,000 rows carry
+    about 13,000 independent-equivalent observations.
+
+    Scaled to mean 1 so ``alpha`` keeps its meaning -- otherwise down-weighting
+    the sample would silently strengthen the penalty.
+    """
+    if weights is not None:
+        w = np.asarray(weights, dtype="float64")
+        w = np.where(np.isfinite(w) & (w > 0), w, 0.0)
+        if w.sum() <= 0:
+            w = None
+        else:
+            w = w * (len(w) / w.sum())
+    else:
+        w = None
+
+    xs, mu, sd = _standardise(x, w)
     n, p = xs.shape
-    a = xs.T @ xs + alpha * np.eye(p)
-    b = xs.T @ (y - y.mean())
+    if w is None:
+        a = xs.T @ xs + alpha * np.eye(p)
+        b = xs.T @ (y - y.mean())
+        intercept = float(y.mean())
+    else:
+        yw = float((y * w).sum() / w.sum())
+        xw = xs * w[:, None]
+        a = xs.T @ xw + alpha * np.eye(p)
+        b = xw.T @ (y - yw)
+        intercept = yw
     coef = np.linalg.solve(a, b)
-    return {"coef": coef, "mu": mu, "sd": sd, "intercept": float(y.mean())}
+    return {"coef": coef, "mu": mu, "sd": sd, "intercept": intercept}
 
 
 def elastic_net_fit(

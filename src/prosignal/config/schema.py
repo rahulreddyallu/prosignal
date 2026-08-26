@@ -790,6 +790,28 @@ class RedundancyConfig(_Base):
         return self
 
 
+class LabelConfig(_Base):
+    """How the training label is built.
+
+    The horizon return is blind to the path: a name that fell 20% and recovered
+    by day 63 scores the same as one that drifted up quietly, and the engine was
+    stopped out of the first in week two. Triple-barrier labelling records
+    whichever of the profit, stop or time barrier is touched FIRST, so the model
+    is fitted against the trade it would actually have taken.
+    """
+
+    triple_barrier: bool = True
+    #: Barrier widths in units of the name's own horizon volatility, so they
+    #: mean the same thing for a 1.2%-sigma large cap and a 4%-sigma midcap.
+    upper_sigma: float = Field(1.0, gt=0, le=5.0)
+    lower_sigma: float = Field(0.75, gt=0, le=5.0)
+    vol_window_sessions: int = Field(60, ge=20, le=252)
+    #: Weight each row by how much of its outcome window it holds alone.
+    #: Without it a 63-session label sampled every 21 counts one market shock
+    #: once per overlapping row.
+    uniqueness_weighting: bool = True
+
+
 class Stage4Config(_Base):
     weighting_mode: TS
     standardisation: TS
@@ -819,6 +841,7 @@ class Stage4Config(_Base):
     model_max_train_sessions: int = Field(3000, ge=300, le=20000)
     model_refit_every_sessions: int = Field(21, ge=1, le=252)
     model_min_train_rows: int = Field(600, ge=100)
+    labels: LabelConfig = Field(default_factory=LabelConfig)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":

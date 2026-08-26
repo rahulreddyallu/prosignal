@@ -1003,6 +1003,37 @@ stage4_core_score:
   # Cross-sectional model. model_horizon_sessions must equal
   # stage7_risk.max_holding_sessions -- the loader enforces it -- or the model
   # forecasts a window the engine never holds for.
+  # How the training label is built. The horizon return is blind to the path:
+  # a name that fell 20% and recovered by day 63 scored the same as one that
+  # drifted up quietly, and the engine was stopped out of the first in week two.
+  # Triple-barrier labelling records whichever of the profit, stop or time
+  # barrier is touched FIRST, so the model is fitted against the trade it would
+  # actually have taken.
+  #
+  # Widths are in units of the name's OWN horizon volatility, so they mean the
+  # same thing for a 1.2%-sigma large cap and a 4%-sigma midcap.
+  #
+  # Calibrated on the real universe, 91 panel dates. Too wide and everything
+  # times out, which collapses the label back to the horizon return it replaces;
+  # too tight and it is measuring noise:
+  #
+  #   upper/lower   target   stop  timeout   uniqueness   median hold
+  #     2.0/1.5       14%     10%     76%      0.404          63
+  #     1.5/1.0       23%     24%     52%      0.462          63
+  #     1.0/0.75      37%     36%     27%      0.576          34   <- chosen
+  #     0.8/0.6       42%     45%     13%      0.682          23
+  labels:
+    triple_barrier: true
+    upper_sigma: 1.0
+    lower_sigma: 0.75
+    vol_window_sessions: 60
+    # Weight each training row by how much of its outcome window it holds
+    # alone. A 63-session label sampled every 21 shares two thirds of its span
+    # with its neighbour, so an unweighted fit counts one market shock once per
+    # overlapping row. Measured on this panel: mean uniqueness 0.576, so ~33,000
+    # rows carry about 19,000 independent-equivalent observations.
+    uniqueness_weighting: true
+
   model_horizon_sessions: 63
   model_ridge_alpha: 20000.0
   model_max_train_sessions: 3000

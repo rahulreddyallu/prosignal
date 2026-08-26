@@ -42,6 +42,7 @@ from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
 from ..features.crosssec import liquidity_mask
+from ..features.labels import BarrierSpec
 from ..features.refit_gate import review_refit
 from ..features.crossmodel import (
     contributions as cm_contributions,
@@ -660,9 +661,18 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
         # that the instance's memory budget was designed around. The wide read
         # is 3.8s and 31 MB as float32, and it happens on refit days.
         refitting = cached is None
+        # high/low make the barrier touch test intraday, which is what a stop
+        # actually is. Closes alone understate how often one is hit.
+        cols = [DATE, SYMBOL, "close", "turnover"]
+        # Read here rather than at the top: a config problem in this block must
+        # not raise before the delivery check, whose failure is the one the
+        # caller needs to see.
+        lab = cfg.labels
+        if refitting and bool(lab.triple_barrier):
+            cols += ["high", "low"]
         px = store.read_prices(
             symbols=None if refitting else list(symbols), start=start, end=as_of,
-            columns=[DATE, SYMBOL, "close", "turnover"],
+            columns=cols,
         )
         if px.empty:
             return None, None, "no price rows", None, None
@@ -671,6 +681,12 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
                                aggfunc="last", observed=True).sort_index()
         turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
                                   aggfunc="last", observed=True).sort_index()
+        high = low = None
+        if "high" in px.columns and "low" in px.columns:
+            high = px.pivot_table(index=DATE, columns=SYMBOL, values="high",
+                                  aggfunc="last", observed=True).sort_index()
+            low = px.pivot_table(index=DATE, columns=SYMBOL, values="low",
+                                 aggfunc="last", observed=True).sort_index()
         del px
 
         # Value and quality: the only inputs not derived from price and volume.
@@ -764,6 +780,13 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
             sectors=sector_map,
             multipliers=multipliers,
             actions=actions,
+            barriers=(BarrierSpec(
+                upper=float(lab.upper_sigma), lower=float(lab.lower_sigma),
+                horizon=int(iv(cfg.model_horizon_sessions)),
+                vol_window=int(lab.vol_window_sessions))
+                if bool(lab.triple_barrier) else None),
+            high=high, low=low,
+            uniqueness_weighting=bool(lab.uniqueness_weighting),
         )
         if model is not None:
             # A refit is proposed, not installed. This is the one path where a
