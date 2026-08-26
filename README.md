@@ -17,41 +17,53 @@ It issues opinions. It has no order-routing code and no broker connection.
 | **Universe** | ~750 names, liquidity-screened point-in-time |
 | **Frequency** | Once per trading session, end-of-day |
 | **Horizon** | 63 sessions (~3 months) |
-| **Method** | Ridge regression on the cross-sectional factors that clear a coverage floor — **12 of 17** on the current feed — refit each run |
+| **Method** | Ridge regression on **5 factor families** — the individual factors are too collinear to fit separately — refit each run |
 | **Output** | A ranked shortlist of 5, each with factor contributions |
 | **Execution** | None. No orders, no broker, no automation |
-| **Status** | Forward test registered, not yet started |
+| **Status** | Selection-period evidence only. Forward test re-registered, not started. Holdout deliberately unspent |
 
 > [!IMPORTANT]
-> **The validation figures below are withdrawn pending a re-run.** They were
-> computed on a training panel built from ONE universe — the names the
-> liquidity screen admits on the most recent session, projected backwards over
-> every training date. Measured against the screen resolved properly per date,
-> **13–28% of the names eligible on each historical date are absent from that
-> set**, excluded for what happened afterwards, while names eligible today
-> contributed rows on dates they could not have been traded on.
+> **The holdout figures are withdrawn and have NOT been replaced.** They were
+> computed on a training panel built from one universe — the names the liquidity
+> screen admits today, projected backwards over every training date — and on a
+> model whose value block was a constant for 74% of the universe. Both are
+> fixed. The old numbers describe a model that no longer exists.
 >
-> The panel is now point-in-time (`crosssec.liquidity_mask`). Refitting on the
-> corrected panel moves the model in the shape survivorship predicts:
->
-> | factor | biased panel | point-in-time | |
-> |---|---|---|---|
-> | `amihud` (illiquidity) | +0.00737 | −0.00917 | **sign flip** |
-> | `beta_120` | +0.00298 | −0.00274 | **sign flip** |
-> | `mom_6_1` | +0.01389 | +0.00288 | −79% |
->
-> Illiquidity and beta look rewarded when only the survivors are kept, because
-> the risky illiquid names that did not make it are missing. **Every number in
-> this section needs recomputing before it can be quoted again.**
+> The holdout has **not** been re-run, and that is a decision rather than an
+> omission. It was already spent once; looking again would compound the
+> multiple-testing problem the Deflated Sharpe exists to charge for, and would
+> buy a nicer number at the cost of the one clean test left. The
+> **pre-registered forward test** is the designed path to an out-of-sample
+> answer and has been re-registered against this configuration.
 
-**The central finding as last measured — on the biased panel, and therefore
-not currently standing:** on the holdout, the top decile returned **+4.35% per
-63-session period** at an overlap-corrected **t = 3.13**. Regressed against six
-long-short factors built from the engine's own definitions, that excess had an
-**R² of 0.730** and an **alpha of −1.01% at t = −0.38**.
+**What is measured, on the selection period, holdout untouched:**
 
-That the incremental alpha was **not** demonstrated is the one conclusion the
-correction does not threaten — it was already negative.
+| | |
+|---|---|
+| Pooled rank IC (CPCV, 36 paths) | **+0.0682** |
+| Paths below zero | **0%** |
+| Path Sharpe — min / median / max | +0.00 / +0.23 / +0.42 |
+| Top-decile excess | **+1.04%** per 63-session period |
+| Deflated Sharpe, charging 24 trials | **1.000 — pass** |
+
+**And at the book level**, which is what would actually be traded — 45 splits,
+sizing, stops, buffer bands and size-dependent costs applied:
+
+| | min | p25 | median | p75 | max |
+|---|---|---|---|---|---|
+| Sharpe | −3.13 | +0.03 | **+0.42** | +1.08 | +1.80 |
+| return/period | −3.72% | +0.11% | **+1.61%** | +3.54% | +6.00% |
+| max drawdown | −13.3% | −10.5% | **−6.9%** | −3.4% | −0.5% |
+
+**24% of splits have a negative Sharpe.** No t-statistic is quoted for either
+table, and the harness refuses to compute one: test dates recur across splits
+and the paths share training data and one calendar, so neither is a sample of
+independent experiments.
+
+The honest summary is that the ranking carries information on the selection
+period and the book that trades it is positive at the median with a quarter of
+its splits under water. Whether that survives out of sample is what the forward
+test is for, and it has not run yet.
 
 ---
 

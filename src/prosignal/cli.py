@@ -1091,9 +1091,21 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     )
     panel = build_panel(close, turnover, horizon=horizon, step=21,
                         delivery=delivery, eligible=eligible)
+    try:
+        actions = store.read_corporate_actions()
+    except Exception:
+        actions = None
     panel = cm._attach_fundamentals(panel, store.read_statements(), close,
-                                    iv(c4.max_fundamental_age_days))
+                                    iv(c4.max_fundamental_age_days), actions=actions)
+    # The SAME coverage tests and family construction the fit uses. Passing raw
+    # FEATURE_COLUMNS here deleted every row without a fundamental and cut the
+    # panel from 70 dates to 17 -- validating a different model than the one
+    # that runs, when it completed at all.
+    panel, features, dropped = cm.prepare_features(panel)
     _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
+    _print(f"  fitting {len(features)} famil(y/ies): {', '.join(features)}")
+    if dropped:
+        _print(f"  {len(dropped)} factor(s) dropped on coverage")
 
     def progress(n, total):
         if n % 20 == 0 or n == total:
@@ -1101,7 +1113,7 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
 
     _rule(f"CPCV  N={iv(val.cpcv.n_groups)}  k={args.test_groups}")
     result = run_cpcv(
-        panel, list(cm.FEATURE_COLUMNS), horizon_sessions=horizon, step_sessions=21,
+        panel, features, horizon_sessions=horizon, step_sessions=21,
         alpha=fv(c4.model_ridge_alpha), n_groups=iv(val.cpcv.n_groups),
         n_test_groups=args.test_groups,
         purge_sessions=iv(val.cpcv.purge_sessions),
@@ -1545,9 +1557,17 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
         min_price_inr=fv(u.min_price_inr),
     )
     panel = build_panel(panels["close"], turnover_panel, horizon=horizon,
-                        step=21, delivery=delivery, eligible=eligible)
+                        step=21, delivery=delivery, eligible=eligible,
+                        sectors=sector_map)
+    try:
+        actions = store.read_corporate_actions()
+    except Exception:
+        actions = None
     panel = cm._attach_fundamentals(panel, store.read_statements(), panels["close"],
-                                    iv(c4.max_fundamental_age_days))
+                                    iv(c4.max_fundamental_age_days), actions=actions)
+    # Same rule as the fit and the ranking CPCV. See cmd_research_cpcv.
+    panel, features, dropped = cm.prepare_features(panel)
+    _print(f"  fitting {len(features)} famil(y/ies): {', '.join(features)}")
     params = _portfolio_params(cfg)
     _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
     sample = params.cost_bps(300.0, 400, 2e8)
@@ -1563,7 +1583,7 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
 
     _rule(f"Portfolio CPCV  N={iv(val.cpcv.n_groups)}  k={args.test_groups}")
     result = run_portfolio_cpcv(
-        panel, list(cm.FEATURE_COLUMNS), panels, params,
+        panel, features, panels, params,
         step_sessions=21, alpha=fv(c4.model_ridge_alpha),
         n_groups=iv(val.cpcv.n_groups), n_test_groups=args.test_groups,
         purge_sessions=iv(val.cpcv.purge_sessions),
