@@ -608,6 +608,56 @@ def _attach_fundamentals(
     return panel
 
 
+def prepare_features(panel: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], Dict[str, float]]:
+    """Apply the coverage tests and build the families. One implementation.
+
+    `fit_predict` and the research commands must agree about what the model IS,
+    or the thing validated is not the thing that runs. They did not: CPCV passed
+    every raw FEATURE_COLUMN straight to `dropna`, which deleted every row
+    without a fundamental and cut a 70-date panel to 17 -- too few to build ten
+    CPCV groups, so the run did not merely validate the wrong model, it could
+    not complete at all.
+
+    Returns the panel with family columns attached, the feature list to fit on,
+    and what was dropped with the coverage figure that dropped it.
+    """
+    dropped: Dict[str, float] = {}
+    features = list(FEATURE_COLUMNS)
+    fund_cols = [f + "_r" for f in FUNDAMENTAL_FEATURES]
+    n_dates = max(panel["date"].nunique(), 1) if "date" in panel.columns else 1
+
+    for c in fund_cols:
+        if c not in panel.columns:
+            dropped[c] = 0.0
+            continue
+        if "date" not in panel.columns:
+            continue
+        per_date = panel.groupby("date")[c].apply(lambda x: float(x.notna().mean()))
+        live = per_date[per_date > 0]
+        span = len(live) / n_dates
+        within = float(live.median()) if len(live) else 0.0
+        if span < MIN_FACTOR_DATE_SPAN:
+            dropped[c] = round(span, 4)
+            log.info("factor dropped: absent for too much of the panel",
+                     extra={"factor": c, "date_span": round(span, 3),
+                            "within_date": round(within, 3)})
+        elif within < MIN_FACTOR_COVERAGE:
+            dropped[c] = round(within, 4)
+            log.info("factor dropped: ranks too few names on the dates it exists",
+                     extra={"factor": c, "within_date": round(within, 3)})
+
+    features = [c for c in FEATURE_COLUMNS if c not in dropped]
+    panel = panel.drop(columns=[c for c in dropped if c in panel.columns])
+    # Above the floors a gap still ranks neutral, the same rule
+    # `crosssec.NEUTRAL_WHEN_MISSING` applies to delivery.
+    for c in fund_cols:
+        if c in features and c in panel.columns:
+            panel[c] = panel[c].fillna(0.0)
+
+    fitted = build_families(panel, features)
+    return panel, fitted, dropped
+
+
 def fit_predict(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -657,43 +707,14 @@ def fit_predict(
     train_turnover = turnover.reindex(train_close.index)
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
                         delivery=delivery, eligible=eligible, sectors=sectors)
-    features = list(FEATURE_COLUMNS)
+    features: List[str] = []
     dropped: Dict[str, float] = {}
+    member_features: List[str] = []
     if not panel.empty:
         panel = _attach_fundamentals(panel, fundamentals, train_close,
                                      max_fundamental_age_days, actions=actions)
-        # A factor the feed cannot serve for most of the universe is not a
-        # factor. Coverage is measured on the training panel and anything under
-        # the floor leaves the model entirely, rather than being neutral-filled
-        # and reported as though it had ranked anything.
-        fund_cols = [f + "_r" for f in FUNDAMENTAL_FEATURES]
-        n_dates = max(panel["date"].nunique(), 1)
-        for c in fund_cols:
-            if c not in panel.columns:
-                dropped[c] = 0.0
-                continue
-            per_date = panel.groupby("date")[c].apply(
-                lambda x: float(x.notna().mean()))
-            live = per_date[per_date > 0]
-            span = len(live) / n_dates
-            within = float(live.median()) if len(live) else 0.0
-            if span < MIN_FACTOR_DATE_SPAN:
-                # Absent for too much of the period, not thin within it.
-                dropped[c] = round(span, 4)
-                log.info("factor dropped: absent for too much of the panel",
-                         extra={"factor": c, "date_span": round(span, 3),
-                                "within_date": round(within, 3)})
-            elif within < MIN_FACTOR_COVERAGE:
-                dropped[c] = round(within, 4)
-                log.info("factor dropped: ranks too few names on the dates it exists",
-                         extra={"factor": c, "within_date": round(within, 3)})
-        features = [c for c in FEATURE_COLUMNS if c not in dropped]
-        # Above the floor a gap still ranks neutral, which is the same rule
-        # `crosssec.NEUTRAL_WHEN_MISSING` applies to delivery.
-        for c in fund_cols:
-            if c in features:
-                panel[c] = panel[c].fillna(0.0)
-        panel = panel.drop(columns=[c for c in dropped if c in panel.columns])
+        member_features = [c for c in FEATURE_COLUMNS if c in panel.columns]
+        panel, features, dropped = prepare_features(panel)
         panel = panel.dropna(subset=[c for c in features if c in panel.columns]
                              + ["label_rank"])
     if panel.empty or len(panel) < MINR:
@@ -702,20 +723,12 @@ def fit_predict(
             f"{MINR} required"
         )
 
-    if len(features) < 2:
-        return None, None, (
-            f"only {len(features)} factor(s) cleared the "
-            f"{MIN_FACTOR_COVERAGE:.0%} coverage floor"
-        )
     # Fit on FAMILIES, not on the individual factors. See FAMILIES for the
     # measured collinearity that makes seventeen coefficients unestimable.
-    member_features = list(features)
-    fitted_families = build_families(panel, features)
-    if len(fitted_families) < 2:
+    if len(features) < 2:
         return None, None, (
-            f"only {len(fitted_families)} factor famil(y/ies) could be built"
+            f"only {len(features)} factor famil(y/ies) could be built"
         )
-    features = fitted_families
     x = panel[features].to_numpy("float64")
     y = panel["label_rank"].to_numpy("float64")
     fit = ridge_fit(x, y, alpha=A)
