@@ -75,6 +75,14 @@ NEUTRAL_WHEN_MISSING = frozenset({"deliv_pct", "deliv_trend"})
 #: describe the name as it is now.
 RESID_WINDOW = 126
 
+#: Window the RESIDUAL REVERSAL is standardised over. Blitz, Huij, Lansdorp &
+#: Martens (2013) standardise by the trailing 36-month residual standard
+#: deviation, which is 756 sessions. Requiring all of it would exclude any name
+#: with under three years of history against a universe floor of 300 sessions,
+#: so what is available is used down to RESID_WINDOW and no further -- a
+#: dispersion estimate on less than six months is not one.
+REVERSAL_STD_WINDOW = 756
+
 MIN_LOOKBACK = max(v[0] for v in FEATURES.values())
 
 
@@ -142,7 +150,9 @@ def _features_at(
     # Residual momentum: strip the market component, then accumulate. Blitz,
     # Huij & Martens (2011) find the residual carries the momentum premium with
     # far less of the beta exposure that drives momentum crashes.
-    win = ret.tail(252)
+    # Long enough for the reversal's 36-month standardisation where the history
+    # exists. resid_mom still reads only its own 252 sessions off the tail.
+    win = ret.tail(max(252, REVERSAL_STD_WINDOW))
     for name in ("resid_mom", "idio_vol", "idio_skew", "resid_reversal"):
         out[name] = pd.Series(np.nan, index=hist.columns, dtype="float64")
     # An all-NaN benchmark slice is a real state, not a defect: under a
@@ -160,7 +170,9 @@ def _features_at(
             beta_m = win.mul(bc, axis=0).mean() / bvar
             resid = win.sub(np.outer(b, beta_m.to_numpy()), fill_value=np.nan)
             resid.columns = win.columns
-            out["resid_mom"] = resid.iloc[:-21].sum(axis=0)
+            # 252 to 21 sessions back, off the tail, whatever the window holds.
+            mom_win = resid.tail(252)
+            out["resid_mom"] = mom_win.iloc[:-21].sum(axis=0)
 
             # -- the rest of the residual block ---------------------------
             # One regression, four factors. Everything below is a moment of the
@@ -187,8 +199,11 @@ def _features_at(
             # roughly twice the risk-adjusted return. The sign is the raw
             # factor's: a name that has run up over the last month is expected
             # to give some back.
+            # Standardised by the trailing 36-month residual dispersion where
+            # the history is there, and by whatever is there when it is not.
+            long_sd = resid.tail(REVERSAL_STD_WINDOW).std(ddof=1)
             recent = resid.tail(21).sum(axis=0)
-            out["resid_reversal"] = recent / sd.replace(0.0, np.nan)
+            out["resid_reversal"] = recent / long_sd.replace(0.0, np.nan)
 
     r120 = ret.tail(120)
     # Lengths must match before they are masked together. When the benchmark is

@@ -67,8 +67,30 @@ log = get_logger(__name__)
 #: this block. Those were measured on a universe built from today's NIFTY 200
 #: membership projected backwards, which is worth +5.00% per 63 sessions on its
 #: own. They do not survive a point-in-time universe and are withdrawn.
-FUNDAMENTAL_FEATURES = ["earnings_yield", "book_to_price", "ebitda_to_ev",
-                        "fcf_yield", "sales_to_price"]
+FUNDAMENTAL_FEATURES = [
+    # value
+    "earnings_yield", "book_to_price", "ebitda_to_ev", "fcf_yield",
+    "sales_to_price",
+    # quality and profitability. Novy-Marx (2013) for gross profitability;
+    # Fama & French (2018) concede cash-based operating profitability dominates
+    # their own accrual measure. Accruals is Sloan (1996), asset growth is
+    # Cooper, Gulen & Schill (2008), net issuance catches QIPs and promoter
+    # dilution. The last three enter the quality family NEGATED -- see
+    # NEGATED_IN_FAMILY.
+    "gross_profitability", "cash_op_profitability", "roce",
+    "accruals", "asset_growth", "net_issuance",
+    # Scale. Every other factor picks size up implicitly; carrying it lets the
+    # fit price it rather than absorb it.
+    "log_mcap",
+]
+
+#: Members whose natural sign is the opposite of what the family means. The
+#: family is built so a HIGHER composite is a BETTER name, and the fit is free
+#: to price it either way -- but a member entering with the wrong sign would
+#: cancel its neighbours rather than reinforce them.
+NEGATED_IN_FAMILY = frozenset({
+    "accruals_r", "asset_growth_r", "net_issuance_r",
+})
 
 FEATURE_COLUMNS = [f + "_r" for f in FEATURES] + [f + "_r" for f in FUNDAMENTAL_FEATURES]
 
@@ -391,7 +413,24 @@ FAMILIES: Dict[str, Tuple[str, ...]] = {
     "delivery": ("deliv_pct_r", "deliv_trend_r"),
     "value": ("earnings_yield_r", "book_to_price_r", "ebitda_to_ev_r",
               "fcf_yield_r", "sales_to_price_r"),
+    # Quality is a SLOW factor: a modest gross edge that turns over slowly and
+    # therefore sits far below breakeven turnover, which is where most of a
+    # gross edge is otherwise lost.
+    "quality": ("gross_profitability_r", "cash_op_profitability_r", "roce_r",
+                "accruals_r", "asset_growth_r", "net_issuance_r"),
 }
+
+#: Computed, reported, and NOT scored. `log_mcap` is carried so the size of what
+#: the model is ranking is visible, and so `research factors` can measure it --
+#: but it does not get a coefficient.
+#:
+#: Measured over 17 dates it reads IC -0.2297 at a hit rate of 0/17, which is
+#: not a factor, it is three independent 63-session windows in which small caps
+#: happened to win. Giving that a family coefficient equal in weight to momentum
+#: would rebuild by hand exactly the small-cap tilt the point-in-time panel fix
+#: took out. The unintended-sector-bet problem it was raised against is solved
+#: by ranking within sector, which is done.
+UNSCORED_CONTROLS = ("log_mcap_r",)
 
 #: Families whose members are all price-derived, so they are always computable.
 FAMILY_COLUMNS = [f + "_f" for f in FAMILIES]
@@ -410,14 +449,46 @@ def build_families(frame: pd.DataFrame, available: Sequence[str]) -> List[str]:
         present = [m for m in members if m in have and m in frame.columns]
         if not present:
             continue
-        frame[family + "_f"] = frame[present].mean(axis=1)
+        block = frame[present]
+        flip = [m for m in present if m in NEGATED_IN_FAMILY]
+        if flip:
+            block = block.copy()
+            block[flip] = -block[flip]
+        frame[family + "_f"] = block.mean(axis=1)
         built.append(family + "_f")
     return built
+
+
+def share_count_adjustment(
+    actions: Optional[pd.DataFrame], since: pd.Timestamp, until: pd.Timestamp,
+) -> Optional[pd.Series]:
+    """Factor the share COUNT was multiplied by between two dates, per symbol.
+
+    Net issuance is the year-on-year change in shares outstanding, and the raw
+    count cannot tell a placement from a bonus: a 1:1 bonus doubles the count
+    and dilutes nobody. Dividing the raw change by this factor leaves only the
+    part that was actually issued.
+
+    The store's `ratio` is the PRICE adjustment factor -- 0.5 for a 1:1 bonus --
+    so the share count moved by its reciprocal. Dividends do not change the
+    count and are skipped.
+    """
+    if actions is None or actions.empty:
+        return None
+    frame = actions.copy()
+    frame["ex_date"] = pd.to_datetime(frame["ex_date"])
+    frame = frame[(frame["ex_date"] > since) & (frame["ex_date"] <= until)]
+    frame = frame[frame["action_type"].astype(str) != "dividend"]
+    frame = frame[pd.to_numeric(frame["ratio"], errors="coerce").fillna(0) > 0]
+    if frame.empty:
+        return None
+    return frame.groupby("symbol")["ratio"].apply(lambda r: float(1.0 / r.prod()))
 
 
 def _attach_fundamentals(
     panel: pd.DataFrame, statements: Optional[pd.DataFrame],
     close: pd.DataFrame, max_age_days: Optional[int],
+    actions: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Merge point-in-time fundamentals onto each panel date.
 
@@ -473,9 +544,12 @@ def _attach_fundamentals(
         # date. Filtering the statement rows here instead removed the older
         # quarters a trailing-twelve-month sum is built from, so the names the
         # cutoff was meant to keep current were the ones it made uncomputable.
-        feats = build_fundamental_panel(st, mcap, ts.date(),
-                                        enabled=FUNDAMENTAL_FEATURES,
-                                        max_age_days=max_age_days)
+        feats = build_fundamental_panel(
+            st, mcap, ts.date(), enabled=FUNDAMENTAL_FEATURES,
+            max_age_days=max_age_days,
+            share_adjustment=share_count_adjustment(
+                actions, ts - pd.Timedelta(days=400), ts),
+        )
         if feats is None or feats.empty:
             continue
         f = feats.reset_index().rename(columns={"index": "symbol"})
@@ -521,6 +595,7 @@ def fit_predict(
     score_symbols: Optional[Sequence[str]] = None,
     sectors: Optional[Dict[str, str]] = None,
     multipliers: Optional[Dict[str, float]] = None,
+    actions: Optional[pd.DataFrame] = None,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
@@ -557,7 +632,8 @@ def fit_predict(
     features = list(FEATURE_COLUMNS)
     dropped: Dict[str, float] = {}
     if not panel.empty:
-        panel = _attach_fundamentals(panel, fundamentals, train_close, max_fundamental_age_days)
+        panel = _attach_fundamentals(panel, fundamentals, train_close,
+                                     max_fundamental_age_days, actions=actions)
         # A factor the feed cannot serve for most of the universe is not a
         # factor. Coverage is measured on the training panel and anything under
         # the floor leaves the model entirely, rather than being neutral-filled
@@ -622,7 +698,8 @@ def fit_predict(
                        horizon=1, step=21, delivery=delivery, sectors=sectors)
     if live.empty:
         return None, None, "features could not be computed for the decision date"
-    live = _attach_fundamentals(live, fundamentals, live_hist, max_fundamental_age_days)
+    live = _attach_fundamentals(live, fundamentals, live_hist,
+                                max_fundamental_age_days, actions=actions)
     latest = live[live["date"] == live["date"].max()]
     for c in [f + "_r" for f in FUNDAMENTAL_FEATURES]:
         if c in features and c in latest.columns:
@@ -684,7 +761,8 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
                    fundamentals: Optional[pd.DataFrame] = None,
                    max_fundamental_age_days: Optional[int] = None,
                    delivery: Optional[pd.DataFrame] = None,
-                   sectors: Optional[Dict[str, str]] = None):
+                   sectors: Optional[Dict[str, str]] = None,
+                   actions: Optional[pd.DataFrame] = None):
     """Features for the decision date only.
 
     The cheap path: one date rather than a full training panel, so a cached
@@ -698,7 +776,8 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
                        delivery=delivery, sectors=sectors)
     if live.empty:
         return None
-    live = _attach_fundamentals(live, fundamentals, hist, max_fundamental_age_days)
+    live = _attach_fundamentals(live, fundamentals, hist,
+                                max_fundamental_age_days, actions=actions)
     latest = live[live["date"] == live["date"].max()].dropna(
         subset=[c for c in FEATURE_COLUMNS
                 if c in live.columns and not c.endswith(

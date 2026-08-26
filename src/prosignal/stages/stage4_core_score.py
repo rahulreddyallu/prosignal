@@ -619,6 +619,9 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
             "mom": float(regime.momentum_multiplier),
             "reversal": float(regime.momentum_multiplier),
             "value": float(regime.quality_multiplier),
+            # Quality is the other crash stabiliser and tracks the same
+            # multiplier as value, for the same reason.
+            "quality": float(regime.quality_multiplier),
         }
 
     cache = store.curated / "crosssec_model.json"
@@ -666,6 +669,12 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
         # was contributing nothing to the score while still occupying five of
         # the model's columns.
         fundamentals = store.read_statements()
+        # Net issuance needs these: the raw share count cannot tell a placement
+        # from a bonus, and a 1:1 bonus doubles the count while diluting nobody.
+        try:
+            actions = store.read_corporate_actions()
+        except Exception:
+            actions = None
         max_age = int(iv(cfg.max_fundamental_age_days))
 
         # Delivered quantity as a share of traded volume. Read over the same
@@ -713,7 +722,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
             feats = cm.today_features(close, turnover, as_of,
                                       fundamentals=fundamentals,
                                       max_fundamental_age_days=max_age,
-                                      delivery=delivery, sectors=sector_map)
+                                      delivery=delivery, sectors=sector_map,
+                                      actions=actions)
             if feats is None:
                 return None, None, "no symbol had a complete feature set today", None, None
             return (cm.score_with(cached, feats, multipliers), cached, None,
@@ -741,6 +751,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
             score_symbols=list(symbols),
             sectors=sector_map,
             multipliers=multipliers,
+            actions=actions,
         )
         if model is not None:
             # A refit is proposed, not installed. This is the one path where a

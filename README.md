@@ -423,34 +423,65 @@ displayed list and the validated strategy were two different products.
 
 ### What is deliberately not here
 
-Six things worth adding that the data does not support, recorded so the gap is
-visible rather than quietly absent.
+Three things, down from six. The other three are now implemented and waiting on
+coverage rather than on code.
 
-| wanted | blocked by |
+| wanted | state |
 |---|---|
-| Gross profitability, cash operating profitability, ROCE | statements cover **192 of 750** names |
-| Accruals, asset growth, net share issuance | same feed, same 26% |
-| SUE and EAR (post-earnings drift) | `earnings_calendar.csv` is **empty** — no announcement dates, so neither the surprise nor the announcement return is computable |
-| Promoter pledge as a veto | `promoter_pledging.csv` is **empty**. The gate exists and reports `NOT_TESTABLE` — it does not pass |
+| SUE and EAR (post-earnings drift) | `earnings_calendar.csv` is **empty**. SUE needs quarterly EPS history, which the feed has; EAR needs the announcement *date*, which it does not — the LODR deadline is a deadline, not a date, and dating the window off it would misplace it |
 | ASM / GSM surveillance exclusion | no feed. Trade-for-trade settlement and 100% margin make backtest fills there fiction |
-| Free-float-scaled market impact | no float data. Impact currently scales with traded value, and Indian promoter holdings are high enough that two identical-cap names can have floats differing threefold |
+| Free-float-scaled market impact | no float data. Impact scales with traded value instead, and Indian promoter holdings are high enough that two identical-cap names can have floats differing threefold |
 
-**The binding constraint is the feed, not the factor list.** Adding quality or
-surprise factors now would add more constants of exactly the kind the value block
-turned out to be. Fixing the statements ingest to cover the universe rather than
-its largest quarter unlocks the first two rows in one step.
+**Implemented, dropped on coverage, activated by an ingest.** Gross
+profitability, cash operating profitability, ROCE, accruals, asset growth and
+net issuance are all computed and form the `quality` family. On the current feed
+they carry **10–12%** coverage and `MIN_FACTOR_COVERAGE` drops them, the same as
+value. `_refresh_statements` already receives all 750 symbols — the 192-name
+coverage is a stale ingest, not a code limit.
 
-Two more, deliberately not done rather than blocked:
+That floor is doing real work rather than being ceremonial: measured over the 17
+dates coverage allows, `quality` reads **IC −0.0533 at an 18% hit rate**, the
+opposite of the literature. Seventeen overlapping dates is about three
+independent windows, so that is noise rather than a finding — but shipping it as
+a scored family would have injected a negative-quality tilt on the strength of it.
 
-- **Continuous volatility-scaled momentum exposure** (Barroso & Santa-Clara;
-  Daniel & Moskowitz). The engine's analogue is Stage 2's regime multiplier,
-  which now actually reaches the fitted model — it did not before, and was
-  computed, logged, written to the ledger, printed on the card and never applied
-  to a score. A continuous inverse-volatility weight needs a momentum
-  factor-return series the engine does not build.
-- **Splitting into fast and slow sleeves.** Real tension, and it only bites once
-  there are slow signals to split off. Every family that survives today decays on
-  a comparable horizon.
+**Size is computed and reported, not scored.** `log_mcap` reads IC **−0.2297 at
+a hit rate of 0/17**. That is not a factor, it is three windows in which small
+caps happened to win, and giving it a family coefficient equal in weight to
+momentum would rebuild by hand the small-cap tilt the point-in-time panel fix
+removed. The unintended-sector-bet problem size was raised against is solved by
+ranking within sector, which is done.
+
+**Continuous volatility-scaled momentum exposure** is approximated by Stage 2's
+regime multiplier, which now actually reaches the fitted model — it did not
+before, and was computed, logged, written to the ledger, printed on the card and
+never applied to a score. A true inverse-volatility weight needs a momentum
+factor-return series the engine does not build.
+
+---
+
+### Holding period, measured
+
+`prosignal research factors` computes the composite's rank IC at 5, 10, 21, 42,
+63 and 126 sessions and nets it against what turning the book over that often
+costs:
+
+| horizon | IC | ICIR | turns/yr | cost | net |
+|---|---|---|---|---|---|
+| 5 | +0.0015 | +0.012 | 50.4 | 18.89% | −18.88% |
+| 21 | +0.0166 | +0.138 | 12.0 | 4.50% | −4.33% |
+| 63 | +0.0480 | +0.526 | 4.0 | 1.50% | −1.02% |
+| **126** | **+0.0780** | **+0.710** | **2.0** | **0.75%** | **+0.03%** |
+
+**Read the shape, not the levels.** `gross` converts a rank IC to an annual
+return at a fixed 0.10 — a rule of thumb, not a measurement, and the
+`alpha_per_ic` argument exists so it can be replaced with a fitted number. What
+survives that assumption is the **ordering**: IC rises monotonically with
+horizon, so a longer hold keeps more of whatever the edge turns out to be. What
+does not survive it is any absolute claim about profitability.
+
+The engine's configured 63-session hold is on the right side of that curve and
+is not its maximum.
 
 ---
 
@@ -462,12 +493,19 @@ ranks first and **one coefficient is fitted per family**:
 
 | family | members | coefficient |
 |---|---|---|
-| `mom` | `resid_mom`, `prox_52w`, `mom_6_1` | **+0.0255** |
-| `lottery` | `max5_21`, `idio_vol`, `idio_skew`, `downside_vol` | **−0.0190** |
-| `delivery` | `deliv_pct`, `deliv_trend` | **+0.0156** |
-| `reversal` | `resid_reversal` | +0.0047 |
-| `risk` | `beta_120`, `max_dd_120` | +0.0039 |
+| `mom` | `resid_mom`, `prox_52w`, `mom_6_1` | **+0.0250** |
+| `lottery` | `max5_21`, `idio_vol`, `idio_skew`, `downside_vol` | **−0.0187** |
+| `delivery` | `deliv_pct`, `deliv_trend` | **+0.0157** |
+| `reversal` | `resid_reversal` | +0.0042 |
+| `risk` | `beta_120`, `max_dd_120` | +0.0040 |
 | `value` | five ratios | *dropped — 12% coverage* |
+| `quality` | gross profitability, cash operating profitability, ROCE, −accruals, −asset growth, −net issuance | *dropped — 10% coverage* |
+
+Three members enter `quality` **negated**, so a higher composite is always a
+better name: high accruals must cancel high profitability rather than add to it.
+Net issuance is adjusted for bonuses and splits from the corporate-actions
+table — a 1:1 bonus doubles the share count and dilutes nobody, and the raw
+count cannot tell that from a placement.
 
 **Liquidity is not scored at all.** The illiquidity premium is real but it is
 compensation *for* trading costs, and a manual executor pays that cost rather
