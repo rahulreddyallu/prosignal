@@ -69,17 +69,47 @@ def test_the_ledger_records_it():
     assert "model_fingerprint" in contracts
 
 
-def test_the_forward_test_reports_drift_the_config_hash_cannot_see():
-    from prosignal.validation.forward import progress
-    from prosignal.config.loader import load_config
-    cfg = load_config()
-    rows = [{"date": "2026-08-24", "config_version": "v1",
+def test_the_forward_test_reports_drift_the_config_hash_cannot_see(tmp_path):
+    """Registers its own test, rather than reading the production one.
+
+    It used to call `progress(cfg.paths.ledger, ...)` against the LIVE
+    registration with two hard-coded 2026-08 dates. Observations are counted by
+    market date and anything before `started_on` is skipped, so re-registering
+    the real forward test moved its start past those dates, the rows were
+    filtered out, and a test about fingerprint drift started failing for a
+    reason that had nothing to do with fingerprints.
+    """
+    import datetime as dt
+
+    from prosignal.validation.forward import progress, register
+
+    register(tmp_path, config_version="v1", engine_version="0.1.0",
+             git_commit="deadbeef", started_on=dt.date(2026, 1, 1))
+    rows = [{"date": "2026-01-05", "config_version": "v1",
              "model_fingerprint": "aaa/8"},
-            {"date": "2026-08-25", "config_version": "v1",
+            {"date": "2026-01-06", "config_version": "v1",
              "model_fingerprint": "bbb/8"}]
-    pr = progress(cfg.paths.ledger, rows)
+    pr = progress(tmp_path, rows, today=dt.date(2026, 1, 7))
     assert any("model fingerprints" in b for b in pr.broken)
     assert sorted(pr.model_fingerprints) == ["aaa/8", "bbb/8"]
+
+
+def test_one_fingerprint_across_the_window_is_not_drift(tmp_path):
+    """The other half of the claim. A check that fires on everything says
+    nothing, so the quiet case has to be pinned too."""
+    import datetime as dt
+
+    from prosignal.validation.forward import progress, register
+
+    register(tmp_path, config_version="v1", engine_version="0.1.0",
+             git_commit="deadbeef", started_on=dt.date(2026, 1, 1))
+    rows = [{"date": "2026-01-05", "config_version": "v1",
+             "model_fingerprint": "aaa/8"},
+            {"date": "2026-01-06", "config_version": "v1",
+             "model_fingerprint": "aaa/8"}]
+    pr = progress(tmp_path, rows, today=dt.date(2026, 1, 7))
+    assert not any("model fingerprints" in b for b in pr.broken)
+    assert pr.broken == []
 
 
 def test_the_modules_that_decide_the_shortlist_are_fingerprinted():
