@@ -525,6 +525,71 @@ is not its maximum.
 
 ---
 
+### The label is the trade, not the horizon return
+
+The engine promises a stop and a holding period, and used to fit against the
+return 63 sessions later as though neither existed. That label is blind to the
+path — a name that fell 20% and recovered by day 63 scored the same as one that
+drifted up quietly, and the engine was stopped out of the first in week two.
+Fitting against it teaches the model to like trades it would have closed at a
+loss.
+
+Labels are now **triple-barrier** (López de Prado, ch. 3): profit barrier, stop
+barrier, time barrier, and the label is whichever is touched **first**. On a
+constructed case:
+
+| | old horizon label | triple-barrier |
+|---|---|---|
+| a name that round-trips | **+2.00%** | **−13.31%, stopped on day 17** |
+| a name that runs | +28.49% | +16.01%, target on day 54 |
+
+Barriers are in units of the name's **own** horizon volatility, so they mean the
+same thing for a 1.2%-sigma large cap and a 4%-sigma midcap. A bar touching both
+counts as the stop — daily bars cannot order intraday events, the same
+convention `backtest._simulate` uses. Intraday highs and lows do the touch test,
+because a stop is not a close-only instrument.
+
+**Calibrated, not chosen.** Measured on the real universe over 91 panel dates:
+
+| upper/lower | target | stop | timeout | uniqueness | median hold |
+|---|---|---|---|---|---|
+| 2.0/1.5 | 14% | 10% | **76%** | 0.404 | 63 |
+| 1.5/1.0 | 23% | 24% | 52% | 0.462 | 63 |
+| **1.0/0.75** | **37%** | **36%** | **27%** | **0.576** | **34** |
+| 0.8/0.6 | 42% | 45% | 13% | 0.682 | 23 |
+
+At 2.0/1.5 three quarters of labels time out and the label collapses back into
+the horizon return it exists to replace. At 0.8/0.6 it is measuring noise.
+
+### Overlapping labels are not independent observations
+
+A 63-session label sampled every 21 shares two thirds of its window with its
+neighbour. An unweighted fit counts one market shock once per overlapping row —
+the panel has ~33,000 rows and nothing like 33,000 independent observations.
+
+Each row is weighted by its **average uniqueness**: the mean of 1/concurrency
+over its own span (López de Prado, ch. 4). Measured here at **0.576**, so the
+panel carries roughly 19,000 independent-equivalent observations rather than
+33,000. Uniqueness is computed **within a symbol** — thirty names on one date
+are thirty correlated observations, not a thirtieth of one, and pooling them
+returned 0.014 and would have discarded almost the whole panel.
+
+**What changed when the label did.** Refitting on the barrier label moves two
+families materially:
+
+| family | horizon label | triple-barrier |
+|---|---|---|
+| `reversal` | +0.0042 | **+0.0105** |
+| `risk` | +0.0040 | **−0.0002** |
+
+Reversal more than doubles, and `risk` — beta and max drawdown — collapses to
+nothing. That is what you would expect: with a stop *inside* the label, "shallow
+drawdown" stops predicting, because the stop is already handling drawdown.
+
+`features/labels.py`
+
+---
+
 ### Families, not seventeen coefficients
 
 Seventeen coefficients over a set this collinear is not estimable, and the

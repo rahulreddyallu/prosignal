@@ -102,6 +102,15 @@ def test_an_empty_delivery_panel_stops_the_model_rather_than_zeroing_it():
         class model_refit_every_sessions: value = 21
         class min_name_factor_coverage: value = 0.60
 
+        class labels:
+            """Triple-barrier settings. Present because Stage 4 reads them
+            while assembling the price columns for a refit."""
+            triple_barrier = True
+            upper_sigma = 1.0
+            lower_sigma = 0.75
+            vol_window_sessions = 60
+            uniqueness_weighting = True
+
     # The outer handler converts this to a reason string; what matters is that a
     # PipelineError is what travels, not a silently zeroed factor.
     import tempfile

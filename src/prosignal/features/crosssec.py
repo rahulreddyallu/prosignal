@@ -17,8 +17,11 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from .labels import BarrierSpec, average_uniqueness, triple_barrier
+
 __all__ = ["FEATURES", "build_panel", "cross_sectional_rank",
-           "liquidity_mask", "sector_neutral_rank", "MIN_SECTOR_NAMES"]
+           "liquidity_mask", "sector_neutral_rank", "MIN_SECTOR_NAMES",
+           "BarrierSpec"]
 
 #: name -> (lookback sessions needed, description)
 #:
@@ -360,6 +363,9 @@ def build_panel(
     delivery: Optional[pd.DataFrame] = None,
     eligible: Optional[pd.DataFrame] = None,
     sectors: Optional[Dict[str, str]] = None,
+    barriers: Optional["BarrierSpec"] = None,
+    high: Optional[pd.DataFrame] = None,
+    low: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
@@ -387,8 +393,23 @@ def build_panel(
     rows: List[pd.DataFrame] = []
     for i in range(MIN_LOOKBACK, len(dates) - horizon, step):
         feats = _features_at(close, turnover, i, bench_full[: i + 1], delivery=delivery)
-        fwd = close.iloc[i + horizon] / close.iloc[i] - 1.0
-        feats = feats.assign(label=fwd)
+        if barriers is not None:
+            # The label is the trade the engine would actually have taken:
+            # whichever of the profit, stop or time barrier is touched first.
+            # The horizon return is blind to the path and books a name that
+            # fell 20% and recovered by day 63 as a winner the engine was
+            # stopped out of in week two.
+            bars = triple_barrier(close, i, barriers, high=high, low=low)
+            feats = feats.assign(label=bars["ret"].reindex(feats.index),
+                                 barrier_side=bars["side"].reindex(feats.index),
+                                 held=bars["held"].reindex(feats.index),
+                                 t0=float(i),
+                                 t1=bars["t1"].reindex(feats.index))
+        else:
+            fwd = close.iloc[i + horizon] / close.iloc[i] - 1.0
+            feats = feats.assign(label=fwd, barrier_side=np.nan,
+                                 held=float(horizon), t0=float(i),
+                                 t1=float(i + horizon))
         if eligible is not None:
             # Point-in-time: only the names the screen admitted on THIS date.
             feats = feats[eligible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
@@ -412,6 +433,20 @@ def build_panel(
     for c in panel.columns:
         if panel[c].dtype == "float64" and c != "label":
             panel[c] = panel[c].astype("float32")
+    # How much of its own span each label holds alone. Consecutive rows share
+    # most of their outcome window, so an unweighted fit counts one market
+    # shock once per overlapping row.
+    if {"t0", "t1"} <= set(panel.columns):
+        # WITHIN each symbol. Overlap is a label sharing its outcome window
+        # with the SAME name's other labels. Thirty names on one date are
+        # thirty correlated observations, not a thirtieth of one -- pooling
+        # them into the concurrency count returned a uniqueness of 0.014 and
+        # would have thrown away almost the whole panel.
+        panel["uniqueness"] = np.nan
+        for _, g in panel.groupby("symbol", sort=False, observed=True):
+            panel.loc[g.index, "uniqueness"] = average_uniqueness(
+                g["t0"].to_numpy("float64"), g["t1"].to_numpy("float64"),
+                len(dates))
     panel["label_rank"] = panel.groupby("date")["label"].transform(cross_sectional_rank)
     # Ranked WITHIN sector where the sector is big enough. Ranking across the
     # whole market compares a bank's leverage with an IT firm's, and every

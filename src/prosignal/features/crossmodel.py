@@ -31,6 +31,7 @@ import json
 from ..core.logging import get_logger
 from ..core.memory import release_memory
 from .crosssec import FEATURES, MIN_LOOKBACK, build_panel
+from .labels import BarrierSpec
 from .fundamental_factors import available_as_of, build_fundamental_panel, winsorise
 from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
 from .linear import predict, ridge_fit
@@ -674,6 +675,10 @@ def fit_predict(
     sectors: Optional[Dict[str, str]] = None,
     multipliers: Optional[Dict[str, float]] = None,
     actions: Optional[pd.DataFrame] = None,
+    barriers: Optional["BarrierSpec"] = None,
+    high: Optional[pd.DataFrame] = None,
+    low: Optional[pd.DataFrame] = None,
+    uniqueness_weighting: bool = True,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
@@ -706,7 +711,10 @@ def fit_predict(
     train_close = hist.iloc[: len(hist) - H]
     train_turnover = turnover.reindex(train_close.index)
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
-                        delivery=delivery, eligible=eligible, sectors=sectors)
+                        delivery=delivery, eligible=eligible, sectors=sectors,
+                        barriers=barriers,
+                        high=(high.reindex(train_close.index) if high is not None else None),
+                        low=(low.reindex(train_close.index) if low is not None else None))
     features: List[str] = []
     dropped: Dict[str, float] = {}
     member_features: List[str] = []
@@ -731,7 +739,13 @@ def fit_predict(
         )
     x = panel[features].to_numpy("float64")
     y = panel["label_rank"].to_numpy("float64")
-    fit = ridge_fit(x, y, alpha=A)
+    # Overlapping labels are not independent draws. See labels.average_uniqueness.
+    w = None
+    if uniqueness_weighting and "uniqueness" in panel.columns:
+        w = panel["uniqueness"].to_numpy("float64")
+        if not np.isfinite(w).any():
+            w = None
+    fit = ridge_fit(x, y, alpha=A, weights=w)
     if dropped:
         log.info("factors dropped for coverage",
                  extra={"dropped": {k: round(v, 3) for k, v in dropped.items()},
