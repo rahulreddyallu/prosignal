@@ -234,6 +234,22 @@ def run(
         decision = entries.decisions.get(sym)
         if score is None or decision is None:
             continue
+        # `percentile` is the stage-4 rank, measured BEFORE Stage 5 ran, and it
+        # stays that way: it is a UNIVERSE POSITION test, and a penalty is not a
+        # change of position. Gating it post-penalty was tried and is wrong --
+        # penalties are denominated in rank units, so subtracting one and then
+        # testing against a rank threshold double-counts it. Measured live it
+        # cut 45 of 47 defended names, turning `min_universe_percentile` into
+        # "no penalty allowed".
+        #
+        # `min_composite_score` is the post-penalty test, and it is the one that
+        # does not currently bind: a real buy candidate sits near composite 0.99
+        # and would need a penalty of 0.39 to fail it, which the 0.35
+        # auto-reject forecloses. So for the names that actually get bought the
+        # graduated penalties only ever REORDER them -- which is a real effect,
+        # since `_score_of` sorts on `score_after` -- and never remove one.
+        # Raising the floor so it bites is a live-behaviour decision and is left
+        # to the config rather than made here.
         if defense.per_stock[sym].score_after < min_score or score.percentile < min_pct:
             continue
         # Counted BEFORE the veto, so the funnel shows what each gate removed

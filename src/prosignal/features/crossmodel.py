@@ -5,7 +5,10 @@ every run from history strictly before the decision date, predicting the rank of
 the forward 21-session return.
 
 It is here rather than in a research folder because it was measured against the
-incumbent composite under purged walk-forward on 8.8 years and won:
+incumbent composite under purged walk-forward and won. The table below measured
+the RIDGE against the HORIZON return; the engine now fits Fama-MacBeth against
+its own exit geometry, so these are the numbers that motivated the model, not
+the numbers it currently produces. `research estimator` reports those.
 
     composite (momentum + sector RS)  IC +0.025  t 1.28   excess +0.14%/mo t 0.30
     ridge                             IC +0.052  t 3.64   excess +1.11%/mo t 3.44
@@ -398,6 +401,51 @@ def apply_family_multipliers(
     return out
 
 
+#: Families the regime layer is allowed to scale UP when it scales momentum
+#: down -- the crash stabilisers it is designed to rotate INTO.
+DEFENSIVE_FAMILIES = ("value", "quality")
+
+
+def regime_reachability(multipliers: Optional[Dict[str, float]],
+                        coef: Optional[Dict[str, float]]) -> Dict[str, object]:
+    """What the regime layer can actually move, given the fitted model.
+
+    The multipliers target `mom`, `reversal`, `value` and `quality`. When value
+    and quality are not built -- which is their normal state, because the
+    fundamentals feed covers 24% of panel dates against a 60% floor -- and
+    `reversal` is gated to zero, the layer scales exactly one live family.
+
+    That is not a smaller version of the intended behaviour, it is a different
+    behaviour. Halving momentum was meant to rotate weight INTO the stabilisers.
+    With no stabiliser built, the weight goes to whatever else is priced: on the
+    shipped model, `delivery`. Measured on the live coefficients, `range_highvol`
+    and `downtrend_midvol` -- both still open for new entries -- flip the
+    ranking from momentum-driven to delivery-driven, and delivery was never a
+    crash stabiliser.
+
+    Returns the diagnosis rather than acting on it. Stage 4 reports it; the
+    decision about what SHOULD happen when the stabilisers are missing is not
+    one this function can make.
+    """
+    live = {k for k, v in (coef or {}).items() if abs(float(v)) > 1e-12}
+    targeted = {f for f, m in (multipliers or {}).items()
+                if m is not None and float(m) != 1.0}
+    reachable = {f for f in targeted if (f + "_f") in live}
+    defensive_live = [f for f in DEFENSIVE_FAMILIES if (f + "_f") in live]
+    total = sum(abs(float(v)) for v in (coef or {}).values()) or 1.0
+    moved = sum(abs(float((coef or {}).get(f + "_f", 0.0))) for f in reachable)
+    return {
+        "targeted": sorted(targeted),
+        "reachable": sorted(reachable),
+        "inert": sorted(targeted - reachable),
+        "defensive_available": defensive_live,
+        "share_of_weight_moved": round(moved / total, 4),
+        "receives_the_weight": sorted(
+            f.removesuffix("_f") for f in live
+            if f.removesuffix("_f") not in targeted),
+    }
+
+
 def _bare(column: str) -> str:
     """Drop the rank or family suffix. `_r` was stripped and `_f` was not, so a
     family arrived downstream still called `mom_f`, and a coefficient lookup
@@ -544,6 +592,24 @@ FAMILIES: Dict[str, Tuple[str, ...]] = {
 #: took out. The unintended-sector-bet problem it was raised against is solved
 #: by ranking within sector, which is done.
 UNSCORED_CONTROLS = ("log_mcap_r",)
+
+#: Computed and reported, deliberately NOT scored, and not a control either.
+#: These belong to no family, which made them invisible: they were ranked,
+#: correlation-checked and discarded on every run with nothing saying so, and
+#: `research factors` reported `amihud` at IC +0.0362 (t +2.19) and
+#: `turnover_ratio` at -0.0319 (t -3.00) as though they were candidates.
+#:
+#: They are one factor measured from two sides -- they correlate -0.905 within
+#: date -- and the side they measure is the ILLIQUIDITY PREMIUM. That premium is
+#: real and it is compensation FOR trading costs, which a manual executor pays
+#: rather than collects. A positive loading walks the book into names where
+#: realised slippage exceeds forecast alpha. It belongs in the universe screen
+#: as a floor, which is where `universe.pit_min_adtv_inr` already puts it.
+#:
+#: Declared here so the exclusion is a decision on the record rather than an
+#: omission, and so the redundancy report can stop flagging a breach between two
+#: factors neither of which is used.
+UNSCORED_DIAGNOSTICS = ("amihud_r", "turnover_ratio_r")
 
 #: Families whose members are all price-derived, so they are always computable.
 FAMILY_COLUMNS = [f + "_f" for f in FAMILIES]
@@ -974,6 +1040,9 @@ def fit_predict(
 
     n_train = len(panel)
     train_end = pd.Timestamp(panel["date"].max()).date()
+    # The coefficients as fitted, before any regime scaling, so reachability can
+    # be judged against what is actually priced.
+    model_coef_preview = dict(zip(features, fit["coef"].tolist()))
 
     # THE NO TRADE VETO. A second model, fitted only on the trades this engine
     # would actually have taken, predicting whether one reaches its profit
@@ -1001,7 +1070,30 @@ def fit_predict(
                      extra={"reason": meta_reason})
 
     del panel, x, y
-    latest = apply_family_multipliers(latest, multipliers)
+    # THE REGIME LAYER ONLY ACTS WHEN IT CAN DO WHAT IT WAS DESIGNED TO DO.
+    # Its purpose is to rotate weight OUT of momentum and INTO the crash
+    # stabilisers. When no stabiliser is built -- the normal state, because the
+    # fundamentals feed covers 24% of panel dates against a 60% floor -- there
+    # is nothing to rotate into, and scaling momentum down simply hands the book
+    # to whatever else is priced. On the shipped model that is `delivery`, which
+    # was never a crash stabiliser, and in stress buckets it flips the ranking
+    # from momentum-driven to delivery-driven without anyone deciding that.
+    #
+    # A mechanism that cannot work must not half-work in an unintended
+    # direction. It is skipped and the reason is recorded, which leaves the
+    # existing `no_new_entry_buckets` rule as the crash control it always was.
+    reach = regime_reachability(multipliers, model_coef_preview)
+    if multipliers and not reach["defensive_available"]:
+        log.warning(
+            "regime multipliers skipped: no defensive family is priced, so "
+            "scaling momentum down would rotate the book into whatever else "
+            "happens to be weighted rather than into a stabiliser",
+            extra={"targeted": reach["targeted"],
+                   "would_have_received": reach["receives_the_weight"]})
+        multipliers_applied = None
+    else:
+        multipliers_applied = multipliers
+    latest = apply_family_multipliers(latest, multipliers_applied)
     raw = predict(fit, latest[features].to_numpy("float64"))
     scores = pd.Series(raw, index=latest["symbol"].to_numpy())
     # The veto reads the primary score as one of its inputs, under the same
@@ -1034,6 +1126,8 @@ def fit_predict(
                         extra={"reason": meta_reason})
 
     model.dropped_for_coverage = dropped
+    model.regime_reachability = reach
+    model.regime_multipliers_applied = multipliers_applied is not None
     model.meta_prob = model_meta_prob
     model.meta = meta_model
     model.meta_unavailable = meta_reason
