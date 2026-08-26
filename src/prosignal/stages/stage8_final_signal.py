@@ -423,8 +423,17 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
         # can see both how unusual the name is and how much that mattered. Only
         # the terms that moved it are listed; the rest are near zero and would
         # bury the ones that did.
-        shown = [f for f in score.factors.values()
-                 if f.evidence_tier == "model" and f.raw_value is not None][:6]
+        # A theme the estimator gated out carries coefficient EXACTLY zero. It
+        # did not contribute nothing; it was not used. Printing it as
+        # "+ lottery: -0.82 sd, raises the score by 0.0000" next to a citation
+        # reads as though the model consulted it and found it neutral, which is
+        # the opposite of what happened -- the significance floor removed it.
+        priced = [f for f in score.factors.values()
+                  if f.evidence_tier == "model" and f.raw_value is not None
+                  and abs(f.weight or 0.0) > 1e-12]
+        gated = [f for f in score.factors.values()
+                 if f.evidence_tier == "model" and abs(f.weight or 0.0) <= 1e-12]
+        shown = sorted(priced, key=lambda f: -abs(f.raw_value))[:6]
         for f in shown:
             direction = "raises" if f.raw_value >= 0 else "lowers"
             z = f"{f.standardised:+.2f} sd" if f.standardised is not None else "n/a"
@@ -432,13 +441,20 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 f"{f.name}: {z} vs the universe, {direction} the score by "
                 f"{abs(f.raw_value):.4f} (coefficient {f.weight:+.5f}) ({f.citation})"
             )
-        total = sum(abs(f.raw_value) for f in score.factors.values()
-                    if f.evidence_tier == "model" and f.raw_value is not None)
+        total = sum(abs(f.raw_value) for f in priced)
         listed = sum(abs(f.raw_value) for f in shown)
-        if total > 0 and len(shown) < len(model_tier):
+        if total > 0 and len(shown) < len(priced):
             why.append(
-                f"These {len(shown)} of {len(model_tier)} fitted factors carry "
+                f"These {len(shown)} of {len(priced)} priced factors carry "
                 f"{listed / total:.0%} of the movement; the rest are near zero."
+            )
+        if gated:
+            names = ", ".join(sorted(f.name for f in gated))
+            why.append(
+                f"Not used in this fit: {names}. The estimator could not measure "
+                f"them past its significance floor on their own training window, "
+                f"so they were set to zero rather than given a weight the data "
+                f"did not support."
             )
     else:
         for fname, f in score.factors.items():

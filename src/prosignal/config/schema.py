@@ -812,6 +812,42 @@ class LabelConfig(_Base):
     uniqueness_weighting: bool = True
 
 
+class EstimatorConfig(_Base):
+    """How the theme coefficients are estimated.
+
+    The pooled ridge stacked every (symbol, date) row into one design matrix and
+    solved once, which treats ~33,000 rows as 33,000 independent observations.
+    They are 70 cross-sections. Measured on a purged walk-forward over 50
+    out-of-sample dates:
+
+        arm                        IC    t(NW)   top-decile      t
+        ridge                   +0.0021  +0.06     -0.11%    -0.17
+        equal weight 1/N        -0.0022  -0.07     -0.38%    -0.79
+        Fama-MacBeth, gated     +0.0510  +3.21     +1.25%    +2.55
+
+    The ridge could not beat the 1/N control it is supposed to justify.
+    """
+
+    #: "fama_macbeth" or "ridge". Ridge is kept because it is the arm the
+    #: Fama-MacBeth result is measured AGAINST, and an unreproducible baseline
+    #: is not a baseline.
+    method: str = Field("fama_macbeth", pattern="^(fama_macbeth|ridge)$")
+    #: A theme below this on its own training window is set to exactly zero.
+    #: Pre-committed at the conventional two-sigma bar. A floor of 1.65 measured
+    #: BETTER out of sample here and was rejected for that reason -- choosing
+    #: the threshold that scored best on the dates used to score it is how a
+    #: backtest gets manufactured.
+    significance_floor: float = Field(2.0, ge=0.0, le=6.0)
+    #: Trailing cross-sections to estimate over, or null for every date in the
+    #: training panel. This is what makes it ROLLING.
+    window_dates: Optional[int] = Field(None, ge=12, le=600)
+    #: Shrink surviving themes toward zero, or toward the prior-oriented pool
+    #: mean. Zero by default: `lottery` carries a documented negative prior and
+    #: measures IC +0.0485 here, and pooling hands an imprecise theme nearly the
+    #: full prior mean -- a confident coefficient built out of an assumption.
+    shrink_toward: str = Field("zero", pattern="^(zero|prior_mean)$")
+
+
 class Stage4Config(_Base):
     weighting_mode: TS
     standardisation: TS
@@ -842,6 +878,7 @@ class Stage4Config(_Base):
     model_refit_every_sessions: int = Field(21, ge=1, le=252)
     model_min_train_rows: int = Field(600, ge=100)
     labels: LabelConfig = Field(default_factory=LabelConfig)
+    estimator: EstimatorConfig = Field(default_factory=EstimatorConfig)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":
@@ -1316,7 +1353,18 @@ class SignificanceConfig(_Base):
     t_stat_bar: TF
 
 
-class LabelConfig(_Base):
+class ValidationLabelConfig(_Base):
+    """The label horizon the VALIDATION harness measures over.
+
+    Renamed from `LabelConfig`, which collided with the stage-4 block of the
+    same name defined earlier in this module. The second definition silently
+    replaced the first in the module namespace, so `from ...schema import
+    LabelConfig` returned this one -- a class with a single required field --
+    while `Stage4Config` kept a reference to the real one because pydantic
+    resolved the annotation before the shadowing happened. Production was
+    unaffected and any importer got the wrong class.
+    """
+
     forward_return_sessions: TI
 
 
@@ -1342,7 +1390,7 @@ class ValidationConfig(_Base):
     cpcv: CpcvConfig
     holdout: HoldoutConfig
     significance: SignificanceConfig
-    label: LabelConfig
+    label: ValidationLabelConfig
     search_budget: SearchBudgetConfig = Field(default_factory=SearchBudgetConfig)
 
     @model_validator(mode="after")

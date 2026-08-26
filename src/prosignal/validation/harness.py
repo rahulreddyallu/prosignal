@@ -29,6 +29,24 @@ import pandas as pd
 
 from ..core.logging import get_logger
 from ..features.linear import predict, ridge_fit
+
+#: Every fit in this module goes through `crossmodel.fit_coefficients`, so what
+#: CPCV validates is what stage 4 trades. Six separate `ridge_fit` calls used to
+#: live here, and switching the production estimator would have left every
+#: number in this file describing a model no longer in use.
+_ESTIMATOR_DEFAULT = "fama_macbeth"
+
+
+def _fit(train, cols, alpha, estimator, horizon_sessions, step_sessions,
+         significance_floor=None):
+    from ..features.crossmodel import fit_coefficients
+    w = (train["uniqueness"].to_numpy("float64")
+         if "uniqueness" in train.columns else None)
+    fit, _fm, _why = fit_coefficients(
+        train, cols, estimator=estimator, alpha=alpha,
+        horizon=horizon_sessions, step=step_sessions,
+        significance_floor=significance_floor, weights=w)
+    return fit
 from .cpcv import CombinatorialPurgedCV
 from .metrics import compute_pbo, deflated_sharpe_ratio, sharpe_ratio
 
@@ -111,6 +129,7 @@ def run_cpcv(
     min_train_rows: int = 2000,
     top_decile: float = 0.90,
     progress: Optional[Callable[[int, int], None]] = None,
+    estimator: str = _ESTIMATOR_DEFAULT,
 ) -> CpcvResult:
     """Fit and score the ridge model across every CPCV split.
 
@@ -174,8 +193,12 @@ def run_cpcv(
         result.purged_total += split.purged_count
         result.embargoed_total += split.embargoed_count
 
-        fit = ridge_fit(train[cols].to_numpy("float64"),
-                        train["label_rank"].to_numpy("float64"), alpha=alpha)
+        fit = _fit(train, cols, alpha, estimator, horizon_sessions, step_sessions)
+        if fit is None:
+            result.notes.append(
+                f"split {split.split_id}: the estimator produced no tradeable "
+                f"coefficients; skipped")
+            continue
         for d in test_dates:
             te = by_date[d]
             pred = predict(fit, te[cols].to_numpy("float64"))
@@ -219,6 +242,7 @@ def configuration_matrix(
     min_train_dates: int = 30,
     min_train_rows: int = 2000,
     top_decile: float = 0.90,
+    estimator: str = _ESTIMATOR_DEFAULT,
 ) -> pd.DataFrame:
     """Per-period performance of every configuration, on one common index.
 
@@ -249,8 +273,11 @@ def configuration_matrix(
             if len(train) < min_train_rows:
                 continue
             te = by_date[dates[i]]
-            fit = ridge_fit(train[cols].to_numpy("float64"),
-                            train["label_rank"].to_numpy("float64"), alpha=alpha)
+            # `purge_sessions` IS the label horizon here -- that is what the
+            # purge is sized from -- and it is what sets the Newey-West lag.
+            fit = _fit(train, cols, alpha, estimator, purge_sessions, step_sessions)
+            if fit is None:
+                continue
             pred = predict(fit, te[cols].to_numpy("float64"))
             lab = te["label"].to_numpy("float64")
             ok = np.isfinite(pred) & np.isfinite(lab)
@@ -307,6 +334,7 @@ def run_portfolio_cpcv(
     embargo_sessions: int,
     min_train_rows: int = 2000,
     progress: Optional[Callable[[int, int], None]] = None,
+    estimator: str = _ESTIMATOR_DEFAULT,
 ) -> PortfolioCpcvResult:
     """Fit on each CPCV training set, then trade the test blocks.
 
@@ -359,8 +387,14 @@ def run_portfolio_cpcv(
         train = work[work["date"].isin([dates[i] for i in split.train_idx])]
         if len(train) < min_train_rows:
             continue
-        fit = ridge_fit(train[cols].to_numpy("float64"),
-                        train["label_rank"].to_numpy("float64"), alpha=alpha)
+        # `purge_sessions` IS the label horizon -- the purge is sized from it --
+        # and it is what sets the Newey-West lag.
+        fit = _fit(train, cols, alpha, estimator, purge_sessions, step_sessions)
+        if fit is None:
+            result.notes.append(
+                f"split {split.split_id}: the estimator produced no tradeable "
+                f"coefficients; skipped")
+            continue
         test_dates = [dates[i] for i in split.test_idx]
         rankings = []
         for d in test_dates:
@@ -396,6 +430,10 @@ class NestedResult:
     outer_splits: int
     #: one row per outer split: chosen parameters and the outer-test metrics
     rows: List[Dict[str, object]] = field(default_factory=list)
+    #: why splits were skipped. An empty `rows` with nothing here is
+    #: indistinguishable from a search that ran and found nothing, and a caller
+    #: reading `len(rows) == 0` cannot tell "no model" from "no edge".
+    notes: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
 
     def spread(self, key: str) -> Dict[str, float]:
@@ -433,6 +471,7 @@ def nested_band_search(
     inner_fraction: float = 0.3,
     min_train_rows: int = 2000,
     progress: Optional[Callable[[int, int], None]] = None,
+    estimator: str = _ESTIMATOR_DEFAULT,
 ) -> NestedResult:
     """Choose Stage 6 bands inside each outer training set, report outside it.
 
@@ -486,8 +525,12 @@ def nested_band_search(
         inner_fit_rows = work[work["date"].isin(fit_dates)]
         if len(inner_fit_rows) < min_train_rows:
             continue
-        inner_fit = ridge_fit(inner_fit_rows[cols].to_numpy("float64"),
-                              inner_fit_rows["label_rank"].to_numpy("float64"), alpha=alpha)
+        inner_fit = _fit(inner_fit_rows, cols, alpha, estimator,
+                         purge_sessions, step_sessions)
+        if inner_fit is None:
+            result.notes.append(
+                f"split {n}: the inner fit produced no tradeable coefficients")
+            continue
         inner_rank = _rank(inner_fit, inner_dates)
 
         best, best_sharpe = None, -np.inf
@@ -503,8 +546,12 @@ def nested_band_search(
         outer_rows = work[work["date"].isin(train_dates)]
         if len(outer_rows) < min_train_rows:
             continue
-        outer_fit = ridge_fit(outer_rows[cols].to_numpy("float64"),
-                              outer_rows["label_rank"].to_numpy("float64"), alpha=alpha)
+        outer_fit = _fit(outer_rows, cols, alpha, estimator,
+                         purge_sessions, step_sessions)
+        if outer_fit is None:
+            result.notes.append(
+                f"split {n}: the outer fit produced no tradeable coefficients")
+            continue
         outer = phase_summary(_rank(outer_fit, test_dates), prices,
                               make_params(*best), step_sessions=step_sessions,
                               dates_allowed=[pd.Timestamp(d) for d in test_dates])

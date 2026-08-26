@@ -1034,6 +1034,42 @@ stage4_core_score:
     # rows carry about 19,000 independent-equivalent observations.
     uniqueness_weighting: true
 
+  # HOW THE THEME COEFFICIENTS ARE ESTIMATED.
+  #
+  # The pooled ridge stacked every (symbol, date) row into one matrix and solved
+  # once, which behaves as though 33,000 rows were 33,000 independent draws.
+  # They are 70 cross-sections, and within one date every name shares the same
+  # market. Fama-MacBeth estimates each cross-section separately and treats the
+  # slope series as the sample, so the confidence comes from T, not N*T, and
+  # Newey-West charges for the overlap that a 63-session label sampled every 21
+  # sessions induces between consecutive slopes.
+  #
+  # Purged walk-forward, 50 out-of-sample dates:
+  #
+  #   arm                        IC    t(NW)   hit   top-decile      t
+  #   ridge (was production)  +0.0021  +0.06   48%     -0.11%    -0.17
+  #   equal weight 1/N        -0.0022  -0.07   50%     -0.38%    -0.79
+  #   fama-macbeth raw        +0.0100  +0.31   58%     -0.06%    -0.11
+  #   gate |t|>=2, shrink     +0.0510  +3.21   78%     +1.25%    +2.55
+  #   momentum alone          +0.0481  +2.36   68%     +1.52%    +3.20
+  #
+  # The ridge was indistinguishable from zero, and did not beat the 1/N control
+  # it exists to justify. What broke it: the pooled fit gave `lottery` a -0.0143
+  # coefficient while lottery measures IC +0.0485 in this universe, so the blend
+  # bet against it. `mom_f - lottery_f` reads IC +0.0031 against `mom_f` alone
+  # at +0.0481 -- one wrong-signed theme cancelled the one theme that works.
+  #
+  # Note honestly that momentum ALONE still has the best top-decile excess. The
+  # gated estimator is not kept because it beats a single factor today; it is
+  # kept because it collapses to momentum on its own when nothing else measures,
+  # and admits `delivery` on the windows where delivery earns it. A one-factor
+  # engine has no mechanism to do either.
+  estimator:
+    method: fama_macbeth
+    significance_floor: 2.0
+    window_dates: null
+    shrink_toward: zero
+
   model_horizon_sessions: 63
   model_ridge_alpha: 20000.0
   model_max_train_sessions: 3000

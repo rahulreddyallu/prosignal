@@ -641,7 +641,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
     try:
         sessions = store.price_sessions()
         refit_every = iv(cfg.model_refit_every_sessions)
-        cached = cm.load_cached(cache, as_of, refit_every)
+        cached = cm.load_cached(cache, as_of, refit_every,
+                                estimator=str(cfg.estimator.method))
 
         # Cheap path: a recent fit only needs today's features, which is one
         # date of history instead of a thousand. The large read is what pushed
@@ -668,6 +669,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
         # not raise before the delivery check, whose failure is the one the
         # caller needs to see.
         lab = cfg.labels
+        est = cfg.estimator
         if refitting and bool(lab.triple_barrier):
             cols += ["high", "low"]
         px = store.read_prices(
@@ -787,6 +789,11 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
                 if bool(lab.triple_barrier) else None),
             high=high, low=low,
             uniqueness_weighting=bool(lab.uniqueness_weighting),
+            estimator=str(est.method),
+            significance_floor=float(est.significance_floor),
+            fm_window_dates=(int(est.window_dates)
+                             if est.window_dates is not None else None),
+            shrink_toward=str(est.shrink_toward),
         )
         if model is not None:
             # A refit is proposed, not installed. This is the one path where a
@@ -803,7 +810,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
                             extra={"verdict": verdict.summary(),
                                    "sign_flips": verdict.sign_flips,
                                    "magnitude_jumps": verdict.magnitude_jumps})
-                held = cm.load_cached(cache, as_of, refit_every)
+                held = cm.load_cached(cache, as_of, refit_every,
+                                      estimator=str(cfg.estimator.method))
                 if held is not None:
                     feats = cm.today_features(close, turnover, as_of,
                                               fundamentals=fundamentals,

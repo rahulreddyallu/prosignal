@@ -15,7 +15,11 @@ import pytest
 from prosignal.validation.harness import nested_band_search
 from prosignal.validation.portfolio_sim import PortfolioParams
 
-SY = [f"S{i:02d}" for i in range(24)]
+#: A realistic cross-section. Twenty-four names is below
+#: `famamacbeth.MIN_CROSS_SECTION`, so every date was skipped as too thin to
+#: support a cross-sectional regression and the search silently returned no
+#: rows at all. The floor is right; the fixture was not.
+SY = [f"S{i:02d}" for i in range(60)]
 
 
 def _prices(n=1600, seed=0):

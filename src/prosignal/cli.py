@@ -1031,6 +1031,7 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .stages._cfg import fv, iv, v
     from .validation.harness import run_cpcv
     from .validation.metrics import deflated_sharpe_ratio
+    from .validation.research_panel import build_research_panel
 
     p = cfg.params
     val, c4 = p.validation, p.stage4_core_score
@@ -1058,51 +1059,14 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     symbols = list(snap.symbols)
 
     _rule("Building the panel")
-    # UNRESTRICTED. `symbols` is the screen resolved for the LATEST session, and
-    # building the panel from it projected today's survivors backwards over
-    # every training date. Measured against the screen resolved properly per
-    # date: 27% of the names eligible on 2024-08-12 are absent from today's set,
-    # excluded for what happened afterwards, while names eligible today
-    # contributed rows on dates they could not have been traded on. The panel is
-    # masked per date by `liquidity_mask` below instead.
-    px = store.read_prices(start=sessions[0], end=end,
-                           columns=[DATE, SYMBOL, "close", "turnover"])
-    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
-    close = px.pivot_table(index=DATE, columns=SYMBOL, values="close",
-                           aggfunc="last", observed=True).sort_index()
-    turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
-                              aggfunc="last", observed=True).sort_index()
-    del px
-    delivery = None
-    dl = store.read_delivery(start=sessions[0], end=end)
-    if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
-        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
-        delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
-                                  aggfunc="last", observed=True).sort_index()
-    del dl
-    horizon = iv(c4.model_horizon_sessions)
-    eligible = liquidity_mask(
-        close, turnover,
-        min_adtv_inr=fv(u.pit_min_adtv_inr),
-        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
-        max_names=iv(u.pit_max_names),
-        min_history_sessions=iv(u.min_history_sessions),
-        min_price_inr=fv(u.min_price_inr),
-    )
-    panel = build_panel(close, turnover, horizon=horizon, step=21,
-                        delivery=delivery, eligible=eligible)
-    try:
-        actions = store.read_corporate_actions()
-    except Exception:
-        actions = None
-    panel = cm._attach_fundamentals(panel, store.read_statements(), close,
-                                    iv(c4.max_fundamental_age_days), actions=actions)
-    # The SAME coverage tests and family construction the fit uses. Passing raw
-    # FEATURE_COLUMNS here deleted every row without a fundamental and cut the
-    # panel from 70 dates to 17 -- validating a different model than the one
-    # that runs, when it completed at all.
-    panel, features, dropped = cm.prepare_features(panel)
-    _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
+    # Built by the SHARED builder, so what CPCV validates is what stage 4
+    # trades -- including the triple-barrier label. These commands used to
+    # construct the panel by hand and did not read high/low, so after the label
+    # changed they were still measuring against the horizon return.
+    rp = build_research_panel(cfg, store, end)
+    panel, features, dropped, horizon = rp.panel, rp.features, rp.dropped, rp.horizon
+    _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
+    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
     _print(f"  fitting {len(features)} famil(y/ies): {', '.join(features)}")
     if dropped:
         _print(f"  {len(dropped)} factor(s) dropped on coverage")
@@ -1118,6 +1082,7 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
         n_test_groups=args.test_groups,
         purge_sessions=iv(val.cpcv.purge_sessions),
         embargo_sessions=iv(val.cpcv.embargo_sessions),
+        estimator=str(c4.estimator.method),
         progress=progress,
     )
 
@@ -1261,6 +1226,7 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .costs import CostModel
     from .validation.factor_ic import (
         breakeven_turnover, factor_ic, ic_decay, net_of_cost)
+    from .validation.research_panel import build_research_panel
 
     def _short(name: str) -> str:
         """Strip only the TRAILING suffix. `str.replace` took the `_r` out of
@@ -1283,36 +1249,13 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
         _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
 
     _rule("Building the panel")
-    px = store.read_prices(start=sessions[0], end=end,
-                           columns=[DATE, SYMBOL, "close", "turnover"])
-    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
-    close = px.pivot_table(index=DATE, columns=SYMBOL, values="close",
-                           aggfunc="last", observed=True).sort_index()
-    turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
-                              aggfunc="last", observed=True).sort_index()
-    del px
-    delivery = None
-    dl = store.read_delivery(start=sessions[0], end=end)
-    if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
-        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
-        delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
-                                  aggfunc="last", observed=True).sort_index()
-    del dl
-    sectors = store.read_sector_map()
-    sector_map = (dict(zip(sectors["symbol"], sectors["sector"]))
-                  if sectors is not None and not sectors.empty else {})
-    eligible = liquidity_mask(
-        close, turnover, min_adtv_inr=fv(u.pit_min_adtv_inr),
-        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
-        max_names=iv(u.pit_max_names),
-        min_history_sessions=iv(u.min_history_sessions),
-        min_price_inr=fv(u.min_price_inr))
-    horizon = iv(c4.model_horizon_sessions)
-    panel = build_panel(close, turnover, horizon=horizon, step=21,
-                        delivery=delivery, eligible=eligible, sectors=sector_map)
-    panel = cm._attach_fundamentals(panel, store.read_statements(), close,
-                                    iv(c4.max_fundamental_age_days))
-    _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
+    # The SHARED builder -- same label, same universe screen, same coverage
+    # tests as stage 4. Measuring factors against a label the engine no longer
+    # fits on is how a factor table stops describing the model.
+    rp = build_research_panel(cfg, store, end)
+    panel, horizon, sector_map, close = rp.panel, rp.horizon, rp.sector_map, rp.close
+    _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
+    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
 
     _rule("Standalone rank IC, before any blending")
     _print(f"  {'factor':<20}{'dates':>7}{'IC':>9}{'ICIR':>8}{'t':>8}{'hit':>7}")
@@ -1359,10 +1302,28 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
     costs = CostModel(cfg)
     round_trip = float(costs.round_trip(300.0, 400).total_bps_of_buy)
     _print(f"  round trip modelled at {round_trip:.0f} bps\n")
-    # The composite the engine actually ranks on, at every horizon.
+    # The composite the engine actually ranks on, at every horizon. An
+    # EQUAL-WEIGHTED mean of the families is not that composite -- the engine
+    # weights them by the fitted coefficients, and under the gated estimator
+    # three of five typically carry exactly zero. Measuring decay on the
+    # equal-weight blend measured a model nothing runs.
+    from .features.famamacbeth import (fama_macbeth, gated_shrink,
+                                       score_from_lambda, is_degenerate)
     live = panel[panel["date"].notna()].copy()
+    est = c4.estimator
     weights = {c: 1.0 for c in built}
-    live["composite"] = live[built].mean(axis=1)
+    if str(est.method) == "fama_macbeth":
+        _fm = fama_macbeth(panel, built, horizon=horizon, step=21)
+        if _fm is not None:
+            weights = gated_shrink(_fm, floor=float(est.significance_floor),
+                                   toward=str(est.shrink_toward))
+            _print(f"  composite weighted by the fitted coefficients: "
+                   + ", ".join(f"{_short(k)} {v:+.4f}" for k, v in weights.items()))
+            if is_degenerate(weights):
+                _print("  every theme was gated out; falling back to equal weight "
+                       "for the decay shape only")
+                weights = {c: 1.0 for c in built}
+    live["composite"] = score_from_lambda(live, weights)
     wide = live.pivot_table(index="date", columns="symbol", values="composite",
                             aggfunc="last", observed=True)
     table = ic_decay(close, wide, horizons=(5, 10, 21, 42, 63, 126))
@@ -1421,6 +1382,142 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
     _print("  not a profitability test.")
     return 0
 
+
+
+def cmd_research_estimator(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Every estimator arm, out of sample, against the equal-weight control.
+
+    An estimated model has to earn its estimation. DeMiguel, Garlappi & Uppal
+    (2009) found 1/N beat fourteen optimising rules out of sample because
+    estimation error cost more than optimisation gained, and any coefficient
+    this engine fits is subject to the same test. Before this command existed
+    the comparison had never been run, and the pooled ridge in production turned
+    out not to beat the control at all.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .features.famamacbeth import (equal_weight_lambda, fama_macbeth,
+                                       gated_shrink, hierarchical_shrink,
+                                       is_degenerate, newey_west_se,
+                                       score_from_lambda)
+    from .features.linear import predict, purged_walk_forward, rank_ic, ridge_fit
+    from .stages._cfg import fv, iv
+    from .validation.research_panel import build_research_panel
+
+    p = cfg.params
+    val, c4 = p.validation, p.stage4_core_score
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = (sessions[-1] if args.include_holdout
+           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+
+    _rule("Building the panel")
+    rp = build_research_panel(cfg, store, end)
+    panel, fams, horizon = rp.panel, rp.features, rp.horizon
+    _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
+    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
+    if len(fams) < 2:
+        _print("  too few families to compare estimators")
+        return 1
+
+    _rule("In-sample Fama-MacBeth, for orientation only")
+    full = fama_macbeth(panel, fams, horizon=horizon, step=21)
+    if full is None:
+        _print("  not enough cross-sections")
+        return 1
+    _print(f"  {'theme':<12}{'lambda':>10}{'se(NW)':>10}{'t':>8}"
+           f"{'gated+shrunk':>14}{'1/N':>8}")
+    shrunk = gated_shrink(full, floor=fv(c4.estimator.significance_floor),
+                          toward=str(c4.estimator.shrink_toward))
+    control = equal_weight_lambda(fams)
+    for c in fams:
+        _print(f"  {c.removesuffix('_f'):<12}{full.lam[c]:>+10.4f}"
+               f"{full.se[c]:>10.4f}{full.t_stat[c]:>+8.2f}"
+               f"{shrunk[c]:>+14.4f}{control[c]:>+8.2f}")
+    _print(f"\n  Newey-West at {full.nw_lags} lags, for the overlap a "
+           f"{horizon}-session label sampled every 21 induces.")
+
+    _rule(f"Out of sample -- purged walk-forward, {args.splits} splits")
+    folds = purged_walk_forward(panel, fams, horizon=horizon,
+                                n_splits=args.splits, embargo=args.embargo)
+    if not folds:
+        _print("  the panel cannot support a purged walk-forward")
+        return 1
+    per: dict = {}
+    refused: dict = {}
+    for f in folds:
+        tr, te = f["train"], f["test"]
+        w = (tr["uniqueness"].to_numpy("float64")
+             if "uniqueness" in tr.columns else None)
+        rf = fama_macbeth(tr, fams, horizon=horizon, step=21)
+        fit = ridge_fit(tr[fams].to_numpy("float64"),
+                        tr["label_rank"].to_numpy("float64"),
+                        alpha=fv(c4.model_ridge_alpha), weights=w)
+        arms = {"ridge, pooled": None, "equal weight 1/N": control}
+        if rf is not None:
+            arms["fama-macbeth raw"] = rf.lam
+            arms["shrunk, no gate"] = hierarchical_shrink(rf, toward="zero")
+            arms["PRODUCTION: gate+shrink"] = gated_shrink(
+                rf, floor=fv(c4.estimator.significance_floor),
+                toward=str(c4.estimator.shrink_toward))
+        for d, g in te.groupby("date", observed=True):
+            if len(g) < 30:
+                continue
+            actual = g["label"].to_numpy("float64")
+            for name, lam in arms.items():
+                if lam is not None and is_degenerate(lam):
+                    refused[name] = refused.get(name, 0) + 1
+                    continue
+                pred = (predict(fit, g[fams].to_numpy("float64")) if lam is None
+                        else score_from_lambda(g, lam).to_numpy())
+                if not np.isfinite(pred).any() or float(np.std(pred)) < 1e-12:
+                    refused[name] = refused.get(name, 0) + 1
+                    continue
+                top = actual[pred >= np.quantile(pred, args.top_decile)]
+                per.setdefault(name, []).append(
+                    (d, rank_ic(pred, actual), float(top.mean() - actual.mean())))
+
+    _print(f"  {'arm':<26}{'dates':>7}{'IC':>9}{'t(NW)':>8}{'hit':>7}"
+           f"{'top-decile':>12}{'t':>7}{'no model':>10}")
+    for name, rows in per.items():
+        ic = np.array([b for _, b, _ in rows])
+        ex = np.array([c for _, _, c in rows])
+        ic = ic[np.isfinite(ic)]
+        if len(ic) < 3:
+            _print(f"  {name:<26}{len(ic):>7}   too few scored dates")
+            continue
+        _print(f"  {name:<26}{len(ic):>7}{ic.mean():>+9.4f}"
+               f"{ic.mean() / newey_west_se(ic, 2):>+8.2f}{(ic > 0).mean():>7.0%}"
+               f"{ex.mean():>+12.2%}{ex.mean() / newey_west_se(ex, 2):>+7.2f}"
+               f"{refused.get(name, 0):>10}")
+
+    if "equal weight 1/N" in per:
+        base = {d: b for d, b, _ in per["equal weight 1/N"]}
+        _rule("Paired against the control, on the dates both scored")
+        for name, rows in per.items():
+            if name == "equal weight 1/N":
+                continue
+            d = np.array([b - base[dt] for dt, b, _ in rows if dt in base])
+            d = d[np.isfinite(d)]
+            if len(d) < 3:
+                continue
+            _print(f"  {name:<26}{d.mean():>+9.4f}   t "
+                   f"{d.mean() / newey_west_se(d, 2):>+6.2f}   "
+                   f"beats control on {(d > 0).mean():.0%} of dates")
+        _print()
+        _print(_tag("WHAT THIS CANNOT SETTLE"))
+        _print("  These are a few dozen overlapping 63-session windows on one")
+        _print("  market. A difference of 0.01 in rank IC is not resolvable")
+        _print("  here, and the arms were compared on the same dates that")
+        _print("  informed the estimator's design -- so read the ORDERING, and")
+        _print("  count every arm above as a trial when deflating a Sharpe.")
+    return 0
 
 def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     """How far the pre-registered forward test has run.
@@ -1509,6 +1606,7 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .features.crosssec import build_panel, liquidity_mask
     from .stages._cfg import fv, iv, v
     from .validation.harness import run_portfolio_cpcv
+    from .validation.research_panel import build_research_panel
 
     p = cfg.params
     val, c4 = p.validation, p.stage4_core_score
@@ -1535,39 +1633,18 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     symbols = list(snap.symbols)
 
     _rule("Building panels")
-    # UNRESTRICTED, then masked per date. `symbols` is the screen resolved for
-    # the LATEST session; building the panel from it projects today's survivors
-    # backwards over every training date.
+    # The SHARED builder for the feature panel -- same label, same universe
+    # screen, same coverage tests as stage 4 -- with the price frames passed in
+    # so the store is read once. The simulator needs open/high/low/atr, which
+    # is why this path loads them itself.
     panels = _portfolio_inputs(cfg, store, sessions, None, end)
     turnover_panel = (panels["close"] * panels["volume"])
-    delivery = None
-    dl = store.read_delivery(start=sessions[0], end=end)
-    if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
-        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
-        delivery = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
-                                  aggfunc="last", observed=True).sort_index()
-    del dl
-    horizon = iv(c4.model_horizon_sessions)
-    eligible = liquidity_mask(
-        panels["close"], turnover_panel,
-        min_adtv_inr=fv(u.pit_min_adtv_inr),
-        lookback_sessions=iv(u.pit_adtv_lookback_sessions),
-        max_names=iv(u.pit_max_names),
-        min_history_sessions=iv(u.min_history_sessions),
-        min_price_inr=fv(u.min_price_inr),
-    )
-    panel = build_panel(panels["close"], turnover_panel, horizon=horizon,
-                        step=21, delivery=delivery, eligible=eligible,
-                        sectors=sector_map)
-    try:
-        actions = store.read_corporate_actions()
-    except Exception:
-        actions = None
-    panel = cm._attach_fundamentals(panel, store.read_statements(), panels["close"],
-                                    iv(c4.max_fundamental_age_days), actions=actions)
-    # Same rule as the fit and the ranking CPCV. See cmd_research_cpcv.
-    panel, features, dropped = cm.prepare_features(panel)
+    rp = build_research_panel(cfg, store, end, prices=panels,
+                              turnover=turnover_panel)
+    panel, features, dropped, horizon = rp.panel, rp.features, rp.dropped, rp.horizon
+    _print(f"  label: {'triple-barrier' if rp.barriers else 'horizon return'}")
     _print(f"  fitting {len(features)} famil(y/ies): {', '.join(features)}")
+    _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
     params = _portfolio_params(cfg)
     _print(f"  {len(panel):,} rows over {panel['date'].nunique()} dates")
     sample = params.cost_bps(300.0, 400, 2e8)
@@ -1588,6 +1665,7 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
         n_groups=iv(val.cpcv.n_groups), n_test_groups=args.test_groups,
         purge_sessions=iv(val.cpcv.purge_sessions),
         embargo_sessions=iv(val.cpcv.embargo_sessions),
+        estimator=str(c4.estimator.method),
         progress=progress,
     )
     sharpe = result.spread("sharpe")
@@ -1759,6 +1837,19 @@ def build_parser() -> argparse.ArgumentParser:
                        help="extend the panel through the reserved holdout. "
                             "This spends the one honest test")
     fac_p.set_defaults(func=cmd_research_factors)
+
+    est_p = research_sub.add_parser(
+        "estimator",
+        help="compare estimator arms out of sample against an equal-weight control")
+    est_p.add_argument("--splits", type=int, default=6,
+                       help="purged walk-forward splits (default 6)")
+    est_p.add_argument("--embargo", type=int, default=5,
+                       help="embargo in sampled dates (default 5)")
+    est_p.add_argument("--top-decile", type=float, default=0.90,
+                       dest="top_decile", help="top-decile cutoff (default 0.90)")
+    est_p.add_argument("--include-holdout", action="store_true",
+                       help="spend the reserved holdout; normally left alone")
+    est_p.set_defaults(func=cmd_research_estimator)
 
     fwd_p = research_sub.add_parser(
         "forward", help="status of the pre-registered forward test")

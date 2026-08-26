@@ -34,6 +34,8 @@ from .crosssec import FEATURES, MIN_LOOKBACK, build_panel
 from .labels import BarrierSpec
 from .fundamental_factors import available_as_of, build_fundamental_panel, winsorise
 from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
+from .famamacbeth import (FMResult, SIGNIFICANCE_FLOOR, fama_macbeth,
+                          gated_shrink, is_degenerate)
 from .linear import predict, ridge_fit
 
 __all__ = ["CrossSectionalModel", "fit_predict", "load_cached", "save_cache",
@@ -180,15 +182,24 @@ class CrossSectionalModel:
 
     def summary(self) -> str:
         top = sorted(self.coef.items(), key=lambda kv: -abs(kv[1]))[:4]
-        parts = ", ".join(f"{k.replace('_r','')} {v:+.3f}" for k, v in top)
-        return (
-            f"ridge on {len(self.coef)} cross-sectional features, "
-            f"{self.n_train} training rows to {self.train_end}; strongest: {parts}"
-        )
+        parts = ", ".join(f"{k.removesuffix('_f').removesuffix('_r')} {v:+.3f}"
+                          for k, v in top)
+        how = getattr(self, "estimator", "ridge")
+        if how == "fama_macbeth":
+            live = sum(1 for v in self.coef.values() if abs(v) > 1e-12)
+            n_dates = getattr(self, "fm_n_dates", 0)
+            head = (f"Fama-MacBeth over {n_dates} cross-sections, "
+                    f"{live} of {len(self.coef)} themes cleared |t| >= "
+                    f"{SIGNIFICANCE_FLOOR:g}")
+        else:
+            head = f"ridge on {len(self.coef)} cross-sectional features"
+        return (f"{head}, {self.n_train} training rows to {self.train_end}; "
+                f"strongest: {parts}")
 
 
 def load_cached(path, as_of: dt.date,
-                refit_every_sessions: Optional[int] = None) -> Optional[CrossSectionalModel]:
+                refit_every_sessions: Optional[int] = None,
+                estimator: Optional[str] = None) -> Optional[CrossSectionalModel]:
     """Coefficients from a recent fit, or None when absent or stale.
 
     ``refit_every_sessions`` comes from the config. It defaulted to the module
@@ -220,6 +231,10 @@ def load_cached(path, as_of: dt.date,
             return None                      # pre-family fit; refit on families
         if sorted(stored) != sorted(blob["coef"]):
             return None                      # blob is internally inconsistent
+        # A model fitted by a different estimator is a different model. Blobs
+        # written before the field existed were ridge fits.
+        if estimator is not None and str(blob.get("estimator", "ridge")) != str(estimator):
+            return None
         m = CrossSectionalModel(
             coef=blob["coef"], n_train=int(blob["n_train"]),
             train_end=dt.date.fromisoformat(blob["train_end"]),
@@ -230,6 +245,10 @@ def load_cached(path, as_of: dt.date,
         m.mu = np.array(blob["mu"], dtype="float64")
         m.sd = np.array(blob["sd"], dtype="float64")
         m.intercept = float(blob["intercept"])
+        m.estimator = str(blob.get("estimator", "ridge"))
+        m.fm_t_stat = dict(blob.get("fm_t_stat") or {})
+        m.fm_lambda = dict(blob.get("fm_lambda") or {})
+        m.fm_n_dates = int(blob.get("fm_n_dates", 0) or 0)
         return m
     except (OSError, ValueError, KeyError):
         return None
@@ -288,6 +307,16 @@ def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
         "dispersion": float(getattr(model, "dispersion", 0.0) or 0.0),
         "train_dispersion": float(getattr(model, "train_dispersion", 0.0) or 0.0),
         "coef": model.coef,
+        # The estimator is part of what this model IS, not a note about how it
+        # was made. A ridge blob reloaded under Fama-MacBeth would score today
+        # with coefficients no current code path would produce.
+        "estimator": str(getattr(model, "estimator", "ridge")),
+        "fm_t_stat": {k: float(v) for k, v in
+                      (getattr(model, "fm_t_stat", {}) or {}).items()
+                      if v == v},
+        "fm_lambda": {k: float(v) for k, v in
+                      (getattr(model, "fm_lambda", {}) or {}).items()},
+        "fm_n_dates": int(getattr(model, "fm_n_dates", 0) or 0),
         "dropped_for_coverage": getattr(model, "dropped_for_coverage", {}) or {},
         "mu": list(map(float, model.mu)),
         "sd": list(map(float, model.sd)),
@@ -659,6 +688,69 @@ def prepare_features(panel: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], Dict
     return panel, fitted, dropped
 
 
+
+def fit_coefficients(
+    panel: pd.DataFrame,
+    features: Sequence[str],
+    *,
+    estimator: str = "fama_macbeth",
+    alpha: float = ALPHA,
+    horizon: int = HORIZON,
+    step: int = 21,
+    significance_floor: Optional[float] = None,
+    shrink_toward: str = "zero",
+    weights: Optional[np.ndarray] = None,
+    window_dates: Optional[int] = None,
+    target: str = "label_rank",
+) -> Tuple[Optional[Dict[str, np.ndarray]], Optional["FMResult"], Optional[str]]:
+    """Turn a training panel into scoring coefficients. ONE implementation.
+
+    `fit_predict`, CPCV, the portfolio harness and the nested-CV search all have
+    to agree about how a model is estimated, or what gets validated is not what
+    gets traded. They did not: the harness called `ridge_fit` at six separate
+    sites, so switching the production estimator to Fama-MacBeth would have left
+    every validation number describing a model no longer in use -- the same
+    divergence `prepare_features` was extracted to close on the feature side.
+
+    Returns ``(fit, fm_result, reason_unavailable)``. The fit is always in the
+    standardised parameterisation `linear.predict` expects, whichever estimator
+    produced it.
+    """
+    cols = [c for c in features if c in panel.columns]
+    if not cols:
+        return None, None, "no usable feature columns"
+    x = panel[cols].to_numpy("float64")
+    y = panel[target].to_numpy("float64")
+
+    if estimator == "ridge":
+        return ridge_fit(x, y, alpha=alpha, weights=weights), None, None
+    if estimator != "fama_macbeth":
+        return None, None, f"unknown estimator {estimator!r}"
+
+    fm = fama_macbeth(panel, cols, target=target, horizon=horizon, step=step,
+                      window=window_dates)
+    if fm is None:
+        n = panel["date"].nunique() if "date" in panel.columns else 0
+        return None, None, (f"Fama-MacBeth needs at least 3 usable "
+                            f"cross-sections; {n} dates produced too few")
+    floor = SIGNIFICANCE_FLOOR if significance_floor is None else float(significance_floor)
+    lam = gated_shrink(fm, floor=floor, toward=shrink_toward)
+    if is_degenerate(lam):
+        strongest = max(fm.t_stat, key=lambda k: abs(fm.t_stat.get(k, 0.0)))
+        return None, fm, (
+            f"no factor theme cleared |t| >= {floor:g} on {fm.n_dates} "
+            f"cross-sections; strongest was {strongest.removesuffix('_f')} at "
+            f"t {fm.t_stat[strongest]:+.2f}"
+        )
+    # predict() computes ((x - mu)/sd) @ coef + intercept, so coef = lambda * sd
+    # reproduces (x - mu) @ lambda exactly. The dropped constant moves no rank.
+    mu = x.mean(axis=0)
+    sd = x.std(axis=0, ddof=0)
+    sd = np.where(sd < 1e-12, 1.0, sd)
+    return ({"coef": np.array([lam[c] for c in cols]) * sd, "mu": mu, "sd": sd,
+             "intercept": float(y.mean())}, fm, None)
+
+
 def fit_predict(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -679,6 +771,10 @@ def fit_predict(
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
     uniqueness_weighting: bool = True,
+    estimator: str = "fama_macbeth",
+    significance_floor: Optional[float] = None,
+    fm_window_dates: Optional[int] = None,
+    shrink_toward: str = "zero",
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
@@ -745,7 +841,29 @@ def fit_predict(
         w = panel["uniqueness"].to_numpy("float64")
         if not np.isfinite(w).any():
             w = None
-    fit = ridge_fit(x, y, alpha=A, weights=w)
+
+    # The pooled ridge treats 33,000 rows as 33,000 independent draws. They are
+    # 70 cross-sections, and within one date every name shares the same market.
+    # Measured on a purged walk-forward, 50 out-of-sample dates:
+    #
+    #   arm                        IC    t(NW)   hit   top-decile     t
+    #   ridge (was production)  +0.0021  +0.06   48%     -0.11%   -0.17
+    #   equal weight 1/N        -0.0022  -0.07   50%     -0.38%   -0.79
+    #   gate |t|>=2, then shrink +0.0516 +3.25   78%     +1.12%   +2.33
+    #
+    # The ridge could not beat the 1/N control it exists to justify. What broke
+    # it: the pooled fit gave `lottery` a -0.0143 coefficient while lottery
+    # measures IC +0.0485 in this universe, so the blend bet against it and
+    # `mom_f - lottery_f` reads IC +0.0031 against `mom_f` alone at +0.0481.
+    fit, fm, why = fit_coefficients(
+        panel, features, estimator=estimator, alpha=A, horizon=H, step=21,
+        significance_floor=significance_floor, shrink_toward=shrink_toward,
+        weights=w, window_dates=fm_window_dates)
+    if fit is None:
+        # A refusal, not a crash. When no theme clears the floor the honest
+        # answer is not to trade this refit -- scoring anyway emits a flat
+        # ranking nothing downstream could tell from a real view.
+        return None, None, why
     if dropped:
         log.info("factors dropped for coverage",
                  extra={"dropped": {k: round(v, 3) for k, v in dropped.items()},
@@ -813,6 +931,12 @@ def fit_predict(
         features=features,
     )
     model.dropped_for_coverage = dropped
+    model.estimator = estimator
+    if fm is not None:
+        model.fm_t_stat = dict(fm.t_stat)
+        model.fm_lambda = dict(fm.lam)
+        model.fm_n_dates = fm.n_dates
+        model.fm_nw_lags = fm.nw_lags
     model.dispersion = dispersion
     model.train_dispersion = train_dispersion
     model.mu, model.sd, model.intercept = fit["mu"], fit["sd"], fit["intercept"]
