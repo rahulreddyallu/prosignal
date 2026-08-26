@@ -109,6 +109,17 @@ class PortfolioResult:
             "n_periods": int(len(r)),
             "avg_names": float(self.periods["n_held"].mean()),
             "avg_turnover": float(self.periods["n_new"].mean()),
+            "mean_gross": (float(self.periods["gross_ret"].mean())
+                           if "gross_ret" in self.periods else float("nan")),
+            "mean_cost": (float(self.periods["cost_ret"].mean())
+                          if "cost_ret" in self.periods else float("nan")),
+            #: Share of the gross edge handed to the broker and the exchange.
+            #: A book whose gross return is real and whose cost share is above
+            #: 1.0 is not a strategy, it is a fee-generation scheme.
+            "cost_share_of_gross": (
+                float(self.periods["cost_ret"].sum() / self.periods["gross_ret"].sum())
+                if "gross_ret" in self.periods
+                and float(self.periods["gross_ret"].sum()) > 0 else float("nan")),
         }
 
 
@@ -227,11 +238,18 @@ def simulate(
                 charged += size * bps / 10_000.0
         if filled == 0:
             continue
+        gross = pnl
         pnl -= charged
         opening = equity
         equity += pnl
         rows.append({
             "date": date, "ret": pnl / opening, "equity": equity,
+            # The cost drag, kept separately. Netting it into `ret` and
+            # discarding the parts makes the buy/hold spread unmeasurable: a
+            # wider exit band earns its keep by NOT paying entry cost on a name
+            # it already holds, and that saving is invisible once the two are
+            # added together.
+            "gross_ret": gross / opening, "cost_ret": charged / opening,
             "n_held": filled, "n_new": len([s for s in book if s not in held]),
             "deployed_frac": deployed / opening,
         })
@@ -277,6 +295,17 @@ def phase_summary(
         "hit_rate": float((r > 0).mean()),
         "avg_names": float(pooled["n_held"].mean()),
         "avg_new": float(pooled["n_new"].mean()),
+        # Gross and cost carried through pooling, so the buy/hold spread can be
+        # priced: a wider exit band buys its edge by NOT paying entry cost on a
+        # name it already holds, and that saving is invisible in `mean_return`.
+        "mean_gross": (float(pooled["gross_ret"].mean())
+                       if "gross_ret" in pooled else float("nan")),
+        "mean_cost": (float(pooled["cost_ret"].mean())
+                      if "cost_ret" in pooled else float("nan")),
+        "cost_share_of_gross": (
+            float(pooled["cost_ret"].sum() / pooled["gross_ret"].sum())
+            if "gross_ret" in pooled and float(pooled["gross_ret"].sum()) > 0
+            else float("nan")),
         "n_periods": int(len(r)),
         "n_phases": len(usable),
     }

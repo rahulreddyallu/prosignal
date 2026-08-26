@@ -525,6 +525,43 @@ is not its maximum.
 
 ---
 
+### What the buy/hold spread actually buys
+
+The engine enters at rank 8 and holds until rank 16. That gap is the whole of
+its turnover control, and it had never been priced — the simulator netted cost
+into the return and threw the parts away, so the saving a wider band exists to
+capture was invisible in every number the engine reported.
+
+Gross and cost are now carried separately. Measured on 50 out-of-sample
+rebalances, paired period by period against a book with **no hysteresis at
+all**:
+
+| band | net diff | t (NW) | gross given up | cost saved | wins |
+|---|---|---|---|---|---|
+| 8/10 | −0.086% | −1.03 | −0.089% | +0.003% | 10% |
+| 8/12 | −0.199% | −1.69 | −0.207% | +0.009% | 32% |
+| **8/16 — shipped** | **−0.257%** | **−0.93** | **−0.282%** | **+0.026%** | 36% |
+| 8/20 | −0.317% | −0.77 | −0.378% | +0.061% | 50% |
+| 8/25 | −0.310% | −0.93 | −0.402% | +0.092% | 48% |
+
+**The spread gives up roughly ten times more gross alpha than it saves in
+commission.** Holding a name that has slipped to rank 14 instead of replacing it
+with the current rank-8 name costs 0.28% a period; not paying that name's entry
+cost saves 0.026%.
+
+It is **not** significant — t −0.93 on 50 periods — so the band is not being
+changed on this evidence. What the table does establish is the shape: at this
+cost level (round trip ~37–76 bps) and this book size, turnover is cheap and
+signal freshness is not. The band is buying the wrong thing.
+
+An entry rank above the slot count is inert — with 8 slots the 10th candidate is
+never reached — and the command now says so instead of printing duplicate rows
+as if they were different configurations.
+
+`research spread`
+
+---
+
 ### N is 70, not 33,569
 
 The pooled ridge stacked every (symbol, date) row into one design matrix and

@@ -1519,6 +1519,200 @@ def cmd_research_estimator(cfg: AppConfig, args: argparse.Namespace) -> int:
         _print("  count every arm above as a trial when deflating a Sharpe.")
     return 0
 
+
+
+def _band_periods(rankings, panels, base, entry: int, exit_: int):
+    """(phase, date) -> (net, gross, cost) for one band.
+
+    Keyed by phase AND date so two bands are compared on identical rebalances.
+    Pooling by date alone would silently pair a period from one phase against a
+    different phase's period on the same day.
+    """
+    from dataclasses import replace
+
+    from .validation.portfolio_sim import simulate
+
+    import numpy as np
+
+    out = {}
+    params = replace(base, entry_rank=entry, exit_rank=exit_)
+    stride = max(int(np.ceil(params.horizon_sessions / 21)), 1)
+    for phase in range(stride):
+        result = simulate(rankings, panels, params, phase=phase, step_sessions=21)
+        if result.empty:
+            continue
+        for _, row in result.periods.iterrows():
+            out[(phase, row["date"])] = (
+                float(row["ret"]),
+                float(row.get("gross_ret", float("nan"))),
+                float(row.get("cost_ret", float("nan"))),
+            )
+    return out
+
+
+def _nw_se(series, lags: int) -> float:
+    from .features.famamacbeth import newey_west_se
+    return newey_west_se(series, lags)
+
+
+def cmd_research_spread(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """What the buy/hold spread costs, and what it buys.
+
+    The engine enters at rank 8 and holds until rank 16. That gap is the whole
+    of its turnover control, and it had never been priced: the simulator netted
+    cost into the return and threw the parts away, so a wider band's saving --
+    it does not pay entry cost on a name it already holds -- was invisible.
+
+    A no-spread book (entry == exit) is included as the control. If hysteresis
+    does not beat it net of cost, the band is decoration.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from dataclasses import replace
+
+    from .data.store import DataStore
+    from .features.linear import predict, purged_walk_forward
+    from .features.crossmodel import fit_coefficients
+    from .stages._cfg import fv, iv
+    from .validation.portfolio_sim import phase_summary
+    from .validation.research_panel import build_research_panel
+
+    p = cfg.params
+    val, c4 = p.validation, p.stage4_core_score
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = (sessions[-1] if args.include_holdout
+           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+
+    _rule("Building panels")
+    panels = _portfolio_inputs(cfg, store, sessions, None, end)
+    turnover_panel = (panels["close"] * panels["volume"])
+    rp = build_research_panel(cfg, store, end, prices=panels,
+                              turnover=turnover_panel)
+    panel, fams, horizon = rp.panel, rp.features, rp.horizon
+    base = _portfolio_params(cfg)
+    _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
+    _print(f"  shipped band: enter at rank {base.entry_rank}, "
+           f"exit past rank {base.exit_rank}, {base.max_positions} slots")
+
+    # Rankings come from a PURGED walk-forward fit, never from a model that saw
+    # the dates it is ranking. The band comparison is still in-sample in the
+    # sense that every band is scored on the same dates -- that is what the
+    # nested search exists to price, and it is said plainly below.
+    folds = purged_walk_forward(panel, fams, horizon=horizon,
+                                n_splits=args.splits, embargo=args.embargo)
+    if not folds:
+        _print("  the panel cannot support a purged walk-forward")
+        return 1
+    rankings: list = []
+    for f in folds:
+        fit, _fm, why = fit_coefficients(
+            f["train"], fams, estimator=str(c4.estimator.method),
+            alpha=fv(c4.model_ridge_alpha), horizon=horizon, step=21,
+            significance_floor=fv(c4.estimator.significance_floor),
+            shrink_toward=str(c4.estimator.shrink_toward),
+            weights=(f["train"]["uniqueness"].to_numpy("float64")
+                     if "uniqueness" in f["train"].columns else None))
+        if fit is None:
+            continue
+        for d, g in f["test"].groupby("date", observed=True):
+            pred = predict(fit, g[fams].to_numpy("float64"))
+            rankings.append((pd.Timestamp(d),
+                             pd.Series(pred, index=g["symbol"].to_numpy())
+                             .sort_values(ascending=False)))
+    rankings.sort(key=lambda t: t[0])
+    if len(rankings) < 6:
+        _print(f"  only {len(rankings)} out-of-sample ranking dates; too few")
+        return 1
+    _print(f"  {len(rankings)} out-of-sample ranking dates from "
+           f"{len(folds)} purged folds")
+
+    _rule("Every spread, gross and net")
+    _print(f"  {'entry':>6}{'exit':>6}{'spread':>8}{'new/reb':>9}"
+           f"{'gross':>9}{'cost':>8}{'NET':>9}{'cost/gross':>12}{'Sharpe':>8}")
+    rows = []
+    for entry in args.entries:
+        for exit_ in args.exits:
+            if exit_ < entry:
+                continue
+            m = phase_summary(rankings, panels,
+                              replace(base, entry_rank=entry, exit_rank=exit_),
+                              step_sessions=21)
+            if not m:
+                continue
+            share = m.get("cost_share_of_gross", float("nan"))
+            rows.append(dict(entry=entry, exit=exit_, **m))
+            _print(f"  {entry:>6}{exit_:>6}{exit_ - entry:>8}"
+                   f"{m['avg_new']:>9.1f}{m.get('mean_gross', float('nan')):>+9.2%}"
+                   f"{m.get('mean_cost', float('nan')):>8.2%}"
+                   f"{m['mean_return']:>+9.2%}"
+                   f"{share:>12.0%}{m['sharpe']:>+8.2f}")
+    if not rows:
+        _print("  no band produced a tradeable book")
+        return 1
+
+    frame = pd.DataFrame(rows)
+    if any(e > base.max_positions for e in args.entries):
+        _print()
+        _print(f"  note: an entry rank above {base.max_positions} is INERT -- "
+               f"the book has {base.max_positions} slots, so nothing beyond the "
+               f"{base.max_positions}th candidate is ever added. Those rows "
+               f"duplicate entry {base.max_positions}.")
+
+    # Comparing column means across bands is weak: the bands are walked over the
+    # same rebalances, so the difference should be measured PAIRED, period by
+    # period, where the shared market move cancels.
+    _rule("Paired against a no-spread book, period by period")
+    ctrl = _band_periods(rankings, panels, base, base.entry_rank, base.entry_rank)
+    if not ctrl:
+        _print("  the no-spread control produced no periods")
+    else:
+        _print(f"  control: enter and exit at rank {base.entry_rank}, no "
+               f"hysteresis at all")
+        _print(f"  {'band':<10}{'n':>5}{'net diff':>11}{'t(NW)':>8}"
+               f"{'gross given up':>16}{'cost saved':>12}{'wins':>7}")
+        for exit_ in sorted(x for x in args.exits if x > base.entry_rank):
+            test = _band_periods(rankings, panels, base, base.entry_rank, exit_)
+            keys = sorted(set(ctrl) & set(test))
+            if len(keys) < 6:
+                continue
+            d = np.array([test[k][0] - ctrl[k][0] for k in keys])
+            dg = np.array([test[k][1] - ctrl[k][1] for k in keys])
+            dc = np.array([ctrl[k][2] - test[k][2] for k in keys])
+            t = d.mean() / _nw_se(d, 2)
+            _print(f"  {base.entry_rank}/{exit_:<8}{len(d):>5}{d.mean():>+11.3%}"
+                   f"{t:>+8.2f}{dg.mean():>+16.3%}{dc.mean():>+12.3%}"
+                   f"{(d > 0).mean():>7.0%}")
+        _print()
+        _print("  'gross given up' is the alpha the band forfeits by holding a")
+        _print("  name that has slipped instead of replacing it with the")
+        _print("  current best. 'cost saved' is the entry cost it avoided. The")
+        _print("  spread pays only when the second exceeds the first.")
+
+    shipped = frame[(frame["entry"] == base.entry_rank)
+                    & (frame["exit"] == base.exit_rank)]
+    if not shipped.empty:
+        r = shipped.iloc[0]
+        rank = int((frame["mean_return"] > r["mean_return"]).sum()) + 1
+        _print()
+        _print(f"  the SHIPPED band ({base.entry_rank}/{base.exit_rank}) ranks "
+               f"{rank} of {len(frame)} on net return.")
+
+    _print()
+    _print(_tag("THIS TABLE CANNOT CHOOSE THE BAND"))
+    _print("  Every row is scored on the same dates, so the best of them is a")
+    _print("  selected maximum and its margin is not evidence. `research")
+    _print("  portfolio` runs the nested search that prices that selection:")
+    _print("  the band is chosen inside each training block and reported")
+    _print("  outside it. Read this table for the SHAPE -- how cost scales")
+    _print("  with turnover -- not for a winner.")
+    return 0
+
 def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     """How far the pre-registered forward test has run.
 
@@ -1850,6 +2044,21 @@ def build_parser() -> argparse.ArgumentParser:
     est_p.add_argument("--include-holdout", action="store_true",
                        help="spend the reserved holdout; normally left alone")
     est_p.set_defaults(func=cmd_research_estimator)
+
+    spread_p = research_sub.add_parser(
+        "spread", help="price the buy/hold spread: gross, cost and net per band")
+    spread_p.add_argument("--entries", type=int, nargs="+", default=[5, 8, 10],
+                          help="entry ranks to sweep (default 5 8 10)")
+    spread_p.add_argument("--exits", type=int, nargs="+",
+                          default=[5, 8, 10, 12, 16, 20, 25],
+                          help="exit ranks to sweep")
+    spread_p.add_argument("--splits", type=int, default=6,
+                          help="purged walk-forward splits (default 6)")
+    spread_p.add_argument("--embargo", type=int, default=5,
+                          help="embargo in sampled dates (default 5)")
+    spread_p.add_argument("--include-holdout", action="store_true",
+                          help="spend the reserved holdout; normally left alone")
+    spread_p.set_defaults(func=cmd_research_spread)
 
     fwd_p = research_sub.add_parser(
         "forward", help="status of the pre-registered forward test")
