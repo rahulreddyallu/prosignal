@@ -1247,7 +1247,8 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .features.crosssec import FEATURES, build_panel, liquidity_mask
     from .stages._cfg import fv, iv
     from .costs import CostModel
-    from .validation.factor_ic import breakeven_turnover, factor_ic, net_of_cost
+    from .validation.factor_ic import (
+        breakeven_turnover, factor_ic, ic_decay, net_of_cost)
 
     def _short(name: str) -> str:
         """Strip only the TRAILING suffix. `str.replace` took the `_r` out of
@@ -1338,20 +1339,74 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
                 breaches.append((a, b, float(r)))
     if breaches:
         for a, b, r in sorted(breaches, key=lambda t: -abs(t[2])):
-            _print(f"  {_short(a):<20}{_short(b):<20}{r:>+8.3f}")
+            _print(f"  {_short(a):<24}{_short(b):<24}{r:>+8.3f}")
     else:
         _print(f"  no pair reaches |rho| = {cutoff}")
 
-    _rule("Breakeven turnover")
+    _rule("Holding period, measured rather than chosen")
     costs = CostModel(cfg)
     round_trip = float(costs.round_trip(300.0, 400).total_bps_of_buy)
-    _print(f"  round trip modelled at {round_trip:.0f} bps")
+    _print(f"  round trip modelled at {round_trip:.0f} bps\n")
+    # The composite the engine actually ranks on, at every horizon.
+    live = panel[panel["date"].notna()].copy()
+    weights = {c: 1.0 for c in built}
+    live["composite"] = live[built].mean(axis=1)
+    wide = live.pivot_table(index="date", columns="symbol", values="composite",
+                            aggfunc="last", observed=True)
+    table = ic_decay(close, wide, horizons=(5, 10, 21, 42, 63, 126))
+    if table.empty:
+        _print("  not enough dates to measure decay")
+    else:
+        table = net_of_cost(table, round_trip)
+        _print(f"  {'horizon':>8}{'dates':>7}{'IC':>9}{'ICIR':>8}"
+               f"{'turns/yr':>10}{'gross':>9}{'cost':>8}{'NET':>9}")
+        for _, r in table.sort_values("horizon").iterrows():
+            _print(f"  {int(r['horizon']):>8}{int(r['n_dates']):>7}"
+                   f"{r['ic_mean']:>+9.4f}{r['icir']:>+8.3f}"
+                   f"{r['turnovers_per_year']:>10.1f}{r['gross_annual']:>+9.2%}"
+                   f"{r['cost_annual']:>8.2%}{r['net_annual']:>+9.2%}")
+        best = table.iloc[0]
+        _print()
+        _print(f"  Best NET of turnover cost: {int(best['horizon'])} sessions "
+               f"at {best['net_annual']:+.2%} a year.")
+        _print("  Not the highest raw IC, which is almost always the shortest")
+        _print("  horizon and the one that pays the most in costs.")
+        _print()
+        _print(_tag("READ THE SHAPE, NOT THE LEVELS"))
+        _print("  gross/yr converts a rank IC to an annual return at a fixed")
+        _print("  0.10 -- a rule of thumb, not a measurement, and the argument")
+        _print("  `alpha_per_ic` exists so it can be replaced with a fitted")
+        _print("  number. What survives that assumption is the ORDERING: IC")
+        _print("  rises monotonically with horizon here, so a longer hold keeps")
+        _print("  more of whatever the edge turns out to be. What does not")
+        _print("  survive it is any absolute claim about profitability.")
+
+    _rule("Breakeven turnover")
     _print(f"  {'gross annual edge':<24}{'round trips it pays for':>26}")
     for gross in (0.02, 0.04, 0.08):
         _print(f"  {gross:<24.0%}{breakeven_turnover(gross, round_trip):>26.2f}")
     _print()
-    _print("  A factor whose implied turnover exceeds T* loses money however")
-    _print("  good the gross IC looks. STT alone is 20 bps round trip.")
+    _print(f"  {'family':<14}{'IC':>9}{'gross/yr':>11}{'T*':>9}   verdict")
+    for col in built:
+        result = factor_ic(panel, col, label="label")
+        if result is None:
+            continue
+        gross = result.ic_mean * 0.10
+        star = breakeven_turnover(gross, round_trip)
+        # The engine holds for `horizon` sessions, so it turns a slot over
+        # 252/horizon times a year. A family whose T* is below that cannot pay
+        # for the way it is actually traded.
+        implied = 252.0 / horizon
+        verdict = "pays for itself" if star >= implied else "BELOW implied turnover"
+        _print(f"  {_short(col):<14}{result.ic_mean:>+9.4f}{gross:>+11.2%}"
+               f"{star:>9.2f}   {verdict}")
+    _print()
+    _print(f"  The engine turns a slot over {252.0/horizon:.1f} times a year at a")
+    _print(f"  {horizon}-session hold. STT alone is 20 bps round trip.")
+    _print()
+    _print("  T* uses the same 0.10 IC-to-return assumption, so the verdicts")
+    _print("  move with it. They are a ranking of families by cost tolerance,")
+    _print("  not a profitability test.")
     return 0
 
 

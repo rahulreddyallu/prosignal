@@ -319,6 +319,7 @@ def build_fundamental_panel(
     as_of: dt.date,
     enabled: Optional[Sequence[str]] = None,
     max_age_days: Optional[int] = DEFAULT_MAX_AGE_DAYS,
+    share_adjustment: Optional[pd.Series] = None,
 ) -> pd.DataFrame:
     """Raw fundamental factor values for one decision date.
 
@@ -358,6 +359,45 @@ def build_fundamental_panel(
     if "ebitda_to_ev" in want:
         ev = mc.add(debt.reindex(mc.index).fillna(0.0), fill_value=0.0)
         out["ebitda_to_ev"] = _safe_div(ebitda, ev)
+
+    # -- profitability, scaled by assets ---------------------------------
+    # Novy-Marx (2013): gross profit over assets has about the same power as
+    # book-to-market in the cross-section, and it is the cleanest profitability
+    # measure because it sits above every accounting choice made below it.
+    if "gross_profitability" in want:
+        out["gross_profitability"] = _safe_div(gp, assets)
+    # Fama & French (2018) concede that CASH-based operating profitability
+    # dominates their own accrual-based measure. Operating cash flow over
+    # assets is that measure with the data this feed carries.
+    if "cash_op_profitability" in want:
+        out["cash_op_profitability"] = _safe_div(ocf, assets)
+    # Cooper, Gulen & Schill (2008). Enters the quality family NEGATED: the top
+    # asset-growth decile underperformed the bottom by 13% a year.
+    if "asset_growth" in want:
+        out["asset_growth"] = _safe_div(assets, p("Total Assets").abs()) - 1.0
+    # Year-on-year change in shares outstanding. In India this catches QIPs,
+    # preferential allotments and promoter dilution. Also NEGATED in the family.
+    #
+    # Bonus and split adjustment matters here and the raw count does not carry
+    # it: a 1:1 bonus doubles the share count without diluting anyone. The
+    # corporate-actions table is the only place that distinction lives, so the
+    # caller passes a per-symbol adjustment factor and a name with an
+    # unadjustable action is left NaN rather than counted as a 100% issue.
+    if "net_issuance" in want:
+        shares_now, shares_prior = g("Ordinary Shares Number"), p("Ordinary Shares Number")
+        raw = _safe_div(shares_now, shares_prior.abs()) - 1.0
+        if share_adjustment is not None:
+            adj = share_adjustment.reindex(raw.index)
+            raw = raw.where(adj.isna(), (raw + 1.0) / adj - 1.0)
+            raw = raw.where(~(adj.isna() & shares_now.notna() & shares_prior.notna()
+                              & (raw.abs() > 0.10)))
+        out["net_issuance"] = raw
+
+    # Size. Not a signal on its own here -- it is carried so the model can see
+    # the scale it is ranking across, which every other factor otherwise picks
+    # up implicitly. Log, because market cap spans four orders of magnitude.
+    if "log_mcap" in want:
+        out["log_mcap"] = np.log(mc.where(mc > 0))
 
     if "roe" in want:               out["roe"] = _safe_div(ni, eq)
     if "roce" in want:

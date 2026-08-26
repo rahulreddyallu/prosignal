@@ -151,7 +151,7 @@ def test_the_residual_moments_come_from_one_regression():
     from prosignal.features import crosssec
 
     src = inspect.getsource(crosssec._features_at)
-    block = src[src.index('out["resid_mom"] = resid'):]
+    block = src[src.index("mom_win = resid.tail(252)"):]
     for name in ("idio_vol", "idio_skew", "resid_reversal"):
         assert f'out["{name}"]' in block
 
@@ -252,3 +252,77 @@ def test_a_store_without_sectors_ranks_against_the_universe_rather_than_failing(
     block = block[:block.index("cache = store.curated")]
     assert "except Exception" in block
     assert "sector_map = {}" in block
+
+
+# ----------------------------------------------------- quality and controls
+def test_the_quality_family_carries_the_six_it_should():
+    assert set(cm.FAMILIES["quality"]) == {
+        "gross_profitability_r", "cash_op_profitability_r", "roce_r",
+        "accruals_r", "asset_growth_r", "net_issuance_r"}
+
+
+def test_the_three_that_predict_badly_enter_the_family_negated():
+    """The family is built so a HIGHER composite is a BETTER name. A member with
+    the wrong sign cancels its neighbours instead of reinforcing them."""
+    assert cm.NEGATED_IN_FAMILY == {
+        "accruals_r", "asset_growth_r", "net_issuance_r"}
+    frame = pd.DataFrame({"accruals_r": [1.0], "gross_profitability_r": [1.0]})
+    cm.build_families(frame, list(frame.columns))
+    assert frame["quality_f"].iloc[0] == pytest.approx(0.0), (
+        "high accruals must cancel high profitability, not add to it"
+    )
+
+
+def test_size_is_computed_and_reported_but_not_scored():
+    """Measured over 17 dates it reads IC -0.2297 at a hit rate of 0/17 -- three
+    independent windows in which small caps happened to win. A family
+    coefficient for that rebuilds by hand the small-cap tilt the point-in-time
+    panel fix removed. The unintended-sector-bet problem size was raised against
+    is solved by ranking within sector."""
+    assert "log_mcap" in cm.FUNDAMENTAL_FEATURES
+    scored = {m for members in cm.FAMILIES.values() for m in members}
+    assert "log_mcap_r" not in scored
+    assert "log_mcap_r" in cm.UNSCORED_CONTROLS
+
+
+def test_a_bonus_is_not_counted_as_dilution():
+    """A 1:1 bonus doubles the share count and dilutes nobody. The raw count
+    cannot tell it from a placement."""
+    actions = pd.DataFrame({
+        "symbol": ["A", "B"],
+        "ex_date": ["2026-03-01", "2026-03-01"],
+        "action_type": ["bonus", "dividend"],
+        "ratio": [0.5, 1.0],
+    })
+    adj = cm.share_count_adjustment(
+        actions, pd.Timestamp("2026-01-01"), pd.Timestamp("2026-06-01"))
+    assert adj["A"] == pytest.approx(2.0)
+    assert "B" not in adj.index, "a dividend does not change the share count"
+
+
+def test_no_actions_means_no_adjustment_rather_than_a_guess():
+    assert cm.share_count_adjustment(None, pd.Timestamp("2026-01-01"),
+                                     pd.Timestamp("2026-06-01")) is None
+
+
+# ------------------------------------------------ the 36-month reversal window
+def test_residual_reversal_is_standardised_over_36_months():
+    """Blitz, Huij, Lansdorp & Martens (2013) standardise by the trailing
+    36-month residual standard deviation."""
+    from prosignal.features.crosssec import REVERSAL_STD_WINDOW
+
+    assert REVERSAL_STD_WINDOW == 756
+    assert REVERSAL_STD_WINDOW / 21 == pytest.approx(36.0)
+
+
+def test_the_reversal_window_degrades_rather_than_excluding_short_history():
+    """Requiring all 756 sessions would exclude any name with under three years
+    against a universe floor of 300."""
+    import inspect
+
+    from prosignal.features import crosssec
+
+    src = inspect.getsource(crosssec._features_at)
+    assert "resid.tail(REVERSAL_STD_WINDOW).std" in src, (
+        "tail() takes what is there rather than requiring the full window"
+    )
