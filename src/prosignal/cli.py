@@ -1304,6 +1304,14 @@ def _portfolio_params(cfg: AppConfig):
         horizon_sessions=iv(cfg.params.stage4_core_score.model_horizon_sessions),
         entry_rank=iv(c6.admission.entry_rank),
         exit_rank=iv(c6.admission.exit_rank),
+        # None when disabled, so the overlay is genuinely absent rather than
+        # present at a neutral setting -- a scale of exactly 1.0 still clips,
+        # still reads the window, and still has to be reasoned about.
+        target_vol_annual=(float(c7.volatility_scaling.target_vol_annual)
+                           if bool(c7.volatility_scaling.enabled) else None),
+        vol_window_sessions=int(c7.volatility_scaling.window_sessions),
+        max_vol_scale=float(c7.volatility_scaling.max_scale),
+        min_vol_scale=float(c7.volatility_scaling.min_scale),
     )
 
 
@@ -2012,6 +2020,139 @@ def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
                "reconstructed, and is not being silently assumed to be nothing.")
     return 0
 
+
+def cmd_research_volscale(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Does scaling total exposure by recent market volatility help?
+
+    Moreira & Muir (2017) say it should: volatility is far more forecastable at
+    short horizons than return is, so scaling by the inverse of recent realised
+    variance raises the Sharpe ratio.
+
+    The number to read is the SHARPE, not the mean return. The overlay changes
+    leverage, so a higher target mechanically raises both return and volatility;
+    only a ratio invariant to that can say whether anything was gained.
+    """
+    from dataclasses import replace
+
+    import numpy as np
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .features.crossmodel import fit_coefficients
+    from .features.famamacbeth import newey_west_se
+    from .features.linear import predict, purged_walk_forward
+    from .stages._cfg import fv, iv
+    from .validation.portfolio_sim import simulate
+    from .validation.registry import TrialRegistry, registry_path
+    from .validation.research_panel import build_research_panel
+
+    p = cfg.params
+    val, c4 = p.validation, p.stage4_core_score
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = (sessions[-1] if args.include_holdout
+           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
+    if args.include_holdout:
+        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+
+    _rule("Building panels")
+    panels = _portfolio_inputs(cfg, store, sessions, None, end)
+    rp = build_research_panel(cfg, store, end, prices=panels,
+                              turnover=panels["close"] * panels["volume"])
+    panel, fams, horizon = rp.panel, rp.features, rp.horizon
+    base = _portfolio_params(cfg)
+    _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
+
+    rankings = []
+    for f in purged_walk_forward(panel, fams, horizon=horizon,
+                                 n_splits=args.splits, embargo=args.embargo):
+        fit, _fm, _why = fit_coefficients(
+            f["train"], fams, estimator=str(c4.estimator.method),
+            alpha=fv(c4.model_ridge_alpha), horizon=horizon, step=21,
+            significance_floor=fv(c4.estimator.significance_floor),
+            shrink_toward=str(c4.estimator.shrink_toward),
+            weights=(f["train"]["uniqueness"].to_numpy("float64")
+                     if "uniqueness" in f["train"].columns else None))
+        if fit is None:
+            continue
+        for d, g in f["test"].groupby("date", observed=True):
+            rankings.append((pd.Timestamp(d),
+                             pd.Series(predict(fit, g[fams].to_numpy("float64")),
+                                       index=g["symbol"].to_numpy())
+                             .sort_values(ascending=False)))
+    rankings.sort(key=lambda t: t[0])
+    if len(rankings) < 6:
+        _print(f"  only {len(rankings)} out-of-sample ranking dates; too few")
+        return 1
+    _print(f"  {len(rankings)} out-of-sample ranking dates")
+
+    def periods(params):
+        out = {}
+        stride = max(int(np.ceil(params.horizon_sessions / 21)), 1)
+        for phase in range(stride):
+            r = simulate(rankings, panels, params, phase=phase, step_sessions=21)
+            if r.empty:
+                continue
+            for _, row in r.periods.iterrows():
+                out[(phase, row["date"])] = (
+                    float(row["ret"]), float(row.get("vol_scale", 1.0)),
+                    float(row.get("realised_vol", float("nan"))))
+        return out
+
+    ppy = 252.0 / float(horizon)
+    off = periods(replace(base, target_vol_annual=None))
+    if not off:
+        _print("  the book produced no periods")
+        return 1
+
+    _rule("Exposure scaled by recent market volatility")
+    _print(f"  {'target':>8}{'n':>5}{'mean ret':>11}{'sd':>9}{'Sharpe':>9}"
+           f"{'vs off':>10}{'t(NW)':>8}{'avg scale':>11}")
+    r0 = np.array([v[0] for _, v in sorted(off.items())])
+    _print(f"  {'OFF':>8}{len(r0):>5}{r0.mean():>+11.2%}{r0.std(ddof=1):>9.2%}"
+           f"{r0.mean() / r0.std(ddof=1) * np.sqrt(ppy):>+9.2f}"
+           f"{'--':>10}{'--':>8}{1.0:>11.2f}")
+    best_sharpe, best_name = r0.mean() / r0.std(ddof=1) * np.sqrt(ppy), "OFF"
+    for target in args.targets:
+        on = periods(replace(base, target_vol_annual=float(target)))
+        keys = sorted(set(off) & set(on))
+        if len(keys) < 6:
+            continue
+        a = np.array([on[k][0] for k in keys])
+        b = np.array([off[k][0] for k in keys])
+        d = a - b
+        scale = np.array([on[k][1] for k in keys])
+        sharpe = a.mean() / a.std(ddof=1) * np.sqrt(ppy)
+        if sharpe > best_sharpe:
+            best_sharpe, best_name = sharpe, f"{target:.0%}"
+        _print(f"  {target:>8.0%}{len(a):>5}{a.mean():>+11.2%}{a.std(ddof=1):>9.2%}"
+               f"{sharpe:>+9.2f}{d.mean():>+10.2%}"
+               f"{d.mean() / newey_west_se(d, 2):>+8.2f}{scale.mean():>11.2f}")
+    TrialRegistry(registry_path(cfg.paths.curated)).record(
+        "research volscale", [f"target={t:.2f}" for t in args.targets] + ["off"])
+
+    vols = np.array([v[2] for v in off.values() if np.isfinite(v[2])])
+    _print()
+    if vols.size:
+        _print(f"  realised universe volatility over these periods: "
+               f"median {np.median(vols):.1%}, range {vols.min():.1%} to "
+               f"{vols.max():.1%}")
+    _print(f"  best Sharpe: {best_name}")
+    if best_name == "OFF":
+        _print()
+        _print(_tag("THE OVERLAY DOES NOT EARN ITS PLACE"))
+        _print("  A higher target raises the mean return, and raises the")
+        _print("  volatility with it -- that is leverage, not alpha, and a")
+        _print("  t-statistic on the return difference will happily confirm it.")
+        _print("  The Sharpe is the measure invariant to how much of the book")
+        _print("  is on, and on that measure switching the overlay off wins.")
+    enabled = bool(p.stage7_risk.volatility_scaling.enabled)
+    _print()
+    _print(f"  shipped: volatility_scaling.enabled = {enabled}")
+    return 0
+
 def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     """How far the pre-registered forward test has run.
 
@@ -2383,6 +2524,17 @@ def build_parser() -> argparse.ArgumentParser:
     trials_p = research_sub.add_parser(
         "trials", help="every configuration compared, and what the DSR charges")
     trials_p.set_defaults(func=cmd_research_trials)
+
+    vol_p = research_sub.add_parser(
+        "volscale", help="price the portfolio-level volatility overlay")
+    vol_p.add_argument("--targets", type=float, nargs="+",
+                       default=[0.10, 0.15, 0.20, 0.25],
+                       help="annualised volatility targets to sweep")
+    vol_p.add_argument("--splits", type=int, default=6)
+    vol_p.add_argument("--embargo", type=int, default=5)
+    vol_p.add_argument("--include-holdout", action="store_true",
+                       help="spend the reserved holdout; normally left alone")
+    vol_p.set_defaults(func=cmd_research_volscale)
 
     fwd_p = research_sub.add_parser(
         "forward", help="status of the pre-registered forward test")

@@ -525,6 +525,43 @@ is not its maximum.
 
 ---
 
+### Volatility scaling: leverage is not alpha
+
+Moreira & Muir (2017) show that scaling a portfolio by the inverse of its recent
+realised variance raises the Sharpe ratio — volatility is far more forecastable
+at short horizons than return is, so the overlay decides *size* without
+predicting direction at all.
+
+Note first what was already there: position sizing is **already**
+inverse-volatility, through the ATR stop. `risk_budget / (entry × atr_distance)`
+gives a high-ATR name a smaller position by construction. What was missing is
+the separate, aggregate question — how much book to have on at all.
+
+Measured over 50 out-of-sample rebalances:
+
+| target vol | mean ret | sd | **Sharpe** | vs off | t | avg scale |
+|---|---|---|---|---|---|---|
+| **off** | +3.12% | 7.87% | **+0.79** | — | — | 1.00 |
+| 10% | +2.64% | 7.31% | +0.72 | −0.47% | −1.00 | 0.73 |
+| 15% | +3.34% | 9.15% | +0.73 | +0.22% | +0.52 | 1.00 |
+| 20% | +3.79% | 10.08% | +0.75 | +0.68% | +1.65 | 1.20 |
+| 25% | +4.19% | 10.96% | +0.76 | **+1.07%** | **+2.21** | 1.34 |
+
+A 25% target returns **+1.07% more per period at t +2.21** — and none of it is
+alpha. Average exposure is **1.34×**, volatility rises from 7.87% to 10.96%, and
+the **Sharpe falls**. Read on mean return the overlay looks like it works, and a
+t-statistic on the return difference will happily confirm it. Read on the only
+measure invariant to how much of the book is on, switching it off wins.
+
+It ships disabled. The overlay also reads *market* volatility — the equal-weight
+index — rather than average single-name volatility, because forty independently
+wild names make a calm index and a portfolio-level overlay is right to ignore
+the part that diversifies away.
+
+`research volscale`
+
+---
+
 ### The trial count was a number somebody typed
 
 The Deflated Sharpe Ratio charges a result for the configurations tried before

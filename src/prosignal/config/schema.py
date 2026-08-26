@@ -889,6 +889,41 @@ class MetaLabelConfig(_Base):
     l2: float = Field(1.0, gt=0.0, le=1000.0)
 
 
+class VolatilityScalingConfig(_Base):
+    """Scaling total book exposure by how turbulent the market has been.
+
+    Moreira & Muir (2017) show that scaling a portfolio by the inverse of its
+    recent realised variance raises the Sharpe ratio. Measured here over 50
+    out-of-sample rebalances it does not:
+
+        target vol    mean ret      sd    Sharpe   avg scale
+        off             +3.12%   7.87%    +0.79      1.00
+        10%             +2.69%   7.40%    +0.73      0.74
+        20%             +3.83%  10.15%    +0.76      1.21
+        25%             +4.22%  11.04%    +0.77      1.35
+
+    A 25% target returns +1.11% more per period at t +2.24, and none of that is
+    alpha: average exposure is 1.35x, volatility rises with it, and the Sharpe
+    falls. On mean return the overlay looks like it works; on the only measure
+    invariant to leverage, switching it off wins.
+
+    Note that position sizing is ALREADY inverse-volatility, through the ATR
+    stop -- `risk_budget / (entry * atr_distance)` gives a high-ATR name a
+    smaller position by construction. This block is the separate, aggregate
+    question of how much book to have on at all, and that is the part the data
+    does not support.
+    """
+
+    enabled: bool = False
+    target_vol_annual: float = Field(0.20, gt=0.0, le=1.0)
+    window_sessions: int = Field(21, ge=5, le=252)
+    #: An uncapped inverse-variance rule takes enormous positions in the calmest
+    #: stretch of the sample -- where a volatility estimate is least reliable and
+    #: where a variance-scaled backtest earns most of its result.
+    max_scale: float = Field(1.5, ge=1.0, le=4.0)
+    min_scale: float = Field(0.5, ge=0.05, le=1.0)
+
+
 class Stage4Config(_Base):
     weighting_mode: TS
     standardisation: TS
@@ -1252,6 +1287,8 @@ class Stage7Config(_Base):
     risk_category: RiskCategoryConfig
     holding_period: HoldingPeriodConfig
     exit_hierarchy: ExitHierarchyConfig
+    volatility_scaling: VolatilityScalingConfig = Field(
+        default_factory=VolatilityScalingConfig)
 
 
 # =============================================================================
