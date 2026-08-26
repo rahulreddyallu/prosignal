@@ -174,11 +174,21 @@ def test_fundamentals_cannot_leak_a_future_filing():
     future = _fund(as_of + pd.Timedelta(days=30))
     out = cm._attach_fundamentals(panel.copy(), future, close, None)
     cols = [f + "_r" for f in cm.FUNDAMENTAL_FEATURES]
-    # A filing dated after as_of contributes nothing, so every rank is neutral.
-    assert all(float(out[c].iloc[0]) == 0.0 for c in cols)
+    # A filing dated after as_of contributes nothing, so the rank is ABSENT --
+    # not neutral. The two used to be the same value here, which is what let a
+    # feed covering a quarter of the universe report as a full factor.
+    assert all(pd.isna(out[c].iloc[0]) for c in cols)
 
 
-def test_missing_fundamentals_rank_neutral_not_dropped():
+def test_a_missing_filing_is_absent_not_neutral():
+    """It used to be neutral-filled right here, and that is what hid the defect.
+
+    The statements feed covers 192 of 750 names, so all five value factors sat
+    at exactly the neutral rank for 74% of the universe -- five columns that
+    were a CONSTANT for three quarters of the names, reported as five factors.
+    Leaving the gap as NaN lets the fit measure coverage and decide, instead of
+    the gap being invisible by the time it gets there.
+    """
     import pandas as pd
 
     from prosignal.features import crossmodel as cm
@@ -187,9 +197,9 @@ def test_missing_fundamentals_rank_neutral_not_dropped():
     panel = pd.DataFrame({"date": [close.index[400]] * 3,
                           "symbol": ["S0", "S1", "S2"]})
     out = cm._attach_fundamentals(panel.copy(), None, close, None)
-    assert len(out) == 3
+    assert len(out) == 3, "the rows survive; only the value is unknown"
     for f in cm.FUNDAMENTAL_FEATURES:
-        assert (out[f + "_r"] == 0.0).all()
+        assert out[f + "_r"].isna().all()
 
 
 def test_feature_columns_cover_price_and_fundamental_families():

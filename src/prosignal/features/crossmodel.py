@@ -21,7 +21,7 @@ so no observation used in the fit can know anything about the decision date.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -99,6 +99,18 @@ HORIZON = 63              # default only; stage 4 passes the configured value
 #: rather than returning a confident-looking number from nothing.
 MIN_TRAIN_ROWS = 600
 
+#: A factor scored on a minority of names ranks the rest by neutral fill, which
+#: is not a ranking. Stage 4 already states this rule and enforces it on the
+#: hand-weighted composite -- the fitted model, which is the one that actually
+#: ranks, imputed instead.
+#:
+#: Measured on the live universe: the statements feed covers 192 of 750 names,
+#: so all five value factors sat at exactly the neutral rank for 74% of the
+#: universe. Worse, coverage is not random -- names WITH statements have 7.5x
+#: the median turnover of names without (Rs 176 cr against Rs 23 cr), so the
+#: value block was substantially a disguised size bet.
+MIN_FACTOR_COVERAGE = 0.60
+
 #: Training window in sessions. Bounded rather than "all history" for memory:
 #: the full 2,206-session panel peaked at 615 MB on a 512 MB instance. 1,500
 #: sessions still yields ~45 training periods for 14 features, which is the
@@ -114,10 +126,17 @@ REFIT_EVERY_SESSIONS = 21
 class CrossSectionalModel:
     """A fitted ridge model plus the provenance needed to reproduce it."""
 
-    def __init__(self, coef: Dict[str, float], n_train: int, train_end: dt.date) -> None:
+    def __init__(self, coef: Dict[str, float], n_train: int, train_end: dt.date,
+                 features: Optional[List[str]] = None) -> None:
         self.coef = coef
         self.n_train = n_train
         self.train_end = train_end
+        #: The columns this model was fitted on, IN FIT ORDER -- `mu` and `sd`
+        #: are positional and align to it. Not always every column in
+        #: FEATURE_COLUMNS: a factor the feed cannot serve for most of the
+        #: universe is dropped rather than neutral-filled, so the model has to
+        #: say which ones it actually used.
+        self.features = list(features) if features else list(coef.keys())
 
     def summary(self) -> str:
         top = sorted(self.coef.items(), key=lambda kv: -abs(kv[1]))[:4]
@@ -146,11 +165,19 @@ def load_cached(path, as_of: dt.date,
         fitted = dt.date.fromisoformat(blob["fitted_for"])
         if (as_of - fitted).days > every * 2:
             return None
-        if sorted(blob["coef"]) != sorted(FEATURE_COLUMNS):
+        # A stored model may legitimately carry FEWER factors than the code
+        # declares: one the feed could not serve for most of the universe is
+        # dropped rather than neutral-filled. What must not happen is a stored
+        # factor the code no longer knows, which means the definitions moved.
+        stored = list(blob.get("features") or blob["coef"].keys())
+        if not set(stored) <= set(FEATURE_COLUMNS):
             return None                      # feature set changed; refit
+        if sorted(stored) != sorted(blob["coef"]):
+            return None                      # blob is internally inconsistent
         m = CrossSectionalModel(
             coef=blob["coef"], n_train=int(blob["n_train"]),
             train_end=dt.date.fromisoformat(blob["train_end"]),
+            features=stored,
         )
         m.mu = np.array(blob["mu"], dtype="float64")
         m.sd = np.array(blob["sd"], dtype="float64")
@@ -207,7 +234,11 @@ def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
         "fitted_for": as_of.isoformat(),
         "train_end": model.train_end.isoformat(),
         "n_train": model.n_train,
+        # IN FIT ORDER. `mu` and `sd` are positional and align to it, so a dict
+        # whose iteration order changed would silently mis-standardise.
+        "features": list(model.features),
         "coef": model.coef,
+        "dropped_for_coverage": getattr(model, "dropped_for_coverage", {}) or {},
         "mu": list(map(float, model.mu)),
         "sd": list(map(float, model.sd)),
         "intercept": model.intercept,
@@ -216,8 +247,9 @@ def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
 
 def score_with(model: CrossSectionalModel, features: pd.DataFrame) -> pd.Series:
     """Apply stored coefficients to today's features."""
-    x = features[FEATURE_COLUMNS].to_numpy("float64")
-    coef = np.array([model.coef[c] for c in FEATURE_COLUMNS], dtype="float64")
+    cols = model.features
+    x = features.reindex(columns=cols).fillna(0.0).to_numpy("float64")
+    coef = np.array([model.coef[c] for c in cols], dtype="float64")
     raw = ((x - model.mu) / model.sd) @ coef + model.intercept
     s = pd.Series(raw, index=features["symbol"].to_numpy())
     return ((s.rank(pct=True) - 0.5) * 2.0).sort_values(ascending=False)
@@ -232,24 +264,26 @@ def contributions(model: CrossSectionalModel, features: pd.DataFrame) -> pd.Data
     factors beside a number the model produced describes a calculation that did
     not happen.
     """
-    x = features[FEATURE_COLUMNS].to_numpy("float64")
+    cols = model.features
+    x = features.reindex(columns=cols).fillna(0.0).to_numpy("float64")
     z = (x - model.mu) / np.where(model.sd == 0, 1.0, model.sd)
-    coef = np.array([model.coef[c] for c in FEATURE_COLUMNS], dtype="float64")
+    coef = np.array([model.coef[c] for c in cols], dtype="float64")
     return pd.DataFrame(
         z * coef,
         index=features["symbol"].to_numpy(),
-        columns=[c[:-2] if c.endswith("_r") else c for c in FEATURE_COLUMNS],
+        columns=[c[:-2] if c.endswith("_r") else c for c in cols],
     )
 
 
 def standardised_features(model: CrossSectionalModel, features: pd.DataFrame) -> pd.DataFrame:
     """The z-scores the coefficients multiply, for the same columns."""
-    x = features[FEATURE_COLUMNS].to_numpy("float64")
+    cols = model.features
+    x = features.reindex(columns=cols).fillna(0.0).to_numpy("float64")
     z = (x - model.mu) / np.where(model.sd == 0, 1.0, model.sd)
     return pd.DataFrame(
         z,
         index=features["symbol"].to_numpy(),
-        columns=[c[:-2] if c.endswith("_r") else c for c in FEATURE_COLUMNS],
+        columns=[c[:-2] if c.endswith("_r") else c for c in cols],
     )
 
 
@@ -273,7 +307,7 @@ def _attach_fundamentals(
 
     def _blank(frame: pd.DataFrame) -> pd.DataFrame:
         for c in cols:
-            frame[c] = 0.0
+            frame[c] = np.nan
         return frame
 
     if statements is None or statements.empty:
@@ -330,11 +364,17 @@ def _attach_fundamentals(
         col = f + "_r"
         if f in panel.columns:
             w = panel.groupby("date")[f].transform(winsorise)
+            # NOT filled here. A missing filing is left as NaN so the caller can
+            # SEE how much of the column is absent and decide. Filling it at 0.0
+            # here made the gap invisible: every name without a statement landed
+            # on the neutral rank, the five value columns became a constant for
+            # three quarters of the universe, and the model reported seventeen
+            # factors while twelve carried the ranking.
             panel[col] = w.groupby(panel["date"]).transform(
                 lambda s: ((s.rank(pct=True, na_option="keep") - 0.5) * 2.0)
-            ).fillna(0.0)
+            )
         else:
-            panel[col] = 0.0
+            panel[col] = np.nan
     return panel
 
 
@@ -384,9 +424,30 @@ def fit_predict(
     train_turnover = turnover.reindex(train_close.index)
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
                         delivery=delivery, eligible=eligible)
+    features = list(FEATURE_COLUMNS)
+    dropped: Dict[str, float] = {}
     if not panel.empty:
         panel = _attach_fundamentals(panel, fundamentals, train_close, max_fundamental_age_days)
-        panel = panel.dropna(subset=[c for c in FEATURE_COLUMNS if c in panel.columns]
+        # A factor the feed cannot serve for most of the universe is not a
+        # factor. Coverage is measured on the training panel and anything under
+        # the floor leaves the model entirely, rather than being neutral-filled
+        # and reported as though it had ranked anything.
+        fund_cols = [f + "_r" for f in FUNDAMENTAL_FEATURES]
+        for c in fund_cols:
+            if c not in panel.columns:
+                dropped[c] = 0.0
+                continue
+            cov = float(panel[c].notna().mean())
+            if cov < MIN_FACTOR_COVERAGE:
+                dropped[c] = cov
+        features = [c for c in FEATURE_COLUMNS if c not in dropped]
+        # Above the floor a gap still ranks neutral, which is the same rule
+        # `crosssec.NEUTRAL_WHEN_MISSING` applies to delivery.
+        for c in fund_cols:
+            if c in features:
+                panel[c] = panel[c].fillna(0.0)
+        panel = panel.drop(columns=[c for c in dropped if c in panel.columns])
+        panel = panel.dropna(subset=[c for c in features if c in panel.columns]
                              + ["label_rank"])
     if panel.empty or len(panel) < MINR:
         return None, None, (
@@ -394,9 +455,18 @@ def fit_predict(
             f"{MINR} required"
         )
 
-    x = panel[FEATURE_COLUMNS].to_numpy("float64")
+    if len(features) < 2:
+        return None, None, (
+            f"only {len(features)} factor(s) cleared the "
+            f"{MIN_FACTOR_COVERAGE:.0%} coverage floor"
+        )
+    x = panel[features].to_numpy("float64")
     y = panel["label_rank"].to_numpy("float64")
     fit = ridge_fit(x, y, alpha=A)
+    if dropped:
+        log.info("factors dropped for coverage",
+                 extra={"dropped": {k: round(v, 3) for k, v in dropped.items()},
+                        "floor": MIN_FACTOR_COVERAGE, "kept": len(features)})
 
     # Features for the decision date itself, from the same builder, so training
     # and inference cannot drift apart in definition.
@@ -415,22 +485,28 @@ def fit_predict(
         return None, None, "features could not be computed for the decision date"
     live = _attach_fundamentals(live, fundamentals, live_hist, max_fundamental_age_days)
     latest = live[live["date"] == live["date"].max()]
-    latest = latest.dropna(subset=[c for c in FEATURE_COLUMNS if c in latest.columns])
+    for c in [f + "_r" for f in FUNDAMENTAL_FEATURES]:
+        if c in features and c in latest.columns:
+            latest = latest.copy()
+            latest[c] = latest[c].fillna(0.0)
+    latest = latest.dropna(subset=[c for c in features if c in latest.columns])
     if latest.empty:
         return None, None, "no symbol had a complete feature set on the decision date"
 
     n_train = len(panel)
     train_end = pd.Timestamp(panel["date"].max()).date()
     del panel, x, y
-    raw = predict(fit, latest[FEATURE_COLUMNS].to_numpy("float64"))
+    raw = predict(fit, latest[features].to_numpy("float64"))
     scores = pd.Series(raw, index=latest["symbol"].to_numpy())
     ranked = (scores.rank(pct=True) - 0.5) * 2.0
 
     model = CrossSectionalModel(
-        coef=dict(zip(FEATURE_COLUMNS, fit["coef"].tolist())),
+        coef=dict(zip(features, fit["coef"].tolist())),
         n_train=n_train,
         train_end=train_end,
+        features=features,
     )
+    model.dropped_for_coverage = dropped
     model.mu, model.sd, model.intercept = fit["mu"], fit["sd"], fit["intercept"]
     release_memory()
     log.info(
@@ -460,5 +536,7 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
         return None
     live = _attach_fundamentals(live, fundamentals, hist, max_fundamental_age_days)
     latest = live[live["date"] == live["date"].max()].dropna(
-        subset=[c for c in FEATURE_COLUMNS if c in live.columns])
+        subset=[c for c in FEATURE_COLUMNS
+                if c in live.columns and not c.endswith(
+                    tuple(f + "_r" for f in FUNDAMENTAL_FEATURES))])
     return latest if not latest.empty else None
