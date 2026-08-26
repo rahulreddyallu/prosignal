@@ -61,6 +61,10 @@ class PortfolioParams:
     cost_bps_round_trip: float = 70.0
     #: (price, quantity, adtv_inr) -> round-trip bps of the buy value.
     cost_fn: Optional[Callable[[float, float, float], float]] = None
+    #: Profit target in units of the stop distance (stage7_risk.targets.
+    #: t2_r_multiple). The simulator had NO target, so it measured a strategy
+    #: that never takes profit while Stage 7 emits a target exit at 3R.
+    target_r_multiple: float = 3.0
 
     # -- portfolio-level volatility scaling (Moreira & Muir 2017) -----------
     #: Annualised volatility the BOOK is scaled toward. `None` disables the
@@ -223,34 +227,35 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
 
 def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams
           ) -> Optional[float]:
-    """Realised return of one position: stop, then invalidation, then horizon."""
-    entry = close[sym].iloc[i]
-    a = atr[sym].iloc[i]
-    if not np.isfinite(entry) or entry <= 0 or not np.isfinite(a):
-        return None
-    dist = min(max(p.stop_atr_multiple * a / entry * 100.0,
-                   p.min_stop_distance_pct), p.max_stop_distance_pct) / 100.0
-    stop = entry * (1.0 - dist)
-    H = p.horizon_sessions
-    lo = low[sym].iloc[i + 1: i + 1 + H].to_numpy(dtype="float64")
-    op = open_[sym].iloc[i + 1: i + 1 + H].to_numpy(dtype="float64")
-    cl = close[sym].iloc[i + 1: i + 1 + H].to_numpy(dtype="float64")
-    mv = ma[sym].iloc[i + 1: i + 1 + H].to_numpy(dtype="float64")
-    av = atr[sym].iloc[i + 1: i + 1 + H].to_numpy(dtype="float64")
-    finite = np.isfinite(cl)
-    if finite.sum() < H * 0.5:
-        return None
-    for k in range(len(cl)):
-        # A gap through the stop fills at the open, not at the stop. Assuming
-        # the stop price is the optimistic error, and the optimistic error is
-        # the one that matters.
-        if np.isfinite(lo[k]) and lo[k] <= stop:
-            fill = min(op[k], stop) if np.isfinite(op[k]) else stop
-            return float(fill / entry - 1.0)
-        if (np.isfinite(cl[k]) and np.isfinite(mv[k]) and np.isfinite(av[k])
-                and cl[k] < mv[k] - p.invalidation_buffer_atr * av[k]):
-            return float(cl[k] / entry - 1.0)
-    return float(cl[finite][-1] / entry - 1.0)
+    """Realised return of one position, from the SHARED exit resolver.
+
+    This used to carry its own copy of the exit logic -- stop, invalidation,
+    horizon, and no profit target at all -- while the training label carried a
+    different copy and Stage 7 a third. `features.exits` is the single
+    definition now; this is the per-symbol adapter onto it.
+
+    Note that the simulator therefore TAKES PROFIT now, at `target_r_multiple`.
+    It did not before, so a position that reached 3R was carried to the horizon
+    and whatever happened next was booked. That flattered nothing consistently:
+    it overstated the winners that kept running and understated the ones that
+    gave it back.
+    """
+    from ..features.exits import ExitRules, resolve_exits
+
+    rules = ExitRules(
+        stop_atr_multiple=p.stop_atr_multiple,
+        min_stop_distance_pct=p.min_stop_distance_pct,
+        max_stop_distance_pct=p.max_stop_distance_pct,
+        target_r_multiple=p.target_r_multiple,
+        invalidation_ma_sessions=p.invalidation_ma_sessions,
+        invalidation_buffer_atr=p.invalidation_buffer_atr,
+        horizon=p.horizon_sessions,
+    )
+    one = [sym]
+    out = resolve_exits(close[one], i, rules, high=None, low=low[one],
+                        open_=open_[one], atr=atr[one], ma=ma[one])
+    value = out["ret"].iloc[0] if len(out) else np.nan
+    return None if not np.isfinite(value) else float(value)
 
 
 def simulate(

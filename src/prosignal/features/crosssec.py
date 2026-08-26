@@ -17,7 +17,9 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .labels import BarrierSpec, average_uniqueness, triple_barrier
+from .exits import ExitRules, atr_panel, ma_panel
+from .labels import (BarrierSpec, average_uniqueness, engine_barrier,
+                     triple_barrier)
 
 __all__ = ["FEATURES", "build_panel", "cross_sectional_rank",
            "liquidity_mask", "sector_neutral_rank", "MIN_SECTOR_NAMES",
@@ -364,8 +366,10 @@ def build_panel(
     eligible: Optional[pd.DataFrame] = None,
     sectors: Optional[Dict[str, str]] = None,
     barriers: Optional["BarrierSpec"] = None,
+    exit_rules: Optional["ExitRules"] = None,
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
+    open_: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
@@ -390,15 +394,32 @@ def build_panel(
     else:
         bench_src = close
     bench_full = bench_src.mean(axis=1).pct_change(fill_method=None).to_numpy(dtype="float64")
+    # ATR and the invalidation moving average are computed ONCE for the whole
+    # panel rather than per date. They are the engine's own, from the same
+    # `true_range` Stage 7 uses.
+    atr = ma = None
+    if exit_rules is not None and high is not None and low is not None:
+        atr = atr_panel(high, low, close, exit_rules.atr_period_sessions,
+                        exit_rules.atr_method)
+        ma = ma_panel(close, exit_rules.invalidation_ma_sessions)
     rows: List[pd.DataFrame] = []
     for i in range(MIN_LOOKBACK, len(dates) - horizon, step):
         feats = _features_at(close, turnover, i, bench_full[: i + 1], delivery=delivery)
-        if barriers is not None:
-            # The label is the trade the engine would actually have taken:
-            # whichever of the profit, stop or time barrier is touched first.
-            # The horizon return is blind to the path and books a name that
-            # fell 20% and recovered by day 63 as a winner the engine was
-            # stopped out of in week two.
+        if exit_rules is not None:
+            # The label is the trade the engine would actually have taken, in
+            # the ENGINE'S OWN geometry: its ATR stop, its 3R target, its
+            # thesis-invalidation exit. Sigma barriers described a trade with a
+            # 1.33:1 reward-to-risk profile that this engine never takes.
+            bars = engine_barrier(close, i, exit_rules, high=high, low=low,
+                                  open_=open_, atr=atr, ma=ma)
+            feats = feats.assign(label=bars["ret"].reindex(feats.index),
+                                 barrier_side=bars["side"].reindex(feats.index),
+                                 held=bars["held"].reindex(feats.index),
+                                 t0=float(i),
+                                 t1=bars["t1"].reindex(feats.index))
+        elif barriers is not None:
+            # Sigma barriers. Research only -- kept so the shipped geometry can
+            # be measured against the one it replaced.
             bars = triple_barrier(close, i, barriers, high=high, low=low)
             feats = feats.assign(label=bars["ret"].reindex(feats.index),
                                  barrier_side=bars["side"].reindex(feats.index),

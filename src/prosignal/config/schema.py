@@ -801,8 +801,18 @@ class LabelConfig(_Base):
     """
 
     triple_barrier: bool = True
-    #: Barrier widths in units of the name's own horizon volatility, so they
-    #: mean the same thing for a 1.2%-sigma large cap and a 4%-sigma midcap.
+    #: "engine" derives the barriers from the stop and target Stage 7 ACTUALLY
+    #: places -- 2.5 x ATR and 3.0R -- so the model is fitted against the trade
+    #: the engine takes. "sigma" uses `upper_sigma`/`lower_sigma` below and is
+    #: kept for research only.
+    #:
+    #: The sigma geometry shipped first and was wrong in a measurable way:
+    #: across 156,446 observations its stop was 1.48x looser than the engine's
+    #: for 88% of names and its target 1.57x tighter, giving the label a 1.33:1
+    #: reward-to-risk profile against the engine's 3.0:1. 14% of everything it
+    #: called a winner would have been stopped out.
+    barrier_source: str = Field("engine", pattern="^(engine|sigma)$")
+    #: Research only. See `barrier_source`.
     upper_sigma: float = Field(1.0, gt=0, le=5.0)
     lower_sigma: float = Field(0.75, gt=0, le=5.0)
     vol_window_sessions: int = Field(60, ge=20, le=252)
