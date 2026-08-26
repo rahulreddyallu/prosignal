@@ -1099,6 +1099,43 @@ stage4_core_score:
   # The constraint is DATA, not code: eight positions over seventy rebalances is
   # roughly 370 decided trades in the entire history. Re-run
   # `prosignal research metalabel` when the panel is longer.
+  # THE PRE-COMMITTED KILL CRITERION FOR A FACTOR THEME.
+  #
+  # The gated estimator already zeroes a theme that cannot clear |t| >= 2 on its
+  # own training window, so a theme that stops working stops being traded. That
+  # is a CONTROL, not a monitor: it acts and then says nothing about why, and a
+  # theme that flickers in and out of the book across refits looks identical to
+  # one that is quietly dying. The two call for opposite responses -- a small
+  # coefficient this quarter is noise; a coefficient that has walked
+  # monotonically to zero over years is a dead factor, and refitting it every 21
+  # sessions in the hope it comes back is how a strategy outlives its edge.
+  #
+  # THE CRITERION, stated as a principle rather than a tuned pair of numbers:
+  #
+  #   A theme is killed when its trailing-window Newey-West t has been
+  #   NON-POSITIVE on every check across a COMPLETE REFRESH of that window.
+  #
+  # Non-positive rather than some threshold, because a t at or below zero says
+  # there is no positive relationship left at all -- a sign test, not a level
+  # somebody picked. A complete refresh rather than "a few checks", because the
+  # rolling windows overlap almost entirely: requiring the breach to persist
+  # until every observation in the window arrived AFTER it began means no single
+  # bad quarter can end a theme. required_breaches is tied to window_dates and
+  # is not tuned separately.
+  #
+  # Declared before the numbers were looked at. `prosignal research decay`
+  # evaluates it; it does not choose it.
+  decay_monitor:
+    window_dates: 24
+    kill_t_stat: 0.0
+    required_breaches: 24
+    # McLean & Pontiff (2016): 97 published anomalies lose about 58% of their
+    # return out of sample -- a third from statistical bias in the original
+    # result, the rest from real arbitrage once the paper was read. Every theme
+    # here comes from a published paper, so a theme merely MEETING its haircut
+    # expectation is behaving as the literature predicts, not underperforming.
+    post_publication_haircut: 0.58
+
   metalabel:
     enabled: false
     shortlist_top_k: 50

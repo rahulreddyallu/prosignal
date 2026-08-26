@@ -924,6 +924,47 @@ class VolatilityScalingConfig(_Base):
     min_scale: float = Field(0.5, ge=0.05, le=1.0)
 
 
+class DecayMonitorConfig(_Base):
+    """The pre-committed kill criterion for a factor theme.
+
+    Declared HERE, before the numbers are looked at. A rule chosen after seeing
+    which themes it would remove is not a rule; it is the selection it exists to
+    prevent, wearing a lab coat.
+
+    The criterion is stated as a principle rather than a tuned pair of numbers:
+
+      A theme is killed when its trailing-window Newey-West t has been
+      NON-POSITIVE on every check across a COMPLETE REFRESH of that window.
+
+    Both halves are chosen for a reason and not for a score. Non-positive,
+    rather than some threshold, because a t at or below zero says there is no
+    positive relationship left at all -- it is a sign test, not a level somebody
+    picked. A complete refresh, rather than "a few checks", because the rolling
+    windows overlap almost entirely: requiring the breach to persist until every
+    observation in the window arrived AFTER the breach began means no single bad
+    quarter can end a theme.
+
+    `required_breaches` is therefore tied to `window_dates` and not tuned
+    separately.
+    """
+
+    #: Trailing cross-sections per check. 24 dates at a 21-session step is about
+    #: two years -- long enough for a Newey-West t to mean something, short
+    #: enough that a theme which died three years ago is not still being carried
+    #: by its own history.
+    window_dates: int = Field(24, ge=12, le=120)
+    #: Non-positive. See above: a sign test, not a tuned level.
+    kill_t_stat: float = Field(0.0, ge=-2.0, le=2.0)
+    #: A complete refresh of the window. Kept as its own field so it is visible,
+    #: but it is meant to equal `window_dates`.
+    required_breaches: int = Field(24, ge=1, le=120)
+    #: McLean & Pontiff (2016): published anomalies lose about 58% of their
+    #: return out of sample. Every theme here comes from a published paper, so
+    #: the honest expectation is the haircut coefficient -- and a theme merely
+    #: MEETING it is behaving as the literature predicts, not underperforming.
+    post_publication_haircut: float = Field(0.58, ge=0.0, lt=1.0)
+
+
 class Stage4Config(_Base):
     weighting_mode: TS
     standardisation: TS
@@ -956,6 +997,7 @@ class Stage4Config(_Base):
     labels: LabelConfig = Field(default_factory=LabelConfig)
     estimator: EstimatorConfig = Field(default_factory=EstimatorConfig)
     metalabel: MetaLabelConfig = Field(default_factory=MetaLabelConfig)
+    decay_monitor: DecayMonitorConfig = Field(default_factory=DecayMonitorConfig)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":
