@@ -348,11 +348,26 @@ def run(
             )
         )
 
-    redundancy = _redundancy(frame, cfg)
+    # Measured on the MODEL's own features, not on the hand-weighted composite's.
+    # It ran on `frame` -- the legacy composite's factor block -- so the
+    # seventeen columns that actually rank the universe were never checked
+    # against each other. On the live universe they are not independent:
+    # amihud/turnover_ratio at -0.87 are one factor measured from two sides, and
+    # resid_mom/mom_6_1 at +0.77 with prox_52w at +0.60 make the momentum block
+    # roughly one bet carrying three coefficients.
+    model_block = None
+    if model_features is not None and not model_features.empty:
+        cols = [c for c in model_features.columns if c.endswith("_r")]
+        if len(cols) >= 2:
+            model_block = model_features[cols].rename(columns=lambda c: c[:-2])
+
+    redundancy = _redundancy(model_block if model_block is not None else frame, cfg)
     if redundancy.breaches:
+        pairs = ", ".join(f"{a}/{b} {r:+.2f}" for a, b, r in redundancy.breaches[:4])
         notes.append(
             f"Redundancy: {len(redundancy.breaches)} factor pair(s) exceed "
-            f"|rho|={redundancy.cutoff}. They are not independent evidence."
+            f"|rho|={redundancy.cutoff}. They are not independent evidence. "
+            f"{pairs}"
         )
 
     log.info("stage 4 complete", extra={"scored": len(scores), "factors": list(effective)})

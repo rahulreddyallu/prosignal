@@ -17,7 +17,7 @@ It issues opinions. It has no order-routing code and no broker connection.
 | **Universe** | ~750 names, liquidity-screened point-in-time |
 | **Frequency** | Once per trading session, end-of-day |
 | **Horizon** | 63 sessions (~3 months) |
-| **Method** | Ridge regression on 17 cross-sectional factors, refit each run |
+| **Method** | Ridge regression on the cross-sectional factors that clear a coverage floor — **12 of 17** on the current feed — refit each run |
 | **Output** | A ranked shortlist of 5, each with factor contributions |
 | **Execution** | None. No orders, no broker, no automation |
 | **Status** | Forward test registered, not yet started |
@@ -421,6 +421,38 @@ displayed list and the validated strategy were two different products.
 
 `presentation/selection.py`
 
+### What the score is actually made of
+
+Measured on the live universe, mean |contribution| per factor, and the pairwise
+rank correlations that say how much of it is one bet:
+
+| Block | Factors | Share |
+|---|---|---|
+| Delivery | `deliv_pct`, `deliv_trend` | 25% |
+| Momentum | `resid_mom`, `prox_52w`, `mom_6_1` | 41% |
+| Liquidity | `turnover_ratio`, `amihud` | 14% |
+| Risk | `downside_vol`, `beta_120`, `max_dd_120`, `max5_21` | 10% |
+| Value | five ratios | **dropped — see above** |
+
+**The blocks are not independent.** Pairs above the |ρ| = 0.60 cutoff:
+
+| pair | ρ | reading |
+|---|---|---|
+| `amihud` / `turnover_ratio` | **−0.869** | one factor measured from two sides |
+| `resid_mom` / `mom_6_1` | **+0.770** | |
+| `resid_mom` / `prox_52w` | **+0.601** | the momentum block is close to one bet with three coefficients |
+
+Ridge does not pick a winner among collinear inputs, it spreads the penalty
+across the block — so the effective momentum weight is larger than any single
+coefficient suggests. The redundancy check now measures **the model's own
+features**; it previously ran on the hand-weighted composite's block and never
+saw these.
+
+One pairing the numbers **refute**: `max_dd_120` / `downside_vol` sit at
+**−0.372**, not above 0.7. They are genuinely different information and both stay.
+
+---
+
 ### What holds a position open
 
 Three separate mechanisms had to agree before the book could actually be
@@ -473,7 +505,26 @@ served, so two exit rules can never be averaged together.
 
 ## Feature reference
 
-All 17 are **active**. Suffix `_r` denotes the cross-sectional rank.
+Suffix `_r` denotes the cross-sectional rank.
+
+> [!WARNING]
+> **The five value factors are not currently active.** The statements feed
+> covers **192 of 750** names, so on the training panel they carry **10–12%**
+> coverage and are dropped by `crossmodel.MIN_FACTOR_COVERAGE`. The engine fits
+> **12 factors**, not 17, and says so in the model blob's
+> `dropped_for_coverage`.
+>
+> They were previously neutral-filled. Every name without a statement landed on
+> exactly the same rank for all five, which is why they read as five identical
+> z-scores of −0.01 on a card — identical to two decimals across five ratios
+> built from five different line items. Worse, the gap is not random: names WITH
+> statements have **7.5× the median turnover** of names without (₹176 cr against
+> ₹23 cr), so the block was substantially a disguised size bet.
+>
+> **The binding constraint is the feed, not the factor list.** Quality,
+> profitability, accruals, asset growth and net issuance are all worth adding
+> and none of them can be added until fundamentals cover the universe rather
+> than its largest quarter.
 
 | Feature | Lookback | Definition | Reference |
 |---|---|---|---|
@@ -532,7 +583,7 @@ equally evidenced.** This is the single largest known weakness.
 
 ## Technical methodology
 
-Six dimensions, mapped from the 17 factors: momentum, trend position,
+Six dimensions, mapped from the fitted factors: momentum, trend position,
 participation, valuation, risk, market environment.
 
 **There is no RSI, MACD, or moving-average crossover in the signal path.**
