@@ -2444,9 +2444,21 @@ function techHTML(t) {
   const list = (k, arr) => !arr || !arr.length ? "" :
     '<div class="tr"><span class="tk2">' + k + '</span><span class="tv">' +
     arr.map((x) => esc(String(x))).join("<br>") + '</span></div>';
+  /* Score and the factor contributions are in DIFFERENT UNITS, and the panel
+     showed both without saying so. A reader adding up contributions of ~0.12
+     and seeing a score of 0.898 has no way to connect them.
+
+     The chain is: the model produces a raw prediction (the contributions sum to
+     it), that prediction is ranked across the day's eligible universe, and the
+     rank is mapped onto [0,1]. So 0.898 means "89.8th percentile of the names
+     eligible today" -- not a probability, and not the sum of anything above. */
   return '<div class="tech">' +
-    line("Score", t.score != null ? Number(t.score).toFixed(3) : null) +
+    line("Score", t.score != null
+         ? Number(t.score).toFixed(3) + "  (percentile of today's universe)"
+         : null) +
     line("Percentile", t.percentile != null ? Number(t.percentile).toFixed(1) : null) +
+    line("Contributions", "in the model's raw units — they sum to the " +
+         "prediction that was ranked, not to Score") +
     line("Rank shown", t.display_rank) +
     list("Supporting", t.why_raw) +
     list("Against", t.against_raw) +

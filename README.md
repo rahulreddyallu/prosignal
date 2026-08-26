@@ -421,6 +421,29 @@ displayed list and the validated strategy were two different products.
 
 `presentation/selection.py`
 
+### What SCORE is, in units
+
+The card shows a SCORE of e.g. 0.898 and factor contributions summing to
+about 0.12. They are **different units**, and nothing used to say so.
+
+```
+raw = Σ (z_factor × coefficient) + intercept      the contributions sum to THIS
+    ↓  rank across today's eligible universe
+    ↓  map rank onto [0, 1]  via (rank−1)/(n−1)
+SCORE = 0.898   →  "89.8th percentile of the names eligible today"
+```
+
+So SCORE is a **cross-sectional percentile**, stable in meaning across days only
+in the sense that 0.9 always means "top decile of that day's universe". It is
+not a probability, and it is not the sum of the contributions. Stage 5 penalties
+subtract from it afterwards, which is why a penalised name can sit below its
+pre-defence percentile.
+
+This is also why `min_composite_score = 0.60` and `min_universe_percentile = 60`
+are arithmetically the same test — the config already notes it.
+
+---
+
 ### What the score is actually made of
 
 Measured on the live universe, mean |contribution| per factor, and the pairwise
