@@ -121,17 +121,34 @@ HORIZON = 63              # default only; stage 4 passes the configured value
 #: rather than returning a confident-looking number from nothing.
 MIN_TRAIN_ROWS = 600
 
-#: A factor scored on a minority of names ranks the rest by neutral fill, which
+#: A factor scored on a minority of NAMES ranks the rest by neutral fill, which
 #: is not a ranking. Stage 4 already states this rule and enforces it on the
 #: hand-weighted composite -- the fitted model, which is the one that actually
 #: ranks, imputed instead.
 #:
-#: Measured on the live universe: the statements feed covers 192 of 750 names,
-#: so all five value factors sat at exactly the neutral rank for 74% of the
-#: universe. Worse, coverage is not random -- names WITH statements have 7.5x
-#: the median turnover of names without (Rs 176 cr against Rs 23 cr), so the
-#: value block was substantially a disguised size bet.
+#: Measured WITHIN A DATE, which is the question the rule asks. A single number
+#: over the whole panel conflated two different failures and reported the wrong
+#: one: after the fundamentals ingest took symbol coverage from 26% to 100%, the
+#: value factors read 40% "coverage" and were dropped for ranking too few names
+#: -- when in fact they rank 73% of the universe on every date they exist.
 MIN_FACTOR_COVERAGE = 0.60
+
+#: The other failure. A factor the feed cannot serve for the earlier part of the
+#: panel is not badly covered, it is ABSENT, and fitting it beside factors that
+#: span the whole period means either imputing it for those dates -- the bug
+#: this pair of tests exists to prevent -- or shortening the panel for everyone.
+#:
+#: Measured after the ingest: the value and quality factors exist on 35 of 88
+#: panel dates. yfinance serves about five years of statements and TTM needs
+#: four quarters of it, so the first usable date is 2023-06 against a panel
+#: starting 2018-12. Shortening the panel to 35 overlapping dates -- roughly
+#: eight independent 63-session windows -- to fit seven coefficients instead of
+#: five is a worse trade than dropping two families.
+#:
+#: This is a DATA-DEPTH bar, not a quality bar. A fundamentals source reaching
+#: back as far as the price history clears it and the families enter on their
+#: own.
+MIN_FACTOR_DATE_SPAN = 0.60
 
 #: Training window in sessions. Bounded rather than "all history" for memory:
 #: the full 2,206-session panel peaked at 615 MB on a 512 MB instance. 1,500
@@ -650,13 +667,26 @@ def fit_predict(
         # the floor leaves the model entirely, rather than being neutral-filled
         # and reported as though it had ranked anything.
         fund_cols = [f + "_r" for f in FUNDAMENTAL_FEATURES]
+        n_dates = max(panel["date"].nunique(), 1)
         for c in fund_cols:
             if c not in panel.columns:
                 dropped[c] = 0.0
                 continue
-            cov = float(panel[c].notna().mean())
-            if cov < MIN_FACTOR_COVERAGE:
-                dropped[c] = cov
+            per_date = panel.groupby("date")[c].apply(
+                lambda x: float(x.notna().mean()))
+            live = per_date[per_date > 0]
+            span = len(live) / n_dates
+            within = float(live.median()) if len(live) else 0.0
+            if span < MIN_FACTOR_DATE_SPAN:
+                # Absent for too much of the period, not thin within it.
+                dropped[c] = round(span, 4)
+                log.info("factor dropped: absent for too much of the panel",
+                         extra={"factor": c, "date_span": round(span, 3),
+                                "within_date": round(within, 3)})
+            elif within < MIN_FACTOR_COVERAGE:
+                dropped[c] = round(within, 4)
+                log.info("factor dropped: ranks too few names on the dates it exists",
+                         extra={"factor": c, "within_date": round(within, 3)})
         features = [c for c in FEATURE_COLUMNS if c not in dropped]
         # Above the floor a gap still ranks neutral, which is the same rule
         # `crosssec.NEUTRAL_WHEN_MISSING` applies to delivery.

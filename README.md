@@ -432,18 +432,46 @@ coverage rather than on code.
 | ASM / GSM surveillance exclusion | no feed. Trade-for-trade settlement and 100% margin make backtest fills there fiction |
 | Free-float-scaled market impact | no float data. Impact scales with traded value instead, and Indian promoter holdings are high enough that two identical-cap names can have floats differing threefold |
 
-**Implemented, dropped on coverage, activated by an ingest.** Gross
-profitability, cash operating profitability, ROCE, accruals, asset growth and
-net issuance are all computed and form the `quality` family. On the current feed
-they carry **10–12%** coverage and `MIN_FACTOR_COVERAGE` drops them, the same as
-value. `_refresh_statements` already receives all 750 symbols — the 192-name
-coverage is a stale ingest, not a code limit.
+**Implemented, dropped on DATE SPAN, waiting on a deeper feed.** Value's five
+ratios and quality's six are all computed. The fundamentals ingest was run and
+took symbol coverage from **192 to 758** names — 100% of the universe — and they
+are still dropped. The reason is not what it looks like:
 
-That floor is doing real work rather than being ceremonial: measured over the 17
-dates coverage allows, `quality` reads **IC −0.0533 at an 18% hit rate**, the
-opposite of the literature. Seventeen overlapping dates is about three
-independent windows, so that is noise rather than a finding — but shipping it as
-a scored family would have injected a negative-quality tilt on the strength of it.
+| | |
+|---|---|
+| within-date coverage, on dates the factor exists | **65–73%** — above the 60% floor |
+| panel dates the factor exists on at all | **33 of 88** — below the 60% span floor |
+
+yfinance serves about five years of statements and TTM needs four quarters of
+it, so the first usable panel date is **2023-06** against a panel starting
+**2018-12**. These are two different failures and the engine now tests them
+separately (`MIN_FACTOR_COVERAGE` and `MIN_FACTOR_DATE_SPAN`), because the
+remedies differ: thinness needs more names, absence needs more history, and the
+log has to say which.
+
+Fitting them anyway would mean truncating the panel to 33 overlapping dates —
+roughly eight independent 63-session windows — to estimate seven coefficients
+instead of five. That is a worse trade than dropping two families.
+
+**And value is now worth wanting.** With full coverage on the dates it exists it
+is the strongest family measured:
+
+| factor | IC | ICIR | t | dates |
+|---|---|---|---|---|
+| **value** (family) | **+0.0839** | +0.623 | +2.57 | 17 |
+| `ebitda_to_ev` | +0.0845 | +0.756 | +3.12 | 17 |
+| `fcf_yield` | +0.0533 | **+1.184** | +4.88 | 17 |
+| `mom` (family) | +0.0673 | +0.501 | +4.19 | 70 |
+
+Seventeen dates against a 63-session label is about **four independent windows**,
+and `factor_ic`'s t is deliberately not overlap-corrected — treat it as an upper
+bound. This is not evidence that value works. It is evidence that a fundamentals
+source reaching back as far as the price history is the single highest-value
+thing missing, and the code is already there to use it.
+
+`quality` reads **−0.0177 at t −0.92** on the same 17 dates — not significant
+either way. Note `accruals` at IC −0.0290: negative is Sloan's sign, and the
+family negates it, so it contributes correctly.
 
 **Size is computed and reported, not scored.** `log_mcap` reads IC **−0.2297 at
 a hit rate of 0/17**. That is not a factor, it is three windows in which small

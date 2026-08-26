@@ -207,3 +207,44 @@ def test_the_score_is_a_percentile_of_the_days_universe():
     assert out["mid"] == pytest.approx(0.5)
     # and it does NOT preserve the magnitudes the contributions carried
     assert out["best"] != pytest.approx(0.12)
+
+
+# ----------------------------------------------- two failures, two tests
+def test_coverage_is_two_different_questions():
+    """A single number over the whole panel conflated them and reported the
+    wrong one. After the fundamentals ingest took symbol coverage from 26% to
+    100%, the value factors read 40% panel coverage and were dropped for
+    "ranking too few names" -- when they rank **73%** of the universe on every
+    date they exist. What is actually wrong is that they exist on only 35 of 88
+    dates."""
+    assert cm.MIN_FACTOR_COVERAGE == pytest.approx(0.60)
+    assert cm.MIN_FACTOR_DATE_SPAN == pytest.approx(0.60)
+
+
+def test_a_factor_absent_early_is_dropped_for_span_not_for_thinness():
+    """The distinction matters because the remedies differ: thinness needs more
+    names, absence needs more history, and the log has to say which."""
+    import inspect
+
+    src = inspect.getsource(cm.fit_predict)
+    assert "absent for too much of the panel" in src
+    assert "ranks too few names on the dates it exists" in src
+    # Span is tested FIRST, so the more fundamental failure is the one reported.
+    assert (src.index("span < MIN_FACTOR_DATE_SPAN")
+            < src.index("within < MIN_FACTOR_COVERAGE"))
+
+
+def test_within_date_coverage_ignores_dates_the_factor_never_existed_on():
+    """Averaging zeros from an era the feed does not reach drags a perfectly
+    rankable factor under the floor."""
+    panel = pd.DataFrame({
+        "date": pd.to_datetime(["2020-01-01"] * 4 + ["2024-01-01"] * 4),
+        "f_r": [np.nan] * 4 + [1.0, 2.0, 3.0, np.nan],
+    })
+    per_date = panel.groupby("date")["f_r"].apply(lambda x: float(x.notna().mean()))
+    live = per_date[per_date > 0]
+    assert len(live) == 1, "one date has data"
+    assert float(live.median()) == pytest.approx(0.75), "and covers 75% of it"
+    assert float(panel["f_r"].notna().mean()) == pytest.approx(0.375), (
+        "while the flat average reads 37.5% and would drop it"
+    )
