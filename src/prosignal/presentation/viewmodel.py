@@ -28,6 +28,7 @@ FUNNEL_LABELS: Dict[str, str] = {
     "scored": "Ranked by the model",
     "survived_defense": "Cleared the risk checks",
     "triggered": "Met the entry criteria",
+    "passed_meta_label": "Cleared the NO TRADE veto",
     "buys": "Qualifying setups",
 }
 
@@ -46,6 +47,12 @@ FUNNEL_DETAIL: Dict[str, str] = {
         "earnings distortion. A name failing one is penalised or removed."
     ),
     "triggered": "Names inside the rank band the strategy opens positions in.",
+    "passed_meta_label": (
+        "New entries a second model did not refuse. It estimates the chance a "
+        "trade like this reaches its target before its stop; anything below the "
+        "floor is dropped. It can only refuse, never propose. Absent from this "
+        "funnel when the veto is switched off, which is the shipped default."
+    ),
     "buys": "What remained after every check.",
 }
 

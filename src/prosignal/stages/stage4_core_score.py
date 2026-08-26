@@ -68,6 +68,21 @@ STAGE_NAME = "stage4_core_score"
 log = get_logger(__name__)
 
 
+
+def _win_probability(model) -> Optional[Dict[str, float]]:
+    """P(target before stop) per ticker, or None when the veto is inert.
+
+    A cached model reloaded from disk carries no meta model -- the classifier is
+    not serialised -- so this returns None on the cheap path rather than an
+    empty dict. The two are different: an empty dict says the veto ran and
+    scored nobody, None says it did not run.
+    """
+    probs = getattr(model, "meta_prob", None) if model is not None else None
+    if probs is None or len(probs) == 0:
+        return None
+    return {str(k): float(v) for k, v in probs.items() if v == v}
+
+
 def run(
     eligibility: EligibilityReport,
     store: DataStore,
@@ -382,6 +397,11 @@ def run(
                                if model is not None else None),
         typical_dispersion=(float(getattr(model, "train_dispersion", 0.0))
                             if model is not None else None),
+        win_probability=_win_probability(model),
+        win_probability_unavailable=(
+            None if not bool(cfg.metalabel.enabled)
+            else (getattr(model, "meta_unavailable", None)
+                  or ("no model was fitted this run" if model is None else None))),
         weighting_mode=str(v(cfg.weighting_mode)),
         standardisation=method,
         effective_weights={k: round(v, 4) for k, v in effective.items()},
@@ -794,6 +814,9 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None):
             fm_window_dates=(int(est.window_dates)
                              if est.window_dates is not None else None),
             shrink_toward=str(est.shrink_toward),
+            metalabel=bool(cfg.metalabel.enabled),
+            metalabel_top_k=int(cfg.metalabel.shortlist_top_k),
+            metalabel_l2=float(cfg.metalabel.l2),
         )
         if model is not None:
             # A refit is proposed, not installed. This is the one path where a

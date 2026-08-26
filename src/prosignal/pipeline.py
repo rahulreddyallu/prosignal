@@ -255,7 +255,7 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # ---- Stage 8 ----------------------------------------------------------
     step(8)
     t = _clock()
-    buys, watch, no_trade = stage8_final_signal.run(
+    buys, watch, no_trade, gate_counts = stage8_final_signal.run(
         regime=regime,
         eligibility=eligibility,
         scores=scores,
@@ -330,14 +330,13 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         stage_timings_ms={k: round(v, 1) for k, v in timings.items()},
     )
 
-    funnel = no_trade.gate_summary if no_trade else {
-        "universe_considered": eligibility.universe_considered,
-        "passed_eligibility": len(eligibility.eligible_universe),
-        "scored": len(scores.ranked_scores),
-        "survived_defense": len(defense.survivors()),
-        "triggered": len(entries.triggered()),
-        "buys": len(buys),
-    }
+    # Stage 8's own counts, on every path. Rebuilding them here read
+    # `entries.triggered()` for the trigger line -- the population BEFORE the
+    # score gate -- so the displayed funnel could run backwards (triggered=1
+    # above passed_score=8) on exactly the path that produces a trade. Stage 8
+    # documents having fixed that; the fix never reached the screen because the
+    # screen was reading a different dict.
+    funnel = no_trade.gate_summary if no_trade else gate_counts
 
     # -- persist BEFORE returning. A run that is not recorded must not be
     # -- reported as evidence, so a ledger failure fails the run.

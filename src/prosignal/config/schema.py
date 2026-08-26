@@ -848,6 +848,47 @@ class EstimatorConfig(_Base):
     shrink_toward: str = Field("zero", pattern="^(zero|prior_mean)$")
 
 
+class MetaLabelConfig(_Base):
+    """The NO TRADE veto: a second model that decides whether to act.
+
+    DISABLED, and the reason is measured. Meta-labelling (Lopez de Prado ch. 3)
+    fits a binary classifier on the trades the primary model would actually have
+    taken, predicting whether one reaches its profit barrier before its stop.
+    Evaluated here on 1,432 out-of-sample shortlist rows over 40 dates:
+
+        pooled AUC                     0.5698
+        mean per-date AUC              0.4996   t vs 0.5   -0.02
+        dates above 0.5                50%
+        top-half minus bottom-half    -0.16% per period   t -0.15
+
+    The pooled figure is the pooled-N illusion in a new place. Pooling across
+    dates lets "this was a good period" masquerade as "this was a good name":
+    within a date, which is the only question a per-name veto can answer, the
+    classifier is a coin. Its calibration is also wrong in the direction that
+    matters -- the top bucket predicts 0.817 and realises 0.547.
+
+    Read as a DATE-level gate the pooled signal does reappear (trading only the
+    higher-probability half of dates returns +8.62% against +0.86%), but that is
+    market timing rather than trade selection; it rests on ~13 independent
+    windows once the 63-session overlap is counted, not 40; and it was found by
+    looking a second time after the first look failed. It is not enabled on that
+    basis.
+
+    The machinery is here, tested and wired, because the constraint is DATA:
+    eight positions over seventy rebalances is roughly 370 decided trades in the
+    whole history. Re-run `research metalabel` when the panel is longer.
+    """
+
+    enabled: bool = False
+    #: How far down the primary ranking counts as a trade the engine would
+    #: consider. Eight rows a date cannot support a classifier.
+    shortlist_top_k: int = Field(50, ge=8, le=200)
+    #: A candidate below this modelled probability of reaching target before
+    #: stop is refused. 0.0 vetoes nothing even when enabled.
+    min_win_probability: float = Field(0.0, ge=0.0, lt=1.0)
+    l2: float = Field(1.0, gt=0.0, le=1000.0)
+
+
 class Stage4Config(_Base):
     weighting_mode: TS
     standardisation: TS
@@ -879,6 +920,7 @@ class Stage4Config(_Base):
     model_min_train_rows: int = Field(600, ge=100)
     labels: LabelConfig = Field(default_factory=LabelConfig)
     estimator: EstimatorConfig = Field(default_factory=EstimatorConfig)
+    metalabel: MetaLabelConfig = Field(default_factory=MetaLabelConfig)
 
     @model_validator(mode="after")
     def _check(self) -> "Stage4Config":
@@ -1236,6 +1278,13 @@ class ScarcityConfig(_Base):
     #: penalty: measured across 88 panel dates the entire range was 0.0355 to
     #: 0.0607, so any absolute floor near the label's own scale blocks every day.
     min_dispersion_ratio: TF
+    #: A NEW entry whose modelled probability of reaching target before stop
+    #: falls below this is refused. 0.0 vetoes nothing, which is the shipped
+    #: default -- see MetaLabelConfig for the measurement behind that. Held
+    #: positions are exempt: they are governed by the Stage 6 exit band, and a
+    #: classifier refitted every 21 sessions must not be able to close a trade
+    #: it was not consulted about opening.
+    min_win_probability: TF
     expect_frequent_no_trade: bool = True
 
 
