@@ -69,10 +69,41 @@ def review_refit(
     proposed: Dict[str, float],
     previous: Optional[Dict[str, float]],
     previous_train_end: Optional[str] = None,
+    *,
+    proposed_estimator: Optional[str] = None,
+    previous_estimator: Optional[str] = None,
 ) -> RefitVerdict:
-    """Compare a proposed coefficient set against the one currently live."""
+    """Compare a proposed coefficient set against the one currently live.
+
+    A CHANGE OF ESTIMATOR IS NOT A REFIT. The comparison below is arithmetic on
+    coefficient magnitudes, and that only means something when both sets came
+    out of the same estimator. Across a switch it means nothing: ridge spreads
+    a penalty across collinear inputs while Fama-MacBeth gates on significance
+    and shrinks what survives, so the same data produces different numbers by
+    construction. On the recorded ridge-to-Fama-MacBeth change that read as a
+    sign flip and a 5.4x jump -- indistinguishable, by magnitude alone, from
+    the corrupted upstream date this gate exists to catch.
+
+    So an estimator change is treated as a FIRST FIT for the new estimator:
+    accepted, because there is nothing comparable to hold on to, and recorded
+    loudly, because a model replacement passing through the promotion gate is
+    exactly the event someone needs to see in the ledger.
+    """
     if previous is None or not previous:
         return RefitVerdict(accepted=True, reasons=["no previous fit to compare against"])
+
+    if (proposed_estimator is not None and previous_estimator is not None
+            and str(proposed_estimator) != str(previous_estimator)):
+        return RefitVerdict(
+            accepted=True,
+            reasons=[
+                f"the estimator changed from {previous_estimator!r} to "
+                f"{proposed_estimator!r}, so there is no comparable previous "
+                f"fit. Reviewed as a first fit; the coefficient comparison was "
+                f"NOT applied and this replacement is on the record"
+            ],
+            compared_against=previous_train_end,
+        )
 
     if not proposed:
         return RefitVerdict(accepted=False, reasons=["proposed fit has no coefficients"],

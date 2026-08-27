@@ -1,8 +1,13 @@
 """Cross-sectional return-rank model used by Stage 4.
 
-A ridge regression on fourteen cross-sectionally ranked features, refitted on
-every run from history strictly before the decision date, predicting the rank of
-the forward 21-session return.
+Cross-sectional themes fitted by Fama-MacBeth over the panel's DATES, refitted
+every 21 sessions from history strictly before the decision date, predicting the
+rank of the forward 63-session outcome under the engine's own exit geometry.
+
+The unit of estimation is the FAMILY, not the factor: 26 ranked columns are
+averaged into at most seven families and one coefficient is fitted per family.
+On the shipped model five families are built and the significance floor prices
+three of them.
 
 It is here rather than in a research folder because it was measured against the
 incumbent composite under purged walk-forward and won. The table below measured
@@ -24,6 +29,7 @@ so no observation used in the fit can know anything about the decision date.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -294,18 +300,32 @@ def load_cached(path, as_of: dt.date,
         return None
 
 
-def read_cached_coefficients(path) -> Tuple[Optional[Dict[str, float]], Optional[str]]:
-    """Coefficients currently live, and the date they were trained to.
+def read_cached_coefficients(
+    path,
+) -> Tuple[Optional[Dict[str, float]], Optional[str], Optional[str]]:
+    """Coefficients currently live, the date they were trained to, and the
+    estimator that produced them.
 
     Deliberately does not go through load_cached: staleness and feature-set
     checks are right for scoring and wrong here, where the question is only
     what a proposed refit would be replacing.
+
+    The ESTIMATOR comes back because the caller has to know whether the
+    comparison is meaningful at all. Without it, a deliberate switch from ridge
+    to Fama-MacBeth was reviewed as though it were a routine 21-session update
+    -- and it looks exactly like a corrupted one, because it is a different
+    model: on the recorded change, `reversal_f` went +0.0105 to -0.0568, a sign
+    flip and a 5.4x jump, and `mom_f` went from the largest positive
+    coefficient to zero. The gate cannot tell that from a bad upstream date by
+    looking at magnitudes, so it must not try.
     """
     try:
         blob = json.loads(path.read_text(encoding="utf-8"))
-        return dict(blob.get("coef") or {}), blob.get("train_end")
+        # A blob written before the field existed was a ridge fit.
+        return (dict(blob.get("coef") or {}), blob.get("train_end"),
+                str(blob.get("estimator", "ridge")))
     except (OSError, ValueError, KeyError, TypeError):
-        return None, None
+        return None, None, None
 
 
 def archive_cache(path, keep: int = 10) -> Optional[str]:
@@ -319,13 +339,21 @@ def archive_cache(path, keep: int = 10) -> Optional[str]:
         return None
     versions = path.parent / f"{path.stem}_versions"
     versions.mkdir(parents=True, exist_ok=True)
+    text = path.read_text(encoding="utf-8")
     try:
-        blob = json.loads(path.read_text(encoding="utf-8"))
+        blob = json.loads(text)
         stamp = str(blob.get("fitted_for") or "unknown")
     except (OSError, ValueError):
         stamp = "unknown"
-    target = versions / f"{path.stem}_{stamp}.json"
-    target.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    # The date ALONE collides. Two refits fitted for the same date -- which is
+    # what a config or estimator change on one day produces -- wrote to the
+    # same filename, so the second archive destroyed the copy the first one
+    # took and the recovery path this function exists to provide was gone
+    # exactly when it was most needed. The content digest keeps them apart and
+    # keeps re-archiving identical content idempotent.
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+    target = versions / f"{path.stem}_{stamp}_{digest}.json"
+    target.write_text(text, encoding="utf-8")
     existing = sorted(versions.glob(f"{path.stem}_*.json"))
     for old_file in existing[:-keep]:
         try:
@@ -446,6 +474,44 @@ def regime_reachability(multipliers: Optional[Dict[str, float]],
     }
 
 
+def reachable_multipliers(
+    multipliers: Optional[Dict[str, float]], coef: Optional[Dict[str, float]]
+) -> Tuple[Optional[Dict[str, float]], Optional[str]]:
+    """The multipliers to actually apply, and the reason when they are skipped.
+
+    ONE decision, for every path that scores. The guard used to live inside
+    `fit_predict` alone, which meant the regime layer behaved differently
+    depending on which branch produced the ranking:
+
+        refit accepted    1 session in 21   guarded on defensive_available
+        cached model     20 sessions in 21   applied unconditionally
+        refit rejected            rare       never passed at all
+
+    Three behaviours for one rule, and the two that skipped the guard were the
+    common ones. It was invisible only because every targeted family is
+    currently at coefficient zero or absent, so all three happen to produce the
+    same score today -- the divergence activates the moment `mom` is priced
+    again, which is exactly when the regime layer is supposed to matter.
+
+    The rule itself: scaling momentum down is only meaningful when there is a
+    crash stabiliser to rotate INTO. With none built -- the normal state, since
+    the fundamentals feed covers 24% of panel dates against a 60% floor -- the
+    weight goes to whatever else is priced, which on the shipped model is
+    `delivery`, and delivery was never a stabiliser.
+    """
+    if not multipliers:
+        return None, None
+    reach = regime_reachability(multipliers, coef)
+    if not reach["defensive_available"]:
+        return None, (
+            "no defensive family is priced, so scaling momentum down would "
+            "rotate the book into whatever else happens to be weighted "
+            f"({', '.join(reach['receives_the_weight']) or 'nothing'}) rather "
+            "than into a stabiliser"
+        )
+    return multipliers, None
+
+
 def _bare(column: str) -> str:
     """Drop the rank or family suffix. `_r` was stripped and `_f` was not, so a
     family arrived downstream still called `mom_f`, and a coefficient lookup
@@ -477,8 +543,18 @@ def prediction_dispersion(raw: pd.Series) -> float:
 
 def score_with(model: CrossSectionalModel, features: pd.DataFrame,
                multipliers: Optional[Dict[str, float]] = None) -> pd.Series:
-    """Apply stored coefficients to today's features."""
-    features = apply_family_multipliers(features, multipliers)
+    """Apply stored coefficients to today's features.
+
+    Goes through the SAME regime guard `fit_predict` uses. This path serves 20
+    of every 21 sessions and applied the multipliers unconditionally, so the
+    rule the refit path enforced was the exception rather than the norm.
+    """
+    applied, skipped = reachable_multipliers(multipliers, model.coef)
+    if skipped:
+        log.warning("regime multipliers skipped on the cached path",
+                    extra={"reason": skipped})
+    model.regime_multipliers_applied = applied is not None
+    features = apply_family_multipliers(features, applied)
     cols = model.features
     x = features.reindex(columns=cols).fillna(0.0).to_numpy("float64")
     coef = np.array([model.coef[c] for c in cols], dtype="float64")
@@ -1083,16 +1159,12 @@ def fit_predict(
     # direction. It is skipped and the reason is recorded, which leaves the
     # existing `no_new_entry_buckets` rule as the crash control it always was.
     reach = regime_reachability(multipliers, model_coef_preview)
-    if multipliers and not reach["defensive_available"]:
-        log.warning(
-            "regime multipliers skipped: no defensive family is priced, so "
-            "scaling momentum down would rotate the book into whatever else "
-            "happens to be weighted rather than into a stabiliser",
-            extra={"targeted": reach["targeted"],
-                   "would_have_received": reach["receives_the_weight"]})
-        multipliers_applied = None
-    else:
-        multipliers_applied = multipliers
+    multipliers_applied, skipped = reachable_multipliers(
+        multipliers, model_coef_preview)
+    if skipped:
+        log.warning("regime multipliers skipped: " + skipped,
+                    extra={"targeted": reach["targeted"],
+                           "would_have_received": reach["receives_the_weight"]})
     latest = apply_family_multipliers(latest, multipliers_applied)
     raw = predict(fit, latest[features].to_numpy("float64"))
     scores = pd.Series(raw, index=latest["symbol"].to_numpy())

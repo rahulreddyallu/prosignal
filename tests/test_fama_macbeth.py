@@ -287,3 +287,68 @@ class TestPboIsActuallyComputed:
         kept = [c for c in frame.columns if frame[c].notna().sum() >= 8]
         assert set(kept) == {"good", "also good"}
         assert len(frame[kept].dropna()) == 30
+
+
+# ------------------------------------------------------ the winner's curse
+def _wc_result(lam, se, n_dates=69):
+    feats = list(lam)
+    t = {c: (lam[c] / se[c] if se[c] else float("nan")) for c in feats}
+    slopes = pd.DataFrame({c: [lam[c]] * n_dates for c in feats})
+    return FMResult(features=feats, slopes=slopes, lam=dict(lam), se=dict(se),
+                    t_stat=t, n_dates=n_dates, nw_lags=2)
+
+
+_WC_LAM = {"a_f": -0.219, "b_f": -0.101, "c_f": 0.062, "d_f": 0.037, "e_f": -0.003}
+_WC_SE = {"a_f": 0.035, "b_f": 0.017, "c_f": 0.012, "d_f": 0.020, "e_f": 0.021}
+
+
+def test_the_pool_is_estimated_before_the_gate_selects():
+    """`gated_shrink` kills everything under the floor and then shrinks the
+    survivors. Estimating the between-theme dispersion from THAT set is the
+    winner's curse: they were selected for being large, so E[lambda^2] among
+    them is inflated, tau^2 comes out too big, and the themes that passed are
+    barely shrunk at all.
+
+    Measured on the shipped fit the haircut was delivery 1.6%, reversal 3.3%,
+    lottery 12.1%. An empirical-Bayes discipline removing 1.6% of a coefficient
+    is the gate doing the entire job while the estimator takes the credit.
+    """
+    full = _wc_result(_WC_LAM, _WC_SE)
+    kept = [c for c in full.features if abs(full.t_stat[c]) >= 2.0]
+    assert kept, "fixture must have survivors"
+    sub = _wc_result({c: _WC_LAM[c] for c in kept}, {c: _WC_SE[c] for c in kept})
+
+    post = hierarchical_shrink(sub, toward="zero")                   # survivors only
+    pre = hierarchical_shrink(sub, toward="zero", tau2_from=full)    # every theme
+
+    for c in kept:
+        assert abs(pre[c]) < abs(post[c]), (
+            f"{c}: a pool estimated before selection must shrink at least as "
+            f"hard as one estimated after it"
+        )
+        assert pre[c] * _WC_LAM[c] > 0, "shrinkage must not flip a sign"
+
+
+def test_gated_shrink_routes_the_preselection_pool_through():
+    full = _wc_result(_WC_LAM, _WC_SE)
+    out = gated_shrink(full, floor=2.0, toward="zero")
+    kept = [c for c in full.features if abs(full.t_stat[c]) >= 2.0]
+    sub = _wc_result({c: _WC_LAM[c] for c in kept}, {c: _WC_SE[c] for c in kept})
+    naive = hierarchical_shrink(sub, toward="zero")
+    assert any(abs(out[c]) < abs(naive[c]) for c in kept), (
+        "gated_shrink must hand the full result over as the tau^2 source"
+    )
+
+
+def test_the_gate_still_does_the_killing_not_the_shrinkage():
+    """The floor is a RISK CONTROL and the shrinkage is an ESTIMATOR. Fixing
+    which sample the pool is learned from must not turn the estimator into a
+    second gate."""
+    full = _wc_result(_WC_LAM, _WC_SE)
+    out = gated_shrink(full, floor=2.0, toward="zero")
+    live = {c for c, v in out.items() if abs(v) > 1e-12}
+    expected = {c for c in full.features if abs(full.t_stat[c]) >= 2.0}
+    assert live == expected, "the survivor set must be decided by the floor alone"
+    for c in full.features:
+        if c not in expected:
+            assert out[c] == 0.0

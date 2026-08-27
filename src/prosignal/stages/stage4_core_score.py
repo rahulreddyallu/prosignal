@@ -389,21 +389,40 @@ def run(
     # amihud/turnover_ratio at -0.87 are one factor measured from two sides, and
     # resid_mom/mom_6_1 at +0.77 with prox_52w at +0.60 make the momentum block
     # roughly one bet carrying three coefficients.
+    # Measured on the columns that actually CARRY COEFFICIENTS, which since the
+    # family refactor means the families, not their members.
+    #
+    # Pointing it at the individual `_r` factors reported the wrong thing
+    # loudly. Measured live on 2026-08-25 those columns breach |rho| = 0.6 five
+    # times -- mom_6_1/resid_mom +0.72, downside_vol/idio_vol +0.69,
+    # mom_6_1/prox_52w +0.64, max_dd_120/prox_52w +0.63, prox_52w/resid_mom
+    # +0.62 -- and every one of those pairs sits INSIDE a single family. That
+    # collinearity is the reason the families exist; averaging them is the
+    # engine's answer to it. Reporting it as a breach on every run is a
+    # detector that fires constantly and teaches its reader to ignore it.
+    #
+    # The question the report is for is whether the things given INDEPENDENT
+    # coefficients are independent. On the live model the families read
+    # delivery/lottery -0.38 at the widest, which is the aggregation working.
     model_block = None
+    member_block = None
     if model_features is not None and not model_features.empty:
-        # Only factors that can actually reach the score. A breach between
-        # two UNSCORED_DIAGNOSTICS -- amihud and turnover_ratio sit at
-        # -0.905 -- is the loudest line in the report and describes two
-        # columns neither of which is fitted.
         from ..features.crossmodel import (UNSCORED_CONTROLS,
                                            UNSCORED_DIAGNOSTICS)
+        fitted = [c for c in (getattr(model, "features", None) or [])
+                  if c in model_features.columns]
+        if len(fitted) >= 2:
+            model_block = model_features[fitted].rename(columns=lambda c: c[:-2])
+        # Kept as context rather than as the verdict: it is what justifies the
+        # aggregation, so it belongs in the report, not in the breach list.
         _ignore = set(UNSCORED_DIAGNOSTICS) | set(UNSCORED_CONTROLS)
         cols = [c for c in model_features.columns
                 if c.endswith("_r") and c not in _ignore]
         if len(cols) >= 2:
-            model_block = model_features[cols].rename(columns=lambda c: c[:-2])
+            member_block = model_features[cols].rename(columns=lambda c: c[:-2])
 
-    redundancy = _redundancy(model_block if model_block is not None else frame, cfg)
+    redundancy = _redundancy(model_block if model_block is not None else frame,
+                             cfg, members=member_block)
     if redundancy.breaches:
         pairs = ", ".join(f"{a}/{b} {r:+.2f}" for a, b, r in redundancy.breaches[:4])
         notes.append(
@@ -562,8 +581,15 @@ def _weights(cfg, surviving: List[str]) -> Dict[str, float]:
     }
 
 
-def _redundancy(frame: pd.DataFrame, cfg) -> RedundancyReport:
-    """Measure factor overlap rather than assuming it."""
+def _redundancy(frame: pd.DataFrame, cfg,
+                members: Optional[pd.DataFrame] = None) -> RedundancyReport:
+    """Measure overlap between the things that carry coefficients.
+
+    ``frame`` is the fitted block -- families under the current model.
+    ``members`` is the individual factors underneath them, reported as context
+    because their collinearity is what the aggregation exists to absorb, and a
+    reader who sees only the clean family numbers should be able to check that.
+    """
     cutoff = fv(cfg.redundancy.max_abs_spearman)
     pairs = spearman_pairs(frame) if frame.shape[1] >= 2 else {}
     breaches = [
@@ -571,16 +597,26 @@ def _redundancy(frame: pd.DataFrame, cfg) -> RedundancyReport:
         for k, v in pairs.items()
         if abs(v) > cutoff
     ]
+    notes: List[str] = []
+    if not pairs:
+        notes.append(
+            "fewer than two scored columns carried enough values to correlate; "
+            "overlap not measurable this run"
+        )
+    if members is not None and members.shape[1] >= 2:
+        inner = spearman_pairs(members)
+        worst = sorted(inner.items(), key=lambda kv: -abs(kv[1]))[:4]
+        if worst:
+            notes.append(
+                "Within-family overlap (absorbed by averaging, not a breach): "
+                + ", ".join(f"{k.replace('|', '/')} {v:+.2f}" for k, v in worst)
+            )
     return RedundancyReport(
         pairwise_spearman={k: round(v, 4) for k, v in pairs.items()},
         breaches=breaches,
         cutoff=cutoff,
         action_taken=str(v(cfg.redundancy.on_breach)),
-        notes=(
-            []
-            if pairs
-            else ["fewer than two factors survived; correlation not measurable"]
-        ),
+        notes=notes,
     )
 
 
@@ -868,8 +904,12 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
             # bad upstream date reaches every future decision at once without
             # failing anything, so the new coefficients are compared against the
             # live ones before they replace them.
-            previous, previous_end = cm.read_cached_coefficients(cache)
-            verdict = review_refit(model.coef, previous, previous_end)
+            previous, previous_end, previous_est = cm.read_cached_coefficients(cache)
+            verdict = review_refit(
+                model.coef, previous, previous_end,
+                proposed_estimator=str(cfg.estimator.method),
+                previous_estimator=previous_est,
+            )
             if verdict.accepted:
                 cm.archive_cache(cache)
                 cm.save_cache(cache, model, as_of)
@@ -881,13 +921,23 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                 held = cm.load_cached(cache, as_of, refit_every,
                                       estimator=str(cfg.estimator.method))
                 if held is not None:
+                    # The SAME feature construction as every other path. This
+                    # dropped `sectors` and `actions`, so a run that held its
+                    # previous coefficients also silently ranked every factor
+                    # universe-wide instead of within sector -- reintroducing
+                    # the unintended sector bet `sector_neutral_rank` exists to
+                    # remove -- and lost net issuance's bonus-vs-placement
+                    # correction. A rejected refit is a data problem; it must
+                    # not also change how the features are built.
                     feats = cm.today_features(close, turnover, as_of,
                                               fundamentals=fundamentals,
                                               max_fundamental_age_days=max_age,
-                                              delivery=delivery)
+                                              delivery=delivery,
+                                              sectors=sector_map,
+                                              actions=actions)
                     if feats is not None:
-                        return (cm.score_with(held, feats), held, None,
-                                feats, verdict)
+                        return (cm.score_with(held, feats, multipliers), held,
+                                None, feats, verdict)
                 # Nothing usable to hold on to, so the run cannot quietly
                 # continue on a fit that failed review.
                 return None, None, f"refit rejected: {verdict.summary()}", None, verdict

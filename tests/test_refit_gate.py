@@ -146,7 +146,79 @@ def test_reading_live_coefficients_ignores_staleness(tmp_path):
     """The gate asks what it would be replacing, not whether that is scoreable."""
     path = tmp_path / "crosssec_model.json"
     cm.save_cache(path, _model(LIVE), dt.date(2020, 1, 1))
-    coef, train_end = cm.read_cached_coefficients(path)
+    coef, train_end, estimator = cm.read_cached_coefficients(path)
     assert coef[_FIRST] == pytest.approx(LIVE[_FIRST])
     assert train_end == "2026-01-01"
+    assert estimator == "ridge"          # what _model() carries by default
     assert cm.load_cached(path, dt.date(2026, 6, 1)) is None       # too stale to score
+
+
+def test_a_blob_written_before_the_estimator_field_reads_as_ridge(tmp_path):
+    """Those blobs were ridge fits. Reporting the estimator as unknown would
+    make the gate skip its comparison on every legacy file."""
+    path = tmp_path / "crosssec_model.json"
+    cm.save_cache(path, _model(LIVE), dt.date(2026, 6, 1))
+    blob = json.loads(path.read_text())
+    del blob["estimator"]
+    path.write_text(json.dumps(blob), encoding="utf-8")
+    assert cm.read_cached_coefficients(path)[2] == "ridge"
+
+
+# ------------------------------------------------- changing the estimator
+def test_an_estimator_change_is_not_reviewed_as_a_refit():
+    """Ridge and Fama-MacBeth produce different numbers from the same data by
+    construction, so comparing their magnitudes is meaningless. On the recorded
+    switch it read as a sign flip and a 5.4x jump -- indistinguishable, by
+    magnitude alone, from the corrupted upstream date this gate is for."""
+    # Exactly the shape of the real ridge -> Fama-MacBeth change.
+    previous = dict(LIVE)
+    proposed = dict(LIVE)
+    proposed[_FIRST] = 0.0                       # momentum gated out
+    proposed[_SECOND] = -LIVE[_SECOND] * 6.0     # sign flip and a 6x jump
+
+    # Reviewed as a refit, this is rejected -- correctly, for a refit.
+    same = review_refit(proposed, previous,
+                        proposed_estimator="ridge", previous_estimator="ridge")
+    assert not same.accepted
+
+    # Reviewed across estimators, the comparison must not be applied at all.
+    switched = review_refit(proposed, previous,
+                            proposed_estimator="fama_macbeth",
+                            previous_estimator="ridge")
+    assert switched.accepted
+    assert not switched.sign_flips and not switched.magnitude_jumps
+    assert "estimator changed" in switched.summary()
+
+
+def test_an_unknown_estimator_on_either_side_keeps_the_comparison():
+    """Absence of the field must not become a way past the gate."""
+    proposed = {k: v * 20 for k, v in LIVE.items()}
+    assert not review_refit(proposed, LIVE).accepted
+    assert not review_refit(proposed, LIVE, proposed_estimator="ridge").accepted
+    assert not review_refit(proposed, LIVE, previous_estimator="ridge").accepted
+
+
+# ------------------------------------------------------ archive collisions
+def test_two_refits_fitted_for_one_date_do_not_overwrite_each_other(tmp_path):
+    """A config or estimator change on a single day produces exactly this. The
+    archive was named by `fitted_for` alone, so the second copy destroyed the
+    first -- removing the recovery path at the moment it was most needed."""
+    path = tmp_path / "crosssec_model.json"
+    cm.save_cache(path, _model(LIVE), dt.date(2026, 6, 1))
+    first = cm.archive_cache(path)
+
+    cm.save_cache(path, _model({k: v * 3 for k, v in LIVE.items()}),
+                  dt.date(2026, 6, 1))          # SAME fitted_for
+    second = cm.archive_cache(path)
+
+    assert first != second, "the second archive overwrote the first"
+    assert json.loads(open(first).read())["coef"][_FIRST] == pytest.approx(LIVE[_FIRST])
+    assert json.loads(open(second).read())["coef"][_FIRST] == pytest.approx(LIVE[_FIRST] * 3)
+
+
+def test_archiving_identical_content_twice_is_idempotent(tmp_path):
+    path = tmp_path / "crosssec_model.json"
+    cm.save_cache(path, _model(LIVE), dt.date(2026, 6, 1))
+    assert cm.archive_cache(path) == cm.archive_cache(path)
+    kept = list((tmp_path / "crosssec_model_versions").glob("*.json"))
+    assert len(kept) == 1
