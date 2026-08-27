@@ -975,7 +975,13 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     def ledger(limit: int = 50) -> Dict[str, Any]:
         led = Ledger(cfg.paths.ledger)
         rows = led.read_all()[-limit:]
-        return {"count": led.count(), "trials": led.trial_count(), "runs": rows}
+        # `trial_id` is one uuid per RUN, so this counts executions, not the
+        # configurations the Deflated Sharpe charges for. It was labelled
+        # "trials", which reads as the DSR input and is off by two orders of
+        # magnitude -- 1,929 runs against a research registry of 40. The DSR
+        # reads `TrialRegistry.effective_trials`; this number is operational.
+        return {"count": led.count(), "runs_recorded": led.trial_count(),
+                "runs": rows}
 
     @app.get("/config")
     def config_report() -> Dict[str, Any]:

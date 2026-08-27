@@ -300,7 +300,15 @@ def test_run_is_persisted_to_the_ledger(client, live_cfg):
 
 def test_ledger_endpoint_exposes_run_history(client):
     body = client.get("/ledger").json()
-    assert "count" in body and "trials" in body and "runs" in body
+    assert "count" in body and "runs_recorded" in body and "runs" in body
+
+
+def test_the_ledger_endpoint_does_not_call_run_counts_trials(client):
+    """`trial_id` is one uuid per RUN. Labelled "trials" it reads as the
+    Deflated Sharpe's multiple-testing input and is off by two orders of
+    magnitude -- 1,929 executions against a research registry of 40. The DSR
+    reads `TrialRegistry.effective_trials`; this endpoint counts operations."""
+    assert "trials" not in client.get("/ledger").json()
 
 
 def test_ui_is_served(client):
