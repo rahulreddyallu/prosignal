@@ -151,22 +151,54 @@ def test_the_stored_feature_order_is_preserved(tmp_path):
 
 
 # --------------------------------------------------------- redundancy
-def test_the_redundancy_check_measures_the_model_not_the_legacy_composite():
+def test_the_redundancy_check_measures_what_carries_the_coefficients():
     """It ran on `frame` -- the hand-weighted composite's factor block -- so the
-    seventeen columns that actually rank the universe were never checked against
-    each other. Measured on the live universe they are not independent:
+    columns that actually rank the universe were never checked against each
+    other. It then ran on the individual `_r` factors, which is the opposite
+    error: those are collinear BY DESIGN, and averaging them is what the
+    families are for. Measured live on 2026-08-25 they breach five times --
+    mom_6_1/resid_mom +0.72, downside_vol/idio_vol +0.69, mom_6_1/prox_52w
+    +0.64 -- and every pair sits inside one family.
 
-        amihud / turnover_ratio   -0.869   one factor from two sides
-        resid_mom / mom_6_1       +0.770
-        resid_mom / prox_52w      +0.601   the momentum block is ~one bet
+    The question is whether the things given INDEPENDENT coefficients are
+    independent, so the check measures the fitted columns and reports the
+    within-family structure as context.
     """
     import inspect
 
     from prosignal.stages import stage4_core_score as s4
 
     src = inspect.getsource(s4.run)
-    assert "model_block" in src
-    assert "_redundancy(model_block if model_block is not None else frame, cfg)" in src
+    assert "model_block" in src and "member_block" in src
+    assert 'getattr(model, "features", None)' in src, (
+        "the fitted block must come from the model's own feature list, not "
+        "from a filter over column suffixes that cannot tell a fitted column "
+        "from a diagnostic one"
+    )
+    assert "members=member_block" in src, (
+        "the within-family overlap must still reach the report -- it is what "
+        "justifies the aggregation"
+    )
+
+
+def test_an_all_empty_column_cannot_silence_the_whole_redundancy_report():
+    """`today_features` attaches every fundamental column whether or not the
+    fit could build it. A listwise dropna then emptied the frame on one absent
+    column, and the report said 'correlation not measurable' with twelve
+    fully-populated factors sitting in it, on every run."""
+    import numpy as np
+    import pandas as pd
+
+    from prosignal.indicators import spearman_pairs
+
+    frame = pd.DataFrame({
+        "a": np.linspace(0, 1, 50),
+        "b": np.linspace(1, 0, 50),
+        "all_empty": [np.nan] * 50,
+    })
+    pairs = spearman_pairs(frame)
+    assert pairs, "one empty column silenced the whole report"
+    assert abs(pairs["a|b"] + 1.0) < 1e-9
 
 
 def test_a_breach_names_the_pair_rather_than_only_counting_them():

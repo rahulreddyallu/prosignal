@@ -168,12 +168,32 @@ def test_a_composite_run_is_not_presented_as_a_model_run():
 
 
 def test_a_real_model_run_is_not_flagged():
+    """Keyed on the FAMILY columns, because that is what a fitted model emits.
+
+    This fixture used to name individual factors -- `resid_mom`, `deliv_pct`,
+    `prox_52w` -- which no code path has produced since the fit moved to
+    families. The detection was keyed on the same stale names, so test and code
+    agreed with each other while every healthy run was reported to the operator
+    as 'the cross-sectional model could not fit this run ... treat this
+    shortlist as unscored'. The warning was inverted, on every run.
+    """
+    from prosignal.features.crossmodel import FAMILY_COLUMNS, _bare
     from prosignal.presentation.viewmodel import _scorer_used
 
-    got = _scorer_used([{"factors": {"resid_mom": {}, "deliv_pct": {},
-                                     "prox_52w": {}}}])
+    got = _scorer_used([{"factors": {_bare(c): {} for c in FAMILY_COLUMNS}}])
+    assert got["model"] == "cross-sectional"
     assert got["validated"] is True
     assert got["note"] is None
+
+
+def test_an_unrecognised_factor_block_reports_unknown_rather_than_guessing():
+    """The failure direction has to be safe. Naming neither scorer is the
+    honest answer; asserting either one is how a wrong claim ships."""
+    from prosignal.presentation.viewmodel import _scorer_used
+
+    got = _scorer_used([{"factors": {"something_the_engine_no_longer_emits": {}}}])
+    assert got["model"] == "unknown"
+    assert got["validated"] is False
 
 
 def test_the_scorer_is_detected_from_the_factors_not_trusted_as_a_flag():
@@ -184,7 +204,7 @@ def test_the_scorer_is_detected_from_the_factors_not_trusted_as_a_flag():
     src = (Path(__file__).resolve().parents[1] / "src" / "prosignal"
            / "presentation" / "viewmodel.py").read_text(encoding="utf-8")
     fn = src[src.index("def _scorer_used"):src.index("def build_view")]
-    assert "FACTOR_MAP" in fn
+    assert "MODEL_KEYS" in fn and "COMPOSITE_KEYS" in fn
 
 
 def test_the_interface_renders_the_unscored_warning():
