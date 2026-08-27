@@ -176,11 +176,27 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     timings[stage2_regime.STAGE_NAME] = t()
     release_memory()
 
+    # ---- the open book, read once, BEFORE anything can exclude a name ------
+    # Stage 3 needs it as much as Stage 6 does. Its model-domain filter removes
+    # names below their thesis-invalidation level from the universe -- correct
+    # for an ENTRY, and catastrophic for a position already open: the name
+    # reaches neither Stage 6's exit band nor Stage 7's exit hierarchy, falls
+    # through to the orphan review, and is reported "hold, trading normally"
+    # at the exact moment it has met its own first exit condition.
+    #
+    # Entry constraints do not govern open positions. That is Stage 8's
+    # contract and Stage 6 already honours it; Stage 3 must too.
+    ledger = Ledger(config.paths.ledger)
+    previous = ledger.previous_run(before=resolved)
+    open_book = list(previous.get("signals_generated") or []) if previous else []
+    previous_slate = list(previous.get("slate_shown") or []) if previous else []
+
     # ---- Stage 3 ----------------------------------------------------------
     step(3)
     t = _clock()
     eligibility = stage3_eligibility.run(
-        universe, store, calendar, quality, config, as_of=resolved
+        universe, store, calendar, quality, config, as_of=resolved,
+        held=open_book,
     )
     timings[stage3_eligibility.STAGE_NAME] = t()
     release_memory()
@@ -216,13 +232,9 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # what the previous run committed to. The engine holds no live position
     # state -- the ledger is the record of the open book.
     ranks = {s.ticker: s.rank for s in scores.ranked_scores}
-    # One read. Both the open book and the previous screen come out of the same
-    # row, and this file grows without bound -- scanning it twice per run for
-    # two fields of one record was waste.
-    ledger = Ledger(config.paths.ledger)
-    previous = ledger.previous_run(before=resolved)
-    open_book = list(previous.get("signals_generated") or []) if previous else []
-    previous_slate = list(previous.get("slate_shown") or []) if previous else []
+    # `open_book` and `previous_slate` were read once, above Stage 3 -- this
+    # file grows without bound and scanning it twice per run for two fields of
+    # one record was waste.
     entries = stage6_entry.run(defended, frames, config, resolved,
                                ranks=ranks, held=open_book)
     timings[stage6_entry.STAGE_NAME] = t()
@@ -284,7 +296,8 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # rules and the tests to go with it, and nothing in the engine had ever
     # called it. It is called here.
     directives = _review_open_positions(
-        open_book, buys, watch, store, universe, calendar, resolved
+        open_book, buys, watch, store, universe, calendar, resolved,
+        eligibility=eligibility,
     )
 
     # ---- the slate --------------------------------------------------------
@@ -418,7 +431,7 @@ def _build_slate(buys, watch, previous_slate, *, exit_rank: int, as_of: dt.date)
 
 
 def _review_open_positions(open_book, buys, watch, store, universe, calendar,
-                           as_of: dt.date) -> List[Dict[str, object]]:
+                           as_of: dt.date, eligibility=None) -> List[Dict[str, object]]:
     """Decide what happens to held names the run never produced a card for.
 
     A name in `buys` is still held and a name in `watch` was seen and set aside
@@ -462,10 +475,18 @@ def _review_open_positions(open_book, buys, watch, store, universe, calendar,
 
     out: List[Dict[str, object]] = []
     for ticker in orphans:
+        # WHY the run produced no card, when the run knows. `in_universe` is
+        # the RAW universe, so an eligibility rejection still reads as "in
+        # universe" and the directive said "trading normally".
+        why = None
+        if eligibility is not None and ticker in eligibility.rejected:
+            why = (eligibility.rejection_details.get(ticker)
+                   or eligibility.rejected[ticker].value)
         directive = review_open_position(
             ticker, frames.get(ticker), as_of,
             in_universe=ticker in in_universe,
             sessions=calendar.sessions,
+            excluded_because=why,
         )
         out.append(directive.to_dict())
         log.info("open position reviewed",

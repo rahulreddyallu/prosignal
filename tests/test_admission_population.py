@@ -197,3 +197,119 @@ def test_the_traded_target_is_the_one_the_label_is_fitted_on():
     p = cfg.params
     rules = rules_from_config(p.stage4_core_score, p.stage7_risk)
     assert rules.target_r_multiple == float(p.stage7_risk.targets.t2_r_multiple.value)
+
+
+# ------------------------------------- an entry rule must not trap a position
+def test_a_held_name_below_invalidation_still_reaches_the_exit_band():
+    """THE second-order regression the domain filter introduced.
+
+    Stage 3 removes below-invalidation names from the universe. For an ENTRY
+    that is right. For a name already held it is catastrophic: the position
+    reaches neither Stage 6's exit band nor Stage 7's exit hierarchy, falls
+    through to the orphan review, and is reported "in universe and trading
+    normally" at the exact moment it has met its own first exit condition.
+
+    The original defect BOUGHT names below invalidation. This one refused to
+    SELL them, which is worse.
+    """
+    import inspect
+
+    from prosignal.stages import stage3_eligibility as s3
+
+    src = inspect.getsource(s3.run)
+    assert "open_book" in src, "Stage 3 must know what is held"
+    block = src[src.index("# 5b. THE MODEL'S OWN DOMAIN."):]
+    block = block[:block.index("# 6. Manual exclusion")]
+    assert "sym not in open_book" in block, (
+        "the model-domain filter must exempt held names -- every OTHER gate in "
+        "this stage is about whether the name may be traded at all, which "
+        "applies to a sale as much as to a purchase"
+    )
+
+
+def test_the_open_book_is_read_before_the_stage_that_can_exclude_a_name():
+    """Ordering, not just presence. Reading the book after Stage 3 leaves the
+    filter with no way to know what is held."""
+    import inspect
+
+    from prosignal import pipeline
+
+    src = inspect.getsource(pipeline._run_analysis_locked)
+    assert src.index("open_book = list(") < src.index("stage3_eligibility.run"), (
+        "the open book must be read before Stage 3 runs"
+    )
+    # And still reaches the two stages that already relied on it.
+    assert src.count("held=open_book") >= 2
+
+
+def test_every_other_stage_3_gate_still_applies_to_a_held_name():
+    """The exemption is scoped to ONE gate. Liquidity, data quality, price
+    floor and the circuit test are about whether the name can be traded at all,
+    and a position you cannot sell is not one to stop checking."""
+    import inspect
+
+    from prosignal.stages import stage3_eligibility as s3
+
+    src = inspect.getsource(s3.run)
+    # The per-symbol gate loop, up to the model-domain filter. The book is
+    # ASSIGNED above the loop; what matters is that no gate inside it reads.
+    loop = src[src.index("for sym in symbols:"):]
+    before = loop[:loop.index("# 5b. THE MODEL\'S OWN DOMAIN.")]
+    assert "open_book" not in before, (
+        "no gate before the model-domain filter may consult the book -- "
+        "liquidity, data quality, the price floor and the circuit test are "
+        "about whether the name can be traded at all, and a position you "
+        "cannot sell is not one to stop checking"
+    )
+
+
+# ------------------------------------- the orphan review must not reassure
+def test_a_held_name_the_run_rejected_is_not_reported_as_trading_normally():
+    """`in_universe` is tested against the RAW universe, so a held name that an
+    eligibility gate explicitly rejected still reads as "in universe" and the
+    directive said "in universe and trading normally". The operator was told
+    nothing was wrong about a position the engine had refused to evaluate.
+
+    The ACTION stays HOLD -- entry gates do not govern open positions, and
+    exiting into one pays the worst price available for a reason the thesis
+    never priced. Only the reason is corrected.
+    """
+    import datetime as dt
+
+    import numpy as np
+    import pandas as pd
+
+    from prosignal.positions import PositionAction, review_open_position
+
+    idx = pd.bdate_range("2026-01-01", periods=80)
+    px = np.linspace(100, 120, 80)
+    frame = pd.DataFrame({"date": idx, "open": px, "high": px * 1.01,
+                          "low": px * 0.99, "close": px, "volume": 1e6})
+    sessions = [d.date() for d in idx]
+
+    quiet = review_open_position("X", frame, sessions[-1], in_universe=True,
+                                 sessions=sessions)
+    assert quiet.reason == "in universe and trading normally"
+
+    flagged = review_open_position(
+        "X", frame, sessions[-1], in_universe=True, sessions=sessions,
+        excluded_because="results due in ~39 sessions, inside the 45-session "
+                         "holding window")
+    assert flagged.action is PositionAction.HOLD, "the action must not change"
+    assert "trading normally" not in flagged.reason
+    assert "set it aside" in flagged.reason
+    assert "45-session" in flagged.reason, "the actual gate must reach the reader"
+
+
+def test_the_pipeline_hands_the_rejection_reason_to_the_review():
+    import inspect
+
+    from prosignal import pipeline
+
+    src = inspect.getsource(pipeline._review_open_positions)
+    assert "eligibility.rejected" in src
+    assert "excluded_because=why" in src
+    call = inspect.getsource(pipeline._run_analysis_locked)
+    assert "eligibility=eligibility" in call, (
+        "the review cannot explain a rejection it was never given"
+    )

@@ -88,6 +88,7 @@ def review_open_position(
     in_universe: bool,
     sessions: Sequence[dt.date],
     delisted: bool = False,
+    excluded_because: Optional[str] = None,
 ) -> PositionDirective:
     """Classify one open position against today's facts.
 
@@ -143,6 +144,24 @@ def review_open_position(
             last_tradeable_price=last_price, last_tradeable_date=last_date,
         )
 
+    if excluded_because:
+        # "Trading normally" was FALSE here. A held name reaches this review
+        # only because the run produced no card for it, and the commonest cause
+        # is an eligibility gate that rejected it with a stated reason --
+        # earnings proximity, a data-quality failure, illiquidity. `in_universe`
+        # is tested against the RAW universe, so all of those still read as "in
+        # universe", and the operator was told nothing was wrong about a
+        # position the engine had explicitly refused to evaluate.
+        #
+        # The ACTION is unchanged and deliberate: entry-time gates do not
+        # govern open positions, and exiting into one pays the worst price
+        # available for a reason the thesis never priced. Only the reason is
+        # corrected, because a flag nobody can act on is worse than no flag.
+        return PositionDirective(
+            ticker, UniverseEvent.NONE, PositionAction.HOLD,
+            reason=f"still trading, but the run set it aside: {excluded_because}",
+            last_tradeable_price=last_price, last_tradeable_date=last_date,
+        )
     return PositionDirective(
         ticker, UniverseEvent.NONE, PositionAction.HOLD,
         reason="in universe and trading normally",

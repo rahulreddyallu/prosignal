@@ -12,7 +12,7 @@ not check" as "passed" is the failure mode this ordering exists to prevent.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
@@ -39,12 +39,17 @@ def run(
     quality: DataQualityReport,
     config,
     as_of: Optional[dt.date] = None,
+    held: Optional[Sequence[str]] = None,
 ) -> EligibilityReport:
     p = config.params
     cfg = p.stage3_eligibility
     as_of = as_of or calendar.last
 
     symbols = [normalise_symbol(s) for s in universe.symbols]
+    # The book Stage 6 was asked to maintain. Only the model-domain filter
+    # consults it: every other gate here is about whether the name may be
+    # TRADED at all, which applies to a sale as much as to a purchase.
+    open_book = {normalise_symbol(s) for s in (held or ())}
     rejected: Dict[str, RejectionReason] = {}
     details: Dict[str, str] = {}
     not_testable: Dict[str, List[str]] = {}
@@ -202,7 +207,15 @@ def run(
         # and `min_universe_percentile` along with it. Filtering after ranking
         # leaves the top of the list unbuyable and silently promotes the sixth
         # name to first while the statistics still describe the old population.
-        if bv(p.stage6_entry.admission.require_above_invalidation):
+        # HELD NAMES ARE EXEMPT, for the reason Stage 6 states: an entry
+        # constraint must never close -- or fail to close -- a position that is
+        # already open. Removing a held name from the universe here is worse
+        # than admitting one: it reaches neither Stage 6's exit band nor Stage
+        # 7's exit hierarchy, so the orphan review reports "hold, trading
+        # normally" precisely when the position has met its first exit
+        # condition. The engine stops SELLING rather than stops buying.
+        if (sym not in open_book
+                and bv(p.stage6_entry.admission.require_above_invalidation)):
             note = _outside_model_domain(frame, p)
             if note:
                 rejected[sym] = RejectionReason.OUTSIDE_MODEL_DOMAIN

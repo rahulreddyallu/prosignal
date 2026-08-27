@@ -443,24 +443,64 @@ def _corporate_action(frame, actions, sym, as_of, cfg) -> CheckResult:
     a = actions[actions[SYMBOL] == sym].copy()
     if a.empty:
         return _ok("corporate_action_distortion", {"actions_in_window": 0})
-    a["ex_date"] = pd.to_datetime(a["ex_date"], errors="coerce").dt.date
-    recent = a[(a["ex_date"].notna()) & (a["ex_date"] <= as_of)
+    # NaT is dropped BEFORE the comparison, not filtered inside it. `.dt.date`
+    # on a coerced column leaves NaT as an object, and `object <= datetime.date`
+    # raises rather than evaluating False -- so one unparseable ex_date in the
+    # feed took down the whole run from inside the per-stock loop, which has no
+    # handler. `notna()` sat in the same boolean expression as the comparison,
+    # which does not help: pandas evaluates both operands before combining them.
+    a["ex_date"] = pd.to_datetime(a["ex_date"], errors="coerce")
+    a = a[a["ex_date"].notna()]
+    if a.empty:
+        return _ok("corporate_action_distortion",
+                   {"actions_in_window": 0, "unparseable_ex_dates": True})
+    a["ex_date"] = a["ex_date"].dt.date
+    recent = a[(a["ex_date"] <= as_of)
                & (a["ex_date"] >= as_of - dt.timedelta(days=int(lb * 1.5)))]
     if recent.empty:
         return _ok("corporate_action_distortion", {"actions_in_window": 0})
 
-    # Only a factor that moved the share count breaks comparability.
-    ratio = pd.to_numeric(recent.get("ratio"), errors="coerce")
-    rescaling = recent[(ratio.notna()) & (ratio > 0) & (ratio != 1.0)]
+    # Only a factor that moved the share count breaks comparability -- but the
+    # columns needed to establish that are not guaranteed. `ratio` is canonical
+    # (CORPORATE_ACTION_COLUMNS) and the NSE ingest fills it, while the
+    # reference-CSV override ships `ratio_from,ratio_to` and no `ratio` at all,
+    # so a feed arriving by that path has neither the column nor a scalar to
+    # coerce. Reading it unguarded raised inside the per-stock loop, which has
+    # no handler, and took the whole run down.
+    types = (recent["action_type"].astype(str).str.lower()
+             if "action_type" in recent.columns else None)
+    ratio = (pd.to_numeric(recent["ratio"], errors="coerce")
+             if "ratio" in recent.columns else None)
+
+    if ratio is not None and ratio.notna().any():
+        rescaling = recent[ratio.notna() & (ratio > 0) & (ratio != 1.0)]
+        basis = "ratio"
+    elif types is not None:
+        # No usable ratio, so classify by KIND. A split, bonus or rights issue
+        # rescales; a dividend does not. Anything unrecognised is treated as
+        # rescaling, because an action we cannot classify is not one we have
+        # cleared.
+        rescaling = recent[~types.isin({"dividend"})]
+        basis = "action_type"
+    else:
+        # Neither column. The check cannot run, and NOT_TESTABLE is never
+        # upgraded to PASS -- this stage's contract.
+        return _nt("corporate_action_distortion",
+                   f"{len(recent)} action(s) in the window carry neither a "
+                   f"ratio nor an action type, so a price rescaling cannot be "
+                   f"distinguished from a dividend")
+
     obs = {"actions_in_window": int(len(recent)),
            "rescaling_actions": int(len(rescaling)),
-           "types": sorted({str(x) for x in recent["action_type"].dropna()})}
+           "classified_by": basis,
+           "types": (sorted({str(x) for x in types.dropna()})
+                     if types is not None else [])}
     if rescaling.empty:
         return _ok("corporate_action_distortion", obs)
     return _rej("corporate_action_distortion",
                 f"{len(rescaling)} price-rescaling corporate action(s) "
-                f"(split or bonus) inside the {lb}-session lookback; the return "
-                f"series across the ex-date is not comparable",
+                f"(split, bonus or rights) inside the {lb}-session lookback; "
+                f"the return series across the ex-date is not comparable",
                 obs)
 
 
