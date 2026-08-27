@@ -222,3 +222,51 @@ def test_archiving_identical_content_twice_is_idempotent(tmp_path):
     assert cm.archive_cache(path) == cm.archive_cache(path)
     kept = list((tmp_path / "crosssec_model_versions").glob("*.json"))
     assert len(kept) == 1
+
+
+# --------------------------------- nothing to hold on to is a first fit
+def test_a_rejected_refit_installs_when_there_is_no_loadable_previous():
+    """The gate's purpose is that the PREVIOUS coefficients stay live while a
+    suspicious refit is reviewed. When the cache cannot be loaded at all --
+    written by a superseded feature set, a different estimator, a model version
+    that no longer exists -- there is nothing to keep, so rejecting does not
+    protect the old model. It produces NO model and the run dies.
+
+    Observed on a deployment nine releases behind: the refit fitted cleanly,
+    the gate said "proposed fit shares no factors with the live model" against a
+    superseded cache, `load_cached` refused the same cache for the same reason,
+    and the engine reported MODEL_UNAVAILABLE every night with no way forward.
+    """
+    import inspect
+
+    from prosignal.stages import stage4_core_score as s4
+
+    src = inspect.getsource(s4._cross_sectional_model)
+    block = src[src.index("held = cm.load_cached"):]
+    assert "cm.save_cache(cache, model, as_of)" in block, (
+        "with no loadable previous the refit must be installed, not rejected "
+        "into an engine with no model at all"
+    )
+    assert "cm.archive_cache(cache)" in block, (
+        "the superseded cache must still be archived before it is replaced"
+    )
+    assert "accepted=True" in block, (
+        "the verdict handed back must say the refit went live, so the ledger "
+        "records a model replacement rather than a rejection"
+    )
+
+
+def test_a_rejected_refit_still_holds_when_the_previous_model_loads():
+    """The gate must not be softened in the case it was built for: a genuine
+    bad refit against a model that IS loadable still keeps the old one."""
+    import inspect
+
+    from prosignal.stages import stage4_core_score as s4
+
+    src = inspect.getsource(s4._cross_sectional_model)
+    block = src[src.index("held = cm.load_cached"):]
+    held_branch = block[:block.index("# NOTHING TO HOLD ON TO")]
+    assert "if held is not None:" in held_branch
+    assert "cm.score_with(held, feats, multipliers)" in held_branch, (
+        "a loadable previous model must still be the one that scores"
+    )

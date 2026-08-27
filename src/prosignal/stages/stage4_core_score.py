@@ -44,7 +44,7 @@ from ..features import compute_features
 from ..features.crosssec import liquidity_mask
 from ..features.exits import rules_from_config
 from ..features.labels import BarrierSpec
-from ..features.refit_gate import review_refit
+from ..features.refit_gate import RefitVerdict, review_refit
 from ..features.crossmodel import (
     contributions as cm_contributions,
     standardised_features as cm_standardised,
@@ -938,9 +938,51 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                     if feats is not None:
                         return (cm.score_with(held, feats, multipliers), held,
                                 None, feats, verdict)
-                # Nothing usable to hold on to, so the run cannot quietly
-                # continue on a fit that failed review.
-                return None, None, f"refit rejected: {verdict.summary()}", None, verdict
+                # NOTHING TO HOLD ON TO. The gate's entire purpose is that the
+                # PREVIOUS coefficients stay live while a suspicious refit is
+                # reviewed. When the cached model cannot be loaded at all --
+                # written by a superseded version of the model, a different
+                # estimator, a feature set that no longer exists -- there is no
+                # previous model to keep, so rejecting does not protect it. It
+                # produces no model at all and the run dies.
+                #
+                # Observed on a deployment that had not pulled for nine
+                # releases: the refit fitted cleanly, `review_refit` said
+                # "proposed fit shares no factors with the live model" against a
+                # cache from a superseded feature set, `load_cached` refused the
+                # same cache for the same reason, and the engine reported
+                # MODEL_UNAVAILABLE every night with no path forward.
+                #
+                # That is the first-fit case, which `review_refit` already
+                # accepts when `previous` is absent -- an unloadable previous is
+                # absent in every sense that matters here. So it is installed
+                # and the replacement is stated loudly rather than being
+                # rejected into a dead engine.
+                log.warning(
+                    "the rejected refit is installed anyway: the cached model "
+                    "could not be loaded, so there were no previous "
+                    "coefficients for the gate to keep live",
+                    extra={"verdict": verdict.summary()})
+                cm.archive_cache(cache)
+                cm.save_cache(cache, model, as_of)
+                superseded = RefitVerdict(
+                    accepted=True,
+                    reasons=[
+                        f"the live cache could not be loaded, so there was no "
+                        f"previous model to keep. The gate had rejected this "
+                        f"refit ({verdict.summary()}), but rejecting would have "
+                        f"left no model at all rather than the older one. "
+                        f"Installed as a first fit; the superseded cache is "
+                        f"archived."
+                    ],
+                    compared_against=verdict.compared_against,
+                )
+                live = cm.today_features(close, turnover, as_of,
+                                         fundamentals=fundamentals,
+                                         max_fundamental_age_days=max_age,
+                                         delivery=delivery, sectors=sector_map,
+                                         actions=actions)
+                return scores, model, reason, live, superseded
             live = cm.today_features(close, turnover, as_of,
                                      fundamentals=fundamentals,
                                      max_fundamental_age_days=max_age,

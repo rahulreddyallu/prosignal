@@ -261,7 +261,7 @@ def test_a_held_model_is_scored_on_the_same_features_as_every_other_path():
 
     src = inspect.getsource(s4._cross_sectional_model)
     held = src[src.index("held = cm.load_cached"):]
-    held = held[:held.index("# Nothing usable")]
+    held = held[:held.index("# NOTHING TO HOLD ON TO")]
     assert "sectors=sector_map" in held
     assert "actions=actions" in held
 
