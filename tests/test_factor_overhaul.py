@@ -18,13 +18,36 @@ Standalone rank IC over 70 dates says the same thing a second way:
     amihud        +0.0087    +0.090   +0.75   <- carries nothing
     turnover_ratio -0.0155   -0.175   -1.47   <- carries nothing
 
-And every family beats its own best member on ICIR, which is what averaging
-correlated members is supposed to do:
+WHAT AVERAGING IS AND IS NOT FOR. An earlier version of this file claimed
+"every family beats its own best member on ICIR" and quoted mom +0.505 against
+prox_52w +0.462, risk +0.488 against max_dd_120 +0.327, delivery +0.420 against
+deliv_trend +0.388. Those were measured at #68, against the HORIZON RETURN. The
+label was replaced at #75 by the engine's own exit geometry, and re-measured
+against it on the same 69-date panel (magnitudes, since three themes are priced
+negatively) three of the four reverse:
 
-    family     ICIR      best member ICIR
-    mom       +0.505     +0.462 (prox_52w)
-    risk      +0.488     +0.327 (max_dd_120)
-    delivery  +0.420     +0.388 (deliv_trend)
+    family     |ICIR|    best member
+    lottery     0.838    0.853  downside_vol   member wins
+    mom         0.145    0.202  resid_mom      member wins
+    risk        0.177    0.713  max_dd_120     member wins, heavily
+    delivery    0.929    0.794  deliv_pct      family wins
+
+The claim is withdrawn rather than restated, and the families are NOT
+restructured on it, because standalone ICIR is not the criterion they exist to
+serve. They exist for ESTIMABILITY: seventeen coefficients over a set this
+collinear is not estimable, and the near-uniform coefficient band was the model
+saying so. A family with a weaker standalone ICIR can still be the better thing
+to fit one coefficient to.
+
+`risk` is the case worth understanding rather than fixing. Its members correlate
+-0.43 within date, so the average CANCELS the common low-risk axis and keeps the
+residual -- which is why it scores 0.177 against max_dd_120's 0.713. That is
+deliberate and famamacbeth.THEME_PRIOR_SIGN documents it. What was wrong was the
+number attached to it, not the design.
+
+Deciding whether a family should be replaced by its best member needs an
+out-of-sample ablation on the BOOK, not a standalone IC table. That experiment
+has not been run.
 """
 
 from __future__ import annotations
