@@ -1,0 +1,53 @@
+────────────────────────────── Building the panel ──────────────────────────────
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:23:07 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+  27,162 rows over 69 dates
+────────────────── The criterion, declared before the numbers ──────────────────
+  A theme is killed when its trailing 24-date Newey-West t has been
+  at or below +0.00 on every check across 24 consecutive checks --
+  a complete refresh of the window, so no single bad quarter can end a theme.
+───────────────────────────────── Theme health ─────────────────────────────────
+  theme            full      t   recent      t  expected  of exp.  breach  
+verdict
+  mom           -0.0004  -0.02  -0.0189  -0.64   -0.0002      n/a      33     
+KILL
+  reversal      -0.0864  -4.78  -0.0631  -2.15   -0.0363     174%      46     
+KILL
+  lottery       -0.1948  -5.05  -0.1399  -1.84   -0.0818     171%      46     
+KILL
+  risk          +0.0517  +2.45  +0.0381  +1.54   +0.0217     175%       0     
+keep
+  delivery      +0.0662  +5.08  +0.0597  +2.43   +0.0278     215%       0     
+keep
+
+  'of exp.' is blank where the FULL-SAMPLE coefficient is itself
+  indistinguishable from zero: there is no expectation to fall
+  short of, and dividing by noise printed reversal at 837% and
+  lottery at 4341% -- both reading as though the theme thrived.
+
+  'expected' applies the McLean-Pontiff haircut of 58% to the full-sample
+  coefficient. Every theme here comes from a published paper, so a
+  theme merely MEETING that expectation is behaving exactly as the
+  literature predicts -- not underperforming. Above 100% of
+  expected is the honest definition of still working.
+─────────────────────────────────── Verdict ────────────────────────────────────
+  KILL: mom, reversal, lottery
+    mom: trailing 24-date t has been at or below +0.00 for 33 consecutive checks
+    reversal: trailing 24-date t has been at or below +0.00 for 46 consecutive 
+checks
+    lottery: trailing 24-date t has been at or below +0.00 for 46 consecutive 
+checks
+
+  This is a pre-committed removal, not a suggestion. The theme
+  is removed from FAMILIES; it is not left in at a small
+  coefficient to see whether it recovers.

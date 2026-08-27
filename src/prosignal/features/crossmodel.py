@@ -5,9 +5,10 @@ every 21 sessions from history strictly before the decision date, predicting the
 rank of the forward 63-session outcome under the engine's own exit geometry.
 
 The unit of estimation is the FAMILY, not the factor: 26 ranked columns are
-averaged into at most seven families and one coefficient is fitted per family.
-On the shipped model five families are built and the significance floor prices
-three of them.
+averaged into at most nine families and one coefficient is fitted per family.
+On the shipped model seven are built -- value and quality are dropped upstream
+for coverage, at 38% date-span against a 60% floor -- and the significance floor
+prices a subset of those.
 
 It is here rather than in a research folder because it was measured against the
 incumbent composite under purged walk-forward and won. The table below measured
@@ -44,8 +45,9 @@ from .exits import ExitRules, rules_from_config
 from .labels import BarrierSpec
 from .fundamental_factors import available_as_of, build_fundamental_panel, winsorise
 from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
-from .famamacbeth import (FMResult, SIGNIFICANCE_FLOOR, fama_macbeth,
-                          gated_shrink, is_degenerate)
+from .famamacbeth import (FMResult, SIGNIFICANCE_FLOOR, TAPER_C,
+                          TAPER_HARD_FLOOR, fama_macbeth, gated_shrink,
+                          is_degenerate)
 from .metalabel import MetaModel, fit_meta_out_of_sample, shortlist
 from .linear import predict, ridge_fit
 
@@ -243,7 +245,8 @@ def _meta_from_blob(blob) -> Optional["MetaModel"]:
 
 def load_cached(path, as_of: dt.date,
                 refit_every_sessions: Optional[int] = None,
-                estimator: Optional[str] = None) -> Optional[CrossSectionalModel]:
+                estimator: Optional[str] = None,
+                label: Optional[Dict[str, object]] = None) -> Optional[CrossSectionalModel]:
     """Coefficients from a recent fit, or None when absent or stale.
 
     ``refit_every_sessions`` comes from the config. It defaulted to the module
@@ -278,6 +281,17 @@ def load_cached(path, as_of: dt.date,
         # A model fitted by a different estimator is a different model. Blobs
         # written before the field existed were ridge fits.
         if estimator is not None and str(blob.get("estimator", "ridge")) != str(estimator):
+            return None
+        # A model fitted against a DIFFERENT LABEL is a different model, and
+        # this is the check whose absence let the label repair keep scoring on
+        # barrier-fitted coefficients. See `label_fingerprint`.
+        #
+        # A blob written before the field existed carries None. That is treated
+        # as a MISMATCH rather than a pass, because the whole failure mode here
+        # is a stale blob that looks valid: refitting once on an upgrade is
+        # cheap, and scoring for six weeks against a label the engine no longer
+        # uses is not.
+        if label is not None and blob.get("label") != label:
             return None
         m = CrossSectionalModel(
             coef=blob["coef"], n_train=int(blob["n_train"]),
@@ -363,6 +377,63 @@ def archive_cache(path, keep: int = 10) -> Optional[str]:
     return str(target)
 
 
+def label_fingerprint(
+    horizon: int,
+    barriers: Optional["BarrierSpec"] = None,
+    exit_rules: Optional["ExitRules"] = None,
+) -> Dict[str, object]:
+    """What the coefficients were FITTED AGAINST, in a form two fits can compare.
+
+    `load_cached` validated three things -- the fit date, the feature-column set
+    and the estimator name -- and NONE of them move when the label changes. So
+    flipping `labels.triple_barrier`, which changes what the model is predicting
+    and measurably changes every coefficient, left a cached blob that still
+    looked valid in every respect the loader checked. The engine went on scoring
+    with barrier-fitted coefficients for up to `refit_every * 2` = 42 sessions,
+    and every run looked normal. The label was not stored in the blob at all, so
+    nothing downstream could have reported it either.
+
+    This is not hypothetical: it is the trap the label repair had to be walked
+    around by hand, by archiving the live model. Splitting a family invalidates
+    the cache on its own, through the feature-column check. Changing the LABEL
+    does not, and neither does changing the HORIZON.
+
+    Everything here is a value the fit actually consumed, so the fingerprint
+    describes the model that was built rather than the config someone believes
+    was in force.
+    """
+    fp: Dict[str, object] = {
+        "horizon": int(horizon),
+        "triple_barrier": bool(barriers is not None or exit_rules is not None),
+    }
+    if exit_rules is not None:
+        fp["source"] = "engine"
+        fp["engine"] = {
+            "stop_atr_multiple": float(exit_rules.stop_atr_multiple),
+            "min_stop_distance_pct": float(exit_rules.min_stop_distance_pct),
+            "max_stop_distance_pct": float(exit_rules.max_stop_distance_pct),
+            "target_r_multiple": float(exit_rules.target_r_multiple),
+            "invalidation_ma_sessions": int(exit_rules.invalidation_ma_sessions),
+            "invalidation_buffer_atr": float(exit_rules.invalidation_buffer_atr),
+            "atr_period_sessions": int(exit_rules.atr_period_sessions),
+            "atr_method": str(exit_rules.atr_method),
+            "horizon": int(exit_rules.horizon),
+        }
+    elif barriers is not None:
+        fp["source"] = "sigma"
+        fp["sigma"] = {
+            "upper": float(barriers.upper),
+            "lower": float(barriers.lower),
+            "horizon": int(barriers.horizon),
+            "vol_window": int(barriers.vol_window),
+        }
+    else:
+        # The shipped state after the label repair: a plain forward return over
+        # `horizon` sessions, with no path dependence at all.
+        fp["source"] = "forward_return"
+    return fp
+
+
 def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
@@ -391,6 +462,10 @@ def save_cache(path, model: CrossSectionalModel, as_of: dt.date) -> None:
         # approved" silently refuses the whole book.
         "meta": _meta_blob(getattr(model, "meta", None)),
         "dropped_for_coverage": getattr(model, "dropped_for_coverage", {}) or {},
+        # WHAT THIS MODEL WAS FITTED AGAINST. See `label_fingerprint`: without
+        # it a label change keeps scoring on stale coefficients for up to 42
+        # sessions and nothing reports it.
+        "label": getattr(model, "label", None),
         "mu": list(map(float, model.mu)),
         "sd": list(map(float, model.sd)),
         "intercept": model.intercept,
@@ -554,6 +629,16 @@ def score_with(model: CrossSectionalModel, features: pd.DataFrame,
         log.warning("regime multipliers skipped on the cached path",
                     extra={"reason": skipped})
     model.regime_multipliers_applied = applied is not None
+    # Attached on THIS path too, so the card can say what the regime layer did
+    # on the 20 sessions in 21 that score from cache. It was set only in
+    # `fit_predict`, so the honest regime note was available exactly on refit
+    # days and absent the rest of the time -- the same shape of gap the guard
+    # itself had before it was moved here.
+    #
+    # Recomputed rather than cached: it depends on TODAY's multipliers, and a
+    # reachability diagnosis serialised on a refit day would describe the
+    # regime bucket of three weeks ago.
+    model.regime_reachability = regime_reachability(multipliers, model.coef)
     features = apply_family_multipliers(features, applied)
     cols = model.features
     x = features.reindex(columns=cols).fillna(0.0).to_numpy("float64")
@@ -643,9 +728,41 @@ FAMILIES: Dict[str, Tuple[str, ...]] = {
     # because the marginal buyer is retail. Signs are aligned so that a HIGHER
     # composite means MORE lottery-like, and the fit is free to price it
     # negatively.
-    "lottery": ("max5_21_r", "idio_vol_r", "idio_skew_r", "downside_vol_r"),
-    # What is left of risk once the lottery moments are taken out.
-    "risk": ("beta_120_r", "max_dd_120_r"),
+    #
+    # THREE MEMBERS, not four. These three are volatility measures correlating
+    # 0.48-0.68 within date, which is what makes them one family. `idio_skew`
+    # was the fourth and correlates +0.04 with downside_vol and +0.28 with
+    # max5_21 -- near-orthogonal to the family it was averaged into, while
+    # carrying a quarter of its weight. That is not diversification inside a
+    # family, it is a second factor hidden inside a first.
+    #
+    # The literature says the same: Bali, Cakici & Whitelaw (2011) find MAX
+    # subsumes idiosyncratic volatility -- controlling for MAX kills the IVOL
+    # effect -- so these three are one mechanism. Skewness preference is
+    # controlled for SEPARATELY in that paper and is a different channel.
+    "lottery": ("max5_21_r", "idio_vol_r", "downside_vol_r"),
+    # Skewness preference, on its own rather than diluting `lottery`. Measured
+    # against the real forward return it reads t -0.94, so the significance
+    # gate will almost certainly zero it -- which is the point. A theme that is
+    # visible and zeroed is more informative than one that is invisible and
+    # quietly diluting its neighbours.
+    "skew": ("idio_skew_r",),
+    # SPLIT, not averaged. Measured within date these two correlate -0.42: a
+    # high beta rank is RISKIER, a high max_dd rank is a SHALLOWER drawdown and
+    # therefore SAFER. Averaging them under a common sign cancelled the axis --
+    # beta alone t -3.67 and max_dd alone t +4.69 became a composite at t -0.93,
+    # which the significance gate then discarded for being insignificant. Two
+    # significant signals were averaged into one insignificant column.
+    #
+    # The families exist for ESTIMABILITY -- seventeen coefficients over a
+    # collinear set is not estimable -- and two ANTICORRELATED members are not a
+    # collinear block. They are two different bets. One coefficient each; the
+    # fit prices either, both or neither on its own evidence.
+    #
+    # A second cost of the average: max_dd_120 correlates +0.63 with prox_52w,
+    # so `risk` was partly a momentum factor wearing a risk label.
+    "beta": ("beta_120_r",),
+    "drawdown": ("max_dd_120_r",),
     # Delivered share of traded volume. No clean analogue outside India.
     "delivery": ("deliv_pct_r", "deliv_trend_r"),
     "value": ("earnings_yield_r", "book_to_price_r", "ebitda_to_ev_r",
@@ -896,6 +1013,9 @@ def fit_coefficients(
     step: int = 21,
     significance_floor: Optional[float] = None,
     shrink_toward: str = "zero",
+    significance_taper: bool = False,
+    taper_c: float = TAPER_C,
+    taper_hard_floor: float = TAPER_HARD_FLOOR,
     weights: Optional[np.ndarray] = None,
     window_dates: Optional[int] = None,
     target: str = "label_rank",
@@ -931,11 +1051,14 @@ def fit_coefficients(
         return None, None, (f"Fama-MacBeth needs at least 3 usable "
                             f"cross-sections; {n} dates produced too few")
     floor = SIGNIFICANCE_FLOOR if significance_floor is None else float(significance_floor)
-    lam = gated_shrink(fm, floor=floor, toward=shrink_toward)
+    lam = gated_shrink(fm, floor=floor, toward=shrink_toward,
+                       taper=bool(significance_taper), taper_c=float(taper_c),
+                       taper_hard_floor=float(taper_hard_floor))
     if is_degenerate(lam):
+        effective = float(taper_hard_floor) if significance_taper else floor
         strongest = max(fm.t_stat, key=lambda k: abs(fm.t_stat.get(k, 0.0)))
         return None, fm, (
-            f"no factor theme cleared |t| >= {floor:g} on {fm.n_dates} "
+            f"no factor theme cleared |t| >= {effective:g} on {fm.n_dates} "
             f"cross-sections; strongest was {strongest.removesuffix('_f')} at "
             f"t {fm.t_stat[strongest]:+.2f}"
         )
@@ -974,6 +1097,9 @@ def fit_predict(
     significance_floor: Optional[float] = None,
     fm_window_dates: Optional[int] = None,
     shrink_toward: str = "zero",
+    significance_taper: bool = False,
+    taper_c: float = TAPER_C,
+    taper_hard_floor: float = TAPER_HARD_FLOOR,
     metalabel: bool = False,
     metalabel_top_k: int = 50,
     metalabel_l2: float = 1.0,
@@ -1061,6 +1187,8 @@ def fit_predict(
     fit, fm, why = fit_coefficients(
         panel, features, estimator=estimator, alpha=A, horizon=H, step=21,
         significance_floor=significance_floor, shrink_toward=shrink_toward,
+        significance_taper=significance_taper, taper_c=taper_c,
+        taper_hard_floor=taper_hard_floor,
         weights=w, window_dates=fm_window_dates)
     if fit is None:
         # A refusal, not a crash. When no theme clears the floor the honest
@@ -1132,6 +1260,8 @@ def fit_predict(
                 inner_train, features, estimator=estimator, alpha=A, horizon=H,
                 step=21, significance_floor=significance_floor,
                 shrink_toward=shrink_toward,
+                significance_taper=significance_taper, taper_c=taper_c,
+                taper_hard_floor=taper_hard_floor,
                 weights=(inner_train["uniqueness"].to_numpy("float64")
                          if "uniqueness" in inner_train.columns else None))
             if inner_fit is None:
@@ -1198,6 +1328,11 @@ def fit_predict(
                         extra={"reason": meta_reason})
 
     model.dropped_for_coverage = dropped
+    # Taken from the arguments the fit ACTUALLY consumed, not from a config
+    # read a second time, so the fingerprint cannot drift from the model it
+    # describes. `save_cache` writes it and `load_cached` refuses a blob whose
+    # label differs.
+    model.label = label_fingerprint(H, barriers, exit_rules)
     model.regime_reachability = reach
     model.regime_multipliers_applied = multipliers_applied is not None
     model.meta_prob = model_meta_prob

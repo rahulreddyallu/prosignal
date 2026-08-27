@@ -65,7 +65,9 @@ FAMILY_MAP: Dict[str, Tuple[str, str]] = {
     "mom":      ("momentum",      "Medium-term momentum"),
     "reversal": ("reversal",      "Recent one-month move"),
     "lottery":  ("lottery",       "Lottery-like payoff shape"),
-    "risk":     ("risk",          "Market risk and drawdown"),
+    "skew":     ("skew",          "Return skewness"),
+    "beta":     ("beta",          "Market beta"),
+    "drawdown": ("drawdown",      "Drawdown depth"),
     "delivery": ("participation", "Delivery-backed participation"),
     "value":    ("valuation",     "Valuation"),
     "quality":  ("quality",       "Business quality"),
@@ -97,14 +99,18 @@ EVIDENCE_CATEGORIES: Tuple[Tuple[str, str], ...] = (
     ("valuation",     "Valuation"),
     ("quality",       "Quality"),
     ("lottery",       "Payoff Shape"),
-    ("risk",          "Risk"),
+    ("skew",          "Skewness"),
+    ("beta",          "Market Beta"),
+    ("drawdown",      "Drawdown"),
 )
 
 _LABELS = dict(EVIDENCE_CATEGORIES)
 
 #: Categories that read as a LEVEL rather than a direction. "Strong risk" is
 #: ambiguous about whether that is good news; "Contained" is not.
-_LEVEL_CATEGORIES = frozenset({"risk", "lottery"})
+#: `risk` split into `beta` and `drawdown`, and `skew` left `lottery`; all
+#: five read as a LEVEL rather than a direction.
+_LEVEL_CATEGORIES = frozenset({"beta", "drawdown", "lottery", "skew"})
 
 #: Standardised-deviation thresholds for a verdict. A name inside +/-0.35 sd of
 #: the universe is genuinely unremarkable on that axis and is called neutral

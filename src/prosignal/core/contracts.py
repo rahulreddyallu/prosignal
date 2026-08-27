@@ -412,11 +412,29 @@ class CheckResult(_Contract):
 
 
 class StockDefenseResult(_Contract):
+    """One name's Stage 5 verdict.
+
+    THE PENALTY IS A RANK DEMOTION, NOT A SCORE ADJUSTMENT. `score_before` is
+    `composite_unit`, a cross-sectional rank uniform on [0, 1] by construction,
+    so `total_penalty` of 0.10 means "drop this name ten percentile points". It
+    does not mean 0.10 of anything returnlike, and it carries no magnitude: the
+    same 0.10 is applied on a day when the model's predictions are tightly
+    bunched and on a day when they are widely dispersed.
+
+    The field names are kept rather than renamed because they are serialised
+    into the ledger and the API, and renaming them would break stored runs to
+    fix a naming problem. The description is the fix.
+    """
+
     ticker: str
     checks: List[CheckResult] = Field(default_factory=list)
-    total_penalty: float = 0.0
-    score_before: float = 0.0
-    score_after: float = 0.0
+    #: Percentile points to demote by, summed across triggered checks.
+    total_penalty: float = Field(
+        0.0, description="rank demotion in percentile points, not a return")
+    #: The cross-sectional rank in [0, 1] before demotion.
+    score_before: float = Field(0.0, description="cross-sectional rank in [0,1]")
+    #: The same rank after demotion, floored at zero.
+    score_after: float = Field(0.0, description="demoted rank in [0,1]")
     final_status: str = "CLEARED"  # CLEARED | PENALIZED | REJECTED
 
     def passed(self) -> List[CheckResult]:

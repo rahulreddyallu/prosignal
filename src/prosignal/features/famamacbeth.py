@@ -88,8 +88,27 @@ THEME_PRIOR_SIGN: Dict[str, Optional[int]] = {
     # Bali, Cakici & Whitelaw (2011). Lottery demand is paid for, so the more
     # lottery-like the name, the lower the expected return.
     "lottery": -1,
-    # See the note above. No prior; shrinks toward zero.
-    "risk": None,
+    # Frazzini & Pedersen (2014): leverage-constrained investors bid up high
+    # beta, so low beta earns more per unit of risk. Agarwalla, Jacob, Varma &
+    # Vasudevan (2014) find the BAB factor earns significant positive returns
+    # in India and DOMINATES the size, value and momentum factors, so the prior
+    # is claimable in this market specifically rather than by analogy.
+    #
+    # This is a prior taken from the literature BEFORE looking at the panel,
+    # which is what makes it a prior. The note above explains why no prior
+    # could be claimed for the old composite: (beta + max_dd)/2 was not the
+    # BAB portfolio and its orientation was read off the same data the
+    # shrinkage was meant to discipline. Splitting the family is what makes a
+    # literature prior legitimate here.
+    "beta": -1,
+    # No literature analogue for a drawdown-DEPTH cross-section, and the
+    # measurement disagrees with itself across labels. No prior.
+    "drawdown": None,
+    # Skewness preference is a real channel (Bali, Cakici & Whitelaw 2011;
+    # Boyer, Mitton & Vorkink 2010) and points the same way as lottery demand:
+    # investors overpay for positive skew. Prior -1, and the gate is expected
+    # to zero it anyway at t -0.94.
+    "skew": -1,
     # No literature analogue -- delivery percentage is an Indian market
     # microstructure disclosure with no US counterpart. The engine's thesis is
     # that delivered volume is real accumulation rather than intraday churn,
@@ -307,10 +326,28 @@ def hierarchical_shrink(
     # those that survived. The point estimates and standard errors are
     # unchanged; what changes is which sample the prior is learned from.
     source = tau2_from if tau2_from is not None else result
+    # STRICTLY POSITIVE, not merely finite. The pool is inverse-variance
+    # weighted, so a theme enters it as 1/se^2 and a theme with se == 0 is a
+    # division by zero rather than an infinitely precise measurement.
+    #
+    # se == 0 means the theme's slope was identical on every cross-section,
+    # which is not a well-measured theme -- it is a degenerate column the panel
+    # could not move. It carries no information about BETWEEN-theme dispersion,
+    # so it is excluded from the tau^2 pool rather than dominating it.
+    #
+    # Reachable on the production fit path (fit_coefficients -> gated_shrink ->
+    # here), where it would have raised ZeroDivisionError and been caught as
+    # "cross-sectional model failed", taking the ranking down for the run. It
+    # went unnoticed while every family had two or more members; single-member
+    # themes (`reversal`, and now `skew`, `beta`, `drawdown`) make a constant
+    # slope series reachable on a short or degenerate panel.
     src_var = {c: (source.se[c] ** 2) for c in source.features
-               if np.isfinite(source.se.get(c, float("nan")))}
+               if np.isfinite(source.se.get(c, float("nan")))
+               and source.se[c] ** 2 > 0.0}
     if not src_var:
-        src_var = var
+        src_var = {c: v for c, v in var.items() if v > 0.0}
+    if not src_var:
+        return dict(result.lam)
         source = result
 
     # tau^2 by DerSimonian & Laird (1986), NOT by the plain moment estimator
@@ -408,12 +445,25 @@ def score_from_lambda(frame: pd.DataFrame, lam: Mapping[str, float]) -> pd.Serie
 #: to evaluate it is how a backtest is manufactured. Both are counted as trials.
 SIGNIFICANCE_FLOOR = 2.0
 
+#: Curvature of the optional continuous taper, t^2 / (t^2 + c). At c = 4.0 the
+#: half-weight point sits exactly at |t| = 2, so the taper SMOOTHS the shipped
+#: cliff rather than replacing it with a different rule.
+TAPER_C = 4.0
+
+#: Below this the coefficient is zero outright even under the taper. A theme
+#: the window genuinely cannot measure must not steer the book at a fifth
+#: weight any more than at full weight.
+TAPER_HARD_FLOOR = 1.0
+
 
 def gated_shrink(
     result: FMResult,
     floor: float = SIGNIFICANCE_FLOOR,
     toward: str = "zero",
     prior_sign: Optional[Mapping[str, Optional[int]]] = None,
+    taper: bool = False,
+    taper_c: float = TAPER_C,
+    taper_hard_floor: float = TAPER_HARD_FLOOR,
 ) -> Dict[str, float]:
     """Kill themes below the significance floor, then shrink what survives.
 
@@ -425,10 +475,28 @@ def gated_shrink(
     Returns every input feature, with the killed ones at exactly zero. An
     all-zero result is a legitimate answer -- it means no theme was measurable
     -- and the caller must refuse to trade rather than score a flat book.
+
+    ``taper`` replaces the CLIFF with a continuous weight. The cliff is a real
+    weakness: it makes a traded coefficient a step function of a noisy
+    statistic, and `risk` sat at t +1.86 on the live fit against +2.45 on the
+    rebuild -- the same theme worth nothing or nearly everything depending only
+    on the window. Under the taper a theme keeps t^2 / (t^2 + c) of its shrunk
+    coefficient, so |t| = 2 keeps half and |t| = 1 a fifth, and
+    ``taper_hard_floor`` still zeroes anything below it outright.
+
+    OFF by default. The argument for it is structural, but it moves live
+    coefficients, which makes it an estimator change and therefore a trial --
+    see `estimator.significance_taper` in the config for why that distinction
+    is being enforced rather than argued.
     """
-    keep = [c for c in result.features
-            if np.isfinite(result.t_stat.get(c, float("nan")))
-            and abs(result.t_stat[c]) >= float(floor)]
+    if taper:
+        keep = [c for c in result.features
+                if np.isfinite(result.t_stat.get(c, float("nan")))
+                and abs(result.t_stat[c]) >= float(taper_hard_floor)]
+    else:
+        keep = [c for c in result.features
+                if np.isfinite(result.t_stat.get(c, float("nan")))
+                and abs(result.t_stat[c]) >= float(floor)]
     out = {c: 0.0 for c in result.features}
     if not keep:
         return out
@@ -444,6 +512,15 @@ def gated_shrink(
     # floor let through. See hierarchical_shrink.
     out.update(hierarchical_shrink(sub, prior_sign=prior_sign, toward=toward,
                                    tau2_from=result))
+    if taper:
+        # Applied AFTER the shrinkage, not instead of it. The two answer
+        # different questions: hierarchical_shrink weights by how precisely a
+        # theme is measured relative to the pool, and this weights by how far
+        # its own t is from being indistinguishable from zero.
+        c = float(taper_c)
+        for col in keep:
+            t = float(result.t_stat[col])
+            out[col] *= (t * t) / (t * t + c)
     return out
 
 

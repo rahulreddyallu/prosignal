@@ -165,6 +165,33 @@ def run(
         elif total > 0:
             status = "PENALIZED"
 
+        # A PENALTY IS A RANK DEMOTION, IN PERCENTILE POINTS.
+        #
+        # `composite_score` is `composite_unit`, a cross-sectional rank mapped
+        # to [0, 1] and therefore UNIFORM BY CONSTRUCTION every day. Subtracting
+        # 0.10 from it does not remove "0.10 of expected return" -- there is no
+        # return in this unit at all. It moves the name down ten percentile
+        # points, and it moves it the same ten percentile points on a day when
+        # the model's predictions are tightly bunched as on a day when they are
+        # widely dispersed, even though those two days are not remotely the same
+        # decision.
+        #
+        # The arithmetic is UNCHANGED here; the naming and the language around
+        # it are what was wrong. Every constant in this stage still carries
+        # status UNVALIDATED, and reading them as "twelve percentile points" is
+        # the honest description of what they already do.
+        #
+        # The scale-aware version -- expressing a penalty as a fraction of the
+        # day's `prediction_dispersion` and applying it to `composite_raw`
+        # BEFORE the rank transform -- is the right design and is a real change
+        # to what gets selected, so it belongs in a measured trial through
+        # `research portfolio` rather than in a comment. Deliberately not done
+        # here.
+        #
+        # Stage 8 already works around the unit problem from the other side:
+        # `min_universe_percentile` is tested PRE-penalty precisely because
+        # testing it post-penalty double-counts, and measured live that cut 45
+        # of 47 defended names.
         before = cand.composite_score
         after = max(before - total, 0.0)
         per_stock[sym] = StockDefenseResult(

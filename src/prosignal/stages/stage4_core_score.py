@@ -324,6 +324,44 @@ def run(
                 f"({model.summary()}). Run `prosignal research estimator` for "
                 f"its out-of-sample standing against an equal-weight control."
             )
+            # WHAT THE REGIME LAYER ACTUALLY DID, SAID OUT LOUD.
+            #
+            # `reachable_multipliers` refuses to scale momentum down when no
+            # defensive family is priced, because the weight would rotate into
+            # whatever else is weighted -- `delivery` on the shipped model --
+            # and delivery was never a crash stabiliser. That guard is correct
+            # and it fires on EVERY run: `value` and `quality` are dropped
+            # upstream at 38% date-span against a 60% floor, which the
+            # fundamentals feed cannot clear.
+            #
+            # The diagnosis was computed, attached to the model, and read by
+            # nothing. So Stage 2 measured the regime, the ledger recorded it,
+            # the card printed it, and a reader had no way to learn that the
+            # multiplier never reached a score. That is the defect: not the
+            # guard, but the silence about it.
+            reach = getattr(model, "regime_reachability", None)
+            if reach is not None:
+                targeted = ", ".join(reach.get("targeted") or []) or "nothing"
+                if getattr(model, "regime_multipliers_applied", False):
+                    moved = float(reach.get("share_of_weight_moved") or 0.0)
+                    notes.append(
+                        f"Regime multipliers APPLIED to "
+                        f"{', '.join(reach.get('reachable') or []) or 'nothing'}, "
+                        f"moving {moved:.0%} of the fitted weight."
+                    )
+                else:
+                    receives = ", ".join(reach.get("receives_the_weight") or [])
+                    notes.append(
+                        f"Regime multipliers computed and NOT APPLIED: they "
+                        f"target {targeted}, and no defensive family is priced "
+                        f"(value and quality are dropped for coverage), so "
+                        f"scaling momentum down would rotate the book into "
+                        f"{receives or 'nothing'} rather than into a "
+                        f"stabiliser. The regime measurement on this card "
+                        f"describes the market, not a change to the ranking. "
+                        f"The crash control that DOES bind is the entry gate "
+                        f"(no_new_entry_buckets), not a weighting."
+                    )
         else:
             notes.append(
                 f"Cross-sectional model covered only {len(aligned)} of "
@@ -688,7 +726,9 @@ _MODEL_CITE = {
     "mom": "Jegadeesh & Titman (1993); George & Hwang (2004); Blitz, Huij & Martens (2011)",
     "reversal": "Blitz, Huij, Lansdorp & Martens (2013)",
     "lottery": "Bali, Cakici & Whitelaw (2011); Ang, Hodrick, Xing & Zhang (2006)",
-    "risk": "Ang, Hodrick, Xing & Zhang (2006)",
+    "skew": "Bali, Cakici & Whitelaw (2011); Boyer, Mitton & Vorkink (2010)",
+    "beta": "Frazzini & Pedersen (2014); Agarwalla, Jacob, Varma & Vasudevan (2014) for India",
+    "drawdown": "no literature analogue; drawdown depth is not a standard cross-sectional factor",
     "delivery": "NSE delivered-quantity data; no direct analogue outside India",
     "value": "Fama & French (1992); Basu (1977)",
     "quality": "Novy-Marx (2013); Sloan (1996); Cooper, Gulen & Schill (2008)",
@@ -785,8 +825,26 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
     try:
         sessions = store.price_sessions()
         refit_every = iv(cfg.model_refit_every_sessions)
+        # THE LABEL GEOMETRY, BUILT ONCE AND USED TWICE. `fit_predict` consumes
+        # these objects and `load_cached` compares the fingerprint they produce,
+        # so both sides of the cache check read the same construction rather
+        # than the same config twice. Still inside the try, for the reason the
+        # note below on `lab` gives.
+        lab = cfg.labels
+        label_horizon = int(iv(cfg.model_horizon_sessions))
+        label_exit_rules = (rules_from_config(cfg, risk_cfg)
+                            if bool(lab.triple_barrier) and risk_cfg is not None
+                            and str(lab.barrier_source) == "engine" else None)
+        label_barriers = (BarrierSpec(
+            upper=float(lab.upper_sigma), lower=float(lab.lower_sigma),
+            horizon=label_horizon, vol_window=int(lab.vol_window_sessions))
+            if bool(lab.triple_barrier)
+            and str(lab.barrier_source) == "sigma" else None)
+        label_fp = cm.label_fingerprint(
+            label_horizon, label_barriers, label_exit_rules)
         cached = cm.load_cached(cache, as_of, refit_every,
-                                estimator=str(cfg.estimator.method))
+                                estimator=str(cfg.estimator.method),
+                                label=label_fp)
 
         # Cheap path: a recent fit only needs today's features, which is one
         # date of history instead of a thousand. The large read is what pushed
@@ -809,10 +867,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
         # high/low make the barrier touch test intraday, which is what a stop
         # actually is. Closes alone understate how often one is hit.
         cols = [DATE, SYMBOL, "close", "turnover"]
-        # Read here rather than at the top: a config problem in this block must
-        # not raise before the delivery check, whose failure is the one the
-        # caller needs to see.
-        lab = cfg.labels
+        # `lab` is read further up now, where the label fingerprint is built --
+        # still inside this try, for the original reason: a config problem in
+        # this block must not raise before the delivery check, whose failure is
+        # the one the caller needs to see.
         est = cfg.estimator
         if refitting and bool(lab.triple_barrier):
             # `open` too: a bar that gaps through the stop fills at the OPEN,
@@ -937,19 +995,15 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
             # config. If stage 7 is not reachable the label cannot be built
             # honestly, so it falls back to the sigma geometry and says so
             # rather than silently inventing a stop.
-            exit_rules=(rules_from_config(cfg, risk_cfg)
-                        if bool(lab.triple_barrier) and risk_cfg is not None
-                        and str(lab.barrier_source) == "engine" else None),
-            barriers=(BarrierSpec(
-                upper=float(lab.upper_sigma), lower=float(lab.lower_sigma),
-                horizon=int(iv(cfg.model_horizon_sessions)),
-                vol_window=int(lab.vol_window_sessions))
-                if bool(lab.triple_barrier)
-                and str(lab.barrier_source) == "sigma" else None),
+            exit_rules=label_exit_rules,
+            barriers=label_barriers,
             high=high, low=low, open_=open_,
             uniqueness_weighting=bool(lab.uniqueness_weighting),
             estimator=str(est.method),
             significance_floor=float(est.significance_floor),
+            significance_taper=bool(est.significance_taper),
+            taper_c=float(est.taper_c),
+            taper_hard_floor=float(est.taper_hard_floor),
             fm_window_dates=(int(est.window_dates)
                              if est.window_dates is not None else None),
             shrink_toward=str(est.shrink_toward),
@@ -977,7 +1031,8 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                    "sign_flips": verdict.sign_flips,
                                    "magnitude_jumps": verdict.magnitude_jumps})
                 held = cm.load_cached(cache, as_of, refit_every,
-                                      estimator=str(cfg.estimator.method))
+                                      estimator=str(cfg.estimator.method),
+                                      label=label_fp)
                 if held is not None:
                     # The SAME feature construction as every other path. This
                     # dropped `sectors` and `actions`, so a run that held its
@@ -1041,10 +1096,21 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                          delivery=delivery, sectors=sector_map,
                                          actions=actions)
                 return scores, model, reason, live, superseded
+            # THE SAME KEYWORD SET AS EVERY OTHER PATH. This branch -- the
+            # ACCEPTED refit, the common case on a refit day -- dropped
+            # `sectors` and `actions` while the cached, rejected-refit and
+            # superseded branches all passed them. The score therefore came
+            # from sector-neutral ranks while the card's contributions, the
+            # member breakdown and the redundancy report were computed from
+            # universe-wide ranks: the numbers on the card did not sum to the
+            # number on the card, on every refit day. The comment sixty lines
+            # above documents fixing exactly this on the rejected-refit path;
+            # this is the same bug in the branch next to it.
             live = cm.today_features(close, turnover, as_of,
                                      fundamentals=fundamentals,
                                      max_fundamental_age_days=max_age,
-                                     delivery=delivery)
+                                     delivery=delivery, sectors=sector_map,
+                                     actions=actions)
         else:
             live = None
         return scores, model, reason, live, None

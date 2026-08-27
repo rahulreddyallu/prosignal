@@ -123,3 +123,78 @@ class TestTheHaircut:
                         recent_lambda=0.0587, recent_t=2.63, recent_dates=24,
                         expected_lambda=0.0704 * 0.42)
         assert h.share_of_expected == pytest.approx(0.0587 / (0.0704 * 0.42))
+
+
+def _signed_panel(column, betas, n_names=60, seed=3):
+    """A panel for ONE theme whose true slope per date is `betas`."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for d, beta in enumerate(betas):
+        x = rng.normal(size=n_names)
+        rows.append(pd.DataFrame({
+            "date": pd.Timestamp("2018-01-01") + pd.Timedelta(days=21 * d),
+            "symbol": [f"S{i}" for i in range(n_names)],
+            column: x,
+            "label_rank": beta * x + rng.normal(size=n_names),
+        }))
+    return pd.concat(rows, ignore_index=True)
+
+
+class TestTheCriterionIsOrientedByTheThemesOwnDirection:
+    """A theme priced NEGATIVELY is not, for that reason, a decaying theme.
+
+    `assess_decay` compared the raw rolling t against `kill_t` and nothing
+    else, so every correctly-negative theme breached on every check forever.
+    Measured on the pre-repair panel the monitor returned KILL for `reversal`
+    (t -4.78) and `lottery` (t -5.05): both carry THEME_PRIOR_SIGN of -1, both
+    were behaving exactly as the literature says they should, and both were
+    marked for deletion by a PRE-COMMITTED removal rule.
+
+    The rule is unchanged -- at or below the floor for N consecutive checks.
+    What is fixed is that "below" is now measured in the direction the theme is
+    supposed to pay in.
+    """
+
+    def test_a_theme_meeting_its_negative_prior_is_kept(self):
+        panel = _signed_panel("reversal_f", [-0.5] * 70)
+        v = assess_decay(panel, ["reversal_f"], window=24, kill_t=0.0,
+                         required_breaches=24)
+        theme = v.themes[0]
+        assert theme.recent_t < -2, "fixture must be strongly negative"
+        assert not theme.killed, (
+            "a theme sitting at t -2 or below with a -1 literature prior is "
+            "working, not decaying")
+
+    def test_a_negative_prior_theme_that_turns_the_wrong_way_is_still_killed(self):
+        """The orientation must not make a negative theme unkillable.
+
+        Mirrors `test_a_theme_that_died_halfway_is_killed`, which decays a +1
+        theme to -0.05. The mirror of that for a -1 theme is +0.05: a slope on
+        the wrong side of zero for the direction the theme is supposed to pay
+        in. A theme sitting at exactly zero is deliberately NOT the fixture --
+        it breaches roughly half the time by chance, which is why the criterion
+        requires a full window of consecutive breaches.
+        """
+        panel = _signed_panel("reversal_f", [-0.6] * 30 + [0.05] * 40, seed=11)
+        v = assess_decay(panel, ["reversal_f"], window=12, kill_t=0.0,
+                         required_breaches=12)
+        theme = v.themes[0]
+        assert theme.killed, f"breaches={theme.breaches}, t={theme.recent_t}"
+
+    def test_a_positive_prior_theme_going_negative_is_killed(self):
+        """The original behaviour, which was only ever right for +1 themes."""
+        panel = _signed_panel("mom_f", [0.6] * 30 + [-0.05] * 40, seed=5)
+        v = assess_decay(panel, ["mom_f"], window=12, kill_t=0.0,
+                         required_breaches=12)
+        assert v.themes[0].killed
+
+    def test_a_theme_with_no_prior_falls_back_to_its_full_sample_sign(self):
+        """`drawdown` has no literature analogue, so the direction it is
+        supposed to pay in comes from its own full-sample slope. Weaker than a
+        prior and documented as such, but far better than assuming +1."""
+        panel = _signed_panel("drawdown_f", [-0.5] * 70, seed=7)
+        v = assess_decay(panel, ["drawdown_f"], window=24, kill_t=0.0,
+                         required_breaches=24)
+        theme = v.themes[0]
+        assert theme.recent_t < -2
+        assert not theme.killed

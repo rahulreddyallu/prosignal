@@ -48,16 +48,25 @@ def test_the_bar_that_matters_is_the_models_not_eligibilitys(cfg):
 
 
 def test_the_exact_store_that_broke_the_deployment_is_not_ready(cfg):
-    """330 sessions: what the old bootstrap built to."""
+    """330 sessions: what the old bootstrap built to.
+
+    The shortfall was 46 until prox_52w gained its 21-session
+    reversal-avoiding offset. `model_minimum` is MIN_LOOKBACK + horizon + 60,
+    and MIN_LOOKBACK moved 253 -> 274, so the bar moved 376 -> 397 and the same
+    store is now 67 short rather than 46. The number is asserted rather than
+    derived on purpose: it is the operator-facing figure, and a silent change
+    to how much history the engine demands before it will fit at all is exactly
+    the kind of thing this file exists to catch.
+    """
     cov = assess(cfg, 330)
     assert cov.model_will_fit is False
     assert cov.ready is False
-    assert cov.shortfall == 46
-    assert "46 short" in cov.status()
+    assert cov.shortfall == 67
+    assert "67 short" in cov.status()
 
 
 def test_just_over_the_minimum_is_ready_but_says_it_is_not_validated(cfg):
-    """Passing 376 means the fit will run, not that it is the fit that was
+    """Passing 397 means the fit will run, not that it is the fit that was
     measured. Serving that silently would let a short-history model pass for
     the validated one."""
     cov = assess(cfg, 400)

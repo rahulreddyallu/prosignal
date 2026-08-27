@@ -59,7 +59,7 @@ FEATURES: Dict[str, Tuple[int, str]] = {
     "amihud":        (61,  "Amihud (2002) illiquidity: mean(|ret| / turnover)"),
     "turnover_ratio":(61,  "mean turnover over 60 sessions, log"),
     "max_dd_120":    (121, "maximum drawdown over 120 sessions"),
-    "prox_52w":      (253, "close / 252-session high - 1 (George & Hwang 2004)"),
+    "prox_52w":      (274, "close 21 back / 252-session high ending 21 back - 1 (George & Hwang 2004, with a reversal-avoiding skip)"),
     "max5_21":       (22,  "mean of the 5 largest daily returns in 21 sessions; lottery demand (Bali, Cakici & Whitelaw 2011)"),
     "resid_mom":     (253, "momentum of market-residual returns, 252 to 21 back (Blitz, Huij & Martens 2011)"),
     "idio_vol":      (253, "annualised std of market-residual returns, 126 sessions (Ang, Hodrick, Xing & Zhang 2006)"),
@@ -149,7 +149,19 @@ def _features_at(
     r60 = ret.tail(60)
     out["downside_vol"] = r60.where(r60 < 0).std(ddof=1) * np.sqrt(252)
 
-    out["prox_52w"] = last / hist.tail(252).max() - 1.0
+    # SKIPPING THE LAST 21 SESSIONS, which George & Hwang (2004) do NOT do --
+    # they measure nearness on the current price. The deviation is deliberate
+    # and the reason is `resid_reversal` sitting in the same model: using
+    # today's close puts the last month inside prox_52w, which is exactly the
+    # window the reversal theme prices with the OPPOSITE sign, so momentum and
+    # reversal partially cancel through this factor. Measured within date the
+    # two correlate +0.378 as shipped and -0.029 with the skip. mom_6_1 and
+    # resid_mom already skip the same window for the same reason (Jegadeesh
+    # 1990; Lehmann 1990).
+    #
+    # hist.iloc[-273:-21] is the 252 sessions ending one month back. This needs
+    # 273 rows, so FEATURES["prox_52w"] is 274 rather than 253 -- see there.
+    out["prox_52w"] = past(21) / hist.iloc[-273:-21].max() - 1.0
     out["max5_21"] = ret.tail(21).apply(lambda s: s.nlargest(5).mean(), axis=0)
 
     # Residual momentum: strip the market component, then accumulate. Blitz,
