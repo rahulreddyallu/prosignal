@@ -238,6 +238,7 @@ def hierarchical_shrink(
     result: FMResult,
     prior_sign: Optional[Mapping[str, Optional[int]]] = None,
     toward: str = "zero",
+    tau2_from: Optional[FMResult] = None,
 ) -> Dict[str, float]:
     """Empirical-Bayes shrinkage of theme coefficients toward their common mean.
 
@@ -287,6 +288,31 @@ def hierarchical_shrink(
     if not var:
         return dict(result.lam)
 
+    # BETWEEN-THEME DISPERSION IS ESTIMATED BEFORE SELECTION.
+    #
+    # `gated_shrink` kills every theme under the significance floor and then
+    # calls this on the SURVIVORS. Estimating tau^2 from that set is the
+    # winner's curse: the survivors were chosen for having large |t|, so
+    # E[lambda^2] among them is inflated by the selection, tau^2 comes out too
+    # big, the weight tau^2/(tau^2 + se^2) sits too close to 1, and the themes
+    # that passed the gate are barely shrunk at all.
+    #
+    # Measured on the shipped fit, the haircut this produced was
+    # delivery 1.6%, reversal 3.3%, lottery 12.1% -- an empirical-Bayes
+    # discipline removing 1.6% of a coefficient is not disciplining anything,
+    # and the gate was doing the entire job while the estimator took the credit.
+    #
+    # `tau2_from` carries the PRE-SELECTION result, so the pool is estimated
+    # over every theme that was measured and only the shrinkage is applied to
+    # those that survived. The point estimates and standard errors are
+    # unchanged; what changes is which sample the prior is learned from.
+    source = tau2_from if tau2_from is not None else result
+    src_var = {c: (source.se[c] ** 2) for c in source.features
+               if np.isfinite(source.se.get(c, float("nan")))}
+    if not src_var:
+        src_var = var
+        source = result
+
     # tau^2 by DerSimonian & Laird (1986), NOT by the plain moment estimator
     # mean(lambda^2) - mean(se^2). The plain version assumes the themes are
     # measured equally well, and here they are not: standard errors differ by
@@ -296,11 +322,12 @@ def hierarchical_shrink(
     # happened, zeroing an entire walk-forward fold. Inverse-variance weighting
     # gives each theme a say proportional to how well it is known.
     if toward == "prior_mean":
-        pooled = [c for c in result.features if sign_for(c) is not None and c in var]
+        pooled = [c for c in source.features
+                  if sign_for(c) is not None and c in src_var]
         if len(pooled) < 2:
             return dict(result.lam)
-        values = np.array([sign_for(c) * result.lam[c] for c in pooled], dtype="float64")
-        w = np.array([1.0 / var[c] for c in pooled], dtype="float64")
+        values = np.array([sign_for(c) * source.lam[c] for c in pooled], dtype="float64")
+        w = np.array([1.0 / src_var[c] for c in pooled], dtype="float64")
         mu = float((w * values).sum() / w.sum())
         q = float((w * (values - mu) ** 2).sum())
         denom = float(w.sum() - (w ** 2).sum() / w.sum())
@@ -308,9 +335,9 @@ def hierarchical_shrink(
     else:
         # Target is zero, so E[lambda^2] = tau^2 + se^2 and the weighted moment
         # condition is sum(w * lambda^2) = tau^2 * sum(w) + k.
-        cols = [c for c in result.features if c in var]
-        values = np.array([result.lam[c] for c in cols], dtype="float64")
-        w = np.array([1.0 / var[c] for c in cols], dtype="float64")
+        cols = [c for c in source.features if c in src_var]
+        values = np.array([source.lam[c] for c in cols], dtype="float64")
+        w = np.array([1.0 / src_var[c] for c in cols], dtype="float64")
         mu = 0.0
         tau2 = max(0.0, float((w * values ** 2).sum() - len(cols)) / float(w.sum()))
 
@@ -412,7 +439,11 @@ def gated_shrink(
         se={c: result.se[c] for c in keep},
         t_stat={c: result.t_stat[c] for c in keep},
     )
-    out.update(hierarchical_shrink(sub, prior_sign=prior_sign, toward=toward))
+    # The FULL result is handed over as the tau^2 source, so the pool the prior
+    # is learned from is every theme that was measured -- not only the ones the
+    # floor let through. See hierarchical_shrink.
+    out.update(hierarchical_shrink(sub, prior_sign=prior_sign, toward=toward,
+                                   tau2_from=result))
     return out
 
 

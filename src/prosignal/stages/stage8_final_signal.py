@@ -426,17 +426,24 @@ def run(
         # the model: momentum is 41% of this model's IC, so the top names load
         # high on momentum by construction, and capping mean momentum loading
         # rejects the basket for being what the model is designed to produce.
+        # (That measurement was taken when momentum carried the fit. It no
+        # longer does -- the live coefficients price reversal, lottery and
+        # delivery -- so the REASON has moved even though the decision stands.
+        # `_exposure_themes` now reads whatever is priced rather than naming
+        # momentum, so the check follows the model instead of a snapshot.)
         # The operator is still told, which is the part that had value.
-        exposure = _aggregate_exposure(accepted + [score], _EXPOSURE_FACTORS)
-        breached = [n for n, v in exposure.items() if v >= _EXPOSURE_LIMIT]
+        basket = accepted + [score]
+        exposure = _aggregate_exposure(basket, _exposure_themes(basket))
+        breached = [n for n, v in exposure.items() if abs(v) >= _EXPOSURE_LIMIT]
         if breached:
             rec.why_this_signal_exists.append(
-                f"Concentration note: with this name the basket's mean "
-                f"{', '.join(sorted(breached))} loading reaches "
-                f"{_EXPOSURE_LIMIT:+.2f} or more. Every pair passes and every "
-                f"sector passes; taken together they are one macro position. "
-                f"This is reported, not blocked -- blocking it was measured at "
-                f"selection Sharpe +0.45 against +0.86."
+                f"Concentration note: with this name the basket's mean loading "
+                f"on {', '.join(sorted(breached))} reaches "
+                f"{max(abs(exposure[n]) for n in breached):.2f} sd, at or past "
+                f"the {_EXPOSURE_LIMIT:.2f} sd mark. Every pair passes and "
+                f"every sector passes; taken together they are one macro "
+                f"position. This is reported, not blocked -- blocking it was "
+                f"measured at selection Sharpe +0.45 against +0.86."
             )
 
         if len(buys) >= max_signals:
@@ -651,15 +658,43 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
     )
 
 
-#: Factors whose combined loading defines a macro bet. Momentum and beta are
-#: the two that concentrate without showing up pairwise: two names can correlate
-#: at 0.4 and still both sit in the top decile of each.
-_EXPOSURE_FACTORS = ("mom_6_1", "resid_mom", "prox_52w", "beta_120")
+#: Themes whose combined loading defines a macro bet: two names can correlate at
+#: 0.4 and still both sit in the top decile of the same theme, so this catches
+#: what the pairwise and sector caps cannot.
+#:
+#: EVERY PRICED THEME, read from the model rather than listed by hand. This was
+#: a hardcoded tuple of individual factor names -- `mom_6_1`, `resid_mom`,
+#: `prox_52w`, `beta_120` -- and the family refactor made the card's keys
+#: `mom`, `reversal`, `lottery`, `risk`, `delivery`. The intersection was
+#: empty, so `_aggregate_exposure` returned {} on every call and the
+#: concentration note could never fire. A hand-maintained list of the model's
+#: own column names is a thing that goes stale silently; asking the card which
+#: themes moved this name cannot.
+def _exposure_themes(scores) -> Tuple[str, ...]:
+    """The themes the fit actually priced, from the attribution itself."""
+    for score in scores or ():
+        factors = getattr(score, "factors", None) or {}
+        priced = tuple(
+            name for name, f in factors.items()
+            if getattr(f, "evidence_tier", None) == "model"
+            and abs(getattr(f, "weight", 0.0) or 0.0) > 1e-12
+        )
+        if priced:
+            return priced
+    return ()
 
-#: Mean standardised loading at which the basket stops being diversified. Ranks
-#: run -1 to +1, so 0.75 means the average name sits in roughly the top eighth
-#: of the universe on that factor.
-_EXPOSURE_LIMIT = 0.75
+#: Mean loading at which the basket stops being diversified, in STANDARD
+#: DEVIATIONS. The previous value of 0.75 was documented as "ranks run -1 to +1,
+#: so 0.75 is roughly the top eighth" -- but `FactorScore.standardised` on the
+#: model path is `crossmodel.standardised_features`, a z-score, not a rank. On
+#: that scale 0.75 sd is about the 77th percentile for ONE name, and requiring
+#: a whole basket to average it is a much higher bar than the comment claimed.
+#:
+#: 1.00 sd of MEAN loading across the basket is the equivalent statement: with
+#: five names that is a basket sitting a full standard deviation above the
+#: universe on one theme, which is one position wearing five tickers. Reported,
+#: never gated -- see the measurement below.
+_EXPOSURE_LIMIT = 1.00
 
 
 def _aggregate_exposure(scores, factors) -> Dict[str, float]:

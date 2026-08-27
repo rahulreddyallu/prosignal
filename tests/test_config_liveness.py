@@ -84,3 +84,109 @@ def test_section_headers_are_not_counted_as_parameters():
             f"{section!r} is a section, not a parameter; counting it would "
             f"report a permanent false positive"
         )
+
+
+# ------------------------------------------------ name-level ambiguity
+def test_no_leaf_name_is_declared_twice_without_being_declared_shared():
+    """The blind spot in the check above, closed.
+
+    Liveness matches by NAME, so a parameter read in one section and ignored in
+    another reads as live. `stage4_core_score.metalabel.min_win_probability`
+    was exactly that: read by nothing, passing on every startup because
+    `stage8_final_signal.scarcity.min_win_probability` is read. Setting it
+    looked like arming the NO TRADE veto and did nothing at all.
+    """
+    from prosignal.config.liveness import ambiguous_parameters
+
+    ambiguous = ambiguous_parameters(CONFIG)
+    assert not ambiguous, (
+        "these leaf names are declared at more than one path, so the liveness "
+        "check cannot tell whether every copy is read:\n  "
+        + "\n  ".join(f"{name}: {', '.join(paths)}"
+                      for name, paths in sorted(ambiguous.items()))
+        + "\n\nIf the two mean different things (every check has an `enabled`), "
+          "add the name to liveness.SHARED_LEAF_NAMES. If they are one setting "
+          "written twice, delete the copy that nothing reads."
+    )
+
+
+def test_the_shared_list_does_not_outlive_the_duplicates():
+    """The other direction, so the allowlist cannot quietly accumulate."""
+    from prosignal.config.liveness import SHARED_LEAF_NAMES, declared_paths
+
+    paths = declared_paths(CONFIG)
+    stale = sorted(n for n in SHARED_LEAF_NAMES if len(paths.get(n, [])) < 2)
+    assert not stale, (
+        "these are on SHARED_LEAF_NAMES but are no longer declared twice:\n  "
+        + "\n  ".join(stale)
+        + "\n\nRemove them; the list is a record of real ambiguity, and an "
+          "entry that no longer applies is one more thing that reads as "
+          "checked when it is not."
+    )
+
+
+def test_the_ambiguity_detector_actually_detects():
+    """Guards the guard."""
+    from prosignal.config.liveness import declared_paths
+
+    paths = declared_paths(CONFIG)
+    assert len(paths.get("enabled", [])) > 5, (
+        "the detector found no duplicates at all, so it would pass anything"
+    )
+
+
+# ------------------------------------------ inert WITHIN its owning section
+def test_no_shared_name_is_unread_by_the_stage_that_declares_it():
+    """The blind spot the allowlist opened.
+
+    `SHARED_LEAF_NAMES` says a repeated name is legitimate because the copies
+    mean different things. It does not check that each copy is READ. Stage 5
+    declared twelve `enabled` flags and read none of them -- every check ran
+    unconditionally, so setting one to false changed nothing -- and `enabled`
+    passed the name-level check because Stage 4, Stage 6 and the providers read
+    the same word.
+    """
+    from prosignal.config.liveness import (RESERVED_IN_SECTION,
+                                           unread_in_owning_section)
+
+    found = unread_in_owning_section(CONFIG, PACKAGE)
+    flat = {p.split(" (owner")[0] for paths in found.values() for p in paths}
+    undeclared = sorted(flat - set(RESERVED_IN_SECTION))
+    assert not undeclared, (
+        "these parameters are declared under a stage that never reads them:\n  "
+        + "\n  ".join(undeclared)
+        + "\n\nWire each one into its own stage, delete it, or add it to "
+          "liveness.RESERVED_IN_SECTION with the reason. A flag its own stage "
+          "ignores states a behaviour the engine does not have, and the "
+          "name-level check cannot see it."
+    )
+
+
+def test_the_section_reserved_list_does_not_outlive_its_entries():
+    from prosignal.config.liveness import (RESERVED_IN_SECTION,
+                                           unread_in_owning_section)
+
+    found = unread_in_owning_section(CONFIG, PACKAGE)
+    flat = {p.split(" (owner")[0] for paths in found.values() for p in paths}
+    stale = sorted(set(RESERVED_IN_SECTION) - flat)
+    assert not stale, (
+        "these are on RESERVED_IN_SECTION but their stage now reads them:\n  "
+        + "\n  ".join(stale) + "\n\nRemove them; leaving a wired parameter on "
+        "the list hides the fact that it works."
+    )
+
+
+def test_stage_5_actually_honours_its_enabled_flags():
+    """Twelve declared, none read. Every check ran regardless."""
+    import inspect
+
+    from prosignal.stages import stage5_false_signal as s5
+
+    src = inspect.getsource(s5.run)
+    assert "bv(flag.enabled)" in src, (
+        "Stage 5's per-stock checks must be gated on their own enabled flag"
+    )
+    for market in ("regime_transition", "volatility_shock", "momentum_crash"):
+        assert f"bv(cfg.{market}.enabled)" in src, (
+            f"the market-wide {market} check ignores its enabled flag"
+        )

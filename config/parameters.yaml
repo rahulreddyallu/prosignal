@@ -1160,7 +1160,10 @@ stage4_core_score:
   metalabel:
     enabled: false
     shortlist_top_k: 50
-    min_win_probability: 0.0
+    # The veto's THRESHOLD lives in stage8_final_signal.scarcity, which is
+    # where the gate runs. A second copy here was read by nothing and passed
+    # the liveness check only because the leaf name exists elsewhere -- so
+    # setting it looked like enabling the veto and did nothing at all.
     l2: 1.0
 
   model_horizon_sessions: 63
@@ -1216,7 +1219,33 @@ stage5_false_signal:
 
   # ---- 5.1 Market structure ----
   low_volume_breakout:
-    enabled: true
+    # DISABLED ON MEASUREMENT.
+    #
+    # "A move without participation is a move without conviction" is a
+    # MOMENTUM-era question: it asks whether a breakout has volume behind it.
+    # The engine no longer buys breakouts. Its priced themes are reversal(-),
+    # lottery(-) and delivery(+) -- a calm, well-accumulated name that has
+    # pulled back -- and a calm pulled-back name has below-average volume BY
+    # CONSTRUCTION. The check taxes the thesis rather than testing it.
+    #
+    # Measured out-of-sample over 49 purged walk-forward dates, applying each
+    # penalty to the ranking and running the same book:
+    #
+    #     arm                        new    gross    cost      NET   Sharpe
+    #     no penalties               6.0   +1.12%   0.55%   +0.57%   +0.30
+    #     both (was shipped)         6.8   +0.72%   0.62%   +0.11%   +0.04
+    #     low_volume_breakout only   6.8   +0.75%   0.61%   +0.14%   +0.05
+    #     overextension only         6.0   +1.12%   0.55%   +0.57%   +0.30
+    #
+    # It cuts net return by roughly three quarters on its own, and it fires on
+    # 83.9% of name-dates -- it is not a flag, it is the default state.
+    #
+    # `overextension` is left ON: it is inert here (its arm is identical to no
+    # penalties at all, firing on 3.4% of name-dates and never near the top of
+    # the ranking), so it costs nothing, and it restates `reversal` rather than
+    # opposing it. Removing an inert check on 49 dates would be tidying, not
+    # evidence.
+    enabled: false
     lookback_sessions: 20
     min_volume_multiple:
       value: 1.5
@@ -1486,6 +1515,29 @@ stage6_entry:
         entry 5/8/10/12 and exit at 2x and 3x, holdout Sharpe ran 1.40-1.58
         against +0.46 for the trigger -- the result does not turn on the exact
         width, which is why a convention was used rather than a search.
+
+    # A name already below its own thesis-invalidation level is not an entry.
+    # Stage 7 lists invalidation as exit condition #1, so opening there issues a
+    # card whose "the thesis is dead below X" sits ABOVE the entry price.
+    #
+    # This is also the population the model is FITTED on. `resolve_exits` gives
+    # such a name a NaN label, `build_panel` drops the row, and every validation
+    # that derives rankings from that panel inherits the exclusion -- while the
+    # live engine, which builds no label, did not. Measured on the eligible
+    # universe, 21.8% of the selection period and 26.9% of the holdout sits
+    # below the level, so the validated strategy and the traded one were drawing
+    # from populations differing by about a fifth, and no harness could see it:
+    # restricting an already-restricted panel leaves 1.8% to remove.
+    #
+    # HELD positions are exempt. They are governed by the exit band and Stage
+    # 7's exit hierarchy; an entry rule must not close an open position.
+    require_above_invalidation:
+      value: true
+      status: OPERATIONAL
+      note: >-
+        Turning this off restores the previous behaviour, in which the engine
+        could open a position that already met its own first exit condition and
+        that no validation in this repository has ever measured.
 
   # Triggers. These NO LONGER GATE -- they describe what price structure is
   # present so the operator can judge execution, and they still set the entry

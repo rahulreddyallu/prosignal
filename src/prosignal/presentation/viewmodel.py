@@ -96,8 +96,17 @@ def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     benchmark, t = -0.11. Presenting it as the validated model is the single
     most misleading thing this interface could do, so it is detected here from
     the factor names themselves rather than trusted to arrive as a flag.
+
+    DETECTED BY THE COMPOSITE'S OWN KEYS, not by failing to recognise the
+    model's. This read `seen & FACTOR_MAP` while FACTOR_MAP still held the
+    pre-family factor names, so the fitted model's family keys matched nothing
+    and every healthy run was reported as "the cross-sectional model could not
+    fit this run ... treat this shortlist as unscored". That is the exact
+    misrepresentation this function exists to prevent, inverted. Keying on the
+    composite's four names makes the failure direction safe: an unrecognised
+    key set reports UNKNOWN rather than asserting either scorer.
     """
-    from .evidence import FACTOR_MAP
+    from .evidence import COMPOSITE_KEYS, MODEL_KEYS
 
     seen: set = set()
     for pick in picks:
@@ -105,9 +114,24 @@ def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     if not seen:
         return {"model": "unknown", "validated": False,
                 "note": "No factor detail was recorded for this run."}
-    known = seen & set(FACTOR_MAP)
-    if known:
+    # Decided on the keys only ONE scorer can emit. `value` and `quality` are
+    # both fitted families and hand-weighted composite factors -- the engine
+    # genuinely uses the same two words for both -- so a shared key identifies
+    # nothing and matching on it would call a composite run a model run.
+    if seen & (MODEL_KEYS - COMPOSITE_KEYS):
         return {"model": "cross-sectional", "validated": True, "note": None}
+    if not (seen & (COMPOSITE_KEYS - MODEL_KEYS)):
+        return {
+            "model": "unknown",
+            "validated": False,
+            "factors": sorted(seen),
+            "note": (
+                "This run's factor names match neither the fitted model nor the "
+                "hand-weighted composite, so which scorer produced the ranking "
+                "cannot be established from the payload. Treat the shortlist as "
+                "unattributed until that is resolved."
+            ),
+        }
     return {
         "model": "composite",
         "validated": False,

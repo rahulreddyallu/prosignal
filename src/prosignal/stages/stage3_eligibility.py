@@ -183,6 +183,32 @@ def run(
                 )
                 continue
 
+        # 5b. THE MODEL'S OWN DOMAIN.
+        #
+        # The coefficients are estimated on a panel that EXCLUDES names below
+        # their thesis-invalidation level: `resolve_exits` returns NaN for them
+        # and `build_panel` drops non-finite labels. So the fit describes
+        # pullbacks WITHIN uptrends -- it has never seen a name in a decline.
+        #
+        # Scoring one anyway extrapolates. `reversal` carries a negative
+        # coefficient, so applied outside its fitted range it ranks the
+        # BIGGEST fallers highest: on 2026-08-25 the five highest-ranked names
+        # were all below their invalidation level, and the engine bought two of
+        # them.
+        #
+        # This is done HERE, before the ranking, rather than as a veto after it.
+        # The score is a cross-sectional rank, so a universe containing names
+        # the engine cannot buy distorts every percentile, the dispersion floor
+        # and `min_universe_percentile` along with it. Filtering after ranking
+        # leaves the top of the list unbuyable and silently promotes the sixth
+        # name to first while the statistics still describe the old population.
+        if bv(p.stage6_entry.admission.require_above_invalidation):
+            note = _outside_model_domain(frame, p)
+            if note:
+                rejected[sym] = RejectionReason.OUTSIDE_MODEL_DOMAIN
+                details[sym] = note
+                continue
+
         # 6. Manual exclusion
         if sym in set(v(p.universe.manual_exclusions) or []):
             rejected[sym] = RejectionReason.MANUAL_EXCLUSION
@@ -190,12 +216,29 @@ def run(
             continue
 
         # 7. Earnings proximity -- hard reject inside the window
+        #
+        # A NAME WITH NO FORWARD DATE ON FILE IS NOT A NAME WITH NO EARNINGS.
+        # This recorded NOT_TESTABLE only when the WHOLE calendar was missing;
+        # a symbol absent from a present calendar produced `days is None`, fell
+        # through, and was admitted with nothing recorded -- which is precisely
+        # the failure this stage's contract says it exists to prevent.
+        #
+        # Coverage makes that the common case, not the edge one. Measured on
+        # 2026-08-25: the calendar holds 8,776 rows over 2,342 symbols, but
+        # only 181 carry any future date at all and just 7 of those are
+        # company-confirmed. So roughly one name in seven was tested and six in
+        # seven silently passed, while the card claimed no untestable gate.
+        # Worse, calendar coverage tracks size and index membership, so the
+        # residual was a cross-sectional tilt TOWARD names with poorer
+        # reference data -- the opposite of what the gate intends.
         if earnings is None:
             untestable.append("earnings_proximity")
         else:
             days = earnings.get(sym)
             win = iv(cfg.earnings_proximity.holding_window_sessions)
-            if days is not None and 0 <= days <= win:
+            if days is None:
+                untestable.append("earnings_proximity")
+            elif 0 <= days <= win:
                 rejected[sym] = RejectionReason.EARNINGS_CONFLICT
                 details[sym] = (
                     f"results due in ~{days} sessions, inside the {win}-session "
@@ -252,6 +295,49 @@ def run(
 # =============================================================================
 # helpers
 # =============================================================================
+
+
+def _outside_model_domain(frame: pd.DataFrame, params) -> Optional[str]:
+    """Why this name is outside the fitted population, or None if it is inside.
+
+    Reads the level through `exits.tradeable_at_entry` -- the SAME predicate the
+    label uses to decide which rows exist -- so the universe the model ranks and
+    the panel it was fitted on cannot drift apart.
+    """
+    from ..features.exits import (ExitRules, invalidation_level,
+                                  tradeable_at_entry)
+    from ..indicators import atr as atr_fn
+
+    c7 = params.stage7_risk
+    n = iv(c7.thesis_invalidation.structure_ma_sessions)
+    if len(frame) < n:
+        return (f"{len(frame)} sessions, fewer than the {n} needed for the "
+                f"invalidation level. A level that cannot be computed has not "
+                f"been cleared.")
+    rules = ExitRules(
+        invalidation_ma_sessions=n,
+        invalidation_buffer_atr=fv(c7.thesis_invalidation.structure_buffer_atr),
+        atr_period_sessions=iv(c7.atr.period_sessions),
+        atr_method=str(v(c7.atr.method)),
+    )
+    a = atr_fn(frame["high"], frame["low"], frame["close"],
+               rules.atr_period_sessions, rules.atr_method).dropna()
+    if a.empty:
+        return "ATR is not computable, so the invalidation level cannot be checked."
+    closes = pd.to_numeric(frame["close"], errors="coerce")
+    ma_now = float(closes.tail(n).mean())
+    atr_now = float(a.iloc[-1])
+    last = float(closes.iloc[-1])
+    if bool(tradeable_at_entry(last, ma_now, atr_now, rules)):
+        return None
+    level = invalidation_level(ma_now, atr_now, rules)
+    return (
+        f"Rs {last:,.2f} is below the thesis-invalidation level of "
+        f"Rs {level:,.2f} ({n}-session average less "
+        f"{rules.invalidation_buffer_atr:g} ATR). The model's coefficients were "
+        f"fitted on a panel that excludes this state, so ranking it would "
+        f"extrapolate them."
+    )
 
 
 def _series_allowed(frame: pd.DataFrame, params) -> bool:

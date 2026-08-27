@@ -28,12 +28,43 @@ measurement device. So the measurement is moved to match the execution, not the
 other way around -- changing the stop the engine places would change what is
 traded, which is a far larger decision than fixing a training label.
 
-WHAT IS STILL NOT MODELLED. Trailing stop, signal reversal, new hard rejection
-and severe regime change are all real exits the engine can take, and none of
-them is here. Each closes a position EARLIER than this module assumes, so the
-labels remain optimistic -- less so than before, and in a stated direction
-rather than an unmeasured one. The Stage 6 rank band is likewise absent; the
-buy/hold spread measurement covers that separately.
+WHAT IS STILL NOT MODELLED, AND HOW BIG IT IS. Trailing stop, signal reversal,
+new hard rejection and severe regime change are all real exits the engine can
+take, and none of them is here. Each closes a position EARLIER than this module
+assumes, so the labels remain optimistic.
+
+The largest omission by far is the Stage 6 RANK BAND. Measured on the 118
+outcomes resolved under `outcomes.EXIT_MODEL = target-t2-v4`:
+
+    book_exit (the rank band)   105   89%
+    stop                         12   10%
+    stop_gap                      1    1%
+    target (T2, 3.0R)             0    0%   <- what this label rewards
+    reached T1 at any point       7    6%
+    median sessions held          3         <- against a 63-session horizon
+
+So the label scores an outcome the book never experiences: not one trade in 118
+reached the target the model is fitted against, and nine in ten ended for a
+reason this module does not represent.
+
+SHORTENING THE HORIZON IS NOT THE FIX, which is worth stating because it is the
+obvious move. Refitting at 21, 42 and 63 sessions and putting each through the
+same book simulation, out-of-sample over purged folds:
+
+    horizon    net     Sharpe    mom   reversal  lottery   risk  delivery
+    21       +0.31%    +0.39    +0.70    -2.96*   -4.64*   +1.78   +4.21*
+    42       +0.22%    +0.14    +0.36    -4.81*   -5.36*   +2.20*  +5.37*
+    63       +0.57%    +0.30    +0.04    -4.79*   -5.02*   +2.20*  +5.09*
+
+63 earns the most and the theme structure is weaker at 21, where `risk` falls
+below the significance floor. The horizon is a TIMEOUT, not a holding period --
+shortening it truncates trades that would have resolved, which is why it costs
+return. The mismatch is real and it is not the horizon's fault.
+
+Modelling the band inside the label is circular: the band depends on the
+ranking, which depends on the model, which depends on the label. It would need
+an iterated fit. Until then the size of the gap is stated above rather than
+described as "optimistic".
 """
 
 from __future__ import annotations
@@ -47,6 +78,7 @@ import pandas as pd
 from ..indicators.atr import true_range
 
 __all__ = ["ExitRules", "resolve_exits", "rules_from_config",
+           "tradeable_at_entry", "invalidation_level",
            "atr_panel", "ma_panel",
            "EXIT_STOP", "EXIT_TARGET", "EXIT_INVALIDATION", "EXIT_TIMEOUT"]
 
@@ -91,6 +123,48 @@ class ExitRules:
             raw = self.stop_atr_multiple * atr / entry * 100.0
         return np.clip(raw, self.min_stop_distance_pct,
                        self.max_stop_distance_pct) / 100.0
+
+
+def invalidation_level(ma, atr, rules: ExitRules):
+    """Where the thesis is dead. `MA(n) - buffer * ATR`, the engine's own rule.
+
+    One definition, because it decides two different things that MUST agree:
+    whether an open position is closed, and whether a new one may be opened at
+    all. Stage 7 emits it as exit condition #1.
+    """
+    return ma - float(rules.invalidation_buffer_atr) * atr
+
+
+def tradeable_at_entry(close, ma, atr, rules: ExitRules):
+    """Whether a bar is a valid ENTRY under the engine's own invalidation rule.
+
+    THE POPULATION DEFINITION. A name already below its invalidation level is
+    not a trade: it satisfies its own first exit condition at the moment it is
+    opened, and the card would print "close below X means the thesis is dead"
+    with X sitting above the entry price.
+
+    This existed only inside `resolve_exits`, as an inline mask excluding such
+    rows from the LABEL, justified there by "Stage 6 would never trigger an
+    entry on it". That was true when Stage 6 required a pullback, a reclaim or
+    a breakout. Stage 6 now admits on rank alone, so nothing enforced it on the
+    live path -- and because the exclusion also removes those rows from the
+    training panel, every validation that derives rankings from that panel
+    inherits it too. Measured on the eligible universe, 21.8% of the selection
+    period and 26.9% of the holdout sits below the level, so the validated
+    strategy and the live one were drawing from populations that differ by
+    roughly a fifth, and no harness could see it: restricting an
+    already-restricted panel finds 1.8% left to remove.
+
+    Returns a boolean aligned to whatever was passed -- a Series for one bar,
+    a frame for a panel. NaN inputs read as NOT tradeable, because an unknown
+    invalidation level is not a cleared one.
+    """
+    level = invalidation_level(ma, atr, rules)
+    ok = close >= level
+    try:
+        return ok & level.notna() & close.notna()
+    except AttributeError:            # numpy inputs
+        return np.asarray(ok) & np.isfinite(level) & np.isfinite(close)
 
 
 def atr_panel(high: pd.DataFrame, low: pd.DataFrame, close: pd.DataFrame,
@@ -226,14 +300,19 @@ def resolve_exits(
     # because the label had started to contain what momentum was meant to
     # predict. Excluding them leaves invalidation at 37-40% with a median hold
     # of 20, which is the engine's real experience.
+    # THE SAME PREDICATE THE LIVE ADMISSION USES. See `tradeable_at_entry`:
+    # this was an inline mask here and nothing enforced it on the live path,
+    # so the label and the engine drew from populations differing by ~22%.
     entry_ma = ma.iloc[i].reindex(cols).to_numpy("float64")
-    entry_atr = a
     with np.errstate(invalid="ignore"):
-        invalid_at_entry = e < (entry_ma - rules.invalidation_buffer_atr * entry_atr)
-    invalid_at_entry = np.where(np.isfinite(entry_ma) & np.isfinite(entry_atr),
-                                invalid_at_entry, False)
+        admissible = tradeable_at_entry(e, entry_ma, a, rules)
+    # An unknown level cannot exclude a row from the LABEL -- the older bars
+    # have no 50-session average yet and dropping them would shorten the panel
+    # for everyone. Live admission is stricter and refuses the unknown.
+    admissible = np.where(np.isfinite(entry_ma) & np.isfinite(a),
+                          admissible, True)
 
-    usable = (np.isfinite(e) & (e > 0) & np.isfinite(a) & ~invalid_at_entry)
+    usable = (np.isfinite(e) & (e > 0) & np.isfinite(a) & admissible)
     out = pd.DataFrame({"ret": ret, "side": side, "held": held, "t1": t1},
                        index=cols)
     return out.where(pd.Series(usable, index=cols), np.nan)

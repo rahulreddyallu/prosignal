@@ -189,15 +189,31 @@ def spearman_matrix(frame: pd.DataFrame, min_observations: int = 5) -> pd.DataFr
     whether they are linearly related. Two factors can have a modest Pearson
     correlation and still produce nearly identical top-20 lists, which is the
     redundancy that actually costs you diversification.
+
+    COLUMNS ARE JUDGED INDIVIDUALLY, and the guard is per PAIR. This used to
+    test `numeric.dropna().shape[0]` -- a LISTWISE drop -- so a single column
+    with no values anywhere emptied the frame and the whole report came back
+    NaN. That is not hypothetical: `today_features` attaches every fundamental
+    column whether or not the fit could build it, and on a store whose
+    statement feed is too shallow all eleven are entirely absent. The result
+    was a redundancy report that said "fewer than two factors survived;
+    correlation not measurable" while twelve fully-populated factors sat in
+    the frame, on every run, for the one check whose whole job is to stop
+    correlated factors being read as independent evidence.
+
+    An all-empty column is dropped and reported as unmeasurable rather than
+    silently poisoning its neighbours; `min_periods` then handles the pairs
+    that genuinely lack overlap.
     """
     numeric = frame.select_dtypes(include=[np.number]).astype("float64")
-    if numeric.shape[1] < 2:
-        return pd.DataFrame(index=numeric.columns, columns=numeric.columns, dtype="float64")
-    if numeric.dropna().shape[0] < min_observations:
+    # A column with fewer than `min_observations` values of its own cannot
+    # enter any pair, and keeping it would only widen the matrix with NaN.
+    usable = numeric.loc[:, numeric.notna().sum() >= min_observations]
+    if usable.shape[1] < 2:
         return pd.DataFrame(
             np.nan, index=numeric.columns, columns=numeric.columns, dtype="float64"
         )
-    return numeric.corr(method="spearman", min_periods=min_observations)
+    return usable.corr(method="spearman", min_periods=min_observations)
 
 
 def spearman_pairs(

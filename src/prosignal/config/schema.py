@@ -893,9 +893,13 @@ class MetaLabelConfig(_Base):
     #: How far down the primary ranking counts as a trade the engine would
     #: consider. Eight rows a date cannot support a classifier.
     shortlist_top_k: int = Field(50, ge=8, le=200)
-    #: A candidate below this modelled probability of reaching target before
-    #: stop is refused. 0.0 vetoes nothing even when enabled.
-    min_win_probability: float = Field(0.0, ge=0.0, lt=1.0)
+    #: NO THRESHOLD HERE. The veto's floor is
+    #: `stage8_final_signal.scarcity.min_win_probability`, which is where the
+    #: gate actually runs. A second field of the same name lived here, was read
+    #: by nothing, and survived the liveness check precisely because the leaf
+    #: name is consumed elsewhere -- so the check that exists to catch a
+    #: parameter stating behaviour the engine does not have was blind to it.
+    #: See `liveness.SHARED_LEAF_NAMES` for the guard that now covers this.
     l2: float = Field(1.0, gt=0.0, le=1000.0)
 
 
@@ -1159,6 +1163,11 @@ class AdmissionConfig(_Base):
 
     entry_rank: TI
     exit_rank: TI
+    #: Refuse an entry on a name already below its thesis-invalidation level.
+    #: This is the population the model is fitted on -- `resolve_exits` gives
+    #: such a name a NaN label and `build_panel` drops the row -- so with this
+    #: off the engine trades a population no validation has measured.
+    require_above_invalidation: TB
 
     @model_validator(mode="after")
     def _check(self) -> "AdmissionConfig":

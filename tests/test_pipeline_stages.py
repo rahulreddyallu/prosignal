@@ -216,30 +216,62 @@ def _score(tmp_path, cfg, symbols, seeds, regime):
     return stage4_core_score.run(el, store, cal, regime, cfg, as_of=dates[-1].date()), el
 
 
-def test_higher_momentum_ranks_higher(tmp_path, cfg, monkeypatch):
-    _composite_only(cfg)
+def _momentum_universe(tmp_path, cfg, drifts):
     from prosignal.stages import stage2_regime
     dates = _dates()
-    syms = ["STRONG", "MID", "WEAK"]
+    syms = list(drifts)
     store = DataStore(tmp_path / "curated", tmp_path / "snapshots")
-    store.write_prices(pd.concat([
-        _prices(["STRONG"], dates, drift=0.0020, vol=0.005, seed=1, turnover=1e10),
-        _prices(["MID"], dates, drift=0.0008, vol=0.005, seed=2, turnover=1e10),
-        _prices(["WEAK"], dates, drift=-0.0010, vol=0.005, seed=3, turnover=1e10),
-    ], ignore_index=True))
+    store.write_prices(pd.concat(
+        [_prices([s], dates, drift=d, vol=0.005, seed=i + 1, turnover=1e10)
+         for i, (s, d) in enumerate(drifts.items())], ignore_index=True))
     store.write_indices(pd.DataFrame([
         {DATE: d, "index_name": "NIFTY 200", "open": 100.0, "high": 100.0,
          "low": 100.0, "close": 100.0, "volume": 0.0, "source": "t"} for d in dates
     ]))
     cal = TradingCalendar([d.date() for d in dates])
     uni = UniverseSnapshot("NIFTY 200", dates[-1].date(), syms, {s: "S" for s in syms})
-    el = stage3_eligibility.run(uni, store, cal, _clean_quality(), cfg, as_of=dates[-1].date())
-    regime = stage2_regime.run(store, cal, el.eligible_universe, cfg, as_of=dates[-1].date())
+    el = stage3_eligibility.run(uni, store, cal, _clean_quality(), cfg,
+                                as_of=dates[-1].date())
+    regime = stage2_regime.run(store, cal, el.eligible_universe, cfg,
+                               as_of=dates[-1].date())
     sc = stage4_core_score.run(el, store, cal, regime, cfg, as_of=dates[-1].date())
+    return sc, el
 
+
+def test_higher_momentum_ranks_higher(tmp_path, cfg, monkeypatch):
+    """Every name here is inside the model's fitted domain -- all three are
+    above their invalidation level -- so the ordering is the thing under test
+    rather than the domain filter."""
+    _composite_only(cfg)
+    sc, _ = _momentum_universe(tmp_path, cfg, {
+        "STRONG": 0.0020, "MID": 0.0012, "WEAK": 0.0005})
     order = [s.ticker for s in sc.ranked_scores]
     assert order.index("STRONG") < order.index("WEAK")
     assert sc.ranked_scores[0].composite_score >= sc.ranked_scores[-1].composite_score
+
+
+def test_a_name_in_a_decline_is_never_ranked_at_all(tmp_path, cfg):
+    """The model's coefficients are estimated on a panel that EXCLUDES names
+    below their thesis-invalidation level -- `resolve_exits` gives them a NaN
+    label and `build_panel` drops the row. Ranking one anyway extrapolates the
+    reversal coefficient past where it was measured, which is how the five
+    highest-ranked names on 2026-08-25 all came to be in that state.
+
+    The universe is therefore restricted BEFORE the ranking, so that every
+    percentile, the dispersion floor and min_universe_percentile describe a
+    population the engine can actually buy."""
+    from prosignal.core.enums import RejectionReason
+
+    _composite_only(cfg)
+    # A decline steep enough that the outcome does not turn on the noise seed:
+    # -0.4%/session puts the close well clear of MA(50) - 1.5 ATR.
+    sc, el = _momentum_universe(tmp_path, cfg, {
+        "RISING": 0.0020, "FALLING": -0.0040})
+
+    assert "FALLING" not in [s.ticker for s in sc.ranked_scores]
+    assert el.rejected.get("FALLING") is RejectionReason.OUTSIDE_MODEL_DOMAIN
+    assert "invalidation level" in el.rejection_details["FALLING"]
+    assert "RISING" in el.eligible_universe
 
 
 def test_quality_is_dropped_without_point_in_time_fundamentals(tmp_path, cfg):

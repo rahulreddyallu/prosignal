@@ -26,7 +26,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from ._cfg import fv, iv, v
+from ._cfg import bv, fv, iv, v
 from ..core.calendar import TradingCalendar
 from ..core.contracts import (
     CheckResult,
@@ -91,9 +91,13 @@ def run(
 
     # -- market-wide checks --------------------------------------------------
     market: List[CheckResult] = []
-    market.append(_regime_transition(regime, cfg))
-    market.append(_volatility_shock(store, as_of, cfg, p))
-    market.append(_momentum_crash_market(regime, cfg))
+    if bv(cfg.regime_transition.enabled):
+        market.append(_regime_transition(regime, cfg))
+    if bv(cfg.volatility_shock.enabled):
+        market.append(_volatility_shock(store, as_of, cfg, p))
+    if bv(cfg.momentum_crash.enabled):
+        market.append(_momentum_crash_market(
+            regime, cfg, v(p.stage2_regime.no_new_entry_buckets)))
     market_penalty = sum(c.penalty for c in market)
     halt = any(c.outcome is CheckOutcome.HARD_REJECT for c in market)
 
@@ -105,26 +109,58 @@ def run(
         frame = grouped.get(sym)
         checks: List[CheckResult] = []
 
+        # EVERY CHECK IS GATED ON ITS OWN `enabled` FLAG.
+        #
+        # Twelve of them are declared in parameters.yaml and none was read: the
+        # checks ran unconditionally, so setting `enabled: false` on any of them
+        # changed nothing. The liveness checker could not see it either --
+        # `enabled` is a SHARED_LEAF_NAME consumed by Stage 4, Stage 6 and the
+        # providers, so the name reads as live and twelve unread copies hid
+        # behind it. That is the same defect as the duplicate
+        # `min_win_probability`, twelve times over.
+        def add(flag, fn, *args):
+            if bv(flag.enabled):
+                checks.append(fn(*args))
+
         if frame is None or len(frame) < 30:
             checks.append(_nt("insufficient_history", "fewer than 30 sessions in window"))
         else:
-            checks.append(_low_volume_breakout(frame, cfg.low_volume_breakout))
-            checks.append(_liquidity_distortion(frame, cfg.liquidity_distortion))
-            checks.append(_gap_signal(frame, cfg.gap_signal, p))
-            checks.append(_news_spike(frame, cfg.news_spike))
-            checks.append(_overextension(frame, cfg.overextension, p))
-            checks.append(_beta_explained(frame, bench, cfg.beta_explained_move))
-            checks.append(_corporate_action(frame, actions, sym, as_of, cfg.corporate_action_distortion))
+            add(cfg.low_volume_breakout, _low_volume_breakout, frame, cfg.low_volume_breakout)
+            add(cfg.liquidity_distortion, _liquidity_distortion, frame, cfg.liquidity_distortion)
+            add(cfg.gap_signal, _gap_signal, frame, cfg.gap_signal, p)
+            add(cfg.news_spike, _news_spike, frame, cfg.news_spike)
+            add(cfg.overextension, _overextension, frame, cfg.overextension, p)
+            add(cfg.beta_explained_move, _beta_explained, frame, bench, cfg.beta_explained_move)
+            add(cfg.corporate_action_distortion, _corporate_action, frame, actions,
+                sym, as_of, cfg.corporate_action_distortion)
 
-        checks.append(_earnings_distortion(earnings, sym, as_of, calendar,
-                                           cfg.earnings_distortion))
+        add(cfg.earnings_distortion, _earnings_distortion, earnings, sym, as_of,
+            calendar, cfg.earnings_distortion)
 
-        total = sum(c.penalty for c in checks) + market_penalty
+        # THE CAP IS A TEST ON THIS NAME'S OWN EVIDENCE, so it is measured on
+        # this name's own penalties. `market_penalty` is identical for every
+        # candidate -- it cannot reorder anything -- but adding it before the
+        # threshold turned market weather into a per-stock rejection.
+        #
+        # The arithmetic: regime_transition contributes 0.10 and
+        # volatility_shock 0.15, so a transitioning market with a VIX spike puts
+        # 0.25 on every name before any stock-specific check runs, against a cap
+        # of 0.35. Every per-stock penalty is 0.10 or larger, so in that state
+        # the survival condition collapsed to "zero stock-level flags" -- one
+        # below-average volume session was a hard rejection. Two market
+        # conditions that say nothing about a particular stock became the
+        # reason that stock was refused.
+        #
+        # The market penalty still lowers the SCORE, so a hostile tape is still
+        # priced. It just no longer decides whether the case against one name is
+        # overwhelming.
+        stock_penalty = sum(c.penalty for c in checks)
+        total = stock_penalty + market_penalty
         hard = [c for c in checks if c.outcome is CheckOutcome.HARD_REJECT]
         status = "CLEARED"
         if hard:
             status = "REJECTED"
-        elif total >= max_pen:
+        elif stock_penalty >= max_pen:
             status = "REJECTED"
         elif total > 0:
             status = "PENALIZED"
@@ -384,6 +420,23 @@ def _earnings_distortion(earnings, sym, as_of, calendar, cfg) -> CheckResult:
 
 
 def _corporate_action(frame, actions, sym, as_of, cfg) -> CheckResult:
+    """Reject on an action that RESCALED the price, not on any action at all.
+
+    The rejection reason is that the return series across the ex-date is not
+    comparable. That is true of a split or a bonus, which rescale the price by
+    a factor and are adjusted for in the store. It is NOT true of a dividend:
+    `parse_action_subject` assigns dividends a price factor of 1.0 and
+    `build_adjustment_factors` filters on `ratio != 1.0`, so nothing is
+    rescaled and the only discontinuity is the ex-dividend drop itself --
+    typically well inside one session's volatility for an Indian large cap.
+
+    Rejecting on any row made this a dividend filter. Measured on 2026-08-25
+    the 45-day window held 88 actions across 85 symbols and 81 of them were
+    ordinary dividends; dividends are 5,058 of the 5,965 rows in the feed. Ex
+    dates cluster hard -- 70 symbols in July 2026 against 11 in December -- so
+    the effect was a seasonal cull that removed high-yield names from the book
+    for a reason the price series does not actually have.
+    """
     if actions is None or actions.empty:
         return _nt("corporate_action_distortion", "corporate actions feed empty")
     lb = iv(cfg.lookback_sessions)
@@ -395,10 +448,20 @@ def _corporate_action(frame, actions, sym, as_of, cfg) -> CheckResult:
                & (a["ex_date"] >= as_of - dt.timedelta(days=int(lb * 1.5)))]
     if recent.empty:
         return _ok("corporate_action_distortion", {"actions_in_window": 0})
+
+    # Only a factor that moved the share count breaks comparability.
+    ratio = pd.to_numeric(recent.get("ratio"), errors="coerce")
+    rescaling = recent[(ratio.notna()) & (ratio > 0) & (ratio != 1.0)]
+    obs = {"actions_in_window": int(len(recent)),
+           "rescaling_actions": int(len(rescaling)),
+           "types": sorted({str(x) for x in recent["action_type"].dropna()})}
+    if rescaling.empty:
+        return _ok("corporate_action_distortion", obs)
     return _rej("corporate_action_distortion",
-                f"{len(recent)} corporate action(s) inside the {lb}-session lookback; "
-                f"return series across the ex-date is not comparable",
-                {"actions_in_window": int(len(recent))})
+                f"{len(rescaling)} price-rescaling corporate action(s) "
+                f"(split or bonus) inside the {lb}-session lookback; the return "
+                f"series across the ex-date is not comparable",
+                obs)
 
 
 # -- market-level checks ------------------------------------------------------
@@ -428,8 +491,17 @@ def _volatility_shock(store, as_of, cfg, params) -> CheckResult:
     return _ok("volatility_shock", obs)
 
 
-def _momentum_crash_market(regime, cfg) -> CheckResult:
-    if regime.regime_bucket == "uptrend_highvol_rebound":
+def _momentum_crash_market(regime, cfg, no_entry_buckets=()) -> CheckResult:
+    """The Daniel & Moskowitz crash state.
+
+    ONE list of hostile buckets, read from `stage2_regime.no_new_entry_buckets`
+    rather than named again here. Both mechanisms block the same bucket -- Stage
+    2 by refusing new entries and this by halting the market -- so a hardcoded
+    literal meant the funnel attributed the block twice and editing the config
+    moved only one of them.
+    """
+    if regime.regime_bucket in set(no_entry_buckets or ()) or \
+            regime.regime_bucket == "uptrend_highvol_rebound":
         return _rej("momentum_crash",
                     "Daniel & Moskowitz momentum-crash state: prior decline, high "
                     "volatility, sharp rebound. Momentum historically inverts hardest here.",

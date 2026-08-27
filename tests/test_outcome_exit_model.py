@@ -108,11 +108,33 @@ def test_a_stop_on_the_same_bar_takes_precedence():
 
 def test_a_target_reached_before_the_engine_exits_still_wins():
     prices = _flat(20)
-    prices[2] = (SESSIONS[2], 100.0, 113.0, 99.5, 112.5)    # target on the way
+    prices[2] = (SESSIONS[2], 100.0, 121.0, 99.5, 120.5)    # T2 on the way
     bars = _bars(prices)
     book = {SESSIONS[0]: {"AAA"}, SESSIONS[1]: {"AAA"}, SESSIONS[2]: set()}
     out = _resolve(bars, book)
-    assert out["exit_reason"] == "target_1"
+    assert out["exit_reason"] == "target"
+
+
+def test_t1_is_a_milestone_and_never_ends_the_position():
+    """It took profit at T1 (1.5R) while the model is fitted against T2 (3.0R).
+    Measured out-of-sample, booking at 1.5R was worse under BOTH label
+    geometries -- net -0.22% against +0.36% at 3.0R, and -0.12% against +1.15%
+    -- and the combination this record used was the worst of the four."""
+    prices = _flat(20)
+    prices[2] = (SESSIONS[2], 100.0, 113.0, 99.5, 112.5)    # T1 touched, not T2
+    bars = _bars(prices)
+    book = {s: {"AAA"} for s in SESSIONS[:20]}
+    # max_hold short enough that the window fully elapses inside the bars we
+    # have, so the trade resolves as a time exit rather than staying open.
+    out = _resolve(bars, book, max_hold=15)
+    assert out["exit_reason"] == "time_exit", "T1 must not end the position"
+    assert out["touched_t1"] is True, "reaching T1 is still recorded"
+
+
+def test_a_trade_that_never_reaches_t1_says_so():
+    out = _resolve(_bars(_flat(20)), {s: {"AAA"} for s in SESSIONS[:20]},
+                   max_hold=15)
+    assert out["touched_t1"] is False
 
 
 def test_a_session_with_no_recorded_run_is_not_an_exit():
@@ -127,20 +149,20 @@ def test_a_session_with_no_recorded_run_is_not_an_exit():
 
 def test_a_name_the_engine_keeps_holding_runs_to_its_levels():
     prices = _flat(20)
-    prices[10] = (SESSIONS[10], 100.0, 113.0, 99.5, 112.5)
+    prices[10] = (SESSIONS[10], 100.0, 121.0, 99.5, 120.5)
     bars = _bars(prices)
     book = {s: {"AAA"} for s in SESSIONS[:20]}
     out = _resolve(bars, prices and book)
-    assert out["exit_reason"] == "target_1"
+    assert out["exit_reason"] == "target"
     assert out["sessions_held"] == 9
 
 
 def test_no_book_at_all_behaves_like_the_old_model():
     """A caller with no ledger to offer must not have every position closed."""
     prices = _flat(20)
-    prices[10] = (SESSIONS[10], 100.0, 113.0, 99.5, 112.5)
+    prices[10] = (SESSIONS[10], 100.0, 121.0, 99.5, 120.5)
     out = _resolve(_bars(prices), {})
-    assert out["exit_reason"] == "target_1"
+    assert out["exit_reason"] == "target"
 
 
 # ----------------------------------------------------------- the book reader
