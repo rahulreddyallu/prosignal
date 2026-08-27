@@ -467,19 +467,19 @@ def test_a_held_name_survives_between_the_two_bands(cfg):
 # =============================================================================
 
 
-def test_pipeline_runs_on_the_real_store_and_is_reproducible(live_cfg):
+def test_pipeline_runs_on_the_real_store_and_is_reproducible(runnable_cfg):
     """The full eight-stage run against real ingested NSE data."""
     from prosignal.pipeline import run_analysis
 
-    a = run_analysis(live_cfg)
-    b = run_analysis(live_cfg)
+    a = run_analysis(runnable_cfg)
+    b = run_analysis(runnable_cfg)
 
     assert a.output.as_of_date == b.output.as_of_date
     assert a.funnel == b.funnel, "same inputs must produce the same funnel"
     assert [r.ticker for r in a.output.recommendations] == [
         r.ticker for r in b.output.recommendations
     ]
-    assert a.output.config_version == live_cfg.version
+    assert a.output.config_version == runnable_cfg.version
     assert set(a.output.stage_timings_ms) >= {
         "stage1_data_quality", "stage2_regime", "stage3_eligibility",
         "stage4_core_score", "stage5_false_signal", "stage6_entry",
@@ -487,10 +487,10 @@ def test_pipeline_runs_on_the_real_store_and_is_reproducible(live_cfg):
     }
 
 
-def test_no_trade_reports_the_funnel_not_an_empty_list(live_cfg):
+def test_no_trade_reports_the_funnel_not_an_empty_list(runnable_cfg):
     from prosignal.pipeline import run_analysis
 
-    out = run_analysis(live_cfg).output
+    out = run_analysis(runnable_cfg).output
     if out.no_trade is None:
         pytest.skip("a BUY was generated today; funnel assertion covered elsewhere")
     nt = out.no_trade
@@ -501,7 +501,7 @@ def test_no_trade_reports_the_funnel_not_an_empty_list(live_cfg):
         assert c.gate_failed and c.detail
 
 
-def test_engine_never_emits_a_probability(live_cfg):
+def test_engine_never_emits_a_probability(runnable_cfg):
     """Section 23: a weighted score is not a probability.
 
     Nothing here has been calibrated against realised outcomes, so no field may
@@ -511,7 +511,7 @@ def test_engine_never_emits_a_probability(live_cfg):
     from prosignal.pipeline import run_analysis
     from prosignal.stages.stage8_final_signal import PROBABILITY_UNAVAILABLE
 
-    payload = run_analysis(live_cfg).output.model_dump(mode="json")
+    payload = run_analysis(runnable_cfg).output.model_dump(mode="json")
 
     def walk(node, path=""):
         if isinstance(node, dict):
@@ -529,11 +529,11 @@ def test_engine_never_emits_a_probability(live_cfg):
     assert "unavailable" in PROBABILITY_UNAVAILABLE.lower()
 
 
-def test_every_recommendation_carries_contrarian_evidence(live_cfg):
+def test_every_recommendation_carries_contrarian_evidence(runnable_cfg):
     """Section 42: the engine must argue against its own candidates."""
     from prosignal.pipeline import run_analysis
 
-    out = run_analysis(live_cfg).output
+    out = run_analysis(runnable_cfg).output
     cards = out.recommendations + out.watchlist
     if not cards:
         pytest.skip("no cards produced today")
@@ -544,10 +544,10 @@ def test_every_recommendation_carries_contrarian_evidence(live_cfg):
         assert rec.unvalidated_parameter_warning
 
 
-def test_untestable_checks_are_never_reported_as_passed(live_cfg):
+def test_untestable_checks_are_never_reported_as_passed(runnable_cfg):
     from prosignal.pipeline import run_analysis
 
-    out = run_analysis(live_cfg).output
+    out = run_analysis(runnable_cfg).output
     cards = out.recommendations + out.watchlist
     if not cards:
         pytest.skip("no cards produced today")

@@ -29,9 +29,43 @@ from typing import Any, Callable, Dict, List, Optional
 from .core.logging import get_logger
 from .core.memory import release_memory
 
-__all__ = ["JobManager", "JobState", "Job"]
+__all__ = ["JobManager", "JobState", "Job", "JobBusy"]
 
 log = get_logger(__name__)
+
+
+class JobBusy(RuntimeError):
+    """The single slot is held by a job that is not the one you asked for.
+
+    Single flight is global on purpose -- both job kinds rewrite or read the
+    same store -- but `start()` used to hand the caller whichever job was
+    running, whatever its kind. So pressing SCAN MARKET during a data refresh
+    returned the REFRESH job; the interface polled it to completion, asked
+    `/analysis/{id}/view` for its results, and `build_view` accepted the ingest
+    payload without complaint -- producing as_of null, buy 0, watch 0, "No
+    names qualified", and a toast reading "Scan complete. 0 qualifying, 0
+    monitored." No scan had run and no ledger row was written.
+
+    Refusing is the only honest answer: the caller asked for something the
+    engine cannot start yet.
+    """
+
+    def __init__(self, running: "Job", wanted: str, *, orphaned: bool = False):
+        self.running = running
+        self.wanted = wanted
+        self.orphaned = orphaned
+        what = {"analysis": "a market scan", "bootstrap": "a data build",
+                "ingest": "a data refresh", "daily": "the daily run"}
+        busy = what.get(running.kind, running.kind)
+        asked = what.get(wanted, wanted)
+        if orphaned:
+            super().__init__(
+                f"{busy.capitalize()} was cancelled but is still finishing. "
+                f"Wait for it before starting {asked}.")
+        else:
+            super().__init__(
+                f"{busy.capitalize()} is running. Wait for it to finish, then "
+                f"start {asked}.")
 
 
 class JobState(str, Enum):
@@ -137,6 +171,12 @@ class JobManager:
         self.timeout_seconds = timeout_seconds
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
+        #: Which job the live thread belongs to. `cancel()` cannot stop a
+        #: Python thread, so a cancelled job's worker keeps reading the store
+        #: and writing its ledger row. Without this the DB row goes terminal,
+        #: `active_job()` returns None, and a second full-universe run starts
+        #: alongside the first.
+        self._thread_job_id: Optional[str] = None
         self._init_db()
         self.reap_stale()
 
@@ -227,13 +267,36 @@ class JobManager:
         are expensive and both touch the same data store, so running an
         analysis while the store is being rebuilt underneath it would produce a
         result from a half-written store.
+
+        Returning the running job is right only when it is the SAME KIND -- a
+        double click on one button. A different kind is a different request and
+        raises :class:`JobBusy`, because handing it back means the caller polls
+        someone else's job and renders someone else's payload as its own.
+
+        Raises
+        ------
+        JobBusy
+            When a job of another kind holds the slot, or when a cancelled
+            job's worker thread is still finishing.
         """
         with self._lock:
             self.reap_stale()
             existing = self.active_job()
             if existing is not None:
-                log.info("analysis already running", extra={"job_id": existing.id})
+                if existing.kind != kind:
+                    raise JobBusy(existing, kind)
+                log.info("job already running",
+                         extra={"job_id": existing.id, "kind": kind})
                 return existing
+
+            # No live row, but the previous worker may not have stopped. A
+            # cancel marks the row and cannot touch the thread.
+            if self._thread is not None and self._thread.is_alive():
+                orphan = self.get(self._thread_job_id) if self._thread_job_id else None
+                if orphan is not None:
+                    log.warning("worker still finishing after a terminal state",
+                                extra={"job_id": orphan.id, "state": orphan.state.value})
+                    raise JobBusy(orphan, kind, orphaned=True)
 
             job_id = uuid.uuid4().hex[:12]
             now = dt.datetime.now()
@@ -246,6 +309,7 @@ class JobManager:
             self._thread = threading.Thread(
                 target=self._execute, args=(job_id, runner or self.runner), daemon=True
             )
+            self._thread_job_id = job_id
             self._thread.start()
             log.info("analysis job started", extra={"job_id": job_id})
             return self.get(job_id)  # type: ignore[return-value]
@@ -266,16 +330,22 @@ class JobManager:
         try:
             runner = runner or self.runner
             result = runner(lambda step, label: self._progress(job_id, step, label))
+            # `WHERE state = RUNNING` is the whole point. A cancelled job's
+            # worker cannot be stopped, so it arrives here and used to write
+            # COMPLETED over CANCELLED -- the job the operator cancelled came
+            # back finished, with a result, minutes later.
             with self._connect() as conn:
                 conn.execute(
                     "UPDATE jobs SET state=?, finished_at=?, result_json=?, "
-                    "progress_step=progress_total, progress_label=? WHERE id=?",
+                    "progress_step=progress_total, progress_label=? "
+                    "WHERE id=? AND state=?",
                     (
                         JobState.COMPLETED.value,
                         dt.datetime.now().isoformat(),
                         json.dumps(result, default=str),
                         "complete",
                         job_id,
+                        JobState.RUNNING.value,
                     ),
                 )
             log.info("analysis job completed", extra={"job_id": job_id})
@@ -285,13 +355,15 @@ class JobManager:
             detail = traceback.format_exc()
             with self._connect() as conn:
                 conn.execute(
-                    "UPDATE jobs SET state=?, finished_at=?, error=?, error_detail=? WHERE id=?",
+                    "UPDATE jobs SET state=?, finished_at=?, error=?, error_detail=? "
+                    "WHERE id=? AND state=?",
                     (
                         JobState.FAILED.value,
                         dt.datetime.now().isoformat(),
                         f"{type(exc).__name__}: {exc}",
                         detail,
                         job_id,
+                        JobState.RUNNING.value,
                     ),
                 )
             log.error("analysis job failed", extra={"job_id": job_id, "error": str(exc)})
@@ -324,8 +396,14 @@ class JobManager:
         """Mark a job cancelled.
 
         The worker thread is not forcibly killed -- Python cannot do that
-        safely. The row is marked so the UI stops polling and a new job may
-        start; the orphaned thread finishes and its result is discarded.
+        safely. The row is marked so the UI stops polling; the orphaned thread
+        finishes and its result is DISCARDED, because the final update is
+        conditional on the row still being RUNNING.
+
+        A new job may not start until that thread has actually stopped. It is
+        still reading the store and will still append its ledger row, and two
+        full-universe runs overlapping is the thing single flight exists to
+        prevent.
         """
         job = self.get(job_id)
         if job is None or job.state.is_terminal:

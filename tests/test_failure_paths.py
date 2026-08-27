@@ -132,12 +132,12 @@ def test_L_downside_deviation_of_a_series_with_no_down_days_is_zero():
     assert value == 0.0
 
 
-def test_J_the_funnel_is_monotonic(live_cfg):
+def test_J_the_funnel_is_monotonic(runnable_cfg):
     """triggered=1 followed by passed_score_threshold=8 meant the two lines
     counted different populations."""
     from prosignal import pipeline
 
-    funnel = pipeline.run_analysis(live_cfg).funnel
+    funnel = pipeline.run_analysis(runnable_cfg).funnel
     order = ["universe_considered", "passed_eligibility", "scored",
              "passed_score_threshold", "triggered", "passed_portfolio_limits"]
     seen = [(k, funnel[k]) for k in order if k in funnel]

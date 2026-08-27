@@ -306,6 +306,13 @@ class StorageConfig(_Base):
     #: expressing a data limit: NSE serves bhavcopy to at least 2017, so the
     #: default covers roughly eleven years.
     max_backfill_calendar_days: int = Field(4200, ge=100, le=20000)
+    #: The training span the shipped coefficients were validated against. The
+    #: model refits from stored history on EVERY run, so the store IS the
+    #: training set and this is the depth at which the engine is the one that
+    #: was measured. It decides what `/ready` calls "full validated depth" and,
+    #: through that, whether the interface can detect a stale ranking at all --
+    #: which is far too much to leave in a `getattr(..., 2200)`.
+    validated_training_sessions: int = Field(2200, ge=376, le=10000)
 
     @model_validator(mode="after")
     def _check(self) -> "StorageConfig":
@@ -1558,6 +1565,17 @@ class ApiConfig(_Base):
     auth_token: Optional[str] = None
     allow_order_placement: bool = False
     disclaimer: str
+    #: When a RUNNING job is declared dead so the button unblocks. Read through
+    #: `getattr(cfg.params.api, "job_timeout_seconds", 900)` and present in
+    #: neither this schema nor parameters.yaml, so it read like configuration,
+    #: could not be inspected by `config show`, and could not be changed. It is
+    #: also the moment a still-running analysis is marked FAILED and its slot
+    #: freed for a second one, which on a 1 GB instance under swap is not a
+    #: remote possibility.
+    job_timeout_seconds: float = Field(1800.0, ge=60.0, le=21600.0)
+    #: Sessions fetched per press of BUILD DATA STORE, and per nightly backfill
+    #: step. Same problem: a hardcoded 90 behind a getattr.
+    bootstrap_chunk_sessions: int = Field(90, ge=10, le=1000)
 
     @model_validator(mode="after")
     def _no_trading(self) -> "ApiConfig":

@@ -24,12 +24,13 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 __all__ = [
-    "PAUSE_FILE", "OPS_LOG",
+    "PAUSE_FILE", "OPS_LOG", "PRESERVE_ON_RESET",
     "pause_state", "pause", "resume",
     "reset_market_data", "erase_everything",
     "operations_log",
@@ -37,11 +38,6 @@ __all__ = [
 
 PAUSE_FILE = "cron.paused"
 OPS_LOG = "operations.jsonl"
-
-#: Below this share of expected sessions the forward test's own registration
-#: says the sample is a selection rather than a period.
-MIN_SESSION_COVERAGE = 0.60
-
 
 def _ledger(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
@@ -131,14 +127,61 @@ def resume(ledger_root: Path) -> PauseState:
 # Resetting
 # ---------------------------------------------------------------------------
 
-def _wipe(path: Path) -> int:
-    """Remove a directory's contents and report how many files went."""
+#: Things that live in the curated directory and are NOT market data.
+#:
+#: `curated` holds the price store, which NSE will serve again on request, and
+#: it also holds two files that no amount of re-ingesting reconstructs:
+#:
+#:   trial_registry.jsonl      every research configuration ever tried. It is
+#:                             the Deflated Sharpe Ratio's multiple-testing
+#:                             input, so losing it does not merely forget the
+#:                             count -- it silently LOWERS the bar the strategy
+#:                             has to clear, which is the direction that
+#:                             flatters.
+#:   crosssec_model_versions/  the archive the refit gate keeps so a bad refit
+#:                             is recoverable. Deleting it removes the recovery
+#:                             path at the moment it is most needed.
+#:
+#: The reset's own docstring promised "the record of what the engine SAID" was
+#: kept, and it was -- the ledger is elsewhere. These two were counted as
+#: market data because of where they happened to sit.
+PRESERVE_ON_RESET = ("trial_registry.jsonl", "crosssec_model_versions")
+
+
+def _wipe(path: Path, preserve: tuple = ()) -> int:
+    """Remove a directory's contents and report how many files went.
+
+    Anything named in ``preserve`` is carried across the wipe. Copied out to a
+    temporary directory and back rather than deleted around, so a failure
+    part-way leaves the originals on disk rather than half of them.
+    """
     if not path.exists():
         return 0
     n = sum(1 for p in path.rglob("*") if p.is_file())
-    shutil.rmtree(path, ignore_errors=True)
-    path.mkdir(parents=True, exist_ok=True)
-    return n
+    keep = [name for name in preserve if (path / name).exists()]
+    if not keep:
+        shutil.rmtree(path, ignore_errors=True)
+        path.mkdir(parents=True, exist_ok=True)
+        return n
+
+    with tempfile.TemporaryDirectory() as hold:
+        holding = Path(hold)
+        for name in keep:
+            src = path / name
+            if src.is_dir():
+                shutil.copytree(src, holding / name)
+            else:
+                shutil.copy2(src, holding / name)
+        shutil.rmtree(path, ignore_errors=True)
+        path.mkdir(parents=True, exist_ok=True)
+        for name in keep:
+            src = holding / name
+            if src.is_dir():
+                shutil.copytree(src, path / name)
+            else:
+                shutil.copy2(src, path / name)
+    n -= sum(1 for p in path.rglob("*") if p.is_file())
+    return max(n, 0)
 
 
 def reset_market_data(paths: Any) -> Dict[str, Any]:
@@ -148,15 +191,21 @@ def reset_market_data(paths: Any) -> Dict[str, Any]:
     Those describe what the engine SAID, which no amount of re-ingesting
     reconstructs; the store describes what the market DID, which NSE will
     serve again on request.
+
+    Also keeps the two things inside `curated` that are not market data: the
+    trial registry, which is the Deflated Sharpe's multiple-testing input, and
+    the model version archive, which is the refit gate's recovery path. Both
+    were being destroyed by a button whose label promises the record is kept.
     """
     removed = {
-        "curated": _wipe(Path(paths.curated)),
+        "curated": _wipe(Path(paths.curated), PRESERVE_ON_RESET),
         "snapshots": _wipe(Path(paths.snapshots)),
         "cache": _wipe(Path(paths.cache)),
         "raw": _wipe(Path(paths.raw)),
     }
     detail = {"scope": "market_data", "files_removed": removed,
-              "kept": ["ledger", "outcomes", "forward_registration"]}
+              "kept": ["ledger", "outcomes", "forward_registration",
+                       *PRESERVE_ON_RESET]}
     _log(Path(paths.ledger), "reset_market_data", detail)
     return detail
 

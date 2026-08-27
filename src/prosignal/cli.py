@@ -282,7 +282,7 @@ def cmd_data_ingest(cfg: AppConfig, args: argparse.Namespace) -> int:
             have = 0
         cov = assess(cfg, have)
         if have and have < cov.validated_target:
-            chunk = int(getattr(cfg.params.api, "bootstrap_chunk_sessions", 0) or 90)
+            chunk = int(cfg.params.api.bootstrap_chunk_sessions)
             sessions = min(have + chunk, cov.validated_target)
             _print(f"Store is {have} of {cov.validated_target} sessions; "
                    f"reaching for {sessions} tonight.")
@@ -713,6 +713,17 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .stages.stage8_final_signal import PROBABILITY_UNAVAILABLE
 
     _rule("RUN MARKET ANALYSIS")
+
+    if getattr(args, "skip_if_recorded", False):
+        already = _already_recorded(cfg, _resolve_arg_date(getattr(args, "date", None)))
+        if already:
+            _print(f"Session {already} already has a recorded run; nothing to do.")
+            _print("  The store gained no session since the last observation. On "
+                   "an NSE holiday that is the expected outcome -- re-ranking it "
+                   "would write a second ledger row for a date that already has "
+                   "one.")
+            return 0
+
     try:
         run = run_analysis(
             cfg,
@@ -823,6 +834,41 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     for f in o.data_quality_flags:
         _print(f"  data-quality: {f}")
     return 0
+
+
+def _already_recorded(cfg: AppConfig, requested: "Optional[dt.date]") -> "Optional[dt.date]":
+    """The session this run would rank, if the ledger already holds it.
+
+    Resolved the same way the pipeline resolves it -- the last stored session on
+    or before the requested date -- so the answer cannot drift from what the run
+    would actually do. Returns None when the store is empty, the date does not
+    resolve, or no completed run exists for it; in all three the caller should
+    run.
+    """
+    from .core.calendar import TradingCalendar
+    from .data.store import DataStore
+    from .ledger import Ledger
+
+    try:
+        sessions = DataStore(cfg.paths.curated, cfg.paths.snapshots).price_sessions()
+    except Exception:                       # noqa: BLE001 - let the run report it
+        return None
+    if not sessions:
+        return None
+    calendar = TradingCalendar(sessions)
+    resolved = (calendar.last_session_on_or_before(requested) if requested
+                else calendar.last)
+    if resolved is None:
+        return None
+    try:
+        for row in Ledger(cfg.paths.ledger).iter_rows():
+            if row.get("error"):
+                continue
+            if str(row.get("date") or "")[:10] == resolved.isoformat():
+                return resolved
+    except Exception:                       # noqa: BLE001 - an unreadable ledger
+        return None                         # is not a reason to skip the run
+    return None
 
 
 def rec_warning() -> str:
@@ -2322,7 +2368,18 @@ def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     except Exception as exc:
         _print(f"  ledger unreadable: {exc}")
         return 1
-    prog = progress(cfg.paths.ledger, rows)
+    # Same two inputs the API supplies. A CLI that could not see a config
+    # change made between registration and the first observation reported
+    # "Registered today; no forward session yet" on a window already void.
+    from .data.store import DataStore
+    from .validation.forward import sessions_in_window
+    try:
+        sessions = DataStore(cfg.paths.curated, cfg.paths.snapshots).price_sessions()
+    except Exception:
+        sessions = []
+    prog = progress(cfg.paths.ledger, rows,
+                    live_config_version=str(cfg.version),
+                    sessions_printed=sessions_in_window(sessions, reg.started_on))
     if prog is None:
         return 1
 
@@ -2333,6 +2390,9 @@ def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
         ["runs recorded", f"{prog.runs_recorded}"],
         ["latest session", prog.latest_session or "none yet"],
         ["configurations seen", ", ".join(prog.config_versions) or "none yet"],
+        ["session coverage",
+         "not yet meaningful" if prog.coverage is None
+         else f"{prog.coverage:.0%} of {prog.sessions_expected} printed"],
     ])
     _print()
     _print(f"  {prog.summary()}")
@@ -2560,6 +2620,15 @@ def build_parser() -> argparse.ArgumentParser:
     full.add_argument("--date", help="decision date (YYYY-MM-DD)")
     full.add_argument("--watch", type=int, default=3,
                       help="how many watchlist cards to print")
+    full.add_argument(
+        "--skip-if-recorded", action="store_true",
+        help=("exit 0 without running when the session this would rank already "
+              "has a recorded run. For the unattended nightly job: on an NSE "
+              "holiday the ingest fetches nothing and this would otherwise "
+              "re-rank the previous session and write a second ledger row for "
+              "a date that already has one. A person pressing SCAN wants the "
+              "rerun, so this is opt-in."),
+    )
     full.set_defaults(func=cmd_analyse_run)
 
     research_p = sub.add_parser(

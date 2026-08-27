@@ -54,8 +54,14 @@ sudo -u "${APP_USER}" ./.venv/bin/pip install --no-deps -e .
 # Without the three allocator settings the analysis peaks at 542 MB instead of
 # 409 MB, which on a 1 GB instance is the difference between running and being
 # killed. Arrow and glibc both retain freed pages in their own arenas.
+# PROSIGNAL_PUBLIC sits beside the token deliberately. The process binds
+# 127.0.0.1 and Caddy carries the internet to it, so the app's own fail-closed
+# check -- which reads the bind address -- cannot see that it is exposed.
+# With this marker, deleting the token line stops the service instead of
+# opening /admin/reset/everything to the world.
 cat > /etc/prosignal.env <<EOF
 PROSIGNAL_AUTH_TOKEN=${TOKEN}
+PROSIGNAL_PUBLIC=1
 ARROW_DEFAULT_MEMORY_POOL=system
 MALLOC_ARENA_MAX=2
 PYTHONMALLOC=malloc

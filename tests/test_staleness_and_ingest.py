@@ -58,9 +58,15 @@ def test_the_manifest_no_longer_measures_the_store_against_itself():
     source = (ROOT / "src" / "prosignal" / "pipeline.py").read_text(encoding="utf-8")
     block = source[source.index("def _manifest_from_store"):]
     block = block[:block.index("def _frames")]
-    assert "_sessions_behind(last)" in block, (
+    assert "_sessions_behind(last, now)" in block, (
         "live staleness must be measured against today; measuring against a "
         "calendar built from the store returns 0 for every feed forever"
+    )
+    assert "now = market_today(config)" in block, (
+        "and 'today' must come from runtime.timezone, not from whichever "
+        "timezone the host happens to be in -- a UTC box at 20:30 IST is "
+        "already on the next calendar day, so every run would read one "
+        "session staler than it is"
     )
     assert "live = as_of >=" in block, (
         "a deliberate historical run is legitimately behind today and must not "

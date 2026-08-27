@@ -196,3 +196,41 @@ def tmp_store_config(tmp_path):
     })
     store.prices.write(frame)
     return config, store, sessions[-1]
+
+
+@pytest.fixture
+def runnable_cfg(live_cfg):
+    """`live_cfg`, and the store is fresh enough for the pipeline to run.
+
+    Stage 1 halts market-wide on a required feed older than
+    `max_age_sessions`, so every test that calls `run_analysis` against the
+    real store goes red the moment the local store falls a session behind --
+    which it does by itself, every day nobody ingests. Nine did exactly that
+    on 2026-08-27 against a store ending 2026-08-25, all with the identical
+    MarketWideHalt.
+
+    A suite that turns red for reasons unrelated to the code stops being a
+    signal about the code, and the habit it teaches -- ignoring the failures --
+    is the one you least want. The refusal itself is correct and is asserted
+    directly, on purpose, in `test_ready_freshness` and
+    `test_staleness_and_ingest`. These tests are about stage discipline and
+    need a store they can actually run on.
+
+    Only for tests that execute the pipeline. Tests that merely read the real
+    store keep using `live_cfg` and keep running on a stale one.
+    """
+    from prosignal.core.clock import market_today
+    from prosignal.data.store import DataStore
+    from prosignal.pipeline import _sessions_behind
+
+    sessions = DataStore(live_cfg.paths.curated, live_cfg.paths.snapshots).price_sessions()
+    behind = _sessions_behind(sessions[-1], market_today(live_cfg))
+    limit = int(live_cfg.params.feeds["equity_ohlcv"].max_age_sessions)
+    if behind > limit:
+        pytest.skip(
+            f"the local store ends {sessions[-1]}, {behind} weekday(s) behind "
+            f"{market_today(live_cfg)} against a tolerance of {limit} -- the "
+            f"pipeline halts at Stage 1. Run `prosignal data ingest`. This is "
+            f"the engine refusing stale data, not a defect."
+        )
+    return live_cfg

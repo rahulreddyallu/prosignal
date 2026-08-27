@@ -114,6 +114,5 @@ def assess(config, stored: int) -> Coverage:
         stored=int(stored),
         eligibility_minimum=int(config.params.universe.min_history_sessions.value),
         model_minimum=model_minimum,
-        validated_target=int(getattr(
-            config.params.storage, "validated_training_sessions", 0) or 2200),
+        validated_target=int(config.params.storage.validated_training_sessions),
     )
