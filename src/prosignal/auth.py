@@ -22,10 +22,27 @@ import hmac
 import os
 from typing import Optional
 
-__all__ = ["ENV_VAR", "HOSTED_ENV_MARKERS", "OPEN_PATHS", "assert_safe_to_serve",
-           "is_public_bind", "looks_hosted", "resolve_token", "token_matches"]
+__all__ = ["ENV_VAR", "PUBLIC_ENV_VAR", "HOSTED_ENV_MARKERS", "OPEN_PATHS",
+           "assert_safe_to_serve", "is_public_bind", "looks_hosted",
+           "reachable_publicly", "resolve_token", "token_matches"]
 
 ENV_VAR = "PROSIGNAL_AUTH_TOKEN"
+
+#: Set by a deployment that puts this process behind a public reverse proxy.
+#:
+#: The fail-closed check reads the BIND ADDRESS, and the deployed instance binds
+#: 127.0.0.1 with Caddy in front of it -- so `is_public_bind` is false, the
+#: check returns early, and the entire protection is that the token happens to
+#: arrive in the environment. Remove the token line from /etc/prosignal.env and
+#: the API starts, serves the interface, and answers /admin/reset/everything to
+#: the open internet, with nothing anywhere refusing.
+#:
+#: systemd already fails the unit if the EnvironmentFile is missing outright.
+#: This covers the other case: the file present and the token gone. The marker
+#: sits beside the token in the same file, so the two are removed together or
+#: not at all, and losing only the token now stops the service instead of
+#: opening it.
+PUBLIC_ENV_VAR = "PROSIGNAL_PUBLIC"
 
 #: Never require a token for these. Platform health checks cannot carry one,
 #: and a health endpoint that 401s reads to the platform as a dead service --
@@ -78,23 +95,44 @@ def looks_hosted() -> bool:
     return any(os.environ.get(k) for k in HOSTED_ENV_MARKERS)
 
 
+def _declared_public() -> bool:
+    raw = os.environ.get(PUBLIC_ENV_VAR, "").strip().lower()
+    return raw not in ("", "0", "false", "no", "off")
+
+
+def reachable_publicly(host: Optional[str] = None) -> bool:
+    """Whether anything off this box can reach the process.
+
+    Three ways to be reachable and only one of them is visible from the bind
+    address, which is why the check used to miss the deployed instance
+    entirely: it binds loopback and a reverse proxy carries the internet to it.
+    """
+    return is_public_bind(host) or looks_hosted() or _declared_public()
+
+
 def assert_safe_to_serve(config, host: Optional[str] = None) -> None:
     """Refuse to start a public, unauthenticated instance.
 
     Failing closed rather than warning, because a warning in a deploy log is
     read once and a running service is reachable for as long as it is up.
     """
-    if not is_public_bind(host) and not looks_hosted():
+    if not reachable_publicly(host):
         return
     token = resolve_token(config)
     if not token:
-        where = f"on {host!r}" if host else "in a hosted environment"
+        if _declared_public():
+            where = f"behind a public proxy ({PUBLIC_ENV_VAR} is set)"
+        elif host and is_public_bind(host):
+            where = f"on {host!r}"
+        else:
+            where = "in a hosted environment"
         raise RuntimeError(
             f"refusing to serve {where} without an access token. This "
             f"instance exposes /analysis/run and /admin/bootstrap, which start "
-            f"long jobs, and it has no other protection. Set {ENV_VAR} to a "
-            f"random string of at least {MIN_TOKEN_LENGTH} characters, or bind "
-            f"to 127.0.0.1."
+            f"long jobs, and /admin/reset/everything, which erases the record. "
+            f"Set {ENV_VAR} to a random string of at least "
+            f"{MIN_TOKEN_LENGTH} characters, or bind to 127.0.0.1 with no "
+            f"proxy in front of it."
         )
     if len(token) < MIN_TOKEN_LENGTH:
         raise RuntimeError(

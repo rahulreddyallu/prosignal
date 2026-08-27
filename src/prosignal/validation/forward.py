@@ -50,7 +50,9 @@ from typing import Any, Dict, List, Optional
 
 __all__ = [
     "Registration", "Progress", "REGISTRATION_NAME",
+    "MIN_SESSION_COVERAGE", "COVERAGE_GRACE_SESSIONS",
     "register", "load_registration", "verify", "progress",
+    "sessions_in_window",
 ]
 
 REGISTRATION_NAME = "forward_test.json"
@@ -63,6 +65,18 @@ TARGET_SESSIONS = 375
 #: plus an intercept needs seven parameters; eighteen leaves eleven degrees of
 #: freedom, which is the whole reason for the eighteen-month figure.
 TARGET_MONTHS = 18
+
+#: Below this share of the sessions the market actually printed, the sample is a
+#: SELECTION rather than a period -- the registration names this as one of its
+#: four invalidation conditions. It lived in `operations` as a constant nothing
+#: read, so the criterion was written into every pre-registration and evaluated
+#: by nothing. It belongs here, beside the check that enforces it.
+MIN_SESSION_COVERAGE = 0.60
+
+#: Coverage is not meaningful over a handful of days: one missed night out of
+#: three is 67% and says nothing, while one out of a hundred is a real gap. The
+#: ratio is only judged once the window is long enough for it to mean something.
+COVERAGE_GRACE_SESSIONS = 20
 
 
 @dataclass(frozen=True)
@@ -110,6 +124,10 @@ class Progress:
     months_elapsed: int
     months_target: int
     runs_recorded: int
+    #: Sessions the market actually printed inside the window, when the caller
+    #: can supply them. `sessions_elapsed` counts the ones that produced a
+    #: recorded run; the gap between the two is the coverage question.
+    sessions_expected: Optional[int] = None
     #: Distinct model fingerprints seen since the start. config_version
     #: covers parameters.yaml only, so this is the one that notices a code
     #: change or a store that grew under an unchanged config.
@@ -148,12 +166,50 @@ class Progress:
                 f"registration -- a run made against an earlier close is a "
                 f"re-score of data the model has already seen."
             )
+        covered = ""
+        if self.coverage is not None:
+            covered = (f" Coverage {self.coverage:.0%} of the "
+                       f"{self.sessions_expected} sessions the market printed.")
         return (
             f"{self.sessions_elapsed} of {self.sessions_target} sessions "
             f"({self.fraction:.0%}), {self.months_elapsed} of "
-            f"{self.months_target} months, {self.runs_recorded} runs recorded. "
-            f"Nothing may be concluded until both targets are met."
+            f"{self.months_target} months, {self.runs_recorded} runs recorded."
+            f"{covered} Nothing may be concluded until both targets are met."
         )
+
+    @property
+    def coverage(self) -> Optional[float]:
+        """Share of printed sessions that produced a recorded run."""
+        if not self.sessions_expected:
+            return None
+        return min(self.sessions_elapsed / self.sessions_expected, 1.0)
+
+
+def sessions_in_window(sessions, started_on: str,
+                       today: Optional[dt.date] = None) -> int:
+    """How many sessions the market printed between registration and today.
+
+    The denominator for the coverage criterion. Takes the store's session list
+    rather than a store, so this module stays free of the data layer and both
+    callers -- the API and the CLI -- get the same arithmetic.
+    """
+    try:
+        start = dt.date.fromisoformat(str(started_on)[:10])
+    except (TypeError, ValueError):
+        return 0
+    end = today or dt.date.today()
+    n = 0
+    for day in sessions or ():
+        if isinstance(day, dt.datetime):
+            day = day.date()
+        if not isinstance(day, dt.date):
+            try:
+                day = dt.date.fromisoformat(str(day)[:10])
+            except ValueError:
+                continue
+        if start <= day <= end:
+            n += 1
+    return n
 
 
 def _path(root: Path) -> Path:
@@ -278,12 +334,27 @@ def progress(
     ledger_rows,
     *,
     today: Optional[dt.date] = None,
+    live_config_version: Optional[str] = None,
+    sessions_printed: Optional[int] = None,
 ) -> Optional[Progress]:
     """Read the ledger and report how far the window has run.
 
     Deliberately reports NOTHING about performance. Interim results invite
     optional stopping, and a test stopped when it looks good has no p-value
     worth quoting.
+
+    ``live_config_version`` is the configuration the engine is running NOW.
+    Without it, drift is detectable only from the versions stamped on ledger
+    rows INSIDE the window -- so a config changed between registration and the
+    first observation left `broken` empty and the summary reading "Registered
+    today; no forward session yet", which is the reassuring wording for a
+    window that is already void. Observed exactly that: registered against
+    a30a8d48, engine running 9776e5d6, nothing flagged.
+
+    ``sessions_printed`` is how many sessions the MARKET produced inside the
+    window. It is the denominator the registration's fourth invalidation
+    condition needs and the caller is the only thing that knows it, because
+    this module has no store.
     """
     reg = load_registration(root)
     if reg is None:
@@ -324,6 +395,13 @@ def progress(
     broken: List[str] = []
     if not verify(root):
         broken.append("the pre-registration file no longer matches its hash")
+    # The check that does not need an observation to have landed yet.
+    if live_config_version and live_config_version != reg.config_version:
+        broken.append(
+            f"the engine is running {live_config_version} but the test was "
+            f"registered against {reg.config_version} -- the configuration "
+            f"changed after registration, so this window is not one experiment"
+        )
     # The check config_version cannot make. Same knobs, different model.
     if len(prints) > 1:
         broken.append(
@@ -342,6 +420,19 @@ def progress(
             f"{reg.config_version}"
         )
 
+    # "Fewer than 60% of expected sessions produce a recorded run, which would
+    # make the sample a selection rather than a period." The registration has
+    # said this since the first window; nothing evaluated it.
+    if sessions_printed and sessions_printed >= COVERAGE_GRACE_SESSIONS:
+        covered = len(unique_days) / sessions_printed
+        if covered < MIN_SESSION_COVERAGE:
+            broken.append(
+                f"only {len(unique_days)} of the {sessions_printed} sessions "
+                f"the market printed produced a recorded run ({covered:.0%}, "
+                f"below the {MIN_SESSION_COVERAGE:.0%} the registration "
+                f"requires) -- the sample is a selection, not a period"
+            )
+
     return Progress(
         started_on=reg.started_on,
         latest_session=unique_days[-1].isoformat() if unique_days else None,
@@ -350,6 +441,7 @@ def progress(
         months_elapsed=max(months, 0),
         months_target=reg.target_months,
         runs_recorded=len(dates),
+        sessions_expected=(int(sessions_printed) if sessions_printed else None),
         config_versions=sorted(versions),
         model_fingerprints=sorted(prints),
         broken=broken,

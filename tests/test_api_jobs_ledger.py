@@ -265,8 +265,12 @@ def test_results_for_unfinished_job_do_not_return_a_signal(client):
         assert "no results" in json.dumps(r.json()).lower()
 
 
-def test_full_button_flow_end_to_end(client):
-    """CLICK -> JOB -> POLL -> RESULTS, against the real engine and real data."""
+def test_full_button_flow_end_to_end(client, runnable_cfg):
+    """CLICK -> JOB -> POLL -> RESULTS, against the real engine and real data.
+
+    `runnable_cfg` is here only for its skip: this drives the pipeline through
+    the API, so it needs a store fresh enough for Stage 1 to let the run past.
+    """
     started = client.post("/analysis/run").json()
     job_id = started["id"]
 
@@ -288,14 +292,14 @@ def test_full_button_flow_end_to_end(client):
     assert "unavailable" in res["probability_note"].lower()
 
 
-def test_run_is_persisted_to_the_ledger(client, live_cfg):
-    before = Ledger(live_cfg.paths.ledger).count()
+def test_run_is_persisted_to_the_ledger(client, runnable_cfg):
+    before = Ledger(runnable_cfg.paths.ledger).count()
     started = client.post("/analysis/run").json()
     for _ in range(120):
         if client.get(f"/analysis/{started['id']}").json()["state"] in ("COMPLETED", "FAILED"):
             break
         time.sleep(0.5)
-    assert Ledger(live_cfg.paths.ledger).count() > before
+    assert Ledger(runnable_cfg.paths.ledger).count() > before
 
 
 def test_ledger_endpoint_exposes_run_history(client):

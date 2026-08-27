@@ -25,6 +25,7 @@ import pandas as pd
 
 from .config.loader import AppConfig
 from .core.calendar import TradingCalendar
+from .core.clock import market_today
 from .core.contracts import (
     FinalSignalOutput,
     RawDataManifest,
@@ -620,6 +621,12 @@ def _sessions_behind(last: Optional[dt.date], today: Optional[dt.date] = None) -
     holiday in the window. Overstating is the safe direction: it flags early
     rather than late, and the caller allows a tolerance rather than this
     function guessing at a holiday calendar it does not have.
+
+    ``today`` is the MARKET's date, supplied by the caller from
+    `runtime.timezone`. Defaulting to the host clock made the tolerance of one
+    session depend on which timezone the box happened to be in: a UTC host at
+    20:30 IST is already on the next calendar day, so every Monday run would
+    read one session staler than it is.
     """
     if last is None:
         return 0
@@ -644,6 +651,7 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
     # Wall-clock staleness applies to a LIVE run only. A deliberate historical
     # analysis is legitimately behind today and must not be failed for it.
     live = as_of >= calendar.last if calendar.last else False
+    now = market_today(config)
     feeds: Dict[str, FeedRecord] = {}
     # delivery_data is REQUIRED. deliv_pct carries the largest coefficient in the
     # fitted model (+0.0233 of 17 factors) and crosssec treats it as neutral-when-
@@ -661,7 +669,7 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
         if last is None:
             status, age = FeedStatus.MISSING, None
         else:
-            age = (_sessions_behind(last) if live
+            age = (_sessions_behind(last, now) if live
                    else calendar.age_in_sessions(last, as_of))
             # No holiday allowance. Weekday counting overstates by about one
             # session per NSE holiday in the window, and that is the direction
@@ -677,7 +685,7 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
             last_timestamp=last, age_sessions=age, max_age_sessions=max_age,
             required=required,
             notes=([f"age is weekdays since {last} counted against today "
-                    f"({dt.date.today()}), not sessions in the local store. An "
+                    f"({now}), not sessions in the local store. An "
                     f"NSE holiday in the window reads as one extra session; "
                     f"running `prosignal data ingest` settles it either way."]
                    if live else []),

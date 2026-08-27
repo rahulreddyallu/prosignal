@@ -20,16 +20,17 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config.loader import AppConfig, load_config
+from .core.clock import market_today
 from .core.logging import get_logger, setup_logging
 from .core.memory import release_memory, trim_available
 from .data.coverage import MINIMUM_NOTE, assess
 from .data.store import DataStore
 from .auth import (OPEN_PATHS, assert_safe_to_serve, resolve_token,
                     token_matches)
-from .jobs import JobManager
+from .jobs import JobBusy, JobManager
 from .ledger import Ledger
 from .rundetail import card as _card, shape as _shape
-from .pipeline import run_analysis
+from .pipeline import _sessions_behind, run_analysis
 from .version import ENGINE_NAME, ENGINE_VERSION, SCHEMA_VERSION
 
 __all__ = ["create_app"]
@@ -82,9 +83,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     jobs = JobManager(
         db_path=cfg.paths.data / "jobs.sqlite3",
         runner=_runner,
-        timeout_seconds=float(cfg.params.api.job_timeout_seconds)
-        if hasattr(cfg.params.api, "job_timeout_seconds")
-        else 900.0,
+        timeout_seconds=float(cfg.params.api.job_timeout_seconds),
     )
     app.state.cfg = cfg
     app.state.jobs = jobs
@@ -202,6 +201,30 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             cov = assess(cfg, len(sessions))
             checks.update(cov.to_dict())
             checks["analysable_dates"] = max(len(sessions) - cov.eligibility_minimum, 0)
+
+            # UNCONDITIONALLY, on every branch. It used to be set only when the
+            # store had reached full validated depth, and the interface reads
+            # `isCurrent()` off it: with nothing to compare against that
+            # function returns true, so on a still-building store a run from
+            # any past date rendered under today's heading with no staleness
+            # prompt at all. The freshness indicator switched itself off in the
+            # one state where the store is most likely to be behind.
+            checks["latest_session"] = sessions[-1].isoformat() if sessions else None
+
+            # The SAME arithmetic the pipeline halts on, against the same
+            # tolerance, so this endpoint and Stage 1 cannot disagree about
+            # whether an analysis could run. They did: /ready returned
+            # {"ready": true, "latest_session": "2026-08-25"} on 2026-08-27,
+            # while _sessions_behind gave 2 against a limit of 1 and every run
+            # halted market-wide.
+            behind = _sessions_behind(sessions[-1], market_today(cfg)) if sessions else None
+            policy = (cfg.params.feeds or {}).get("equity_ohlcv")
+            limit = int(getattr(policy, "max_age_sessions", 1) or 1)
+            stale = behind is not None and behind > limit
+            checks["sessions_behind"] = behind
+            checks["staleness_limit"] = limit
+            checks["data_stale"] = bool(stale)
+
             if not cov.model_will_fit:
                 ok = False
                 checks["price_data"] = cov.status()
@@ -211,6 +234,23 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                     "until it reports the validated depth. This is expected on a "
                     "fresh deployment: data/ is not in version control."
                 )
+            elif stale:
+                # Deep enough and too old. An analysis started now halts at
+                # Stage 1, so reporting ready would be a readiness probe that
+                # disagrees with the thing it reports readiness for.
+                ok = False
+                checks["price_data"] = (
+                    f"last session {sessions[-1].isoformat()} is {behind} "
+                    f"weekday(s) behind {market_today(cfg)}; the tolerance is "
+                    f"{limit}. An analysis would halt market-wide."
+                )
+                checks["remedy"] = (
+                    "refresh the market data (POST /admin/ingest, or press "
+                    "REFRESH in the interface). If the market was closed for "
+                    "those days the refresh is a no-op and this clears anyway "
+                    "-- age is counted in weekdays, which cannot see an NSE "
+                    "holiday."
+                )
             elif not cov.matches_validation:
                 # Usable, but not the model that was validated. Serving without
                 # saying so would let a 16-month fit pass for a 9-year one.
@@ -218,7 +258,6 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 checks["warning"] = MINIMUM_NOTE
             else:
                 checks["price_data"] = "ok"
-                checks["latest_session"] = sessions[-1].isoformat()
         except Exception as exc:  # noqa: BLE001
             ok = False
             checks["price_data"] = f"{type(exc).__name__}: {exc}"
@@ -247,15 +286,34 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # =====================================================================
     # analysis
     # =====================================================================
+    def _start(kind: str = "analysis", runner=None) -> Dict[str, Any]:
+        """Start a job, or say plainly why it cannot start.
+
+        The single slot is shared by every kind of job. Handing the caller
+        whichever job happened to hold it is how pressing SCAN MARKET during a
+        refresh produced "Scan complete. 0 qualifying, 0 monitored" for a scan
+        that never ran.
+        """
+        try:
+            job = jobs.start(kind=kind, runner=runner) if runner else jobs.start(kind=kind)
+        except JobBusy as busy:
+            raise HTTPException(409, {
+                "message": str(busy),
+                "running": {"id": busy.running.id, "kind": busy.running.kind,
+                            "state": busy.running.state.value,
+                            "progress": busy.running.to_dict()["progress"]},
+                "wanted": busy.wanted,
+            }) from busy
+        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
+
     @app.post("/analysis/run")
     def start_analysis() -> Dict[str, Any]:
         """Start an analysis, or return the one already running.
 
-        Idempotent: a double click gets the same job back rather than launching
-        a second full-universe run.
+        Idempotent for a double click: the same ANALYSIS job comes back. A job
+        of any other kind holding the slot is a 409, not a substitute.
         """
-        job = jobs.start()
-        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
+        return _start("analysis")
 
     @app.get("/analysis/{run_id}")
     def job_status(run_id: str) -> Dict[str, Any]:
@@ -634,7 +692,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         # stored history every analysis, so the store IS the training set.
         need = cov.validated_target
 
-        chunk = int(getattr(cfg.params.api, "bootstrap_chunk_sessions", 0) or 90)
+        chunk = int(cfg.params.api.bootstrap_chunk_sessions)
         target = min(have + chunk, need) if have else min(chunk, need)
 
         progress(0, f"{have} of {need} sessions. Fetching up to {target}...")
@@ -677,8 +735,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         that is being rewritten underneath would produce a result from
         half-written data.
         """
-        job = jobs.start(kind="bootstrap", runner=_bootstrap_runner)
-        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
+        return _start("bootstrap", _bootstrap_runner)
 
     @app.get("/today")
     def today() -> Dict[str, Any]:
@@ -731,9 +788,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                                      cfg.paths.snapshots).price_sessions())
                 cov = assess(cfg, have)
                 if have and have < cov.validated_target:
-                    chunk = int(getattr(cfg.params.api,
-                                        "bootstrap_chunk_sessions", 0) or 90)
-                    sessions = min(have + chunk, cov.validated_target)
+                    sessions = min(have + int(cfg.params.api.bootstrap_chunk_sessions),
+                                   cov.validated_target)
             except Exception:
                 sessions = None
             with DataIngestor(cfg) as ingestor:
@@ -749,8 +805,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 "feeds": {k: v.status.value for k, v in sorted(m.feeds.items())},
             }
 
-        job = jobs.start(kind="ingest", runner=_runner)
-        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
+        return _start("ingest", _runner)
 
     @app.get("/admin/model")
     def admin_model() -> Dict[str, Any]:
@@ -765,6 +820,17 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             blob = _json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {"fitted": False, "note": "The model cache is unreadable."}
+        # The interface rendered `mdl.stale` and this endpoint never returned
+        # it, so the "refresh needed" hint could not appear on any state. The
+        # honest version of the question is whether the coefficients were
+        # fitted for the session the store now ends on.
+        latest = None
+        try:
+            sessions = DataStore(cfg.paths.curated, cfg.paths.snapshots).price_sessions()
+            latest = sessions[-1].isoformat() if sessions else None
+        except Exception:                     # noqa: BLE001 - a display hint
+            latest = None
+        fitted_for = str(blob.get("fitted_for") or "")
         coef = blob.get("coef") or {}
         t = blob.get("fm_t_stat") or {}
         themes = [{"theme": k.removesuffix("_f"), "coefficient": v,
@@ -773,6 +839,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         themes.sort(key=lambda r: -abs(float(r["coefficient"])))
         return {
             "fitted": True,
+            "stale": bool(latest and fitted_for and fitted_for < latest),
+            "latest_session": latest,
             "fitted_for": blob.get("fitted_for"),
             "train_end": blob.get("train_end"),
             "n_train": blob.get("n_train"),
@@ -841,7 +909,22 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                     "note": ("No forward test is registered. Registering opens "
                              "an 18-month window against the current "
                              "configuration.")}
-        prog = forward.progress(led, list(_ledger_rows()), today=_dt.date.today())
+        # The two things `progress` cannot work out for itself: what the engine
+        # is running now, and how many sessions the market actually printed.
+        # Without the first, a config changed between registration and the
+        # first observation is invisible; without the second, the coverage
+        # criterion the registration names cannot be evaluated at all.
+        try:
+            sessions = DataStore(cfg.paths.curated,
+                                 cfg.paths.snapshots).price_sessions()
+        except Exception:
+            sessions = []
+        prog = forward.progress(
+            led, list(_ledger_rows()), today=market_today(cfg),
+            live_config_version=live,
+            sessions_printed=forward.sessions_in_window(
+                sessions, reg.started_on, market_today(cfg)),
+        )
         return {
             "registered": True,
             "started_on": reg.started_on,
@@ -851,6 +934,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "hash_intact": forward.verify(led),
             "sessions_elapsed": prog.sessions_elapsed if prog else 0,
             "sessions_target": reg.target_sessions,
+            "sessions_printed": prog.sessions_expected if prog else None,
+            "coverage": prog.coverage if prog else None,
             "broken": prog.broken if prog else [],
             "summary": prog.summary() if prog else "",
         }
@@ -1013,16 +1098,52 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     def measurement_state() -> Dict[str, Any]:
         return _measurement_state()
 
+    def _daily_runner(progress) -> Dict[str, Any]:
+        """Refresh the data, then rank -- the two steps the nightly job takes.
+
+        This endpoint documented itself as doing exactly that and ran
+        `_bootstrap_runner`, which only ingests. It returned an ingest payload,
+        wrote no ledger row and produced no ranking, while its own docstring
+        said "refresh the data, then rank".
+
+        Doing both in ONE job also removes the trap in doing them as two: the
+        refresh holds the single slot, so a scan pressed while it runs has
+        nowhere to go.
+        """
+        from .data.ingest import DataIngestor, IngestOptions
+        from .rundetail import shape as _shape_run
+
+        progress(0, "Refreshing market data")
+        sessions = None
+        try:
+            have = len(DataStore(cfg.paths.curated, cfg.paths.snapshots).price_sessions())
+            cov = assess(cfg, have)
+            if have and have < cov.validated_target:
+                sessions = min(have + int(cfg.params.api.bootstrap_chunk_sessions),
+                               cov.validated_target)
+        except Exception:                     # noqa: BLE001 - ingest defaults apply
+            sessions = None
+        with DataIngestor(cfg) as ingestor:
+            ingested = ingestor.run(options=IngestOptions(history_sessions=sessions))
+
+        # Stage 1 halts on a stale required feed, so a failed refresh surfaces
+        # as a failed job rather than a ranking computed on old prices.
+        run = run_analysis(cfg, progress=lambda i, label: progress(i, label))
+        payload = _shape_run(run)
+        payload["ingest"] = {
+            "sessions_fetched": ingested.sessions_fetched,
+            "last_session": str(ingested.manifest.calendar_last_session),
+        }
+        return payload
+
     @app.post("/admin/run-now")
     def run_now() -> Dict[str, Any]:
         """What the nightly job does, on demand: refresh the data, then rank.
 
-        The only one of these controls anyone presses. Opening the app before
-        the job has run and finding yesterday's answer with no way to move it
-        forward is the case it exists for.
+        Opening the app before the job has run and finding yesterday's answer
+        with no way to move it forward is the case it exists for.
         """
-        job = jobs.start(kind="bootstrap", runner=_bootstrap_runner)
-        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
+        return _start("daily", _daily_runner)
 
     @app.get("/performance")
     def performance_report(period: str = "all") -> Dict[str, Any]:
@@ -1095,6 +1216,24 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "holding": _perf.holding_profile(rows),
             "measurement": state,
             "scope": ("period" if window is not None else "all"),
+            # Two calls held at the same time cannot both be funded from one
+            # slot, so a sum across them is a return on capital the strategy
+            # never had. `overlaps` computed exactly this and nothing ever
+            # showed it, which left the big number on the page reading like a
+            # portfolio return.
+            "concurrency": {
+                "overlapping_trades": _perf.overlaps(rows),
+                "total": len(rows),
+                "note": (
+                    "The headline is the SUM of per-trade returns for an "
+                    "equal-slot book, not a compounded portfolio return. "
+                    "Overlapping holds are counted once each; funding them "
+                    "simultaneously would take leverage the strategy never "
+                    "took."
+                ),
+            },
+            "configurations": sorted({str(r.get("config_version") or "")
+                                      for r in rows if r.get("config_version")}),
             # Kept apart from every figure above: a mark is not an outcome.
             "open": _op,
         }

@@ -1174,8 +1174,16 @@ async function scan() {
 
   try {
     const start = await fetch("/analysis/run", { method: "POST" });
+    // 409 means another kind of job holds the slot. The message says which,
+    // and it must reach the reader unchanged -- this is the path that used to
+    // hand back someone else's job and render its payload as a finished scan.
     if (!start.ok) throw new Error(await readErr(start));
-    const { id } = await start.json();
+    const started = await start.json();
+    if (started.kind && started.kind !== "analysis") {
+      throw new Error("A " + started.kind + " job is running. Wait for it to " +
+                      "finish, then scan.");
+    }
+    const id = started.id;
     state.jobId = id;
     renderProgress(0);          // repaint now that Cancel has an id
 
@@ -1269,6 +1277,7 @@ async function pollOnce() {
   state.jobId = c.analysis_in_progress || null;
   state.coverage = c;
   state.notReady = !(c.model_will_fit);
+  state.stale = !!c.data_stale;
   state.latestSession = c.latest_session || state.latestSession;
 
   if (state.jobId) {
@@ -1343,12 +1352,20 @@ async function checkReady() {
     // says why -- treating a non-2xx as unreadable threw that away and left
     // the screen with no numbers to show.
     const j = await r.json().catch(() => null);
-    state.coverage = (j && j.checks) || null;
-    state.notReady = !(j && j.ready);
-    state.jobId = (j && j.checks && j.checks.analysis_in_progress) || null;
-    state.latestSession = (j && j.checks && j.checks.latest_session) || null;
+    const c = (j && j.checks) || null;
+    state.coverage = c;
+    // `ready` is false for two different reasons and they need two different
+    // screens. A store too SHORT needs the build screen; a store too OLD needs
+    // a refresh, and sending the reader to "Build data store" for that would
+    // offer a two-hour rebuild to fix a two-minute download. pollReady already
+    // keyed on model_will_fit; these two disagreed.
+    state.notReady = !(c && c.model_will_fit);
+    state.stale = !!(c && c.data_stale);
+    state.jobId = (c && c.analysis_in_progress) || null;
+    state.latestSession = (c && c.latest_session) || null;
   } catch (e) {
     state.notReady = false;
+    state.stale = false;
     state.coverage = null;
   }
 }
@@ -1600,14 +1617,21 @@ function renderSettings() {
     // meant to be operated from here, and an action that requires SSH is one
     // that does not get taken.
     '<div class="grp">' +
+      // Staleness is the STORE's property, and /ready is the one place that
+      // measures it -- against the same arithmetic Stage 1 halts on. This row
+      // read `mdl.stale`, which /admin/model never returned, so the hint could
+      // not appear on any state.
       setRow("Market data",
              (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
-             " sessions stored" + (mdl.stale ? " \u2014 refresh needed" : ""),
+             " sessions stored" +
+             (c.data_stale ? " \u2014 " + (c.sessions_behind || 0) +
+                             " sessions behind, refresh needed" : ""),
              '<button class="btn ghost xs" id="ingest">Refresh</button>') +
       setRow("Model",
              mdl.fitted
                ? (mdl.priced + " of " + (mdl.themes || []).length +
-                  " themes priced, fitted " + esc(String(mdl.fitted_for || "\u2014")))
+                  " themes priced, fitted " + esc(String(mdl.fitted_for || "\u2014")) +
+                  (mdl.stale ? " \u2014 the store has moved on since" : ""))
                : "Not fitted yet",
              '<button class="btn ghost xs" id="refit">Refit</button>') +
       setRow("Outcomes",
@@ -1732,9 +1756,9 @@ async function settingsPost(url, body, working, done) {
 async function doIngest() {
   const d = await settingsPost("/admin/ingest", null,
     "Refreshing market data\u2026",
-    () => "Refresh started. It runs in the background; the scan button will " +
-          "work once it finishes.");
-  if (d && d.id) { state.jobId = d.id; startMonitor(); }
+    () => "Refresh started. The scan button stays disabled until it finishes " +
+          "\u2014 a scan started now would have nowhere to run.");
+  if (d && d.id) { state.jobId = d.id; state.jobKind = d.kind || "ingest"; startMonitor(); }
 }
 
 function doRefit() {
@@ -1934,12 +1958,19 @@ function renderChrome(v) {
   // answer from the same data.
   const btn = $("#scan");
   const onResults = state.tab === "overview";
-  const needsScan = onResults && !state.busy && !isCurrent(v);
+  const needsScan = onResults && !state.busy && !state.stale && !isCurrent(v);
   btn.hidden = !needsScan;
   if (needsScan) {
-    btn.textContent = state.latestSession
-      ? "Scan " + state.latestSession
-      : "Scan Market";
+    // Another kind of job holds the single slot. Leaving the button live
+    // invited the sequence that reported "Scan complete. 0 qualifying, 0
+    // monitored" for a scan that never ran: the refresh handler says the
+    // button will work once it finishes, and it was left pressable.
+    const busyWith = state.jobId && state.jobKind && state.jobKind !== "analysis";
+    btn.disabled = !!busyWith;
+    btn.textContent = busyWith
+      ? (state.jobKind === "ingest" ? "Refreshing market data\u2026"
+                                    : "Building data store\u2026")
+      : (state.latestSession ? "Scan " + state.latestSession : "Scan Market");
   }
   $("#page-sub").textContent = onResults && isCurrent(v)
     ? "Ranked from the close of " + esc(v.as_of) + "."
@@ -1969,12 +2000,25 @@ function viewOverview(v) {
   // A previous day's shortlist rendered under today's heading is not stale
   // data, it is the wrong answer presented confidently.
   if (!isCurrent(v)) {
-    const stale = v && v.as_of;
+    const ranked = v && v.as_of;
+    // The store itself is behind. Offering a scan here is offering a button
+    // that halts at stage one: the analysis does not fetch data, so the
+    // missing sessions have to arrive first.
+    if (state.stale) {
+      const c = state.coverage || {};
+      return '<div class="box empty">' +
+        '<h3>The market data is behind</h3>' +
+        '<p>The store ends at ' + esc(String(c.latest_session || "\u2014")) +
+        ', ' + (c.sessions_behind || 0) + ' sessions back. A scan started ' +
+        'now would stop before it ranked anything.</p>' +
+        '<button class="btn" onclick="doIngest()">Refresh market data</button>' +
+        '</div>';
+    }
     return '<div class="box empty">' +
       // The long version explained the whole staleness rule to someone who
       // only needed to know there was a button to press.
-      '<h3>' + (stale ? "New market data" : "No scan yet") + '</h3>' +
-      '<p>' + (stale
+      '<h3>' + (ranked ? "New market data" : "No scan yet") + '</h3>' +
+      '<p>' + (ranked
         ? "Last ranked " + esc(v.as_of) + "."
         : "Rank the market to see today's shortlist.") + '</p>' +
       '<button class="btn" onclick="document.getElementById(\'scan\').click()">' +

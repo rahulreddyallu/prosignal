@@ -132,6 +132,13 @@ storage:
   # ingest; exceeded means evict, then refuse.
   max_total_mb: 3072
 
+  # The training depth the shipped coefficients were validated against. The
+  # model refits from stored history on every run, so the store IS the training
+  # set: at 400 sessions it fits on sixteen months, and the coefficients that
+  # were validated came from nine years. Same code, same config hash,
+  # materially different model.
+  validated_training_sessions: 2200
+
   raw_cache:
     enabled: true
     # LRU-evicted down to this after every ingest.
@@ -2141,6 +2148,14 @@ api:
   cors_origins: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000"]
   # v1 is single-user localhost. Set a token if you ever expose this.
   auth_token: null
+  # When a RUNNING job is declared dead so the button unblocks. Also the moment
+  # a still-running analysis is marked FAILED and its slot freed for a second
+  # one, so it must exceed the slowest real run on the slowest host you use.
+  # Measured locally: 23s to 413s. A 1 GB instance under swap is slower.
+  job_timeout_seconds: 1800
+  # Sessions fetched per press of BUILD DATA STORE, and per nightly backfill
+  # step while the store is below storage.validated_training_sessions.
+  bootstrap_chunk_sessions: 90
   # Hard safety interlock. There is no order-routing code in this project, and
   # this flag exists so that any future addition must be explicitly enabled.
   allow_order_placement: false

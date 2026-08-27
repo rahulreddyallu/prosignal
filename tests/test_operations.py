@@ -130,3 +130,99 @@ def test_clearing_history_also_hides_the_open_calls_it_covered():
     assert "_ledger_after_clear()" in call, \
         "open positions must be counted from the rows the clear left visible"
     assert "read_all()" not in call, "unfiltered ledger rows are the bug"
+
+
+# =========================================================================
+# What "clear the market data" is allowed to clear
+# =========================================================================
+# `curated` holds the price store, which NSE serves again on request, and two
+# things it does not: the trial registry -- the Deflated Sharpe's
+# multiple-testing input -- and the model version archive, which is the refit
+# gate's only recovery path. Both were wiped by a control labelled "Rebuild
+# storage", whose own docstring said the record of what the engine SAID is
+# kept.
+#
+# Losing the trial count does not merely forget a number. It LOWERS the bar the
+# strategy has to clear, which is the direction that flatters.
+
+import types as _types
+
+
+def _paths(tmp_path):
+    for name in ("curated", "snapshots", "cache", "raw", "ledger"):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    return _types.SimpleNamespace(
+        curated=tmp_path / "curated", snapshots=tmp_path / "snapshots",
+        cache=tmp_path / "cache", raw=tmp_path / "raw",
+        ledger=tmp_path / "ledger")
+
+
+def _stock_a_store(paths):
+    from prosignal.validation.registry import FILENAME as REGISTRY
+    (paths.curated / REGISTRY).write_text(
+        '{"key":"k1","command":"research cpcv","label":"a","recorded_at":"x"}\n'
+        '{"key":"k2","command":"research spread","label":"b","recorded_at":"y"}\n',
+        encoding="utf-8")
+    versions = paths.curated / "crosssec_model_versions"
+    versions.mkdir()
+    (versions / "crosssec_model_2026-08-25.json").write_text('{"coef":{}}', encoding="utf-8")
+    (paths.curated / "prices").mkdir()
+    (paths.curated / "prices" / "year=2026.parquet").write_bytes(b"not really parquet")
+    (paths.curated / "crosssec_model.json").write_text('{"coef":{}}', encoding="utf-8")
+    (paths.cache / "blob").write_bytes(b"cached")
+
+
+def test_resetting_the_store_keeps_the_trial_registry(tmp_path):
+    from prosignal.operations import reset_market_data
+    from prosignal.validation.registry import FILENAME as REGISTRY, TrialRegistry
+    paths = _paths(tmp_path)
+    _stock_a_store(paths)
+    before = TrialRegistry(paths.curated / REGISTRY).count()
+    assert before == 2
+
+    reset_market_data(paths)
+
+    assert (paths.curated / REGISTRY).is_file(), (
+        "the Deflated Sharpe's trial count cannot be re-fetched from NSE")
+    assert TrialRegistry(paths.curated / REGISTRY).count() == before
+
+
+def test_resetting_the_store_keeps_the_model_rollback_archive(tmp_path):
+    from prosignal.operations import reset_market_data
+    paths = _paths(tmp_path)
+    _stock_a_store(paths)
+    reset_market_data(paths)
+    kept = list((paths.curated / "crosssec_model_versions").glob("*.json"))
+    assert len(kept) == 1, "the refit gate's recovery path must survive"
+
+
+def test_resetting_the_store_still_removes_the_market_data(tmp_path):
+    """The preservation must not turn the reset into a no-op."""
+    from prosignal.operations import reset_market_data
+    paths = _paths(tmp_path)
+    _stock_a_store(paths)
+    reset_market_data(paths)
+    assert not (paths.curated / "prices").exists()
+    assert not (paths.curated / "crosssec_model.json").exists()
+    assert not (paths.cache / "blob").exists()
+
+
+def test_the_reset_reports_what_it_kept(tmp_path):
+    from prosignal.operations import PRESERVE_ON_RESET, reset_market_data
+    paths = _paths(tmp_path)
+    _stock_a_store(paths)
+    detail = reset_market_data(paths)
+    for name in PRESERVE_ON_RESET:
+        assert name in detail["kept"]
+    assert detail["files_removed"]["curated"] >= 2
+
+
+def test_erase_everything_is_still_allowed_to_erase_everything(tmp_path):
+    """The other button means it. Only the operations log survives."""
+    from prosignal.operations import erase_everything
+    from prosignal.validation.registry import FILENAME as REGISTRY
+    paths = _paths(tmp_path)
+    _stock_a_store(paths)
+    erase_everything(paths)
+    assert not (paths.curated / REGISTRY).exists()
+    assert not (paths.curated / "crosssec_model_versions").exists()

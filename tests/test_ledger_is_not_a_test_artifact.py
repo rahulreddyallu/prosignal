@@ -42,18 +42,18 @@ def test_live_cfg_still_reads_the_real_store(live_cfg):
         PROJECT_ROOT / "data" / "snapshots").resolve()
 
 
-def test_a_pipeline_run_under_live_cfg_lands_in_the_sandbox(live_cfg):
+def test_a_pipeline_run_under_live_cfg_lands_in_the_sandbox(runnable_cfg):
     """The end-to-end statement: run the real pipeline, and prove the row went
     to the sandbox rather than to the research record."""
     from prosignal.ledger import Ledger
     from prosignal.pipeline import run_analysis
 
-    before = Ledger(live_cfg.paths.ledger).count()
+    before = Ledger(runnable_cfg.paths.ledger).count()
     real_before = Ledger(PROJECT_ROOT / "data" / "ledger").count()
 
-    run_analysis(live_cfg)
+    run_analysis(runnable_cfg)
 
-    assert Ledger(live_cfg.paths.ledger).count() == before + 1
+    assert Ledger(runnable_cfg.paths.ledger).count() == before + 1
     assert Ledger(PROJECT_ROOT / "data" / "ledger").count() == real_before, (
         "a test run reached the production research ledger"
     )

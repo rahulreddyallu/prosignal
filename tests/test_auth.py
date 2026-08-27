@@ -95,9 +95,15 @@ def client(hosted):
 @pytest.mark.parametrize("path", ["/health", "/ready"])
 def test_health_probes_are_never_challenged(client, path):
     """A health endpoint that 401s reads to the platform as a dead service and
-    gets the instance restarted in a loop."""
+    gets the instance restarted in a loop.
+
+    Not challenged is the claim, not 200. `/ready` answers 503 when the store
+    is too short or too stale to analyse -- that is the endpoint doing its job,
+    and asserting 200 here made an authentication test fail whenever the local
+    store fell a session behind.
+    """
     api, _ = client
-    assert api.get(path).status_code == 200
+    assert api.get(path).status_code not in (401, 403)
 
 
 def test_nothing_is_open_that_carries_data():
@@ -263,3 +269,77 @@ def test_the_cloud_init_placeholders_are_obvious():
     sh = (Path(__file__).resolve().parents[1] / "scripts"
           / "cloud-init.sh").read_text(encoding="utf-8")
     assert "__DOMAIN__" in sh and "__TOKEN__" in sh
+
+
+# =========================================================================
+# The bind address is not the whole story
+# =========================================================================
+# The deployed instance binds 127.0.0.1 and Caddy carries the internet to it.
+# `is_public_bind("127.0.0.1")` is false, `looks_hosted()` is false because
+# systemd sets no PORT, so `assert_safe_to_serve` returned early and never
+# looked for a token at all. Every bit of protection came down to the token
+# happening to be in the environment.
+#
+# systemd already fails the unit when EnvironmentFile is missing outright. The
+# uncovered case was the file present with the token line gone: the API starts,
+# serves the interface, and answers /admin/reset/everything to anyone.
+
+def test_a_declared_public_deployment_without_a_token_refuses_to_start(monkeypatch):
+    from prosignal.auth import ENV_VAR, PUBLIC_ENV_VAR, assert_safe_to_serve
+    from prosignal.config.loader import load_config
+
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    monkeypatch.setenv(PUBLIC_ENV_VAR, "1")
+    with pytest.raises(RuntimeError) as caught:
+        assert_safe_to_serve(load_config(), "127.0.0.1")
+    assert "public proxy" in str(caught.value)
+    assert "reset/everything" in str(caught.value)
+
+
+def test_the_marker_travels_with_the_token_so_they_are_lost_together():
+    """Both live in /etc/prosignal.env. Deleting the token alone now stops the
+    service instead of opening it."""
+    from pathlib import Path
+    from prosignal.auth import ENV_VAR, PUBLIC_ENV_VAR
+    src = (Path(__file__).resolve().parents[1] / "scripts"
+           / "cloud-init.sh").read_text(encoding="utf-8")
+    # `chmod 600` alone matches the swapfile line far above the env block.
+    block = src[src.index("cat > /etc/prosignal.env"):
+                src.index("chmod 600 /etc/prosignal.env")]
+    assert ENV_VAR in block and PUBLIC_ENV_VAR in block
+
+
+def test_a_declared_public_deployment_with_a_token_starts(monkeypatch):
+    from prosignal.auth import ENV_VAR, PUBLIC_ENV_VAR, assert_safe_to_serve
+    from prosignal.config.loader import load_config
+
+    monkeypatch.setenv(PUBLIC_ENV_VAR, "1")
+    monkeypatch.setenv(ENV_VAR, "x" * 32)
+    assert_safe_to_serve(load_config(), "127.0.0.1")          # does not raise
+
+
+def test_a_loopback_laptop_is_still_unguarded_on_purpose(monkeypatch):
+    """A local run with no token must keep working; the fail-closed rule is
+    for instances something else can reach."""
+    from prosignal.auth import ENV_VAR, PUBLIC_ENV_VAR, assert_safe_to_serve
+    from prosignal.config.loader import load_config
+
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    monkeypatch.delenv(PUBLIC_ENV_VAR, raising=False)
+    for marker in ("PORT", "RENDER", "FLY_APP_NAME", "RAILWAY_ENVIRONMENT",
+                   "DYNO", "K_SERVICE"):
+        monkeypatch.delenv(marker, raising=False)
+    assert_safe_to_serve(load_config(), "127.0.0.1")          # does not raise
+
+
+def test_the_marker_is_not_tripped_by_a_falsy_value(monkeypatch):
+    from prosignal.auth import ENV_VAR, PUBLIC_ENV_VAR, assert_safe_to_serve
+    from prosignal.config.loader import load_config
+
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    for marker in ("PORT", "RENDER", "FLY_APP_NAME", "RAILWAY_ENVIRONMENT",
+                   "DYNO", "K_SERVICE"):
+        monkeypatch.delenv(marker, raising=False)
+    for falsy in ("0", "false", "no", "off", ""):
+        monkeypatch.setenv(PUBLIC_ENV_VAR, falsy)
+        assert_safe_to_serve(load_config(), "127.0.0.1")
