@@ -365,12 +365,35 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
                         train_sessions=train_sessions)
     )
 
+    result = AnalysisRun(output=output, context=context, timings_ms=timings,
+                         funnel=funnel)
+
+    # THE SCREEN READS THIS, not the API's job queue.
+    #
+    # The interface builds Today from `GET /analysis`, which lists jobs. The
+    # nightly cron runs this same function from the CLI, in a process the API
+    # knows nothing about, so no job row is ever created and the screen asks
+    # for a scan of a market that was scanned hours ago. `/analysis/{id}/view`
+    # cannot help either -- it needs the result held in the job row, and the
+    # ledger keeps a summary with no `factor_detail`, so Today would render
+    # cards with an empty evidence panel.
+    #
+    # Written HERE so every path persists identically: cron, CLI and API job
+    # all come through `run_analysis`. It also survives an API restart, which
+    # the in-memory job result does not.
+    #
+    # After the ledger, and never in place of it. The ledger is the permanent
+    # record and a failure to write it fails the run; this is a display cache
+    # and `rundetail.save` swallows its own errors for that reason.
+    from .rundetail import save as _save_detail
+    _save_detail(result, config)
+
     log.info(
         "analysis complete",
         extra={"run_id": run_id, "as_of": resolved.isoformat(),
                "buys": len(buys), "watch": len(watch), "no_trade": no_trade is not None},
     )
-    return AnalysisRun(output=output, context=context, timings_ms=timings, funnel=funnel)
+    return result
 
 
 # =============================================================================

@@ -28,6 +28,7 @@ from .auth import (OPEN_PATHS, assert_safe_to_serve, resolve_token,
                     token_matches)
 from .jobs import JobManager
 from .ledger import Ledger
+from .rundetail import card as _card, shape as _shape
 from .pipeline import run_analysis
 from .version import ENGINE_NAME, ENGINE_VERSION, SCHEMA_VERSION
 
@@ -679,6 +680,219 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         job = jobs.start(kind="bootstrap", runner=_bootstrap_runner)
         return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
 
+    @app.get("/today")
+    def today() -> Dict[str, Any]:
+        """The newest completed run, whichever process produced it.
+
+        The interface used to build Today from the JOB QUEUE, so a run started
+        by the nightly cron -- a separate process that never touches the API --
+        left the screen asking for a scan of a market already scanned. This
+        reads the persisted run payload instead, so cron, the CLI and the
+        button all land on the same screen, and a restarted API still has it.
+        """
+        from . import rundetail
+
+        payload = rundetail.load_latest(cfg)
+        if payload is None:
+            return {"view": None,
+                    "note": "No completed run has been recorded yet."}
+        names, sectors = _reference_names()
+        admission = cfg.params.stage6_entry.admission
+        from .presentation import build_view
+        return {
+            "view": build_view(payload, company_names=names, sectors=sectors,
+                               entry_rank=int(admission.entry_rank.value),
+                               exit_rank=int(admission.exit_rank.value)),
+            "run_id": payload.get("run_id"),
+            "as_of_date": payload.get("as_of_date"),
+            "generated_at": payload.get("generated_at"),
+            "note": "",
+        }
+
+    # =====================================================================
+    # Operator actions that used to require the CLI
+    # =====================================================================
+    @app.post("/admin/ingest")
+    def admin_ingest() -> Dict[str, Any]:
+        """Refresh the store. The analysis does not fetch data, so a store two
+        sessions behind halts every run at Stage 1 -- and clearing that needed
+        a terminal."""
+        def _runner(progress) -> Dict[str, Any]:
+            from .data.ingest import DataIngestor, IngestOptions
+
+            progress(0, "Refreshing market data")
+            # The same defaults the nightly CLI uses: fetch the new session and
+            # advance the backfill one chunk, so a store below the validated
+            # depth climbs on its own instead of waiting for a person.
+            sessions = None
+            try:
+                from .data.coverage import assess
+                have = len(DataStore(cfg.paths.curated,
+                                     cfg.paths.snapshots).price_sessions())
+                cov = assess(cfg, have)
+                if have and have < cov.validated_target:
+                    chunk = int(getattr(cfg.params.api,
+                                        "bootstrap_chunk_sessions", 0) or 90)
+                    sessions = min(have + chunk, cov.validated_target)
+            except Exception:
+                sessions = None
+            with DataIngestor(cfg) as ingestor:
+                res = ingestor.run(options=IngestOptions(history_sessions=sessions))
+            m = res.manifest
+            progress(1, "Market data refreshed")
+            return {
+                "kind": "ingest",
+                "as_of_date": str(m.as_of_date),
+                "sessions_fetched": res.sessions_fetched,
+                "calendar_sessions": m.calendar_sessions_available,
+                "last_session": str(m.calendar_last_session),
+                "feeds": {k: v.status.value for k, v in sorted(m.feeds.items())},
+            }
+
+        job = jobs.start(kind="ingest", runner=_runner)
+        return {**job.to_dict(), "already_running": job.state.value == "RUNNING"}
+
+    @app.get("/admin/model")
+    def admin_model() -> Dict[str, Any]:
+        """What the model currently prices, and when it was fitted."""
+        import json as _json
+
+        path = Path(cfg.paths.curated) / "crosssec_model.json"
+        if not path.is_file():
+            return {"fitted": False,
+                    "note": "No model has been fitted yet. The next run fits one."}
+        try:
+            blob = _json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"fitted": False, "note": "The model cache is unreadable."}
+        coef = blob.get("coef") or {}
+        t = blob.get("fm_t_stat") or {}
+        themes = [{"theme": k.removesuffix("_f"), "coefficient": v,
+                   "t_stat": t.get(k),
+                   "priced": abs(float(v)) > 1e-12} for k, v in coef.items()]
+        themes.sort(key=lambda r: -abs(float(r["coefficient"])))
+        return {
+            "fitted": True,
+            "fitted_for": blob.get("fitted_for"),
+            "train_end": blob.get("train_end"),
+            "n_train": blob.get("n_train"),
+            "estimator": blob.get("estimator"),
+            "cross_sections": blob.get("fm_n_dates"),
+            "themes": themes,
+            "priced": sum(1 for r in themes if r["priced"]),
+            "note": ("A theme at exactly zero was not consulted and found "
+                     "neutral -- the significance floor removed it."),
+        }
+
+    @app.post("/admin/refit")
+    def admin_refit() -> Dict[str, Any]:
+        """Retire the cached coefficients so the next run fits fresh ones.
+
+        The cache is archived, never deleted: a refit that turns out badly has
+        to be recoverable, and a full retrain would reproduce whatever caused
+        it. The refit itself happens on the next analysis, which is where the
+        promotion gate can review it.
+        """
+        from .features import crossmodel as cm
+
+        active = jobs.active_job()
+        if active is not None:
+            raise HTTPException(409, "A job is running. Wait for it to finish.")
+        path = Path(cfg.paths.curated) / "crosssec_model.json"
+        if not path.is_file():
+            return {"retired": False,
+                    "message": "There was no cached model; the next run fits one."}
+        archived = cm.archive_cache(path)
+        path.unlink()
+        log.info("model cache retired", extra={"archived": archived})
+        return {
+            "retired": True,
+            "archived_to": archived,
+            "message": ("The cached model was archived and retired. The next "
+                        "scan fits fresh coefficients, which takes several "
+                        "minutes rather than seconds."),
+        }
+
+    @app.post("/admin/resolve-outcomes")
+    def admin_resolve() -> Dict[str, Any]:
+        """Score every signal whose holding window has fully elapsed."""
+        from . import outcomes as _out
+
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        led = Path(cfg.paths.ledger)
+        counts = _out.resolve_pending(store, led, led / "outcomes.jsonl", cfg)
+        _resolved["key"] = None          # force the shared cache to rebuild
+        return {**counts, "exit_model": _out.EXIT_MODEL,
+                "message": (f"{counts.get('resolved', 0)} resolved, "
+                            f"{counts.get('still_open', 0)} still running.")}
+
+    @app.get("/admin/forward")
+    def admin_forward_state() -> Dict[str, Any]:
+        """Whether the forward test is registered, current, and still valid."""
+        import datetime as _dt
+
+        from .validation import forward
+
+        led = Path(cfg.paths.ledger)
+        reg = forward.load_registration(led)
+        live = str(getattr(cfg, "version", "") or "")
+        if reg is None:
+            return {"registered": False, "config_version": live,
+                    "note": ("No forward test is registered. Registering opens "
+                             "an 18-month window against the current "
+                             "configuration.")}
+        prog = forward.progress(led, list(_ledger_rows()), today=_dt.date.today())
+        return {
+            "registered": True,
+            "started_on": reg.started_on,
+            "registered_config": reg.config_version,
+            "config_version": live,
+            "config_matches": reg.config_version == live,
+            "hash_intact": forward.verify(led),
+            "sessions_elapsed": prog.sessions_elapsed if prog else 0,
+            "sessions_target": reg.target_sessions,
+            "broken": prog.broken if prog else [],
+            "summary": prog.summary() if prog else "",
+        }
+
+    @app.post("/admin/forward/register")
+    def admin_forward_register(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Open a new forward-test window against the CURRENT configuration.
+
+        Overwriting discards the observations collected so far, which is the
+        one thing a pre-registration exists to prevent -- so the confirmation
+        is required by the server, not only by the interface.
+        """
+        import subprocess
+
+        from .validation import forward
+
+        led = Path(cfg.paths.ledger)
+        existing = forward.load_registration(led)
+        if existing is not None and (body or {}).get("confirm") != "RESTART":
+            raise HTTPException(400, {
+                "message": ('A forward test is already registered. Send '
+                            '{"confirm": "RESTART"} to discard it and start a '
+                            'new window.'),
+                "started_on": existing.started_on,
+                "registered_config": existing.config_version,
+            })
+        try:
+            commit = subprocess.run(["git", "rev-parse", "HEAD"],
+                                    capture_output=True, text=True,
+                                    timeout=10).stdout.strip() or "unknown"
+        except Exception:
+            commit = "unknown"
+        reg = forward.register(led, config_version=str(cfg.version),
+                               engine_version=ENGINE_VERSION,
+                               git_commit=commit, overwrite=True)
+        log.info("forward test registered", extra={"config": reg.config_version})
+        return {"registered": True, "started_on": reg.started_on,
+                "config_version": reg.config_version,
+                "fingerprint": reg.fingerprint(),
+                "message": ("Forward test opened. Any change to the "
+                            "configuration from here invalidates the window.")}
+
     @app.get("/analysis")
     def recent_jobs(limit: int = 20) -> Dict[str, Any]:
         return {
@@ -1051,122 +1265,3 @@ def _memory_report() -> Dict[str, Any]:
         ),
     }
 
-
-def _shape(run) -> Dict[str, Any]:
-    """Flatten an AnalysisRun into the JSON the UI consumes."""
-    o = run.output
-    r = o.regime_state
-    return {
-        "run_id": o.run_id,
-        "as_of_date": o.as_of_date.isoformat(),
-        "generated_at": o.generated_at.isoformat(),
-        "engine_version": o.engine_version,
-        "config_version": o.config_version,
-        "regime": {
-            "bucket": r.regime_bucket,
-            "trend": r.trend_regime.value,
-            "volatility": f"{r.vol_tercile.value}/{r.vol_context.value}",
-            # The measurements the labels are read off. Stage 2 computes all
-            # of these and nothing was serialising them, so "Uptrend" reached
-            # the screen as an assertion with no way to check it.
-            "trend_slope_annualised": r.trend_slope_annualised,
-            "index_vs_fast_ma_pct": r.index_vs_fast_ma_pct,
-            "index_vs_slow_ma_pct": r.index_vs_slow_ma_pct,
-            "vix_level": r.vix_level,
-            "vix_percentile": r.vix_percentile,
-            "breadth_pct": r.breadth_pct_above_ma,
-            "breadth_state": r.breadth_state.value,
-            "transition": r.transition_flag,
-            "allow_new_entries": r.allow_new_entries,
-            "compatibility": r.compatibility().value,
-            "notes": r.notes,
-        },
-        "funnel": run.funnel,
-        "no_trade": (
-            {
-                "reason": o.no_trade.reason,
-                "closest": [
-                    {
-                        "ticker": c.ticker,
-                        "rank": c.rank,
-                        "score": c.composite_score,
-                        "gate_failed": c.gate_failed,
-                        "detail": c.detail,
-                    }
-                    for c in o.no_trade.closest_candidates
-                ],
-            }
-            if o.no_trade
-            else None
-        ),
-        "recommendations": [_card(x) for x in o.recommendations],
-        "watchlist": [_card(x) for x in o.watchlist],
-        # The screen the RUN decided, not one the reader re-derives. Serialising
-        # only the two lists left every consumer to reconstruct the slate, and
-        # they did not agree with each other.
-        "slate": [e.model_dump(mode="json") for e in o.slate],
-        "slate_departures": list(o.slate_departures),
-        "new_entries_blocked": o.new_entries_blocked,
-        "position_directives": list(o.position_directives),
-        "data_quality_flags": o.data_quality_flags,
-        "stage_timings_ms": o.stage_timings_ms,
-        "disclaimer": o.disclaimer,
-        "probability_note": (
-            "Probability estimate unavailable: no out-of-sample calibration "
-            "exists. The score is a RANK within today's eligible universe, not "
-            "a likelihood of profit."
-        ),
-    }
-
-
-def _card(rec) -> Dict[str, Any]:
-    """Shape one recommendation for the UI.
-
-    `factors` is exposed structurally in addition to the prose in `why`. The
-    scanner table needs the raw numbers to sort and align on, and parsing them
-    back out of formatted English in JavaScript would be fragile in exactly the
-    way that breaks silently. No calculation happens here -- these values are
-    already computed in stage 4.
-    """
-    return {
-        "factors": {
-            name: {
-                "raw": f.raw_value,
-                "standardised": f.standardised,
-                "weight": f.weight,
-                "available": f.available,
-            }
-            for name, f in (getattr(rec, "factor_detail", None) or {}).items()
-        },
-        "ticker": rec.ticker,
-        "company_name": rec.company_name,
-        "sector": rec.sector,
-        "decision": rec.decision.value,
-        "strength": rec.signal_strength_band.value,
-        "regime_fit": rec.regime_compatibility.value,
-        "last_close": rec.last_close,
-        "entry_zone": list(rec.entry_zone) if rec.entry_zone else None,
-        "stop": rec.initial_stop,
-        "invalidation": rec.invalidation_level,
-        "target_1": rec.target_1,
-        "target_2": rec.target_2,
-        "score": rec.composite_score,
-        "percentile": rec.universe_percentile,
-        # Both, and they are different things. `rank` is the display position
-        # after Stage 5 penalties re-sort the survivors; `model_rank` is where
-        # the model put the name, and it is the only input to admission. The
-        # table numbers by model_rank -- serialising only `rank` rendered the
-        # column as "undefined".
-        "rank": rec.rank,
-        "model_rank": rec.model_rank,
-        "risk_category": rec.position_risk_category.value if rec.position_risk_category else None,
-        "holding_period": rec.expected_holding_period,
-        "why": rec.why_this_signal_exists,
-        "against": rec.false_signal_flagged,
-        "cleared": rec.false_signal_cleared,
-        "not_testable": rec.false_signal_not_testable,
-        "exits": rec.sell_conditions,
-        "cost_note": rec.cost_note,
-        "research_basis": rec.research_basis,
-        "warning": rec.unvalidated_parameter_warning,
-    }

@@ -1564,6 +1564,8 @@ function toggle(id, on, label) {
 
 function renderSettings() {
   const ops = state.ops || {};
+  const mdl = state.model || {};
+  const fwd = state.forward || {};
   const sch = ops.schedule || {};
   const cur = (state.meas || {}).active;
   const c = state.coverage || {};
@@ -1583,12 +1585,44 @@ function renderSettings() {
                                      "Dark mode")) +
     '</div>' +
 
+    // Everything below used to need a terminal on the box. The engine is
+    // meant to be operated from here, and an action that requires SSH is one
+    // that does not get taken.
+    '<div class="grp">' +
+      setRow("Market data",
+             (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
+             " sessions stored" + (mdl.stale ? " \u2014 refresh needed" : ""),
+             '<button class="btn ghost xs" id="ingest">Refresh</button>') +
+      setRow("Model",
+             mdl.fitted
+               ? (mdl.priced + " of " + (mdl.themes || []).length +
+                  " themes priced, fitted " + esc(String(mdl.fitted_for || "\u2014")))
+               : "Not fitted yet",
+             '<button class="btn ghost xs" id="refit">Refit</button>') +
+      setRow("Outcomes",
+             "Score signals whose holding window has closed",
+             '<button class="btn ghost xs" id="resolve">Resolve</button>') +
+    '</div>' +
+
+    '<div class="grp">' +
+      setRow("Forward test",
+             fwd.registered
+               ? (fwd.config_matches
+                    ? (fwd.sessions_elapsed + " of " + fwd.sessions_target +
+                       " sessions since " + esc(String(fwd.started_on)))
+                    : "\u26a0 The configuration has changed since it was registered")
+               : "Not registered",
+             '<button class="btn ghost xs" id="fwd">' +
+             (fwd.registered && !fwd.config_matches ? "Re-open" : "Open") +
+             '</button>') +
+    '</div>' +
+
     '<div class="grp quiet">' +
       setRow("Recorded results", "Clears the History page",
              '<button class="btn ghost xs" id="wipe">Clear</button>') +
-      setRow("Market history",
-             (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
-             " sessions stored",
+      setRow("Rebuild storage",
+             "Erases the price store and re-fetches it \u2014 hours, and it " +
+             "discards the history the model trains on",
              '<button class="btn ghost xs" id="rebuild">Rebuild</button>') +
     '</div>'
   );
@@ -1601,6 +1635,7 @@ let setReturnFocus = null;
 
 async function openSettings() {
   setReturnFocus = document.activeElement;
+  loadOpsState().then(paintSettings);
   const d = $("#settings"), sc = $("#set-scrim");
   sc.hidden = false; d.hidden = false;
   paintSettings();
@@ -1647,6 +1682,87 @@ function paintSettings() {
   // Clear did, and looked completely normal while doing nothing.
   const wp = $("#wipe");
   if (wp) wp.addEventListener("click", confirmWipe);
+  const ig = $("#ingest");
+  if (ig) ig.addEventListener("click", doIngest);
+  const rf = $("#refit");
+  if (rf) rf.addEventListener("click", doRefit);
+  const rs = $("#resolve");
+  if (rs) rs.addEventListener("click", doResolve);
+  const fw = $("#fwd");
+  if (fw) fw.addEventListener("click", doForward);
+}
+
+/* The operator actions. Each one reports what it did rather than closing
+   silently -- an action whose effect you cannot see is one you press twice. */
+async function settingsPost(url, body, working, done) {
+  const el = $("#set-body");
+  if (el) el.style.opacity = "0.6";
+  try {
+    say(working);
+    const r = await fetch(url, {
+      method: "POST",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((d && (d.detail?.message || d.detail)) || "That did not work.");
+    say(done(d));
+    return d;
+  } catch (e) {
+    say(e.message || String(e));
+    return null;
+  } finally {
+    if (el) el.style.opacity = "";
+    await loadOpsState();
+    paintSettings();
+  }
+}
+
+async function doIngest() {
+  const d = await settingsPost("/admin/ingest", null,
+    "Refreshing market data\u2026",
+    () => "Refresh started. It runs in the background; the scan button will " +
+          "work once it finishes.");
+  if (d && d.id) { state.jobId = d.id; startMonitor(); }
+}
+
+function doRefit() {
+  if (!confirm("Retire the current coefficients?\n\nThe next scan fits fresh " +
+               "ones, which takes several minutes instead of seconds. The " +
+               "current model is archived, not deleted.")) return;
+  settingsPost("/admin/refit", null, "Retiring the model\u2026",
+    (d) => d.retired ? "Model retired. The next scan will refit."
+                     : (d.message || "There was no cached model."));
+}
+
+function doResolve() {
+  settingsPost("/admin/resolve-outcomes", null, "Scoring closed positions\u2026",
+    (d) => d.message || "Outcomes resolved.");
+}
+
+async function doForward() {
+  const f = state.forward || {};
+  const msg = f.registered
+    ? "Re-open the forward test?\n\nThis discards the observations collected " +
+      "so far and starts a new 18-month window against the current " +
+      "configuration. That is the one thing a pre-registration exists to " +
+      "prevent, so only do it if the configuration has genuinely changed."
+    : "Open a forward test against the current configuration?\n\nIt runs for " +
+      "18 months and any configuration change invalidates it.";
+  if (!confirm(msg)) return;
+  await settingsPost("/admin/forward/register",
+    f.registered ? { confirm: "RESTART" } : null,
+    "Opening the forward test\u2026",
+    (d) => "Forward test opened " + (d.started_on || "") +
+           ". Any configuration change from here invalidates it.");
+}
+
+async function loadOpsState() {
+  try {
+    const [m, f] = await Promise.all([fetch("/admin/model"), fetch("/admin/forward")]);
+    if (m.ok) state.model = await m.json();
+    if (f.ok) state.forward = await f.json();
+  } catch (e) { /* the drawer renders without them */ }
 }
 
 async function loadMeasurement() {
@@ -2697,6 +2813,12 @@ async function loadHistory() {
     const r = await fetch("/history/names?limit=60");
     state.history = r.ok ? await r.json()
       : { names: [], note: "The run history could not be read." };
+    // The day-by-day record. /history builds it from the ledger and nothing
+    // was fetching it, so the endpoint's work never reached the screen.
+    try {
+      const d = await fetch("/history?limit=30");
+      if (d.ok) state.days = await d.json();
+    } catch (e) { /* the name view is enough to render */ }
   } catch (e) {
     state.history = { names: [], note: "The run history could not be read." };
   }
@@ -2720,6 +2842,27 @@ async function boot() {
     await checkReady();
     if (state.jobId) startMonitor();       // a build survives the reload
     if (state.notReady) { state.booting = false; render(); return; }
+    // THE NEWEST RUN, not the newest JOB.
+    //
+    // This read /analysis -- the API's own job queue -- and rendered the most
+    // recent COMPLETED job. The nightly cron does not go through the API: it
+    // runs the CLI in a separate process, so no job row is ever created, and
+    // the screen asked for a scan of a market that had been scanned hours
+    // earlier. /today reads the persisted run payload instead, so cron, the
+    // CLI and the button all land here, and it survives an API restart.
+    const tr = await fetch("/today");
+    if (tr.ok) {
+      const t = await tr.json();
+      if (t && t.view) {
+        state.view = t.view;
+        state.run = t.run_id || null;
+        state.viewAsOf = t.as_of_date || null;
+        return;
+      }
+    }
+    // A run started in THIS browser session is still in the job queue and may
+    // be newer than anything on disk if the write failed, so the queue stays
+    // as the fallback rather than being removed.
     const r = await fetch("/analysis");
     if (!r.ok) return;
     const { jobs } = await r.json();

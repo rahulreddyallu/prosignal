@@ -282,8 +282,6 @@ RESERVED: Dict[str, str] = {
     # -- housekeeping that was specified and never built ----------------------
     "retain_runs": "ledger pruning is not implemented; runs are kept forever",
     "retain_sessions": "store pruning by session count is not implemented",
-    "run_detail_subdir": "per-run detail files are not written",
-    "write_run_detail": "per-run detail files are not written",
     "fail_run_if_unwritable": "a ledger write failure is already fatal "
                               "unconditionally; this cannot soften it",
 
