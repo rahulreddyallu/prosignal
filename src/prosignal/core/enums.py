@@ -181,6 +181,13 @@ class RejectionReason(str, Enum):
     REGULATORY_COOLDOWN = "regulatory_cooldown"
     MANUAL_EXCLUSION = "manual_exclusion"
     SERIES_NOT_ALLOWED = "series_not_allowed"
+    #: Outside the population the model was FITTED on. `resolve_exits` gives a
+    #: name below its thesis-invalidation level a NaN label and `build_panel`
+    #: drops the row, so the coefficients were estimated on pullbacks WITHIN
+    #: uptrends and never on names in a decline. Ranking one anyway extrapolates
+    #: the reversal coefficient past where it was measured -- which is why the
+    #: five highest-ranked names on 2026-08-25 were all in that state.
+    OUTSIDE_MODEL_DOMAIN = "outside_model_domain"
     FALSE_SIGNAL_HARD_REJECT = "false_signal_hard_reject"
     FALSE_SIGNAL_PENALTY_CAP = "false_signal_penalty_cap"
     SCORE_THRESHOLD = "score_threshold"

@@ -66,15 +66,33 @@ def test_bar_touching_both_stop_and_target_resolves_as_the_stop(cfg):
 
 
 def test_target_exit_is_taken_when_no_stop_touch(cfg):
+    """T2 is the target. T1 is a milestone -- see `outcomes.EXIT_MODEL`."""
     bars = _bars([
         ("2026-01-01", 100, 101, 99, 100),
         ("2026-01-02", 100, 101, 99, 100),
-        ("2026-01-05", 101, 118, 100, 117),
+        ("2026-01-05", 101, 133, 100, 132),
     ])
-    t = _simulate(_Rec(stop=90.0, t1=115.0), dt.date(2026, 1, 1), None,
-                  {"X": bars}, CostModel(cfg), cfg)
-    assert t.exit_reason == "target_1"
+    t = _simulate(_Rec(stop=90.0, t1=115.0, t2=130.0), dt.date(2026, 1, 1),
+                  None, {"X": bars}, CostModel(cfg), cfg)
+    assert t.exit_reason == "target"
     assert t.gross_return > 0
+    assert t.touched_t1 is True
+
+
+def test_t1_is_a_milestone_here_too_not_a_fifth_exit_definition(cfg):
+    """`backtest._simulate` was the FIFTH independent answer to "how did this
+    trade end", and like the outcome record it booked at T1 (1.5R) while the
+    model is fitted against T2 (3.0R). Measured out of sample, booking at 1.5R
+    was worse under both label geometries."""
+    bars = _bars([
+        ("2026-01-01", 100, 101, 99, 100),
+        ("2026-01-02", 100, 101, 99, 100),
+        ("2026-01-05", 101, 118, 100, 117),   # clears T1, never reaches T2
+    ])
+    t = _simulate(_Rec(stop=90.0, t1=115.0, t2=130.0), dt.date(2026, 1, 1),
+                  None, {"X": bars}, CostModel(cfg), cfg)
+    assert t.exit_reason != "target_1"
+    assert t.touched_t1 is True, "reaching T1 is still recorded"
 
 
 def test_costs_always_reduce_the_return(cfg):

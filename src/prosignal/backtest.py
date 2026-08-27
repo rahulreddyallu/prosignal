@@ -57,6 +57,9 @@ class Trade:
     gross_return: float = 0.0
     net_return: float = 0.0
     cost_bps: float = 0.0
+    #: Whether the trade reached T1 before it ended. Real information about
+    #: the trade, recorded rather than acted on -- T1 is not an exit.
+    touched_t1: bool = False
     mae: float = 0.0  # maximum adverse excursion, as a fraction
     mfe: float = 0.0  # maximum favourable excursion
 
@@ -261,6 +264,7 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
 
     mae = mfe = 0.0
     unfilled_stop_sessions = 0
+    touched_t1 = False
     last_unfilled = ""
     walk = future.iloc[1:].head(max_hold)
     exit_price = None
@@ -291,6 +295,16 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
                 last_unfilled = str(state.value)
             continue
 
+        if high >= t1:
+            # A MILESTONE, not an exit -- the same rule the outcome record and
+            # the training label follow. Booking at T1 (1.5R) while the model
+            # is fitted against T2 (3.0R) measured WORSE under both label
+            # geometries out of sample: net -0.22% against +0.36% at 3.0R, and
+            # -0.12% against +1.15%. This was the fifth independent answer in
+            # the codebase to "how did this trade end"; `features/exits.py`
+            # exists to collapse them.
+            touched_t1 = True
+
         if low <= stop:
             # A gap-down opens below the stop, so the fill is the open, not the
             # stop. Filling at the stop credits a price that was never
@@ -299,9 +313,7 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
             exit_price = min(bar_open, stop) if np.isfinite(bar_open) else stop
             reason = "stop_gap" if exit_price < stop else "stop"
         elif high >= t2:
-            exit_price, reason = t2, "target_2"
-        elif high >= t1:
-            exit_price, reason = t1, "target_1"
+            exit_price, reason = t2, "target"
         if exit_price is not None:
             exit_date = bar[DATE].date()
             break
@@ -333,5 +345,5 @@ def _simulate(rec, signal_date, calendar, bars, costs, config) -> Optional[Trade
         stop=stop, target_1=t1, target_2=t2,
         exit_date=exit_date, exit_price=round(exit_price, 2), exit_reason=reason,
         holding_sessions=held, gross_return=gross, net_return=gross - cost_frac,
-        cost_bps=cb.total_bps_of_buy, mae=mae, mfe=mfe,
+        cost_bps=cb.total_bps_of_buy, touched_t1=touched_t1, mae=mae, mfe=mfe,
     )

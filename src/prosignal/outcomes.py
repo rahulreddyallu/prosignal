@@ -69,7 +69,34 @@ log = get_logger(__name__)
 #:                   modelled and this did not: a stop is filled at the OPEN
 #:                   when the bar gapped through it, and it is not filled at all
 #:                   on a session locked at the price band.
-EXIT_MODEL = "book-band-circuit-v3"
+#:   target-t2-v4    T1 STOPS BEING AN EXIT. This record took profit at
+#:                   `target_1` (1.5R) while the model is fitted against
+#:                   `target_2` (3.0R) through `exits.rules_from_config`, so the
+#:                   thing measuring the engine and the thing training it were
+#:                   different strategies -- the fourth definition of "how did
+#:                   this trade end" that `features/exits.py` was written to
+#:                   collapse and did not reach.
+#:
+#:                   Measured out-of-sample on 49 purged walk-forward dates,
+#:                   crossing the label's target against the book's:
+#:
+#:                       label   book    gross    cost      NET   Sharpe
+#:                       3.0R    3.0R   +0.90%   0.54%   +0.36%   +0.21
+#:                       1.5R    1.5R   +0.54%   0.66%   -0.12%   -0.06
+#:                       3.0R    1.5R   +0.32%   0.54%   -0.22%   -0.18  <- was
+#:                       1.5R    3.0R   +1.82%   0.67%   +1.15%   +0.43
+#:
+#:                   Booking at 1.5R is worse under BOTH labels -- two
+#:                   independent comparisons pointing the same way -- and the
+#:                   combination this record actually used was the worst of the
+#:                   four. 58% of the 716 rows written under v3 exited at T1, so
+#:                   that is what the History page had been reporting.
+#:
+#:                   T1 is retained as a MILESTONE (`touched_t1`), because
+#:                   whether a trade reached 1.5R before its stop is real
+#:                   information about the trade -- it is just not the moment
+#:                   the position ends.
+EXIT_MODEL = "target-t2-v4"
 
 
 class Outcome(dict):
@@ -363,6 +390,7 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
     reason = "open"
     held = 0
     mae = mfe = 0.0
+    touched_t1 = False
     book = book or {}
     # The last session whose close the engine had already acted on when this
     # bar opened. The book exit is decided at a close and fills at the next
@@ -387,6 +415,12 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
                 unfilled_stop_sessions += 1
             continue
 
+        if high >= t1:
+            # A MILESTONE, not an exit. See EXIT_MODEL target-t2-v4: booking
+            # here measured worse than holding to T2 under both label
+            # geometries, and it is not the target the model is fitted against.
+            touched_t1 = True
+
         if low <= stop:
             # A gap-down opens below the stop, so the fill is the open, not the
             # stop. Filling at the stop credits a price that was never available
@@ -395,9 +429,7 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
             exit_price = min(bar_open, stop) if np.isfinite(bar_open) else stop
             reason = "stop_gap" if exit_price < stop else "stop"
         elif high >= t2:
-            exit_price, reason = t2, "target_2"
-        elif high >= t1:
-            exit_price, reason = t1, "target_1"
+            exit_price, reason = t2, "target"
         if exit_price is not None:
             exit_date = bar[DATE].date()
             break
@@ -462,6 +494,9 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
         "cost_inr": cost_inr,
         "mae": mae,
         "mfe": mfe,
+        # Whether the trade reached T1 before it ended. Real information
+        # about the trade, recorded rather than acted on -- see EXIT_MODEL.
+        "touched_t1": touched_t1,
         "composite_score": rec.get("composite_score"),
         "percentile": rec.get("percentile"),
         "config_version": item.get("config_version"),

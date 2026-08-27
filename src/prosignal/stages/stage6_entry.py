@@ -165,6 +165,34 @@ def _evaluate(sym, frame, cfg, params, rank=None, entry_rank=8,
     if trigger_note:
         passed.append(trigger_note)
 
+    # ---- admission: is this a trade at all? --------------------------------
+    # A NAME ALREADY BELOW ITS OWN INVALIDATION LEVEL IS NOT AN ENTRY. Stage 7
+    # lists thesis invalidation as exit condition #1, so opening here issues a
+    # card whose stated "the thesis is dead below X" sits ABOVE the entry price
+    # -- the position satisfies its first exit condition on the day it opens.
+    #
+    # This is the same predicate `exits.resolve_exits` uses to keep such rows
+    # out of the LABEL, and it had no counterpart on the live path once Stage 6
+    # stopped gating on price structure. The consequence was not cosmetic: the
+    # exclusion also removes those rows from the training panel, so every
+    # validation deriving rankings from it inherits the filter while the live
+    # engine does not. Measured on the eligible universe, 21.8% of the
+    # selection period and 26.9% of the holdout sits below the level.
+    #
+    # HELD NAMES ARE EXEMPT. A position already open is governed by the exit
+    # band and by Stage 7's own exit hierarchy; letting an entry rule close it
+    # would be the entry/holding confusion Stage 8 documents fixing.
+    if not is_held and bv(cfg.admission.require_above_invalidation):
+        blocked = _below_invalidation(closes, highs, lows, params)
+        if blocked is not None:
+            return EntryDecision(
+                ticker=sym, status=EntryStatus.WATCHLIST, trigger_type=trigger,
+                reference_price=round(last, 2),
+                confirmations_passed=passed, confirmations_failed=failed,
+                confirmations_not_testable=untestable,
+                reason=blocked,
+            )
+
     # ---- admission: rank, with hysteresis ---------------------------------
     # The trigger above is now description, not a gate. What decides admission
     # is where the name sits in the model's own ranking, and whether it is
@@ -207,6 +235,52 @@ def _evaluate(sym, frame, cfg, params, rank=None, entry_rank=8,
         confirmations_passed=passed, confirmations_failed=failed,
         confirmations_not_testable=untestable,
         notes=notes,
+    )
+
+
+def _below_invalidation(closes, highs, lows, params) -> Optional[str]:
+    """Why this bar is not an entry, or None if it is one.
+
+    Reads the level through `exits.tradeable_at_entry` -- the SAME function the
+    label uses -- from `stage7_risk.thesis_invalidation`, so the rule that
+    decides what the engine may buy and the rule that decides what it trains on
+    cannot drift apart.
+
+    An uncomputable level refuses the entry. A name without enough history for
+    its own invalidation level has not cleared it, and treating "cannot check"
+    as "passed" is the failure the eligibility stage states it exists to
+    prevent.
+    """
+    from ..features.exits import ExitRules, invalidation_level, tradeable_at_entry
+
+    c7 = params.stage7_risk
+    n = iv(c7.thesis_invalidation.structure_ma_sessions)
+    if len(closes) < n:
+        return (f"fewer than {n} sessions of history, so the "
+                f"{n}-session invalidation level cannot be computed. A level "
+                f"that cannot be checked has not been cleared.")
+    rules = ExitRules(
+        invalidation_ma_sessions=n,
+        invalidation_buffer_atr=fv(c7.thesis_invalidation.structure_buffer_atr),
+        atr_period_sessions=iv(c7.atr.period_sessions),
+        atr_method=str(v(c7.atr.method)),
+    )
+    a = atr(highs, lows, closes, rules.atr_period_sessions,
+            rules.atr_method).dropna()
+    if a.empty:
+        return "ATR is not computable, so the invalidation level cannot be checked."
+    ma_now = float(closes.tail(n).mean())
+    atr_now = float(a.iloc[-1])
+    last = float(closes.iloc[-1])
+    if bool(tradeable_at_entry(last, ma_now, atr_now, rules)):
+        return None
+    level = invalidation_level(ma_now, atr_now, rules)
+    return (
+        f"Rs {last:,.2f} is already below the thesis-invalidation level of "
+        f"Rs {level:,.2f} ({n}-session average less "
+        f"{rules.invalidation_buffer_atr:g} ATR). Opening here would issue a "
+        f"position that meets its own first exit condition on day one, and the "
+        f"model was never fitted on names in this state."
     )
 
 

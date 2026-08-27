@@ -31,6 +31,12 @@ from ..stages._cfg import fv, iv
 
 __all__ = ["ResearchPanel", "build_research_panel"]
 
+#: Distinguishes "caller said nothing" from "caller said: no exit geometry".
+#: `None` is a meaningful VALUE here -- it asks for a panel with no
+#: invalidation filter, which is the only way to see the population the live
+#: engine scores -- so it cannot double as the default.
+_USE_CONFIG = object()
+
 
 @dataclass
 class ResearchPanel:
@@ -51,7 +57,8 @@ class ResearchPanel:
 def build_research_panel(cfg, store, end, *, step: int = 21,
                          sector_neutral: bool = True,
                          prices: Optional[Dict[str, pd.DataFrame]] = None,
-                         turnover: Optional[pd.DataFrame] = None) -> ResearchPanel:
+                         turnover: Optional[pd.DataFrame] = None,
+                         exit_rules=_USE_CONFIG) -> ResearchPanel:
     """Build the panel the model is fitted on, from the same config it uses.
 
     ``end`` is the last session to include -- callers pass the holdout boundary
@@ -111,7 +118,22 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
     lab = c4.labels
     engine_geometry = (bool(lab.triple_barrier)
                        and str(lab.barrier_source) == "engine")
-    rules = rules_from_config(c4, p.stage7_risk) if engine_geometry else None
+    # An explicit override lets a caller ask what the coefficients would be
+    # under a DIFFERENT traded geometry -- which is the only way to tell a dead
+    # theme from one the current label mismeasures. It is research only: the
+    # shipped path passes nothing and gets the config's own rules, so the panel
+    # the model trains on cannot be changed from here by accident.
+    #
+    # A SENTINEL, not `or`. `exit_rules or default` cannot tell "not provided"
+    # from "explicitly no exit geometry", so passing None -- the way a caller
+    # asks for an UNFILTERED panel, one that keeps the rows the invalidation
+    # rule would drop -- silently returned the shipped panel instead. Two
+    # experiments were run against it and both reported the filtered population
+    # as though it were the full one.
+    if exit_rules is _USE_CONFIG:
+        rules = rules_from_config(c4, p.stage7_risk) if engine_geometry else None
+    else:
+        rules = exit_rules
     spec = (BarrierSpec(upper=fv(lab.upper_sigma), lower=fv(lab.lower_sigma),
                         horizon=horizon, vol_window=iv(lab.vol_window_sessions))
             if bool(lab.triple_barrier) and not engine_geometry else None)
