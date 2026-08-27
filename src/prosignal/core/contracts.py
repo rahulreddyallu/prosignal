@@ -285,6 +285,26 @@ class EligibilityReport(_Contract):
 # =============================================================================
 
 
+class FactorMember(_Contract):
+    """One measured factor inside a fitted theme.
+
+    The model fits ONE coefficient per theme, over the average of its members'
+    cross-sectional ranks -- seventeen coefficients over a set this collinear
+    is not estimable. So the theme is what carries weight, and these are what
+    the theme is made of. They are carried onto the card because "lottery
+    -1.81 sd" says nothing about WHICH lottery moment moved, and the reader
+    cannot check the theme against the measurements without them.
+
+    `rank` is the cross-sectional rank in [-1, +1], taken within sector where
+    the sector is large enough -- the same number the family averages.
+    """
+
+    name: str
+    rank: Optional[float] = None
+    available: bool = True
+    description: Optional[str] = None
+
+
 class FactorScore(_Contract):
     name: str
     raw_value: Optional[float] = None
@@ -294,6 +314,9 @@ class FactorScore(_Contract):
     horizon_note: Optional[str] = None
     evidence_tier: Optional[str] = None
     citation: Optional[str] = None
+    #: The measured factors this theme averages. Empty on the hand-weighted
+    #: composite path, which has no members.
+    members: List["FactorMember"] = Field(default_factory=list)
 
 
 class StockScore(_Contract):

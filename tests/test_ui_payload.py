@@ -284,19 +284,53 @@ def test_the_arithmetic_is_in_the_panel_and_covers_every_factor():
     """A quant needs z, the fitted coefficient and their product against the
     model's own identifier. Four of seventeen on the card answered neither
     audience -- too much for a glance, too little to check. It is all in the
-    panel now, and the panel is what "View analysis" opens."""
+    panel, and the panel is what "View analysis" opens."""
     html = _html()
     panel = html[html.index("function panelHTML"):]
     panel = panel[:panel.index("\nfunction ", 20)]
-    for column in ("Factor", ">z<", "coef", "contrib"):
-        assert column in panel, column
-    assert "r.coefficient.toFixed" in panel and "r.contribution.toFixed" in panel
+    assert "r.z.toFixed" in panel, "the standardised loading"
+    assert "r.coefficient.toFixed" in panel, "the fitted coefficient"
+    assert "r.contribution.toFixed" in panel, "their product"
     assert "esc(r.factor)" in panel, "the model's own name, not a paraphrase"
-    # Every factor, not a top slice.
-    assert "rows.map(" in panel, "the advanced table must not be truncated"
+    assert "rows.map(" in panel, "every theme, not a top slice"
     vm = UI.parents[1] / "presentation" / "viewmodel.py"
     assert "top: Optional[int] = None" in vm.read_text(encoding="utf-8"), \
         "the payload must carry every factor for that table to exist"
+
+
+def test_the_advanced_section_does_not_repeat_the_summary():
+    """It rendered `rows` twice -- the same five themes the table above already
+    showed, with two more columns. The reader who opened it for the detail got
+    the summary again.
+
+    What is actually underneath is the MEMBERS: one coefficient is fitted per
+    theme over the average of its members' ranks, so "lottery -1.81 sd" is a
+    summary of four separate measurements and the panel never said which one
+    moved."""
+    html = _html()
+    panel = html[html.index("function panelHTML"):]
+    panel = panel[:panel.index("\nfunction ", 20)]
+    adv = panel[panel.index("const advanced"):]
+    assert "r.members" in panel, "the advanced section must show the members"
+    assert "measured factors behind" in adv, (
+        "the summary must say how many measurements sit behind the themes"
+    )
+    # The old duplicate: a second full table built from `rows` with z/coef/
+    # contrib columns. The theme header carries those now, one line each.
+    assert adv.count("rows.map(") == 0, (
+        "the advanced section must not rebuild the drivers table"
+    )
+
+
+def test_the_panel_says_what_was_computed_and_not_priced():
+    """"26 factors" and "5 themes" are both true and neither alone is honest.
+    The panel showed five and said nothing about the other twenty-one."""
+    vm = (UI.parents[1] / "presentation" / "viewmodel.py").read_text(encoding="utf-8")
+    assert "_unscored_note" in vm
+    assert '"unscored"' in vm, "the note has to reach the payload"
+    html = _html()
+    assert "p.technical && p.technical.unscored" in html or "unscored" in html, \
+        "and the panel has to render it"
 
 
 def test_the_market_labels_carry_the_measurements_behind_them():

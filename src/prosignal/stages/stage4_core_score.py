@@ -31,6 +31,7 @@ from ..core.calendar import TradingCalendar
 from ..core.contracts import (
     CoreScoreReport,
     EligibilityReport,
+    FactorMember,
     FactorScore,
     RedundancyReport,
     RegimeState,
@@ -358,6 +359,14 @@ def run(
                     available=pd.notna(row.get(name)),
                     evidence_tier="model",
                     citation=_MODEL_CITE.get(name),
+                    # WHAT THE THEME IS MADE OF. One coefficient is fitted per
+                    # theme over the average of its members' ranks, so the
+                    # theme is what carries weight -- but "lottery -1.81 sd"
+                    # does not say which lottery moment moved, and a reader
+                    # cannot check the theme against the measurement without
+                    # them. The members are the 26 ranked columns; the five
+                    # themes are how they are priced.
+                    members=_members_for(name, sym, model_features),
                 )
         else:
             for name in standardised:
@@ -452,6 +461,55 @@ def run(
         universe_size=len(symbols),
         notes=notes,
     )
+
+
+
+def _members_for(family: str, symbol, features) -> List[FactorMember]:
+    """The measured factors underneath one fitted theme, for one name.
+
+    Reads the SAME frame the model scored from, so a member shown here and the
+    average the coefficient multiplied cannot disagree.
+    """
+    from ..features.crosssec import FEATURES
+    from ..features.crossmodel import FAMILIES
+
+    if features is None or features.empty or family not in FAMILIES:
+        return []
+    row = features[features["symbol"] == symbol]
+    if row.empty:
+        return []
+    row = row.iloc[0]
+    out: List[FactorMember] = []
+    for col in FAMILIES[family]:
+        if col not in features.columns:
+            continue
+        value = row.get(col)
+        bare = col[:-2] if col.endswith("_r") else col
+        described = FEATURES.get(bare)
+        out.append(FactorMember(
+            name=bare,
+            rank=_f(value),
+            available=pd.notna(value),
+            description=(described[1] if described else _FUND_DESC.get(bare)),
+        ))
+    return out
+
+
+#: The fundamental members carry no entry in `crosssec.FEATURES`, which
+#: describes the price and volume block only.
+_FUND_DESC = {
+    "earnings_yield": "trailing earnings over price",
+    "book_to_price": "book value over price",
+    "ebitda_to_ev": "operating profit over enterprise value",
+    "fcf_yield": "free cash flow over price",
+    "sales_to_price": "revenue over price",
+    "gross_profitability": "gross profit over assets (Novy-Marx 2013)",
+    "cash_op_profitability": "cash operating profit over assets",
+    "roce": "return on capital employed",
+    "accruals": "the non-cash share of earnings (Sloan 1996)",
+    "asset_growth": "year-on-year change in total assets",
+    "net_issuance": "shares issued net of buybacks, bonus-adjusted",
+}
 
 
 # =============================================================================

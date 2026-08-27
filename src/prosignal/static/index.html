@@ -697,6 +697,17 @@ td.r { text-align: right; }
 .fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.5;
         margin-top: var(--sp-3); }
 
+.fam { margin: 14px 0; }
+.fam.gated { opacity: .55; }
+.fam-h { display:flex; justify-content:space-between; align-items:baseline;
+         gap:12px; padding:6px 0; border-bottom:1px solid var(--line); }
+.fam-h code { font-size:13px; font-weight:600; }
+.fam-h span { font-size:11.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
+.fam-lede { font-size:12.5px; color:var(--dim); margin:8px 0 4px; line-height:1.5; }
+.fam-note { font-size:12px; color:var(--dim); margin-top:12px; line-height:1.5;
+            padding-top:10px; border-top:1px solid var(--line); }
+.fx-d { font-size:11px; color:var(--dim); margin-top:2px; font-family:inherit; }
+
 /* ===== settings drawer ============================================= */
 /* A fixed element translated past the right edge is still reachable by a
    horizontal scroll on mobile, which is where the grey band beside the page
@@ -2185,10 +2196,13 @@ function cardHTML(p) {
           dn != null ? (dn * 100).toFixed(1) + "%" : "", "v-neg") +
       (function () {
         const h = holdText();
+        // NO CONFIGURED RANGE HERE. "15-63 sessions" is the backstop pair from
+        // parameters.yaml, identical on every name, and printing it in a slot
+        // labelled Hold reads as a forecast for THIS one. Until enough
+        // positions have closed to measure it, the honest answer is that it
+        // has not been measured.
         return h ? fig("Hold", h.main, h.sub)
-                 : fig("Hold",
-                       esc((p.holding_period || "\u2014").replace(" sessions", "")),
-                       "sessions");
+                 : fig("Hold", "\u2014", "not yet measured");
       })() +
     '</div>' +
     '<div class="why">' + whyLine(p) + '</div>' +
@@ -2610,7 +2624,8 @@ function panelHTML(p) {
     '<div class="keys">' +
       num("Price", money(p.price),
           (function () { const h = holdText();
-            return h ? h.main + " " + h.sub : esc(p.holding_period || ""); })()) +
+            return h ? h.main + " " + h.sub
+                     : "not yet measured \u2014 fewer than 20 closed positions"; })()) +
       num("Target", money(L.target_1),
           up != null ? (up > 0 ? "+" : "") + (up * 100).toFixed(1) + "%" : "",
           "v-pos") +
@@ -2653,23 +2668,62 @@ function panelHTML(p) {
       '</tr></thead><tbody>' + top + '</tbody></table></div>'
     : "";
 
-  // Everything, for the reader who came for the evidence.
-  const all = rows.map((r) =>
-    '<tr><td class="fx"><code>' + esc(r.factor) + '</code></td>' +
-    '<td class="num">' + (r.z > 0 ? "+" : "") + r.z.toFixed(2) + '</td>' +
-    '<td class="num">' + (r.coefficient > 0 ? "+" : "") + r.coefficient.toFixed(5) + '</td>' +
-    '<td class="num ' + (r.contribution > 0 ? "v-pos" : "v-neg") + '">' +
-    (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(4) + '</td></tr>').join("");
+  // The MEASURED factors underneath each theme.
+  //
+  // This used to repeat `rows` -- the identical five lines the table above
+  // already showed, with two more columns. The reader who opened it for the
+  // detail got the summary again.
+  //
+  // What is actually underneath is the members: the model fits ONE coefficient
+  // per theme over the average of its members' cross-sectional ranks, so
+  // "lottery -1.81 sd" is a summary of four separate measurements and the
+  // panel never said which one moved.
+  let members = 0;
+  const blocks = rows.map((r) => {
+    const ms = r.members || [];
+    members += ms.length;
+    if (!ms.length) return "";
+    const gated = Math.abs(r.coefficient) < 1e-12;
+    return '<div class="fam' + (gated ? " gated" : "") + '">' +
+      '<div class="fam-h"><code>' + esc(r.factor) + '</code>' +
+      '<span>' + (gated
+        ? "not used \u2014 below the significance floor"
+        : "coefficient " + (r.coefficient > 0 ? "+" : "") +
+          r.coefficient.toFixed(5) + " \u00b7 " +
+          (r.contribution > 0 ? "adds " : "takes ") +
+          Math.abs(r.contribution).toFixed(4)) + '</span></div>' +
+      '<table class="ftab"><tbody>' + ms.map((m) =>
+        '<tr><td class="fx"><code>' + esc(m.name) + '</code>' +
+        (m.description ? '<div class="fx-d">' + esc(m.description) + '</div>' : "") +
+        '</td><td class="num">' +
+        (m.rank == null ? "\u2014"
+                        : (m.rank > 0 ? "+" : "") + Number(m.rank).toFixed(3)) +
+        '</td></tr>').join("") + '</tbody></table></div>';
+  }).join("");
 
-  const advanced =
-    '<details class="adv"><summary>All ' + (p.factors_considered || rows.length) +
-      ' factors, and what the run recorded</summary>' +
-      '<div class="tw"><table class="ftab"><thead><tr><th>Factor</th>' +
-      '<th class="num">z</th><th class="num">coef</th>' +
-      '<th class="num">contrib</th></tr></thead><tbody>' + all + '</tbody></table></div>' +
-      techHTML(p.technical) +
-      (L.exits && L.exits.length ? exitsHTML(L.exits) : "") +
-    '</details>';
+  // The columns the run computed and did NOT price. Saying "26 factors" while
+  // showing five is the sort of gap this panel exists to close.
+  const unscored = p.unscored || (p.technical && p.technical.unscored) || null;
+  const ledger = unscored
+    ? '<div class="fam-note">' + esc(unscored) + '</div>' : "";
+
+  const advanced = members
+    ? '<details class="adv"><summary>All ' + members +
+        ' measured factors behind these ' + rows.length + ' themes</summary>' +
+        '<p class="fam-lede">The model fits one coefficient per THEME, over the ' +
+        'average of its members\u2019 cross-sectional ranks. Seventeen ' +
+        'coefficients over a set this collinear is not estimable, so the theme ' +
+        'is what carries weight and these are what it is made of. Ranks run ' +
+        '\u22121 to +1 against today\u2019s universe, within sector where the ' +
+        'sector is large enough.</p>' +
+        blocks + ledger +
+        techHTML(p.technical) +
+        (L.exits && L.exits.length ? exitsHTML(L.exits) : "") +
+      '</details>'
+    : '<details class="adv"><summary>What the run recorded</summary>' +
+        techHTML(p.technical) +
+        (L.exits && L.exits.length ? exitsHTML(L.exits) : "") +
+      '</details>';
 
   return key + gate + untested + drivers + advanced;
 }

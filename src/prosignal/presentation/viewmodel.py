@@ -408,6 +408,11 @@ def _build_pick(
         # The card shows the largest few. Without the denominator a reader
         # cannot tell whether that is most of the model or a corner of it.
         "factors_considered": len(card.get("factors") or {}),
+        # WHAT WAS COMPUTED BUT NOT PRICED. The engine ranks 26 columns and
+        # fits at most seven themes over them, so "26 factors" and "5 themes"
+        # are both true and neither alone is honest. The panel showed five and
+        # said nothing about the other twenty-one.
+        "unscored": _unscored_note(card),
         "levels": _levels(card),
         "holding_period": card.get("holding_period"),
         "cost_note": card.get("cost_note"),
@@ -427,6 +432,50 @@ def _build_pick(
     return pick
 
 
+def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
+    """The columns the run measured and deliberately did not price.
+
+    Three different reasons, and collapsing them would be the misleading part:
+
+      dropped for coverage  the fundamentals. The value and quality themes are
+                            only built when their inputs span enough of the
+                            panel; below that floor they are absent, not zero.
+      unscored diagnostics  amihud and turnover_ratio. They are one factor
+                            measured from two sides and the side they measure
+                            is the illiquidity premium, which a manual
+                            executor PAYS rather than collects. The universe
+                            screen holds that as a floor instead.
+      unscored control      log_mcap, carried so the size of what is being
+                            ranked is visible without paying it a coefficient.
+    """
+    from ..features.crossmodel import (FEATURE_COLUMNS, UNSCORED_CONTROLS,
+                                       UNSCORED_DIAGNOSTICS)
+
+    factors = card.get("factors") or {}
+    members = sum(len((f or {}).get("members") or []) for f in factors.values())
+    if not members:
+        return None
+    computed = len(FEATURE_COLUMNS)
+    diagnostics = len(UNSCORED_DIAGNOSTICS)
+    controls = len(UNSCORED_CONTROLS)
+    absent = computed - members - diagnostics - controls
+    bits = [f"The run ranks {computed} columns in all."]
+    if absent > 0:
+        bits.append(
+            f"{absent} are fundamental and were dropped this run because they "
+            f"do not span enough of the training panel -- absent, not zero.")
+    bits.append(
+        f"{diagnostics} ({', '.join(c[:-2] for c in UNSCORED_DIAGNOSTICS)}) "
+        f"measure the illiquidity premium, which a manual executor pays rather "
+        f"than collects, so the universe screen holds it as a floor instead of "
+        f"the model paying it a coefficient.")
+    bits.append(
+        f"{controls} ({', '.join(c[:-2] for c in UNSCORED_CONTROLS)}) is "
+        f"carried so the size of what is being ranked is visible, without "
+        f"being priced.")
+    return " ".join(bits)
+
+
 def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[Dict[str, Any]]:
     """What each factor actually added to the score, largest first.
 
@@ -436,7 +485,7 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[D
     checking the model against its source needs the identifier, not a
     paraphrase of it.
     """
-    from .evidence import FACTOR_MAP
+    from .evidence import FAMILY_MAP, FACTOR_MAP
 
     rows: List[Dict[str, Any]] = []
     for name, detail in factors.items():
@@ -446,15 +495,28 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[D
         weight = detail.get("weight")
         if not isinstance(sd, (int, float)) or not isinstance(weight, (int, float)):
             continue
+        fam = FAMILY_MAP.get(name)
         mapped = FACTOR_MAP.get(name)
         rows.append({
             "factor": name,
-            "label": mapped[1] if mapped else name,
-            "category": mapped[0] if mapped else None,
+            # The reader's name for the theme. `lottery` is the literature's
+            # word (Bali, Cakici & Whitelaw 2011) and it reads as a guess
+            # rather than a measurement; what it measures is how lottery-like
+            # the payoff is, and the engine prices it NEGATIVELY -- it prefers
+            # the calm name.
+            "label": fam[1] if fam else (mapped[1] if mapped else name),
+            "category": fam[0] if fam else (mapped[0] if mapped else None),
             "z": round(float(sd), 3),
             "coefficient": round(float(weight), 5),
             "contribution": round(float(sd) * float(weight), 5),
             "raw": detail.get("raw"),
+            # The measured factors this theme averages, so the panel can show
+            # WHICH one moved instead of repeating the theme with more columns.
+            "members": [
+                {"name": m.get("name"), "rank": m.get("rank"),
+                 "description": m.get("description")}
+                for m in ((detail or {}).get("members") or [])
+            ],
         })
     rows.sort(key=lambda r: -abs(r["contribution"]))
     return rows if top is None else rows[:top]

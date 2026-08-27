@@ -61,10 +61,17 @@ def save(run, cfg) -> Optional[Path]:
         root = _dir(cfg)
         root.mkdir(parents=True, exist_ok=True)
         payload = shape(run)
-        # `as_of` first so a directory listing sorts by market date, and the
-        # run id after it so two runs for one date do not collide -- which is
-        # the norm, not the exception.
-        name = f"{payload['as_of_date']}_{payload['run_id']}.json"
+        # `as_of` first so a listing sorts by MARKET DATE, then the moment the
+        # run was generated so it sorts chronologically WITHIN a date, then the
+        # run id for uniqueness.
+        #
+        # The run id alone is not an ordering. It is random hex, so for two
+        # runs on one date -- which the ledger shows is the norm, not the
+        # exception -- a lexical sort picks an arbitrary one. It served the
+        # OLDEST run of three and the screen showed a stale payload while
+        # looking entirely normal.
+        stamp = str(payload.get("generated_at") or "")[:19].replace(":", "").replace("-", "").replace("T", "-")
+        name = f"{payload['as_of_date']}_{stamp}_{payload['run_id']}.json"
         path = root / name
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, default=str), encoding="utf-8")
@@ -101,8 +108,9 @@ def load(cfg, run_id: str) -> Optional[Dict[str, Any]]:
 def load_latest(cfg) -> Optional[Dict[str, Any]]:
     """The newest run on disk, whichever process produced it.
 
-    Ordered by MARKET DATE then run id, not by file mtime: a backfill run
-    written today for a past date must not displace today's screen.
+    Ordered by MARKET DATE, then by when the run was generated -- not by file
+    mtime, so a backfill written today for a past date cannot displace today's
+    screen, and not by run id, which is random hex and orders nothing.
     """
     for path in reversed(available_runs(cfg)):
         try:
@@ -195,6 +203,16 @@ def card(rec) -> Dict[str, Any]:
                 "standardised": f.standardised,
                 "weight": f.weight,
                 "available": f.available,
+                # What the theme is made of. One coefficient is fitted per
+                # theme over the average of its members' ranks, so "lottery
+                # -1.81 sd" is a summary of these -- and without them the
+                # reader cannot see WHICH moment moved, or check the theme
+                # against the measurements it came from.
+                "members": [
+                    {"name": m.name, "rank": m.rank,
+                     "available": m.available, "description": m.description}
+                    for m in (getattr(f, "members", None) or [])
+                ],
             }
             for name, f in (getattr(rec, "factor_detail", None) or {}).items()
         },
