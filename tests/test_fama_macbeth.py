@@ -136,11 +136,17 @@ class TestShrinkage:
             hierarchical_shrink(r, toward="somewhere")
 
     def test_a_theme_with_no_prior_shrinks_to_zero_even_when_pooling(self):
-        assert THEME_PRIOR_SIGN["risk"] is None
-        r = self._result({"mom_f": 0.07, "delivery_f": 0.05, "risk_f": 0.02},
-                         {"mom_f": 0.02, "delivery_f": 0.015, "risk_f": 0.06})
+        """`risk` was the no-prior theme until it was split. `drawdown` now
+        holds that position: there is no literature analogue for a
+        drawdown-depth cross-section, so it carries no prior. `beta` does carry
+        one (Frazzini & Pedersen 2014), which is the point of the split."""
+        assert THEME_PRIOR_SIGN["drawdown"] is None
+        assert THEME_PRIOR_SIGN["beta"] == -1
+        r = self._result(
+            {"mom_f": 0.07, "delivery_f": 0.05, "drawdown_f": 0.02},
+            {"mom_f": 0.02, "delivery_f": 0.015, "drawdown_f": 0.06})
         out = hierarchical_shrink(r, toward="prior_mean")
-        assert abs(out["risk_f"]) < abs(r.lam["risk_f"])
+        assert abs(out["drawdown_f"]) < abs(r.lam["drawdown_f"])
 
 
 class TestGate:
@@ -175,10 +181,21 @@ class TestGate:
 
 class TestControlArm:
     def test_the_control_is_equal_weighted_and_prior_oriented(self):
-        ew = equal_weight_lambda(["mom_f", "lottery_f", "risk_f"])
+        """The 1/N arm `research estimator` measures the model against. A theme
+        with no prior takes no position in it -- and a control with a missing
+        theme is not the control you think it is, which is why THEME_PRIOR_SIGN
+        has to track the family registry."""
+        ew = equal_weight_lambda(["mom_f", "lottery_f", "drawdown_f"])
         assert ew["mom_f"] == pytest.approx(1 / 3)
         assert ew["lottery_f"] == pytest.approx(-1 / 3)
-        assert ew["risk_f"] == 0.0        # no prior, so no bet
+        assert ew["drawdown_f"] == 0.0    # no prior, so no bet
+
+    def test_beta_takes_the_low_beta_side_in_the_control(self):
+        """Frazzini & Pedersen (2014), and in this market Agarwalla, Jacob,
+        Varma & Vasudevan (2014), who find BAB earns significant positive
+        returns in India and dominates size, value and momentum."""
+        ew = equal_weight_lambda(["mom_f", "beta_f"])
+        assert ew["beta_f"] < 0
 
     def test_scoring_ignores_columns_the_frame_does_not_have(self):
         f = pd.DataFrame({"mom_f": [1.0, -1.0]})

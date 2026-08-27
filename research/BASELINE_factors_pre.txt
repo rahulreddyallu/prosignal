@@ -1,0 +1,98 @@
+────────────────────────────── Building the panel ──────────────────────────────
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:10:51 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+  27,162 rows over 69 dates
+  label: engine exits (2.5x ATR stop, 3R target, invalidation, 63-session cap)
+─────────────────── Standalone rank IC, before any blending ────────────────────
+  factor                dates       IC    ICIR       t    hit
+  mom_6_1                  69  -0.0203  -0.126   -1.05    43%
+  resid_reversal           69  -0.1258  -0.827   -6.87    17%
+  downside_vol             69  -0.1407  -0.854   -7.10    23%
+  beta_120                 67  -0.0825  -0.541   -4.43    37%
+  amihud                   69  -0.0674  -0.489   -4.06    33%
+  turnover_ratio           69  +0.0163  +0.173   +1.44    58%
+  max_dd_120               69  +0.1037  +0.716   +5.95    74%
+  prox_52w                 69  +0.0067  +0.049   +0.40    51%
+  max5_21                  69  -0.1849  -0.803   -6.67    20%
+  resid_mom                69  -0.0318  -0.204   -1.69    48%
+  idio_vol                 69  -0.1762  -0.849   -7.05    22%
+  idio_skew                69  -0.0612  -0.641   -5.32    30%
+  deliv_pct                62  +0.0833  +0.793   +6.25    76%
+  deliv_trend              60  +0.0863  +0.782   +6.06    78%
+  earnings_yield                               not computable
+  book_to_price                                not computable
+  ebitda_to_ev                                 not computable
+  fcf_yield                                    not computable
+  sales_to_price                               not computable
+  gross_profitability                          not computable
+  cash_op_profitability                         not computable
+  roce                                         not computable
+  accruals                                     not computable
+  asset_growth                                 not computable
+  net_issuance                                 not computable
+  log_mcap                                     not computable
+───────────────── The families, and the same question of them ──────────────────
+  mom                      69  -0.0244  -0.147   -1.22    48%
+  reversal                 69  -0.1258  -0.827   -6.87    17%
+  lottery                  69  -0.1893  -0.844   -7.01    22%
+  risk                     69  +0.0212  +0.198   +1.64    55%
+  delivery                 62  +0.1158  +0.926   +7.29    81%
+────────────── Correlation, and what is not independent evidence ───────────────
+  amihud                  turnover_ratio            -0.908
+  mom_6_1                 resid_mom                 +0.717
+  downside_vol            idio_vol                  +0.673
+  max5_21                 idio_vol                  +0.613
+───────────────── Holding period, measured rather than chosen ──────────────────
+  round trip modelled at 37 bps
+
+  composite weighted by the fitted coefficients: mom +0.0000, reversal -0.0813, 
+lottery -0.1517, risk +0.0477, delivery +0.0641
+   horizon  dates       IC    ICIR  turns/yr    gross    cost      NET
+         5     69  +0.0740  +0.547      50.4   +0.74%  18.89%  -18.15%
+        10     69  +0.0608  +0.463      25.2   +0.61%   9.45%   -8.84%
+        21     69  +0.0474  +0.390      12.0   +0.47%   4.50%   -4.02%
+        42     69  +0.0327  +0.268       6.0   +0.33%   2.25%   -1.92%
+        63     69  +0.0268  +0.197       4.0   +0.27%   1.50%   -1.23%
+       126     66  +0.0280  +0.217       2.0   +0.28%   0.75%   -0.47%
+
+  Best NET of turnover cost: 126 sessions at -0.47% a year.
+  Not the highest raw IC, which is almost always the shortest
+  horizon and the one that pays the most in costs.
+
+READ THE SHAPE, NOT THE LEVELS
+  gross/yr converts a rank IC to an annual return at a fixed
+  0.10 -- a rule of thumb, not a measurement, and the argument
+  `alpha_per_ic` exists so it can be replaced with a fitted
+  number. What survives that assumption is the ORDERING: IC
+  rises monotonically with horizon here, so a longer hold keeps
+  more of whatever the edge turns out to be. What does not
+  survive it is any absolute claim about profitability.
+────────────────────────────── Breakeven turnover ──────────────────────────────
+  gross annual edge          round trips it pays for
+  2%                                            5.34
+  4%                                           10.67
+  8%                                           21.34
+
+  family               IC   gross/yr       T*   verdict
+  mom             -0.0244     -0.24%     0.00   BELOW implied turnover
+  reversal        -0.1258     -1.26%     0.00   BELOW implied turnover
+  lottery         -0.1893     -1.89%     0.00   BELOW implied turnover
+  risk            +0.0212     +0.21%     0.57   BELOW implied turnover
+  delivery        +0.1158     +1.16%     3.09   BELOW implied turnover
+
+  The engine turns a slot over 4.0 times a year at a
+  63-session hold. STT alone is 20 bps round trip.
+
+  T* uses the same 0.10 IC-to-return assumption, so the verdicts
+  move with it. They are a ranking of families by cost tolerance,
+  not a profitability test.

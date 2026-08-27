@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from ..features.famamacbeth import fama_macbeth, newey_west_se
+from ..features.famamacbeth import THEME_PRIOR_SIGN, fama_macbeth, newey_west_se
 
 __all__ = ["ThemeHealth", "DecayVerdict", "HAIRCUT_MCLEAN_PONTIFF",
            "assess_decay"]
@@ -115,6 +115,29 @@ def _rolling_t(slopes: pd.Series, window: int, lags: int = 2) -> pd.Series:
     return pd.Series(out, index=slopes.index)
 
 
+def _expected_sign(column: str, full_lambda: float) -> float:
+    """+1 or -1: the direction this theme is supposed to pay in.
+
+    The literature prior first, because "has this stopped working?" is a
+    question about a direction that was claimed BEFORE the panel was seen --
+    `reversal` and `lottery` are supposed to be negative, and a theme meeting
+    its prior is not decaying.
+
+    Where no prior exists -- `drawdown` has no literature analogue for a
+    drawdown-depth cross-section -- the theme's own full-sample sign stands in.
+    That is self-referential, since the full sample contains the trailing
+    window, and it is the weaker of the two answers. It is still far better
+    than assuming every theme is supposed to be positive, which is what
+    comparing a raw t against zero assumed.
+    """
+    prior = THEME_PRIOR_SIGN.get(column.removesuffix("_f"))
+    if prior:
+        return float(prior)
+    if np.isfinite(full_lambda) and full_lambda != 0.0:
+        return float(np.sign(full_lambda))
+    return 1.0
+
+
 def assess_decay(
     panel: pd.DataFrame,
     features: Sequence[str],
@@ -153,10 +176,29 @@ def assess_decay(
         trail = slopes.rolling(window, min_periods=max(4, window // 2)).mean()
         t_series = _rolling_t(slopes, window)
         recent = t_series.dropna()
-        # Consecutive breaches ending at the most recent evaluable check.
+        # Consecutive breaches ending at the most recent evaluable check,
+        # ORIENTED BY THE DIRECTION THE THEME IS SUPPOSED TO PAY IN.
+        #
+        # This compared the raw t against `kill_t` and nothing else. "Working"
+        # for a theme priced NEGATIVELY means a t far below zero, so a raw
+        # comparison against a floor of 0.0 marked every correctly-negative
+        # theme as decayed on every check, forever. Measured on the pre-repair
+        # panel, the monitor returned KILL for `reversal` (t -4.78) and
+        # `lottery` (t -5.05) -- the two themes the model priced most
+        # confidently, both behaving exactly as their literature priors say
+        # they should, both carrying THEME_PRIOR_SIGN of -1.
+        #
+        # That is a sign error inside a PRE-COMMITTED REMOVAL RULE, which is
+        # the worst place for one: the rule's whole authority is that it was
+        # declared before the numbers were seen, and acting on it would have
+        # deleted two working themes. Fixing the orientation is a correction to
+        # how the criterion is EVALUATED, not a re-specification of it -- the
+        # rule is still "at or below the floor for N consecutive checks", and
+        # neither the floor nor N moves.
+        sign = _expected_sign(col, full.lam[col])
         breaches = 0
         for value in reversed(recent.to_numpy("float64")):
-            if value <= kill_t:
+            if sign * value <= kill_t:
                 breaches += 1
             else:
                 break
@@ -176,7 +218,8 @@ def assess_decay(
         if required and breaches >= required:
             health.killed = True
             health.reason = (
-                f"trailing {window}-date t has been at or below {kill_t:+.2f} "
-                f"for {breaches} consecutive checks")
+                f"trailing {window}-date t, oriented to the theme's expected "
+                f"{'positive' if sign > 0 else 'negative'} direction, has been "
+                f"at or below {kill_t:+.2f} for {breaches} consecutive checks")
         verdict.themes.append(health)
     return verdict

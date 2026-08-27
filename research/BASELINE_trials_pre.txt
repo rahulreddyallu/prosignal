@@ -1,0 +1,90 @@
+──────────────────────────────── Trial registry ────────────────────────────────
+  /Users/rahulreddyallu/Desktop/Pro Stock Signal 
+BOT/data/curated/trial_registry.jsonl
+
+  research spread  (18)
+      2026-08-26  entry=5,exit=5
+      2026-08-26  entry=5,exit=8
+      2026-08-26  entry=5,exit=10
+      2026-08-26  entry=5,exit=12
+      2026-08-26  entry=5,exit=16
+      2026-08-26  entry=5,exit=20
+      2026-08-26  entry=5,exit=25
+      2026-08-26  entry=8,exit=8
+      2026-08-26  entry=8,exit=10
+      2026-08-26  entry=8,exit=12
+      2026-08-26  entry=8,exit=16
+      2026-08-26  entry=8,exit=20
+      2026-08-26  entry=8,exit=25
+      2026-08-26  entry=10,exit=10
+      2026-08-26  entry=10,exit=12
+      2026-08-26  entry=10,exit=16
+      2026-08-26  entry=10,exit=20
+      2026-08-26  entry=10,exit=25
+
+  research cpcv (pbo)  (11)
+      2026-08-26  all themes
+      2026-08-26  delivery alone
+      2026-08-26  lottery alone
+      2026-08-26  mom alone
+      2026-08-26  reversal alone
+      2026-08-26  risk alone
+      2026-08-26  without delivery
+      2026-08-26  without lottery
+      2026-08-26  without mom
+      2026-08-26  without reversal
+      2026-08-26  without risk
+
+  research estimator  (5)
+      2026-08-26  PRODUCTION: gate+shrink
+      2026-08-26  equal weight 1/N
+      2026-08-26  fama-macbeth raw
+      2026-08-26  ridge, pooled
+      2026-08-26  shrunk, no gate
+
+  research volscale  (5)
+      2026-08-26  target=0.10
+      2026-08-26  target=0.15
+      2026-08-26  target=0.20
+      2026-08-26  target=0.25
+      2026-08-26  off
+
+  audit remediation E2 exit band  (5)
+      2026-08-26  8/8
+      2026-08-26  8/16
+      2026-08-26  12/24
+      2026-08-26  16/32
+      2026-08-26  8/40
+
+  audit remediation E5 label x book  (4)
+      2026-08-26  3R/3R
+      2026-08-26  1.5R/1.5R
+      2026-08-26  3R/1.5R
+      2026-08-26  1.5R/3R
+
+  audit remediation E8 stage5 penalties  (4)
+      2026-08-27  none
+      2026-08-27  both
+      2026-08-27  low_volume_only
+      2026-08-27  overextension_only
+
+  audit remediation E3/E4 label target  (3)
+      2026-08-26  3.0R
+      2026-08-26  1.5R
+      2026-08-26  6.0R
+
+  audit remediation E7 label horizon  (3)
+      2026-08-26  21
+      2026-08-26  42
+      2026-08-26  63
+
+  audit remediation E1/E1b admission  (2)
+      2026-08-26  unfiltered
+      2026-08-26  restricted-to-label-population
+
+  research metalabel  (1)
+      2026-08-26  top_k=50,l2=1
+
+  recorded                           61
+  carried from earlier campaigns     20
+  CHARGED BY THE DSR                 81

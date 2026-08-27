@@ -39,11 +39,32 @@ collinear is not estimable, and the near-uniform coefficient band was the model
 saying so. A family with a weaker standalone ICIR can still be the better thing
 to fit one coefficient to.
 
-`risk` is the case worth understanding rather than fixing. Its members correlate
--0.43 within date, so the average CANCELS the common low-risk axis and keeps the
-residual -- which is why it scores 0.177 against max_dd_120's 0.713. That is
-deliberate and famamacbeth.THEME_PRIOR_SIGN documents it. What was wrong was the
-number attached to it, not the design.
+`risk` WAS defended here as "the case worth understanding rather than fixing":
+its members correlate -0.43 within date, so the average cancels the common
+low-risk axis and keeps the residual, which is why it scored 0.177 against
+max_dd_120's 0.713. That defence is now WITHDRAWN, and it is worth recording why
+rather than deleting it.
+
+It was defended on standalone ICIR measured against the BARRIER label. That
+label has since been removed -- it made the target's magnitude proportional to
+each name's volatility, so every ICIR in the table above was measured against a
+target that no longer exists. A design defended on a criterion that has been
+retired is not defended.
+
+Re-examined on construction rather than on a number, the cancellation is not
+defensible either: a high beta rank means RISKIER and a high max_dd rank means a
+SHALLOWER drawdown and therefore SAFER, and both entered with a + sign. Two
+significant signals -- beta alone t -3.67, max_dd alone t +4.69 -- were averaged
+into a composite at t -0.93, which the significance gate then discarded for
+being insignificant. The families exist for ESTIMABILITY, and the whole argument
+for averaging (seventeen coefficients over a collinear set is not estimable)
+does not apply to a PAIR THAT ANTICORRELATES. Those are two different bets.
+
+They are now two themes, `beta` and `drawdown`, with one coefficient each.
+Splitting is also what makes a literature prior claimable: the note in
+famamacbeth.THEME_PRIOR_SIGN correctly refused a Frazzini-Pedersen prior for the
+old composite, because (beta + max_dd)/2 is not the BAB portfolio. A `beta`
+theme on its own is.
 
 Deciding whether a family should be replaced by its best member needs an
 out-of-sample ablation on the BOOK, not a standalone IC table. That experiment
@@ -78,12 +99,50 @@ def test_the_momentum_trio_is_one_family_not_three_coefficients():
     assert set(cm.FAMILIES["mom"]) == {"mom_6_1_r", "prox_52w_r", "resid_mom_r"}
 
 
-def test_the_lottery_family_carries_every_lottery_moment():
-    """MAX alone was -0.00137, second smallest in the live model. India's
-    lottery effect is driven by retail flow and is stronger than the US
-    literature suggests, so the moments are treated as one block."""
+def test_the_lottery_family_is_the_volatility_block_only():
+    """THREE members, not four. India's lottery effect is driven by retail flow
+    and is stronger than the US literature suggests, so the volatility moments
+    are treated as one block -- and Bali, Cakici & Whitelaw (2011) find MAX
+    subsumes idiosyncratic volatility, which is the same statement.
+
+    `idio_skew` was the fourth member until it was measured against the family
+    it was averaged into: rho +0.04 with downside_vol and +0.28 with max5_21,
+    against 0.48-0.68 among the three that remain. It was near-orthogonal to its
+    own family while carrying a quarter of its weight -- a second factor hidden
+    inside a first. Skewness preference is a separate channel and is controlled
+    for separately in that paper.
+    """
     assert set(cm.FAMILIES["lottery"]) == {
-        "max5_21_r", "idio_vol_r", "idio_skew_r", "downside_vol_r"}
+        "max5_21_r", "idio_vol_r", "downside_vol_r"}
+    assert "idio_skew_r" not in cm.FAMILIES["lottery"]
+
+
+def test_skew_is_its_own_theme_rather_than_dropped():
+    """Measured against the real forward return idio_skew reads t -0.94, so it
+    has earned neither a place in `lottery` nor deletion. A single-member theme
+    costs one coefficient, the significance gate is expected to zero it, and a
+    theme that is visible and zeroed is more informative than one that is
+    invisible and diluting its neighbours."""
+    assert cm.FAMILIES["skew"] == ("idio_skew_r",)
+
+
+def test_beta_and_drawdown_are_different_families():
+    """The defect this test exists to prevent recurring. `risk` averaged
+    beta_120_r and max_dd_120_r under a common sign, but a high beta rank is
+    RISKIER while a high max_dd rank is a SHALLOWER drawdown and therefore
+    SAFER. They correlate -0.42 within date, so the average cancelled the axis:
+    beta alone t -3.67 and max_dd alone t +4.69 became a composite at t -0.93,
+    which the |t| >= 2 gate then discarded for being insignificant.
+
+    Families exist for ESTIMABILITY, and two anticorrelated members are not a
+    collinear block."""
+    families = {f: set(m) for f, m in cm.FAMILIES.items()}
+    holding_beta = [f for f, m in families.items() if "beta_120_r" in m]
+    holding_dd = [f for f, m in families.items() if "max_dd_120_r" in m]
+    assert holding_beta == ["beta"]
+    assert holding_dd == ["drawdown"]
+    assert holding_beta != holding_dd
+    assert "risk" not in cm.FAMILIES
 
 
 def test_reversal_stays_out_of_the_momentum_family():

@@ -863,6 +863,28 @@ class EstimatorConfig(_Base):
     #: measures IC +0.0485 here, and pooling hands an imprecise theme nearly the
     #: full prior mean -- a confident coefficient built out of an assumption.
     shrink_toward: str = Field("zero", pattern="^(zero|prior_mean)$")
+    #: Replace the hard |t| >= floor CLIFF with a continuous taper,
+    #: t^2 / (t^2 + c), so |t| = 2 keeps half its weight and |t| = 1 a fifth,
+    #: with a hard zero below `taper_hard_floor` so a theme the window truly
+    #: cannot measure still cannot steer the book.
+    #:
+    #: OFF by default, deliberately. The cliff is a real defect -- it makes a
+    #: coefficient a step function of a noisy statistic, and `risk` sat at
+    #: t +1.86 live and +2.45 on the rebuild, so the same theme is worth either
+    #: nothing or nearly everything depending on which window is asked. But
+    #: turning the taper ON changes live coefficients, which makes it an
+    #: ESTIMATOR CHANGE rather than a correctness fix, and estimator changes are
+    #: trials: PBO is already being charged against 81 of them and the Deflated
+    #: Sharpe already reads 0.000. So the mechanism ships available and unused,
+    #: to be decided by `research estimator` as a recorded comparison rather
+    #: than by whoever edits this file.
+    significance_taper: bool = False
+    #: Curvature of the taper. 4.0 puts the half-weight point exactly at the
+    #: |t| = 2 the cliff used, so the taper is a smoothing of the shipped rule
+    #: rather than a different rule wearing its name.
+    taper_c: float = Field(4.0, gt=0.0, le=100.0)
+    #: Below this the coefficient is zero outright, tapered or not.
+    taper_hard_floor: float = Field(1.0, ge=0.0, le=6.0)
 
 
 class MetaLabelConfig(_Base):

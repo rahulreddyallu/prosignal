@@ -573,12 +573,19 @@ stage1_data_quality:
   # loader enforces it against crosssec.MIN_LOOKBACK rather than trusting the
   # number here to be maintained.
   unexplained_jump_lookback_sessions:
-    value: 260
+    value: 281
     status: STRUCTURAL
     note: >-
-      Must be at least the model's longest feature lookback (prox_52w and
-      resid_mom at 253 sessions). Shorter, and a split outside the window is
-      invisible to validation and fully consumed by the features.
+      Must be at least the model's longest feature lookback. Shorter, and a
+      split outside the window is invisible to validation and fully consumed by
+      the features.
+
+      Raised 260 -> 281 when prox_52w gained a 21-session reversal-avoiding
+      offset. That factor now reads the 252-session high ending one month back,
+      so it needs 273 sessions of history and crosssec.MIN_LOOKBACK moved from
+      253 to 274. The old 260 no longer covered it and the loader's
+      cross-section check refused the config, which is the check working. 281
+      keeps the same 7-session margin over MIN_LOOKBACK that 260 kept over 253.
 
   # --- Market-wide halt conditions ---
   # If more than this fraction of the universe fails stock-level data quality,
@@ -1030,7 +1037,35 @@ stage4_core_score:
   #     1.0/0.75      37%     36%     27%      0.576          34   <- chosen
   #     0.8/0.6       42%     45%     13%      0.682          23
   labels:
-    triple_barrier: true
+    # THE LABEL IS NOT THE TRADE.
+    #
+    # The barrier label's MAGNITUDE is 3 x stop width for a winner and
+    # -1 x stop width for a loser, and the stop is 2.5 x ATR. So for 91% of
+    # rows the label's SIZE is the name's own volatility, and a ranker fitted
+    # on it discovers that volatility predicts the label -- which is true by
+    # construction, not by evidence. Measured: mom fell to t -0.14 while
+    # lottery reached t -6.3, of which 67% survives partialling out the stop
+    # width. A second channel compounds it: 39.5% of labels resolve as thesis
+    # invalidation, so a name that gains 30% over the quarter but dips through
+    # MA50 - 1.5 x ATR in week three is booked as a loss -- momentum's own
+    # drawdown profile, entered into the target with the sign reversed.
+    #
+    # This is NOT an argument against the triple-barrier method. In Lopez de
+    # Prado (2018) the barrier label is a CLASSIFICATION target (-1/0/+1) and
+    # its volatility scaling exists precisely to make that classification
+    # comparable across names of different vol. Using the volatility-scaled
+    # MAGNITUDE as a cross-sectional ranking target reintroduces exactly the
+    # heteroskedasticity the scaling was there to neutralise.
+    #
+    # The engine already enforces its exit geometry where it belongs --
+    # stage7_risk places the stop, stage6_entry holds the rank band, and
+    # exits.resolve_exits scores the outcome. The RANKER does not also need to
+    # predict it.
+    #
+    # Measured on the rebuilt panel (49 dates, ~24,500 rows) against the real
+    # 63-session forward return: rank IC +0.0262 -> +0.0668, t +1.00 -> +4.15;
+    # top-decile excess -0.92% -> +1.00% per period.
+    triple_barrier: false
     # WHERE THE BARRIERS COME FROM.
     #
     # "engine" derives them from the stop and target Stage 7 actually places --
@@ -1058,8 +1093,33 @@ stage4_core_score:
     # Weight each training row by how much of its outcome window it holds
     # alone. A 63-session label sampled every 21 shares two thirds of its span
     # with its neighbour, so an unweighted fit counts one market shock once per
-    # overlapping row. Measured on this panel: mean uniqueness 0.576, so ~33,000
-    # rows carry about 19,000 independent-equivalent observations.
+    # overlapping row. Measured under the barrier label: mean uniqueness 0.576,
+    # so ~33,000 rows carried about 19,000 independent-equivalent observations.
+    #
+    # INERT ON THE SHIPPED PATH, for two independent reasons. Stating both
+    # because either one alone would invite the wrong fix.
+    #
+    # 1. `fit_coefficients` forwards `weights` only on the RIDGE branch.
+    #    `fama_macbeth()` never receives them and `_ols_slopes` is a plain
+    #    unweighted lstsq, so under `estimator.method: fama_macbeth` -- what
+    #    ships -- these weights reach nothing. Only the ridge arm and the
+    #    meta-label fit read them.
+    #
+    # 2. More fundamentally, there is now nothing for them to weight. Since
+    #    `triple_barrier: false` every label runs the full horizon, so
+    #    `build_panel` assigns held = 63 to every row, and uniqueness is
+    #    computed WITHIN a symbol over identically-shaped spans. Measured on a
+    #    rebuilt panel the within-date standard deviation of uniqueness is
+    #    exactly 0.000 on every date. A per-date WLS is therefore arithmetically
+    #    identical to the per-date OLS already being run.
+    #
+    # So implementing WLS in famamacbeth._ols_slopes would be a provable no-op,
+    # not an improvement. Uniqueness varied by name only while the barrier label
+    # let trades resolve early. Newey-West on the slope series already charges
+    # for the time-series overlap, which is the part that still exists.
+    #
+    # Left TRUE rather than flipped, because it is read and honoured on the
+    # ridge and meta-label paths and flipping it would change those.
     uniqueness_weighting: true
 
   # HOW THE THEME COEFFICIENTS ARE ESTIMATED.
@@ -1097,6 +1157,29 @@ stage4_core_score:
     significance_floor: 2.0
     window_dates: null
     shrink_toward: zero
+    # THE SIGNIFICANCE CLIFF, AND WHY THE SMOOTHING IS OFF.
+    #
+    # `gated_shrink` zeroes any theme below |t| 2.0 and keeps the rest near full
+    # strength. That makes a traded coefficient a STEP FUNCTION of a noisy
+    # statistic: `risk` measured t +1.86 on the live fit and +2.45 on the
+    # 69-date rebuild, so one theme was worth either exactly nothing or nearly
+    # its full coefficient depending only on which window was asked. Seven
+    # themes are re-tested every 21 sessions and each re-test is another look.
+    #
+    # The continuous form below is the standard answer -- weight by
+    # t^2 / (t^2 + c), which is the shape empirical-Bayes shrinkage already
+    # takes -- with c = 4.0 putting the half-weight point exactly at |t| = 2 so
+    # it smooths the shipped rule rather than replacing it, and a hard zero
+    # below |t| = 1 so an unmeasurable theme still cannot steer the book.
+    #
+    # It ships OFF. The argument for it is structural, but switching it on
+    # CHANGES LIVE COEFFICIENTS, which makes it an estimator change and
+    # therefore a trial -- and the DSR is already charging 81 trials and
+    # reading 0.000. Decide it with `research estimator` as a recorded
+    # comparison, not by editing this line.
+    significance_taper: false
+    taper_c: 4.0
+    taper_hard_floor: 1.0
 
   # THE NO TRADE VETO -- disabled, and the reason is measured.
   #
@@ -1277,7 +1360,12 @@ stage5_false_signal:
     action: "hard_reject"
 
   gap_signal:
-    enabled: true
+    # DOUBLE COUNT, disabled. gap/ATR correlates +0.88 with idio_vol, which the
+    # `lottery` theme already prices with a fitted coefficient. Subtracting a
+    # hand-set 0.12 on top of that is an effective loading nobody estimated,
+    # and pushing a loading past its estimated optimum strictly LOWERS expected
+    # out-of-sample IC. Double-counting is not the conservative choice.
+    enabled: false
     # Overnight gap larger than this many ATRs is treated as gap-driven.
     max_gap_atr_multiple:
       value: 1.5
@@ -1294,7 +1382,10 @@ stage5_false_signal:
       search_range: [0.0, 0.4]
 
   news_spike:
-    enabled: true
+    # DOUBLE COUNT, disabled. rho +0.81 with the `lottery` theme, which the fit
+    # already prices. See gap_signal above for why doubling a priced factor is
+    # not conservative.
+    enabled: false
     # Big move + big volume + NO scheduled event on the calendar = unexplained.
     move_sigma:
       value: 3.0
@@ -1317,7 +1408,23 @@ stage5_false_signal:
       search_range: [0.0, 0.4]
 
   beta_explained_move:
-    enabled: true
+    # SIGN CONFLICT, resolved in favour of the estimator.
+    #
+    # This check imposed a hand-set NEGATIVE beta tilt worth up to 0.20 of a
+    # 0.35 penalty budget -- the largest single penalty in the stage -- while
+    # the fitted model measured beta's slope as POSITIVE (risk t +1.86 live,
+    # +2.45 on the 69-date rebuild) and declined to price it. Two layers of the
+    # same engine took opposite positions on the same factor.
+    #
+    # Resolved by pricing beta in the model instead: `beta` is now its own
+    # theme (see crossmodel.FAMILIES) carrying a Frazzini-Pedersen prior of -1,
+    # supported in this market by Agarwalla, Jacob, Varma & Vasudevan (2014),
+    # who find BAB earns significant positive returns in India and dominates
+    # size, value and momentum. If the fit prices it, the low-beta tilt is
+    # carried on measured evidence and this hand-set version is redundant; if
+    # the fit declines to, that is the estimator's answer and overriding it
+    # with a constant is a position taken without measuring it.
+    enabled: false
     # Regress stock returns on market (and sector) over this window; if the
     # move is mostly beta, it is not a stock-specific signal.
     lookback_sessions:
@@ -1341,7 +1448,10 @@ stage5_false_signal:
 
   # ---- 5.2 Continuation vs reversal ----
   overextension:
-    enabled: true
+    # DOUBLE COUNT, disabled. This IS the `reversal` theme -- rho +1.00 with
+    # resid_reversal, which the model prices directly and negatively. The check
+    # restates a fitted coefficient as a hand-set constant.
+    enabled: false
     short_horizon_sessions:
       value: 5
       status: UNVALIDATED

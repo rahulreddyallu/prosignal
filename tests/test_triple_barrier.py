@@ -232,21 +232,47 @@ def test_without_a_barrier_spec_the_panel_keeps_the_horizon_label():
     assert (panel["held"] == 63).all()
 
 
-# ------------------------------------------------------ calibration is real
-def test_the_configured_widths_are_the_ones_that_were_calibrated():
-    """Measured on the real universe over 91 panel dates:
+# --------------------------------------------- the geometry is NOT the label
+def test_the_barrier_label_is_not_what_the_ranker_is_fitted_on():
+    """The barrier geometry was calibrated, measured, and then REMOVED from the
+    training label. This assertion previously read `is True`; it encoded a
+    decision that has since been reversed, and the reversal is the point.
+
+    The calibration was real. Measured on the real universe over 91 panel dates:
 
         upper/lower   target   stop  timeout   uniqueness   median hold
           2.0/1.5       14%     10%     76%      0.404          63
           1.0/0.75      37%     36%     27%      0.576          34   <- chosen
 
     At 2.0/1.5 three quarters of labels time out and the label collapses back to
-    the horizon return it exists to replace.
+    the horizon return it exists to replace. That table is why 1.0/0.75 was
+    chosen and it is still true.
+
+    What the calibration could not see is that the label's MAGNITUDE is
+    3 x stop width for a winner and -1 x stop width for a loser, and the stop is
+    2.5 x ATR -- so for 91% of rows the label's size IS the name's volatility.
+    Fitting a cross-sectional ranker on it prices volatility and de-prices
+    momentum: mom fell to t -0.14 while lottery reached t -6.3. Against the real
+    63-session forward return the shipped configuration scored rank IC +0.0262
+    (t +1.00) with a top-decile excess of -0.92%; with the label switched off,
+    +0.0668 (t +4.15) and +1.00%.
+
+    In Lopez de Prado (2018) the barrier label is a CLASSIFICATION target and
+    its volatility scaling exists to make that classification comparable across
+    names. Using the scaled magnitude as a ranking target puts the
+    heteroskedasticity back.
+
+    The geometry itself is untouched and still enforced where it belongs:
+    stage7_risk places the stop, stage6_entry holds the exit band, and
+    exits.resolve_exits scores the outcome. The sigma parameters stay in the
+    config, inert, documenting what was tried.
     """
     from prosignal.config.loader import load_config
 
     lab = load_config().params.stage4_core_score.labels
-    assert lab.triple_barrier is True
+    assert lab.triple_barrier is False
+    # Inert while triple_barrier is false, and kept so the calibrated geometry
+    # stays on the record rather than being silently dropped.
     assert lab.upper_sigma == pytest.approx(1.0)
     assert lab.lower_sigma == pytest.approx(0.75)
     assert lab.uniqueness_weighting is True

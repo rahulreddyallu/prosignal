@@ -1,0 +1,79 @@
+22:15:06 INFO     data.universe                liquidity universe resolved
+────────────────────────────── Building the panel ──────────────────────────────
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+22:18:59 INFO     features.crossmodel          factor dropped: absent for too much of the panel
+  27,162 rows over 69 dates
+  label: engine exits (2.5x ATR stop, 3R target, invalidation, 63-session cap)
+  fitting 5 famil(y/ies): mom_f, reversal_f, lottery_f, risk_f, delivery_f
+  12 factor(s) dropped on coverage
+─────────────────────────────── CPCV  N=10  k=3 ────────────────────────────────
+  split 20/120
+  split 40/120
+  split 60/120
+  split 80/120
+  split 100/120
+  split 120/120
+22:19:03 INFO     validation.harness           cpcv complete
+   Out-of-sample path distribution   
+┏━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┓
+┃ metric                 ┃ value    ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━┩
+│ splits fitted          │ 120      │
+│ paths woven            │ 36 of 36 │
+│ observations purged    │ 756      │
+│ observations embargoed │ 252      │
+│ pooled rank IC         │ +0.2095  │
+│ path Sharpe -- min     │ -0.24    │
+│ path Sharpe -- median  │ -0.20    │
+│ path Sharpe -- max     │ -0.14    │
+│ path Sharpe -- sd      │ 0.03     │
+│ paths below zero       │ 100%     │
+└────────────────────────┴──────────┘
+──────────────────── What this result is being charged for ─────────────────────
+  research spread                18 configuration(s) compared
+  research cpcv (pbo)            11 configuration(s) compared
+  research estimator              5 configuration(s) compared
+  research volscale               5 configuration(s) compared
+  audit remediation E2 exit band    5 configuration(s) compared
+  audit remediation E5 label x book    4 configuration(s) compared
+  audit remediation E8 stage5 penalties    4 configuration(s) compared
+  audit remediation E3/E4 label target    3 configuration(s) compared
+  audit remediation E7 label horizon    3 configuration(s) compared
+  audit remediation E1/E1b admission    2 configuration(s) compared
+  research metalabel              1 configuration(s) compared
+  carried from earlier campaigns   20
+  CHARGED                        81
+
+  pooled top-decile excess -0.56% per 63-session period, over 2,484 scored test 
+dates
+  Deflated Sharpe 0.000 charging 81 trials -- FAIL
+  worst of 36 paths: Sharpe -0.24; 100% of paths below zero
+  significance bar in config: t >= 3.0; PBO for promotion to VALIDATED: <= 50%
+
+  No t-statistic is quoted, for either the pooled observations or the paths. A 
+test date appears in many splits, and the paths are fitted on heavily 
+overlapping training sets over one shared calendar, so neither is a sample of 
+independent experiments and a t from either is inflated. What CPCV honestly 
+gives is the SPREAD: where the worst path landed, and how much of the 
+distribution sits below zero.
+───────────────────── Probability of Backtest Overfitting ──────────────────────
+  2 configuration(s) the estimator refused outright and could never have been 
+chosen: mom alone, risk alone
+  36 dates scored by all 11 configurations, S=16
+  PBO 33% -- PASS against the 50% bar for promotion to VALIDATED
+
+  PBO is the share of symmetric train/test splits where the
+  configuration that won in-sample landed BELOW the median
+  out-of-sample. A high figure is an instruction to
+  simplify, not to keep searching for a configuration that
+  happens to score better.
