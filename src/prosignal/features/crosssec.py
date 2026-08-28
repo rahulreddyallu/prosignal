@@ -186,11 +186,51 @@ def _features_at(
         # rather than vanishing, so the column is always present for the model.
         if bvar > 1e-12:
             beta_m = win.mul(bc, axis=0).mean() / bvar
-            resid = win.sub(np.outer(b, beta_m.to_numpy()), fill_value=np.nan)
+            # THE REGRESSION HAS AN INTERCEPT. It did not: the residual was
+            # `r - beta*b` with `b` in raw form, so its mean over the window is
+            # the name's own alpha and every subsequent sum accumulates 231
+            # copies of it. What was called "residual momentum" was therefore
+            # raw momentum with a beta-times-market term removed -- the name's
+            # drift, which is the component the construction exists to strip,
+            # survived in full.
+            #
+            # With an intercept, eps = (r - rbar) - beta*(b - bbar), which is
+            # the textbook OLS residual and is mean-zero over the estimation
+            # window by construction. The estimation window (756 sessions) is
+            # deliberately longer than the momentum window (231), exactly as in
+            # the cited paper, so the sub-window sum is not forced to zero.
+            #
+            # A CONSEQUENCE WORTH STATING. With an intercept, a name whose
+            # residual drifts at a constant rate across the whole estimation
+            # window has that drift absorbed into alpha and scores zero. The
+            # factor prices RECENT residual out-performance against the name's
+            # own long-run norm, which is what the paper intends and what the
+            # no-intercept version could not express.
+            resid = (win.sub(win.mean(axis=0), axis=1)
+                        .sub(np.outer(bc, beta_m.to_numpy())))
             resid.columns = win.columns
             # 252 to 21 sessions back, off the tail, whatever the window holds.
             mom_win = resid.tail(252)
-            out["resid_mom"] = mom_win.iloc[:-21].sum(axis=0)
+            formation = mom_win.iloc[:-21]
+            # STANDARDISED BY THE RESIDUAL'S OWN DISPERSION over the same
+            # formation window. Blitz, Huij & Martens (2011) divide the
+            # cumulative residual by the standard deviation of the residual
+            # returns over that period; omitting it left the factor scaling
+            # with volatility, which pulled it into the lottery block it is
+            # supposed to be orthogonal to.
+            f_sd = formation.std(ddof=1)
+            # A name that is EXACTLY a linear function of the market has no
+            # residual to accumulate and no dispersion to divide by: the
+            # standardised factor is 0/0 and its honest value is undefined, not
+            # a large number produced by float noise. The test is dimensionless
+            # -- residual dispersion as a fraction of the name's own -- so it
+            # catches numerical degeneracy without imposing a scale. Real names
+            # sit around R^2 = 0.3; only an exact multiple of the index reaches
+            # this branch.
+            raw_sd = win.tail(252).iloc[:-21].std(ddof=1)
+            degenerate = ~(f_sd > 1e-10 * raw_sd.abs())
+            out["resid_mom"] = (formation.sum(axis=0)
+                                / f_sd.mask(degenerate | (f_sd == 0.0)))
 
             # -- the rest of the residual block ---------------------------
             # One regression, four factors. Everything below is a moment of the
