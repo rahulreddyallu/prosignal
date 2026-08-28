@@ -991,3 +991,50 @@ class TestTheReadmeAgreesWithHead:
         r = self._readme()
         for claim in ("−4.23%", "−0.83", "information ratio"):
             assert claim in r, f"the README does not state {claim}"
+
+
+# =============================================================================
+# C5 -- the forward test must ask the question the audit turned on
+# =============================================================================
+class TestForwardTestIsBenchmarkRelative:
+    """The first registration had no benchmark-relative hypothesis, and
+    neither did any other code path in the repository: every economic
+    conclusion was stated against zero. Adding one is legitimate only because
+    the window has not opened."""
+
+    def test_a_tertiary_benchmark_hypothesis_exists(self):
+        import datetime as dt
+        import tempfile
+        from pathlib import Path
+        from prosignal.validation.forward import register
+        with tempfile.TemporaryDirectory() as d:
+            reg = register(Path(d), config_version="v", engine_version="e",
+                           git_commit="c", started_on=dt.date(2026, 1, 1))
+        assert reg.tertiary, "there is no benchmark-relative hypothesis"
+        t = reg.tertiary.upper()
+        assert "EQUAL-WEIGHT" in t and "EXCESS" in t
+        assert "expected to FAIL" in reg.tertiary, (
+            "the registration must state the prior honestly; a forward test "
+            "whose outcome is not in doubt is not a test")
+
+    def test_the_hypotheses_are_inside_the_fingerprint(self):
+        """Otherwise a criterion could be edited after the result lands."""
+        import datetime as dt
+        import tempfile
+        from pathlib import Path
+        from dataclasses import replace
+        from prosignal.validation.forward import register
+        with tempfile.TemporaryDirectory() as d:
+            reg = register(Path(d), config_version="v", engine_version="e",
+                           git_commit="c", started_on=dt.date(2026, 1, 1))
+        assert replace(reg, tertiary="anything else").fingerprint() != reg.fingerprint()
+
+    def test_an_unavailable_benchmark_voids_the_window(self):
+        import datetime as dt
+        import tempfile
+        from pathlib import Path
+        from prosignal.validation.forward import register
+        with tempfile.TemporaryDirectory() as d:
+            reg = register(Path(d), config_version="v", engine_version="e",
+                           git_commit="c", started_on=dt.date(2026, 1, 1))
+        assert any("benchmark" in i.lower() for i in reg.invalidation)
