@@ -58,11 +58,23 @@ def test_it_finds_a_signal_that_is_there():
 
 
 def test_it_does_not_find_a_signal_that_is_not_there():
-    """Guards the guard. A harness that always reports an edge is worthless."""
+    """Guards the guard. A harness that always reports an edge is worthless.
+
+    There are two acceptable answers on shuffled labels and REFUSAL is the
+    stronger one: under the gated estimator, noise produces no theme that clears
+    the significance floor, so no split yields tradeable coefficients and there
+    is no IC to report. Before the analytic overlap inflation was wired into the
+    gate, the weaker standard error let noise clear |t| >= 2 often enough to
+    produce a number -- a small one, which the old assertion accepted.
+    """
     panel = _panel()
     panel["label_rank"] = np.random.default_rng(7).permutation(panel["label_rank"].to_numpy())
     panel["label"] = np.random.default_rng(8).permutation(panel["label"].to_numpy())
     r = run_cpcv(panel, FEATURES, **KW)
+    if not r.ic:
+        assert r.notes, "a harness that scored nothing must say why"
+        assert any("no tradeable coefficients" in n for n in r.notes)
+        return
     assert abs(r.mean_ic) < 0.05, f"found IC {r.mean_ic} in shuffled labels"
 
 
@@ -96,9 +108,19 @@ def test_the_configuration_matrix_scores_every_column_on_one_index():
         step_sessions=21, alpha=100.0, purge_sessions=63,
         min_train_dates=10, min_train_rows=200,
     )
-    assert list(m.columns) == ["both", "signal_only", "noise_only"]
+    # A configuration the ESTIMATOR REFUSES is not one anybody could have
+    # chosen, so it is dropped and NAMED rather than left as an empty column --
+    # one empty column plus a row-wise dropna deletes every date for every other
+    # arm. `noise_only` is refused here, which is the correct answer: a
+    # single-theme arm built on noise never clears the significance floor.
+    assert "both" in m.columns and "signal_only" in m.columns
     assert not m.isna().any().any(), "a ragged matrix would bias the PBO ranking"
-    assert m["signal_only"].mean() > m["noise_only"].mean()
+    dropped = m.attrs.get("dropped_configurations") or []
+    if "noise_only" in m.columns:
+        assert m["signal_only"].mean() > m["noise_only"].mean()
+    else:
+        assert "noise_only" in dropped, (
+            "a refused configuration must be named, not silently absent")
 
 
 # =============================================================================

@@ -40,7 +40,8 @@ import json
 
 from ..core.logging import get_logger
 from ..core.memory import release_memory
-from .crosssec import FEATURES, MIN_LOOKBACK, build_panel
+from .crosssec import (FEATURES, LIVE_HISTORY_SESSIONS, MIN_LOOKBACK, build_panel,
+                       features_for_date)
 from .exits import ExitRules, rules_from_config
 from .labels import BarrierSpec
 from .fundamental_factors import available_as_of, build_fundamental_panel, winsorise
@@ -1071,6 +1072,26 @@ def fit_coefficients(
              "intercept": float(y.mean())}, fm, None)
 
 
+def _admissible_frame(close, high, low, rules):
+    """Which names are above their own invalidation level, per date.
+
+    ``rules`` is an `ExitRules`; without high/low there is no ATR and the
+    predicate cannot be formed, so every name is admitted and the caller is
+    left where it was. An UNKNOWN level admits -- the early bars have no
+    50-session average yet and excluding them would shorten the panel for
+    everyone. Live admission is stricter and refuses the unknown.
+    """
+    if rules is None or high is None or low is None:
+        return None
+    from .exits import atr_panel, ma_panel, tradeable_at_entry
+
+    atr = atr_panel(high, low, close, rules.atr_period_sessions, rules.atr_method)
+    ma = ma_panel(close, rules.invalidation_ma_sessions)
+    ok = tradeable_at_entry(close, ma, atr, rules)
+    unknown = ~(np.isfinite(ma) & np.isfinite(atr))
+    return (ok | unknown).fillna(True)
+
+
 def fit_predict(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -1089,6 +1110,12 @@ def fit_predict(
     actions: Optional[pd.DataFrame] = None,
     barriers: Optional["BarrierSpec"] = None,
     exit_rules: Optional["ExitRules"] = None,
+    #: The engine's exit geometry, used for the ADMISSIBILITY predicate. Kept
+    #: separate from `exit_rules` because that one selects the LABEL: the
+    #: population the engine can open from does not change when the label does,
+    #: and coupling them is what let the barrier repair silently remove the
+    #: predicate from training while Stage 6 went on enforcing it.
+    exit_geometry: Optional["ExitRules"] = None,
     open_: Optional[pd.DataFrame] = None,
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
@@ -1134,12 +1161,34 @@ def fit_predict(
     # model exists to avoid.
     train_close = hist.iloc[: len(hist) - H]
     train_turnover = turnover.reindex(train_close.index)
+    tr_high = high.reindex(train_close.index) if high is not None else None
+    tr_low = low.reindex(train_close.index) if low is not None else None
+    tr_open = open_.reindex(train_close.index) if open_ is not None else None
+
+    # THE POPULATION THE ENGINE CAN OPEN FROM, applied to the panel so that a
+    # rank means the same thing in training and at the decision. Stage 6 refuses
+    # a name already below its own invalidation level; while the label was a
+    # triple barrier `resolve_exits` applied the same predicate to the panel and
+    # the two agreed. Turning the barrier off removed it from training only.
+    #
+    # Chosen by measurement, not assumption. Ranking over the admissible set
+    # against ranking over everything and letting Stage 6 refuse, out of sample
+    # over 70 common dates, the book the engine would actually OPEN returned:
+    #
+    #     rank over eligible, Stage 6 refuses   +5.90%  (+1.22% vs benchmark)
+    #     rank over admissible only             +6.50%  (+1.82% vs benchmark)
+    #     equal-weight eligible universe        +4.68%
+    #
+    # +0.60% per period in B's favour at t +0.61 -- not significant, and it is
+    # not why the change is made. It is made because ranking a population 23% of
+    # which cannot be bought is incoherent, and the measurement establishes that
+    # coherence costs nothing.
+    admissible = _admissible_frame(train_close, tr_high, tr_low, exit_geometry)
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
                         delivery=delivery, eligible=eligible, sectors=sectors,
                         barriers=barriers, exit_rules=exit_rules,
-                        high=(high.reindex(train_close.index) if high is not None else None),
-                        low=(low.reindex(train_close.index) if low is not None else None),
-                        open_=(open_.reindex(train_close.index) if open_ is not None else None))
+                        high=tr_high, low=tr_low, open_=tr_open,
+                        admissible=admissible)
     features: List[str] = []
     dropped: Dict[str, float] = {}
     member_features: List[str] = []
@@ -1209,10 +1258,24 @@ def fit_predict(
                  if score_symbols is not None else list(hist.columns))
     if not live_cols:
         return None, None, "no eligible symbol survived into the scoring universe"
-    live_hist = hist[live_cols].tail(MIN_LOOKBACK + 5)
-    live = build_panel(live_hist,
-                       turnover.reindex(hist.index)[live_cols].tail(MIN_LOOKBACK + 5),
-                       horizon=1, step=21, delivery=delivery, sectors=sectors)
+    live_hist = hist[live_cols].tail(LIVE_HISTORY_SESSIONS)
+    # The SAME predicate the panel was masked with, for the decision date. Ranks
+    # are then taken over the population Stage 6 will admit from.
+    live_adm = None
+    if exit_geometry is not None and high is not None and low is not None:
+        _a = _admissible_frame(live_hist,
+                               high.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
+                               low.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
+                               exit_geometry)
+        if _a is not None and len(_a):
+            live_adm = _a.iloc[-1]
+    # THE DECISION DATE, not four sessions before it. `build_panel` is a
+    # training-panel builder whose loop stops a horizon short of the end, so it
+    # could never reach the last row -- see `crosssec.features_for_date`.
+    live = features_for_date(
+        live_hist,
+        turnover.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
+        delivery=delivery, sectors=sectors, admissible=live_adm)
     if live.empty:
         return None, None, "features could not be computed for the decision date"
     live = _attach_fundamentals(live, fundamentals, live_hist,
@@ -1368,11 +1431,13 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
     model scores today without the large historical read.
     """
     ts = pd.Timestamp(as_of)
-    hist = close[close.index <= ts].tail(MIN_LOOKBACK + 5)
+    hist = close[close.index <= ts].tail(LIVE_HISTORY_SESSIONS)
     if len(hist) < MIN_LOOKBACK:
         return None
-    live = build_panel(hist, turnover.reindex(hist.index), horizon=1, step=21,
-                       delivery=delivery, sectors=sectors)
+    # The LAST row of `hist`, which is `as_of`. Routing this through
+    # `build_panel` scored a date four sessions earlier on every run.
+    live = features_for_date(hist, turnover.reindex(hist.index),
+                             delivery=delivery, sectors=sectors)
     if live.empty:
         return None
     live = _attach_fundamentals(live, fundamentals, hist,

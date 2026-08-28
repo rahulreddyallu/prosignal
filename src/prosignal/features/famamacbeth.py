@@ -146,13 +146,39 @@ class FMResult:
                f"Newey-West {self.nw_lags} lags: {parts}"
 
 
-def newey_west_se(series: np.ndarray, lags: int) -> float:
+def newey_west_se(series: np.ndarray, lags: int,
+                  horizon_sessions: Optional[int] = None,
+                  step_sessions: Optional[int] = None) -> float:
     """Standard error of the MEAN of an autocorrelated series.
 
     Bartlett kernel, per Newey & West (1987). With overlapping labels the slope
     series is positively autocorrelated, so the naive s/sqrt(T) understates the
     true sampling error -- consecutive slopes are partly the same observation
     seen twice.
+
+    THE ESTIMATE IS NOT ENOUGH HERE, AND THIS MODULE USED TO PRETEND IT WAS.
+    When the sampling scheme is known, the inflation it induces is arithmetic
+    rather than something to estimate: an h-session label sampled every s has
+    rho_k = (m-k)/m for k < m = h/s, before any real serial dependence.
+    `validation.significance.analytic_vif` derives it and documents that the
+    estimated version recovers only 1.74 where the arithmetic gives 3.00 at
+    small n -- and every REPORTED figure in this repository already uses the
+    analytic one.
+
+    The gate that decides which themes are traded did not. Measured on the
+    shipped 83-date slope series the estimator recovered 1.44 to 1.99 against an
+    analytic 2.97, and the difference decides a theme:
+
+        theme         lambda   NW2 t   analytic t   gate at |t| >= 2
+        mom_f        +0.0764   +4.12       +3.27    keep -> keep
+        delivery_f   +0.0474   +4.77       +3.34    keep -> keep
+        lottery_f    -0.0455   -2.26       -1.72    keep -> KILL
+        skew_f       -0.0190   -1.84       -1.46    kill -> KILL
+
+    Passing ``horizon_sessions`` and ``step_sessions`` takes the LARGER of the
+    two inflations -- a series with real serial dependence on top of the
+    scheme's own overlap deserves the bigger penalty, and the arithmetic floor
+    stops a short sample from estimating the penalty away.
     """
     x = np.asarray(series, dtype="float64")
     x = x[np.isfinite(x)]
@@ -161,6 +187,8 @@ def newey_west_se(series: np.ndarray, lags: int) -> float:
         return float("nan")
     d = x - x.mean()
     gamma0 = float(d @ d) / t
+    if gamma0 <= 0:
+        return 0.0
     total = gamma0
     for lag in range(1, min(lags, t - 1) + 1):
         cov = float(d[lag:] @ d[:-lag]) / t
@@ -170,7 +198,11 @@ def newey_west_se(series: np.ndarray, lags: int) -> float:
     # returning a nan and silently dropping the theme from inference.
     if total <= 0:
         total = gamma0
-    return math.sqrt(total / t)
+    vif = total / gamma0
+    if horizon_sessions and step_sessions:
+        from ..validation.significance import analytic_vif
+        vif = max(vif, analytic_vif(int(horizon_sessions), int(step_sessions), t))
+    return math.sqrt(gamma0 * vif / t)
 
 
 def _ols_slopes(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
@@ -246,7 +278,10 @@ def fama_macbeth(
     for c in cols:
         s = slopes[c].to_numpy("float64")
         mean = float(np.nanmean(s))
-        se = newey_west_se(s, lags)
+        # The sampling scheme is passed, so the standard error carries the
+        # analytic overlap inflation as a floor rather than trusting what a
+        # short slope series can estimate. See `newey_west_se`.
+        se = newey_west_se(s, lags, horizon_sessions=horizon, step_sessions=step)
         result.lam[c] = mean
         result.se[c] = se
         result.t_stat[c] = float(mean / se) if se and np.isfinite(se) and se > 0 else float("nan")

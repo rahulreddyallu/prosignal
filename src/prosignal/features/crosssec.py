@@ -21,7 +21,8 @@ from .exits import ExitRules, atr_panel, ma_panel
 from .labels import (BarrierSpec, average_uniqueness, engine_barrier,
                      triple_barrier)
 
-__all__ = ["FEATURES", "build_panel", "cross_sectional_rank",
+__all__ = ["FEATURES", "build_panel", "features_for_date",
+           "cross_sectional_rank",
            "liquidity_mask", "sector_neutral_rank", "MIN_SECTOR_NAMES",
            "BarrierSpec"]
 
@@ -278,6 +279,12 @@ def cross_sectional_rank(s: pd.Series) -> pd.Series:
     return (r - 0.5) * 2.0
 
 
+#: Distinguishes "the caller has no adjustment factors" from "the caller forgot
+#: to pass them". The price floor is a look-ahead trap when it is applied to a
+#: back-adjusted series, and a silent default is how it stayed one.
+NO_ADJUSTMENT = object()
+
+
 def liquidity_mask(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -287,6 +294,7 @@ def liquidity_mask(
     max_names: int,
     min_history_sessions: int,
     min_price_inr: float,
+    adj_factor: object = NO_ADJUSTMENT,
 ) -> pd.DataFrame:
     """Which names the liquidity screen would have admitted on each date.
 
@@ -320,9 +328,28 @@ def liquidity_mask(
     # here would apply a stricter screen to training than to the decision.
     adtv = turnover.rolling(int(lookback_sessions), min_periods=1).median()
     listed = close.notna().cummax().cumsum()
+
+    # THE PRICE FLOOR IS A TRADEABILITY TEST AND MUST READ THE QUOTED PRICE.
+    # `close` is back-adjusted on every store read, so a name that traded at
+    # Rs 200 in 2019 and later split 1:20 reads Rs 10 on that 2019 date and
+    # fails a floor it comfortably cleared at the time. Membership in a past
+    # universe then depends on a corporate action nobody had announced yet.
+    #
+    # Measured against the raw bhavcopy close over 3,848,322 (date, symbol)
+    # cells: 58,411 excluded that the raw series admits, across 165 symbols, and
+    # ZERO in the other direction. 4,905 of them clear every other floor, so the
+    # universe genuinely grows -- ADANIPOWER, BEL, CANBK, ASHOKLEY among them.
+    # The bias runs one way and removes names that later split.
+    #
+    # `adj_factor` multiplies PRE-ex-date prices (0.5 for a 1:1 bonus), so the
+    # quoted price is the adjusted one divided by it.
+    price = close
+    if adj_factor is not NO_ADJUSTMENT and adj_factor is not None:
+        fac = adj_factor.reindex(index=close.index, columns=close.columns)
+        price = close.divide(fac.where(fac > 0))
     ok = (
         (adtv >= float(min_adtv_inr))
-        & (close >= float(min_price_inr))
+        & (price >= float(min_price_inr))
         & (listed >= int(min_history_sessions))
     )
     # The cap is a ranking, so it has to be applied per date rather than
@@ -368,6 +395,108 @@ def sector_neutral_rank(
         out.loc[idx] = cross_sectional_rank(values.loc[idx])
     return out
 
+#: How much history the LIVE feature row reads. `resid_reversal` standardises by
+#: the trailing residual dispersion over REVERSAL_STD_WINDOW where it exists, so
+#: a live row built off MIN_LOOKBACK sessions computes a different statistic from
+#: the training rows it is scored against. Ranking is cross-sectional and absorbs
+#: most of that, but "most" is not "all" and the fix costs one wider read.
+LIVE_HISTORY_SESSIONS = max(MIN_LOOKBACK, REVERSAL_STD_WINDOW) + 1
+
+
+def features_for_date(
+    close: pd.DataFrame,
+    turnover: pd.DataFrame,
+    delivery: Optional[pd.DataFrame] = None,
+    sectors: Optional[Dict[str, str]] = None,
+    min_names: int = 40,
+    eligible: Optional[pd.Series] = None,
+    admissible: Optional[pd.Series] = None,
+) -> pd.DataFrame:
+    """The feature row for the LAST session in ``close``. One date, no label.
+
+    WHY THIS EXISTS. Both live scoring paths used to reach the decision date
+    through `build_panel`:
+
+        live_hist = hist.tail(MIN_LOOKBACK + 5)              # 279 rows
+        live      = build_panel(live_hist, horizon=1, step=21)
+
+    `build_panel` is a TRAINING panel builder. Its loop is
+
+        for i in range(MIN_LOOKBACK, len(dates) - horizon, step)
+
+    and the `- horizon` bound exists to guarantee every row has a label. On a
+    279-row frame with horizon=1 and step=21 the only reachable i is 274, which
+    is FOUR ROWS BEFORE THE END -- and at any horizon >= 1 the bound makes the
+    last row structurally unreachable. Verified live: a run as_of 2026-08-25
+    scored features dated 2026-08-19.
+
+    Measured over 88 panel dates, the cost of that staleness was small
+    statistically (rank IC +0.0751 -> +0.0730, top-decile excess +0.98% ->
+    +0.83%, both inside the noise band) and large operationally: only 64% of the
+    top eight names agreed with the top eight the same model produces on the
+    decision date. Roughly three names on every card were four sessions old,
+    priced at today's close with today's ATR stop attached.
+
+    A decision row wants no label, no stride and no forward bound, so it does not
+    go through a builder that has all three. The ranking columns are built by the
+    SAME `_features_at` and the SAME `sector_neutral_rank` the panel uses, so
+    training and inference cannot drift apart in definition.
+
+    ``eligible`` is the screen for THIS date, as a boolean Series over symbols.
+    ``admissible`` narrows the ROWS further -- to the names Stage 6 can open --
+    without narrowing the BENCHMARK. The two are deliberately separate: in
+    `build_panel` the equal-weight market is `close.where(eligible)`, computed
+    before the admissibility mask, so folding both into one argument here would
+    measure beta and residual momentum against a different market live than in
+    training. That mismatch was introduced while fixing the population and caught
+    by re-reading the fix against the builder it has to match.
+    """
+    if close.empty or len(close.index) == 0:
+        return pd.DataFrame()
+    i = len(close.index) - 1
+    if i < MIN_LOOKBACK:
+        return pd.DataFrame()
+
+    # THE MARKET, from the eligible universe only -- exactly as `build_panel`
+    # forms it. Never narrowed by `admissible`.
+    #
+    # Broadcast to a frame rather than passing the Series to `where(axis=1)`:
+    # that overload raises on a column-indexed condition, which made the
+    # eligible-benchmark path a latent crash.
+    if eligible is None:
+        bench_src = close
+    else:
+        col_ok = eligible.reindex(close.columns).fillna(False).to_numpy(dtype=bool)
+        bench_src = close.where(pd.DataFrame(
+            np.broadcast_to(col_ok, close.shape),
+            index=close.index, columns=close.columns))
+    bench = bench_src.mean(axis=1).pct_change(fill_method=None).to_numpy("float64")
+
+    feats = _features_at(close, turnover, i, bench[: i + 1], delivery=delivery)
+    if eligible is not None:
+        feats = feats[eligible.reindex(feats.index).fillna(False).to_numpy()]
+    if admissible is not None:
+        feats = feats[admissible.reindex(feats.index).fillna(False).to_numpy()]
+    # The SAME completeness rule the panel applies. No label filter: a name is
+    # not excluded from today's ranking because a past session did not print.
+    required = [c for c in FEATURES if c not in NEUTRAL_WHEN_MISSING]
+    feats = feats.dropna(subset=required, thresh=int(len(required) * 0.7))
+    if len(feats) < min_names:
+        return pd.DataFrame()
+
+    feats = feats.copy()
+    feats["date"] = close.index[i]
+    feats["symbol"] = feats.index
+    if sectors is not None:
+        feats["sector"] = feats.index.map(sectors)
+    has_sector = "sector" in feats.columns and feats["sector"].notna().any()
+    for f in FEATURES:
+        r = (sector_neutral_rank(feats[f], feats["sector"]) if has_sector
+             else cross_sectional_rank(feats[f]))
+        feats[f + "_r"] = r.fillna(0.0) if f in NEUTRAL_WHEN_MISSING else r
+    return feats.reset_index(drop=True)
+
+
 def build_panel(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -382,6 +511,7 @@ def build_panel(
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
     open_: Optional[pd.DataFrame] = None,
+    admissible: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
@@ -446,6 +576,19 @@ def build_panel(
         if eligible is not None:
             # Point-in-time: only the names the screen admitted on THIS date.
             feats = feats[eligible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
+        if admissible is not None:
+            # THE POPULATION THE ENGINE CAN ACTUALLY BUY FROM. Stage 6 refuses a
+            # name already below its own invalidation level -- it satisfies its
+            # first exit condition at the moment it is opened. While the label
+            # was a triple barrier, `resolve_exits` applied the same predicate
+            # and training and admission agreed. Turning the barrier off removed
+            # it from training and left the live gate standing, so the model
+            # began ranking a population 23.3% of which it could never buy, and
+            # 1.55 of its top eight were refused on 72% of dates.
+            #
+            # Ranks are taken AFTER this mask, so a rank means the same thing in
+            # training and at the decision.
+            feats = feats[admissible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
         feats = feats[np.isfinite(feats["label"]) & feats["label"].abs().lt(1.0)]
         required = [c for c in FEATURES if c not in NEUTRAL_WHEN_MISSING]
         feats = feats.dropna(subset=required, thresh=int(len(required) * 0.7))

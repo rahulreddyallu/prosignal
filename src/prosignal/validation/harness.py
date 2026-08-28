@@ -71,6 +71,15 @@ class CpcvResult:
     purged_total: int = 0
     embargoed_total: int = 0
     notes: List[str] = field(default_factory=list)
+    #: Excess keyed by TEST DATE, so the duplication `excess` carries can be
+    #: collapsed before any statistic is computed on it. A date appears in
+    #: C(N-1,k-1) splits, so the pooled list counts each one that many times and
+    #: anything scaling with sqrt(n) reads inflated off it.
+    excess_by_date: Dict[object, List[float]] = field(default_factory=dict)
+    #: Label geometry, carried so the overlap correction can be derived here
+    #: rather than guessed by the caller.
+    horizon_sessions: int = 0
+    step_sessions: int = 21
 
     # -- summary ------------------------------------------------------------
     @property
@@ -100,9 +109,61 @@ class CpcvResult:
             "share_negative": float((a < 0).mean()),
         }
 
+    # -- what the DSR is actually entitled to run on -------------------------
+    def excess_per_date(self) -> List[float]:
+        """One excess per DISTINCT test date, averaged over the splits that
+        scored it. This is the series a statistic may be computed on.
+
+        `excess` holds one entry per (split, date) pair. On the shipped geometry
+        that is ~639 entries over 71 dates -- nine copies of each. Anything
+        scaling with sqrt(n) read off the pooled list is inflated threefold
+        before the label overlap is even counted.
+        """
+        if not self.excess_by_date:
+            return list(self.excess)
+        return [float(np.mean(v)) for _, v in sorted(
+            self.excess_by_date.items(), key=lambda kv: str(kv[0]))]
+
+    def effective_observations(self) -> float:
+        """Independent observations behind `excess_per_date`.
+
+        Two deductions, both arithmetic rather than estimated. Distinct dates
+        removes the CPCV duplication; the analytic variance inflation of an
+        h-session label sampled every s removes the overlap between neighbouring
+        dates. At h=63, s=21 the second costs a factor of about three.
+        """
+        from .significance import analytic_vif
+
+        n = len(self.excess_per_date())
+        if n < 3:
+            return float(n)
+        if self.horizon_sessions <= 0 or self.step_sessions <= 0:
+            return float(n)
+        vif = analytic_vif(self.horizon_sessions, self.step_sessions, n)
+        return float(n / vif) if vif > 0 else float(n)
+
     def deflated(self, n_trials: int):
-        """DSR on the pooled per-period excess, charging the trial count."""
-        return deflated_sharpe_ratio(self.excess, n_trials=n_trials)
+        """DSR on the per-date excess, charged for the trial count, the CPCV
+        duplication and the label overlap.
+
+        Three things this call gets right that the previous one did not, all of
+        which pushed the same way:
+
+        * it runs on DISTINCT dates rather than (split, date) pairs;
+        * it declares how many of those dates are independent, so the PSR's
+          sqrt(n-1) term stops reading nine overlapping copies as evidence;
+        * it hands over the woven path Sharpes, which ARE Bailey & Lopez de
+          Prado's Var[SR] -- the cross-sectional dispersion across trials --
+          instead of falling through to a null approximation.
+
+        The previous version returned 1.000 on this data and still passed at
+        100,000 trials.
+        """
+        return deflated_sharpe_ratio(
+            self.excess_per_date(), n_trials=n_trials,
+            trial_sharpes=(self.path_sharpes if len(self.path_sharpes) > 1 else None),
+            effective_n=self.effective_observations(),
+        )
 
 
 def _rank_ic(pred: np.ndarray, actual: np.ndarray) -> float:
@@ -173,7 +234,9 @@ def run_cpcv(
         label_horizon=purge_obs, embargo=embargo_obs,
     )
     by_date = {d: g for d, g in work.groupby("date")}
-    result = CpcvResult(n_splits=cv.n_splits, n_paths=cv.paths_per_observation())
+    result = CpcvResult(n_splits=cv.n_splits, n_paths=cv.paths_per_observation(),
+                        horizon_sessions=int(horizon_sessions),
+                        step_sessions=int(step_sessions))
     # path_id -> per-date results, so each path can be scored as one backtest
     paths: Dict[int, List[Dict[str, float]]] = {}
     seen: Dict[int, int] = {}
@@ -225,6 +288,9 @@ def run_cpcv(
                     degenerate += 1
                     continue
                 result.excess.append(ex)
+                # Keyed by date as well as pooled, so the duplication can be
+                # collapsed before anything is inferred from it.
+                result.excess_by_date.setdefault(d, []).append(ex)
                 # Weave: the k-th time a date is tested it belongs to path k.
                 pid = seen.get(hash(d), 0)
                 seen[hash(d)] = pid + 1

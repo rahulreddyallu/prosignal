@@ -1763,6 +1763,41 @@ stage7_risk:
         help (positive serial correlation, which a momentum book satisfies) but
         NOT a multiplier. The practitioner "2x ATR" figure traces to blogs, not
         journals, so this is searched rather than assumed.
+
+        WITHDRAWN CLAIM. This parameter was previously justified as "corrected
+        at portfolio level, 2.5x is near-optimal and was left unchanged". That
+        comparison ran a grid of stop multiples against EACH OTHER. Every arm
+        had a stop, and an ablation whose grid does not contain OFF cannot
+        discover that the mechanism is negative -- only which setting inside it
+        is least bad.
+
+        Measured with the off arm present and against the equal-weight eligible
+        universe, out of sample over 70 purged CPCV dates, net of the shipped
+        cost model, per 63-session period:
+
+          arm                                   net    vs bench   worst   covid
+          NO stop / target / invalidation     +4.70%     +0.01%  -25.6%   -7.1%
+          stop 1.5x ATR + 3R                  -0.76%     -5.45%  -13.6%   -3.5%
+          stop 2.0x ATR + 3R                  +0.30%     -4.39%  -13.4%   -2.8%
+          stop 2.5x ATR + 3R  (shipped)       +1.28%     -3.41%  -12.3%   -4.1%
+          stop 3.5x ATR + 3R                  +2.06%     -2.63%  -11.1%   -7.3%
+          stop 5.0x ATR + 3R                  +2.36%     -2.33%  -10.3%   -7.6%
+          benchmark                           +4.68%      0.00%  -32.9%  -18.9%
+
+        The relationship is MONOTONE: every tightening costs return. The
+        ranking's own edge is +1.82% per period over the benchmark before any
+        exit machinery is applied, so the stop as configured costs roughly
+        twice the entire edge. Costs, by contrast, are the smallest layer at
+        -0.67%.
+
+        WHY IT IS NOT CHANGED HERE. The stop is a capital-preservation choice,
+        not a research parameter, and it demonstrably works as insurance: worst
+        cohort -12.3% against the benchmark's -32.9%, and -4.1% through the
+        COVID crash against -18.9%. What was wrong was the JUSTIFICATION, not
+        necessarily the value. The premium is now measured and stated so the
+        operator can decide whether -3.4% per period buys enough tail
+        protection to be worth it. Changing the traded stop is a strategy
+        decision and belongs to the operator, not to an audit.
     # Never place the stop further than this % from entry, regardless of ATR.
     max_stop_distance_pct:
       value: 15.0
