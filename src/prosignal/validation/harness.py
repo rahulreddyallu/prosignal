@@ -80,6 +80,23 @@ class CpcvResult:
     #: rather than guessed by the caller.
     horizon_sessions: int = 0
     step_sessions: int = 21
+    #: WHAT THE IC AND THE EXCESS ARE MEASURED AGAINST. Not decoration. The
+    #: ranker is fitted against the h-session forward return; the book earns
+    #: whatever `resolve_exits` produces under a 2.5xATR stop, a 3R target and
+    #: a 50-session invalidation level. Measured across 35,643 rows on 86
+    #: dates, the within-date rank correlation between the two is 0.531 -- the
+    #: label explains about 28% of the variance of what the book actually
+    #: earns, and the book's own positions leave by invalidation 39.3% of the
+    #: time, by stop 32.1%, by target 17.9% and by timeout 10.7%.
+    #:
+    #: Every IC and every top-decile excess in this object is therefore a
+    #: statement about the LABEL, not about the book. Carrying the target's
+    #: name on the result is what stops the two being read as one number.
+    target: str = "label_rank"
+    #: Rank correlation between the label and the realised book outcome, where
+    #: the caller measured it. None means it was not measured, which is itself
+    #: worth printing -- it is not the same as "they agree".
+    label_book_rank_corr: Optional[float] = None
 
     # -- summary ------------------------------------------------------------
     @property

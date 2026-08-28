@@ -1227,6 +1227,23 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     _print(f"    on {dsr.effective_n:.1f} effective observations "
            f"from {dsr.n_observations:,} values; "
            f"Var[SR] {dsr.sr_variance:.4g} ({dsr.sr_variance_source})")
+    # WHAT THESE NUMBERS ARE ABOUT. Every IC and excess above is measured
+    # against the LABEL the ranker is fitted on -- the h-session forward return
+    # -- and not against what the book earns, which is whatever the stop, the
+    # target and the invalidation level produce. The two are different
+    # quantities and the gap is measured, so it is printed rather than left for
+    # a reader to assume away.
+    _print(f"  measured against {result.target}, the {horizon}-session forward "
+           f"return -- NOT against the book's realised outcome")
+    if result.label_book_rank_corr is not None:
+        rc = float(result.label_book_rank_corr)
+        _print(f"  label vs realised book outcome: within-date rank corr "
+               f"{rc:+.3f} ({rc * rc:.0%} of variance). An excess figure here "
+               f"is a statement about the ranking, not about the book.")
+    else:
+        _print("  the gap between this label and the book's realised outcome "
+               "was NOT measured on this run; audit measured it at rank corr "
+               "0.531, i.e. the label explains ~28% of what the book earns")
     worst = float(paths.min()) if paths.size else float("nan")
     _print(f"  worst of {paths.size} paths: Sharpe {worst:+.2f}; "
            f"{spread.get('share_negative', float('nan')):.0%} of paths below zero")

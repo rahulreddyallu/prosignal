@@ -901,3 +901,34 @@ class TestSelectionBiasDiagnostic:
             "the selection correction failed criterion 6 of its own "
             "pre-committed ship rule; trading it requires re-deciding that, "
             "not quietly wiring it in")
+
+
+# =============================================================================
+# W1 -- an IC is a statement about the LABEL, and must say so
+# =============================================================================
+class TestTheTargetTravelsWithTheFigure:
+    """The ranker is fitted against the h-session forward return; the book
+    earns whatever resolve_exits produces. Within-date rank correlation between
+    them is 0.531 -- about 28% of the variance -- and the book's positions exit
+    by invalidation 39.3% of the time, by stop 32.1%, by target 17.9%, by
+    timeout 10.7%. Every IC and excess in the repository is about the first
+    quantity and was routinely read as though it were about the second."""
+
+    def test_the_result_carries_its_target(self):
+        from prosignal.validation.harness import CpcvResult
+        r = CpcvResult(n_splits=1, n_paths=1)
+        assert r.target == "label_rank"
+        assert hasattr(r, "label_book_rank_corr")
+
+    def test_an_unmeasured_gap_is_not_silence(self):
+        """None must print as 'not measured', never be skipped -- 'we did not
+        check' and 'they agree' are different statements."""
+        import inspect
+        from prosignal import cli
+        src = inspect.getsource(cli)
+        block = src[src.index("Var[SR] {dsr.sr_variance"):]
+        block = block[:2000]
+        assert "was NOT measured on this run" in block, (
+            "an unmeasured label-vs-book gap must say so explicitly")
+        assert "NOT against the book" in block, (
+            "the reported excess must name what it is measured against")
