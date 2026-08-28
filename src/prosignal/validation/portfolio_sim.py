@@ -194,17 +194,15 @@ def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float
     alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
     return {
         "benchmarked": True,
-        "benchmark_periods": int(len(b)),
         "bench_mean_return": float(b.mean()),
-        "bench_total_return": float(np.prod(1.0 + b) - 1.0),
         "bench_sharpe": (float(b.mean() / sd_b * np.sqrt(periods_per_year))
                          if sd_b > 0 else float("nan")),
         "mean_excess": float(ex.mean()),
         "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
                               if sd_ex > 0 else float("nan")),
+        "excess_hit_rate": float((ex > 0).mean()),
         "beta_to_benchmark": beta,
         "alpha_per_period": alpha,
-        "beats_benchmark_rate": float((ex > 0).mean()),
     }
 
 
@@ -436,30 +434,44 @@ def simulate(
 
 
 def _path_drawdown(usable: Sequence["PortfolioResult"]) -> float:
-    """Worst peak-to-trough along the WOVEN path, not the average of phases.
+    """Worst peak-to-trough on any ONE schedule -- not the average of them.
 
-    `phase_summary` used to report the MEAN of each phase's own drawdown. A
-    phase is one arbitrary rebalance offset covering a third of the dates, so
-    averaging three of them reports a drawdown no investor could have
-    experienced and always a milder one than the path: on the shipped book the
-    mean-of-phases figure was -14.9% where the woven path reached -21.7%.
+    `phase_summary` used to report the MEAN of the per-phase drawdowns. A phase
+    is one rebalance offset and an investor runs exactly one of them, so the
+    mean describes a book nobody holds and always a milder one than the schedule
+    that got unlucky: -18.6% averaged, against -21.7% on the worst of the three.
+    Schedule choice is not a diversifiable risk here; it is a coin the investor
+    flips once.
 
-    The path is built by ordering every period across phases by date and
-    compounding. That is not a tradeable schedule either -- it interleaves three
-    of them -- but it errs toward the deeper number, which is the right
-    direction for a risk statistic.
+    WHY NOT CONCATENATE THE PHASES. The obvious alternative -- pool every period
+    across phases, sort by date, compound -- is wrong, and wrong in the
+    dangerous direction. The phases PARTITION the rebalance dates rather than
+    running alongside each other, so each date appears in exactly one of them
+    and the pooled series is 70 non-overlapping 63-session holds compounded
+    end to end: about 17.5 years of compounding laid over a 6-year sample. It
+    returns -35.4% here.
+
+    That construction was checked against the thing it cannot be wrong about.
+    Run it on the BENCHMARK returns from the same frame and it reports a -62.4%
+    drawdown for the equal-weight Indian universe over 2019-2025, which did not
+    happen -- the COVID trough was roughly -38%. A drawdown definition that
+    fabricates 24 points of benchmark loss fabricates them for the book too.
+
+    So: the worst single schedule. Conservative between the two defensible
+    readings, and it is a number an investor could actually have lived through.
     """
-    frames = [x.periods for x in usable if not x.empty and "date" in x.periods]
-    if not frames:
-        return float("nan")
-    pooled = pd.concat(frames, ignore_index=True).sort_values("date")
-    r = pooled["ret"].to_numpy(dtype="float64")
-    r = r[np.isfinite(r)]
-    if r.size < 2:
-        return float("nan")
-    equity = np.cumprod(1.0 + r)
-    peak = np.maximum.accumulate(equity)
-    return float((equity / peak - 1.0).min())
+    worst = float("nan")
+    for x in usable:
+        if x.empty:
+            continue
+        r = x.periods["ret"].to_numpy(dtype="float64")
+        r = r[np.isfinite(r)]
+        if r.size < 2:
+            continue
+        equity = np.cumprod(1.0 + r)
+        d = float((equity / np.maximum.accumulate(equity) - 1.0).min())
+        worst = d if not np.isfinite(worst) else min(worst, d)
+    return worst
 
 
 def phase_summary(
@@ -497,10 +509,9 @@ def phase_summary(
         # THE PATH figure. The mean of per-phase drawdowns is kept alongside
         # under its own name rather than deleted, because the old reports quote
         # it and a reader needs to be able to reconcile them.
-        "max_drawdown": _path_drawdown(usable),
+        "max_drawdown_period": float(np.mean([m["max_drawdown"] for m in per_phase])),
         "max_drawdown_path": _path_drawdown(usable),
-        "max_drawdown_mean_of_phases": float(
-            np.mean([m["max_drawdown"] for m in per_phase])),
+        "max_drawdown": _path_drawdown(usable),
         "worst_phase_sharpe": float(min(m["sharpe"] for m in per_phase)),
         "hit_rate": float((r > 0).mean()),
         "avg_names": float(pooled["n_held"].mean()),

@@ -565,3 +565,62 @@ class TestTheCallSitesAreWired:
             "a name below its own invalidation level cannot be bought, so it "
             "must not be ranked -- otherwise the model ranks a population "
             "Stage 6 refuses and its top eight is not the book")
+
+
+# =============================================================================
+# W-drawdown -- the path figure is the worst SCHEDULE, not a pooled artifact
+# =============================================================================
+class TestPathDrawdownIsOneSchedule:
+    """Caught by re-running the evidence against the restored source tree and
+    finding this one number had moved: -35.4% where the record said -21.7%.
+
+    Two wrong answers are available and this pins the boundary between them.
+    """
+
+    @staticmethod
+    def _phase(rets):
+        from prosignal.validation.portfolio_sim import PortfolioResult
+        n = len(rets)
+        return PortfolioResult(periods=pd.DataFrame({
+            "date": pd.bdate_range("2020-01-01", periods=n, freq="63D"[:1] + "B"),
+            "ret": np.asarray(rets, dtype="float64"),
+            "n_held": 8, "n_new": 6}))
+
+    def test_it_reports_the_worst_phase_not_their_mean(self):
+        """An investor runs ONE offset. Averaging three describes a book nobody
+        holds, and always a milder one than the schedule that got unlucky."""
+        from prosignal.validation.portfolio_sim import _path_drawdown
+        deep = self._phase([0.05, -0.30, 0.04, 0.03])
+        mild = self._phase([0.02, -0.05, 0.03, 0.02])
+        got = _path_drawdown([deep, mild])
+        assert got == pytest.approx(-0.30, abs=1e-9), (
+            f"got {got}; the reported path drawdown must be the worst single "
+            f"schedule, not the mean of the phases")
+
+    def test_it_does_not_compound_the_phases_end_to_end(self):
+        """The phases PARTITION the rebalance dates -- they do not run
+        alongside one another -- so pooling and compounding lays about three
+        times the elapsed period over the sample. On the real book that turned
+        -21.7% into -35.4%, and applied to the BENCHMARK it manufactured a
+        -62.4% drawdown for a universe whose worst trough was near -38%."""
+        from prosignal.validation.portfolio_sim import _path_drawdown
+        # Two phases that each recover fully. Concatenated they compound into a
+        # far deeper hole than either schedule ever saw.
+        a = self._phase([-0.25, 0.40, -0.25, 0.40])
+        b = self._phase([-0.25, 0.40, -0.25, 0.40])
+        one = _path_drawdown([a])
+        both = _path_drawdown([a, b])
+        assert both == pytest.approx(one, abs=1e-12), (
+            f"adding an identical second phase changed the drawdown from {one} "
+            f"to {both}; the figure is being pooled across schedules")
+
+    def test_the_mean_of_phases_is_still_reported_under_its_own_name(self):
+        """Never delete a number that earlier reports quote. The mean-of-phases
+        figure stays, named for what it is, so an old report can be
+        reconciled against a new one."""
+        import inspect
+        from prosignal.validation import portfolio_sim
+        src = inspect.getsource(portfolio_sim.phase_summary)
+        assert '"max_drawdown_period"' in src
+        assert '"max_drawdown_path"' in src
+        assert '"max_drawdown"' in src
