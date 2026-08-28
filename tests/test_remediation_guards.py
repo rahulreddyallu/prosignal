@@ -562,6 +562,55 @@ class TestTheCallSitesAreWired:
             "without `high` the resolver cannot see the touch; if this now "
             "agrees with the sighted call the test has stopped discriminating")
 
+    def test_fit_predict_passes_the_mask_to_the_training_panel(self):
+        """SURVIVED A MUTATION. Replacing `admissible=admissible` with
+        `admissible=None` in `fit_predict`'s call to `build_panel` broke no
+        test: the sibling guard below watches the LIVE mask, which still
+        filters the crashed names out of the output, so the training population
+        can silently revert while the ranking still looks right. That is the
+        whole defect -- the model fitted on one population and ranking another.
+
+        Captured at the call site rather than grepped for, so it observes what
+        `build_panel` actually receives."""
+        import prosignal.features.crossmodel as cm
+        from prosignal.features.exits import ExitRules
+
+        seen = {}
+        real = cm.build_panel
+
+        def spy(*a, **kw):
+            seen.update(kw)
+            return real(*a, **kw)
+
+        n = 800
+        rng = np.random.default_rng(11)
+        idx = pd.bdate_range("2018-01-01", periods=n)
+        syms = [f"N{i:02d}" for i in range(60)]
+        close = pd.DataFrame(
+            100.0 * np.exp(np.cumsum(rng.normal(0.0004, 0.015, size=(n, len(syms))), axis=0)),
+            index=idx, columns=syms)
+        turnover = pd.DataFrame(rng.uniform(3e8, 9e8, size=(n, len(syms))),
+                                index=idx, columns=syms)
+        high, low, open_ = close * 1.005, close * 0.995, close
+
+        cm.build_panel = spy
+        try:
+            cm.fit_predict(close, turnover, idx[-1].date(), horizon=63,
+                           min_train_rows=300, high=high, low=low, open_=open_,
+                           exit_geometry=ExitRules(), score_symbols=syms)
+        finally:
+            cm.build_panel = real
+
+        assert "admissible" in seen, "build_panel was called without the argument"
+        adm = seen["admissible"]
+        assert adm is not None, (
+            "the training panel was built over the whole eligible universe "
+            "while the live path masks to the admissible one; the model then "
+            "ranks a population it was not fitted on")
+        assert adm.shape[1] == len(syms)
+        assert not bool(adm.all().all()), (
+            "the mask admits everything, so it cannot be doing anything")
+
     def test_fit_predict_masks_the_panel_to_the_admissible_population(self):
         """The end-to-end wire: a name below its own invalidation level on the
         decision date must not appear in the scored output."""
