@@ -153,39 +153,59 @@ class PortfolioResult:
         A Sharpe ratio answers "was this better than cash". It does not answer
         "was this better than owning the universe equal-weighted", and for a
         long-only book selected from that universe the second question is the
-        one that decides whether the ranking is worth running. Reported here so
-        it cannot be omitted from a summary by not being computed.
+        one that decides whether the ranking is worth running. It is reported
+        here rather than by the caller so that a summary cannot omit it by not
+        computing it.
 
-        `information_ratio` is the mean excess over its own standard deviation,
-        annualised. `alpha` and `beta` come from the same regression of book
-        return on benchmark return, so a book that is simply long beta shows it.
+        The fields are ABSENT, not nan, when no benchmark was supplied.
+        `benchmarked` says which case this is. A nan in a metrics dict gets
+        formatted, averaged and quietly dropped; a missing key does not, and a
+        reader who sees `benchmarked: False` knows the comparison was never
+        made rather than that it came out flat.
         """
         if "bench_ret" not in self.periods:
-            return {}
+            return {"benchmarked": False}
         b = self.periods["bench_ret"].to_numpy(dtype="float64")
         r = self.periods["ret"].to_numpy(dtype="float64")
         ok = np.isfinite(b) & np.isfinite(r)
-        if ok.sum() < 3:
-            return {"benchmark_periods": int(ok.sum())}
-        b, r = b[ok], r[ok]
-        ex = r - b
-        sd_ex = float(ex.std(ddof=1))
-        var_b = float(b.var(ddof=1))
-        beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
-        alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
-        bench_eq = float(np.prod(1.0 + b) - 1.0)
-        return {
-            "benchmark_periods": int(len(b)),
-            "benchmark_mean_return": float(b.mean()),
-            "benchmark_total_return": bench_eq,
-            "mean_excess_return": float(ex.mean()),
-            "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
-                                  if sd_ex > 0 else float("nan")),
-            "beta_to_benchmark": beta,
-            "alpha_vs_benchmark": alpha,
-            "beats_benchmark_rate": float((ex > 0).mean()),
-        }
+        if int(ok.sum()) < 3:
+            return {"benchmarked": False}
+        return _benchmark_stats(r[ok], b[ok], periods_per_year)
 
+
+def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float
+                     ) -> Dict[str, float]:
+    """The single definition of every benchmark-relative figure.
+
+    One function, used by `PortfolioResult.metrics` and by `phase_summary`, so
+    a per-phase number and a pooled number cannot come to mean different
+    things. That divergence is how the repository ended up with three
+    incompatible CPCV results.
+
+    `information_ratio` is mean excess over the standard deviation of excess,
+    annualised. `beta_to_benchmark` and `alpha_per_period` come from the same
+    regression, so a book that is only long beta shows it.
+    """
+    ex = r - b
+    sd_ex = float(ex.std(ddof=1))
+    sd_b = float(b.std(ddof=1))
+    var_b = float(b.var(ddof=1))
+    beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
+    alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
+    return {
+        "benchmarked": True,
+        "benchmark_periods": int(len(b)),
+        "bench_mean_return": float(b.mean()),
+        "bench_total_return": float(np.prod(1.0 + b) - 1.0),
+        "bench_sharpe": (float(b.mean() / sd_b * np.sqrt(periods_per_year))
+                         if sd_b > 0 else float("nan")),
+        "mean_excess": float(ex.mean()),
+        "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
+                              if sd_ex > 0 else float("nan")),
+        "beta_to_benchmark": beta,
+        "alpha_per_period": alpha,
+        "beats_benchmark_rate": float((ex > 0).mean()),
+    }
 
 
 def _volatility_scale(close: pd.DataFrame, i: int, p: PortfolioParams
@@ -500,34 +520,18 @@ def phase_summary(
         "n_phases": len(usable),
         # The alternative, pooled the same way the book is. Absent only when no
         # benchmark panel was supplied.
-        **({} if "bench_ret" not in pooled else _pooled_benchmark(
-            pooled, periods_per_year)),
+        **({"benchmarked": False} if "bench_ret" not in pooled
+           else _pooled_benchmark(pooled, periods_per_year)),
     }
 
 
 def _pooled_benchmark(pooled: pd.DataFrame, periods_per_year: float
                       ) -> Dict[str, float]:
-    """Benchmark-relative figures over the pooled phases. Same definitions as
-    `PortfolioResult._benchmark_block`, computed on the pooled frame so a
-    summary and a single phase cannot disagree about what excess means."""
+    """Benchmark-relative figures over the pooled phases, through the SAME
+    `_benchmark_stats` a single phase uses."""
     b = pooled["bench_ret"].to_numpy(dtype="float64")
     r = pooled["ret"].to_numpy(dtype="float64")
     ok = np.isfinite(b) & np.isfinite(r)
-    if ok.sum() < 3:
-        return {"benchmark_periods": int(ok.sum())}
-    b, r = b[ok], r[ok]
-    ex = r - b
-    sd_ex = float(ex.std(ddof=1))
-    var_b = float(b.var(ddof=1))
-    beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
-    alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
-    return {
-        "benchmark_periods": int(len(b)),
-        "benchmark_mean_return": float(b.mean()),
-        "mean_excess_return": float(ex.mean()),
-        "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
-                              if sd_ex > 0 else float("nan")),
-        "beta_to_benchmark": beta,
-        "alpha_vs_benchmark": alpha,
-        "beats_benchmark_rate": float((ex > 0).mean()),
-    }
+    if int(ok.sum()) < 3:
+        return {"benchmarked": False}
+    return _benchmark_stats(r[ok], b[ok], periods_per_year)

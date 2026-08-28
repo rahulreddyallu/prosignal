@@ -506,8 +506,13 @@ class TestTheCallSitesAreWired:
         sym = "T"
         close = pd.DataFrame({sym: np.full(n, 100.0)}, index=idx)
         high = close.copy(); low = close.copy(); open_ = close.copy()
-        # a single spike that touches far above any 3R target, closing flat
-        high.iloc[40, 0] = 400.0
+        # A single spike that touches far above any 3R target and closes flat,
+        # placed INSIDE the holding window (entry i=60, horizon 63). It sat at
+        # bar 40 -- four bars before the position exists -- so the assertion
+        # below was unreachable and the guard could not have failed for the
+        # right reason. Caught by re-running it against a deliberately
+        # high=None call and finding both arms return 0.0.
+        high.iloc[70, 0] = 400.0
         atr = atr_panel(high, low, close, 14, "wilder")
         ma = ma_panel(close, 50)
         p = PortfolioParams(
@@ -522,6 +527,12 @@ class TestTheCallSitesAreWired:
         assert ret == pytest.approx(0.06, abs=1e-9), (
             f"got {ret}; a target cleared by the intraday high must register. "
             f"Reading the close instead returns 0.0 and understates every win.")
+        # THE NEGATIVE ARM. A guard that cannot fail is not a guard: this is the
+        # exact call the code used to make, and it must give a different answer.
+        blind = _hold(sym, 60, close, None, low, open_, ma, atr, p)
+        assert blind == pytest.approx(0.0, abs=1e-12), (
+            "without `high` the resolver cannot see the touch; if this now "
+            "agrees with the sighted call the test has stopped discriminating")
 
     def test_fit_predict_masks_the_panel_to_the_admissible_population(self):
         """The end-to-end wire: a name below its own invalidation level on the
