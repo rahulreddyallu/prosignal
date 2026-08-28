@@ -1278,3 +1278,63 @@ class TestAdversarialFindings:
         assert cast > rank, (
             "the float32 cast still runs before the ranking; training ranks "
             "are taken at a different precision from live ranks")
+
+
+def test_effective_n_actually_changes_the_deflated_sharpe():
+    """SURVIVED A MUTATION. Replacing
+
+        n_eff = float(n) if effective_n is None else float(min(effective_n, n))
+
+    with `n_eff = float(n)` -- i.e. ignoring the caller's effective count
+    entirely -- broke no test. Every guard reached the parameter through
+    `CpcvResult.deflated()`, which supplies it, so they exercised the wiring
+    and never the arithmetic: the DSR could quietly go back to reading
+    duplicated, overlapping observations as independent ones.
+
+    The discriminating pair is the same return series scored with and without a
+    declared effective count."""
+    from prosignal.validation.metrics import deflated_sharpe_ratio
+    rng = np.random.default_rng(5)
+    r = list(rng.normal(0.012, 0.05, 600))
+
+    naive = deflated_sharpe_ratio(r, n_trials=50)
+    honest = deflated_sharpe_ratio(r, n_trials=50, effective_n=24.0)
+
+    assert honest.effective_n == pytest.approx(24.0)
+    assert naive.effective_n == pytest.approx(600.0)
+    assert honest.deflated_sr < naive.deflated_sr, (
+        f"declaring 24 independent observations out of 600 gave the SAME "
+        f"deflated Sharpe ({honest.deflated_sr:.4f} vs {naive.deflated_sr:.4f}); "
+        f"the effective count is being ignored")
+    assert honest.n_observations == 600, "the raw count is still reported"
+    # and a caller cannot manufacture independence it does not have
+    assert deflated_sharpe_ratio(r, n_trials=50, effective_n=10_000).effective_n \
+        == pytest.approx(600.0)
+
+
+def test_the_psr_itself_honours_the_effective_count():
+    """The half of the previous test that was still uncovered.
+
+    `deflated_sharpe_ratio` uses its effective count TWICE -- once for the
+    null variance and once by passing it down to `probabilistic_sharpe_ratio`
+    for the sqrt(n-1) term. Breaking only the PSR's copy left every guard
+    green, because the DSR's own use of the count still moved the answer
+    enough to satisfy them. So the PSR is asserted directly: its whole job here
+    is that a series of 600 values carrying 24 independent observations must
+    not be read as 600 independent ones."""
+    from prosignal.validation.metrics import probabilistic_sharpe_ratio
+    rng = np.random.default_rng(5)
+    r = list(rng.normal(0.012, 0.05, 600))
+
+    naive = probabilistic_sharpe_ratio(r, benchmark_sr=0.10)
+    honest = probabilistic_sharpe_ratio(r, benchmark_sr=0.10, effective_n=24.0)
+    assert honest < naive - 1e-6, (
+        f"declaring 24 independent observations out of 600 gave PSR "
+        f"{honest:.6f} against {naive:.6f}; the sqrt(n-1) term is still "
+        f"reading the raw length")
+    # monotone in the declared count, and never inflated past the raw length
+    mid = probabilistic_sharpe_ratio(r, benchmark_sr=0.10, effective_n=100.0)
+    assert honest < mid < naive + 1e-12
+    assert probabilistic_sharpe_ratio(r, benchmark_sr=0.10, effective_n=10_000) \
+        == pytest.approx(naive, abs=1e-12), (
+        "a caller cannot declare more independence than the series has")
