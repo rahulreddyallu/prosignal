@@ -449,6 +449,34 @@ class DataStore:
         information: the adjusted series is what the holder actually
         experienced, and every index and vendor reports it this way.
         """
+        # A REQUEST-SHAPE CHECK, BEFORE ANYTHING ELSE -- including the
+        # adjust_prices switch. It used to sit below that early return, so
+        # `DataStore(adjust_prices=False)` served the 1.0 placeholder silently
+        # for a caller that asked for adj_factor alone, which is the same
+        # silent-placeholder failure with one more way in. `adj_factor` is
+        # COMPUTED here by `apply_adjustments` from the action table; the column
+        # sitting in the parquet is a write-time placeholder. Ask for it without
+        # a price column and `price_cols` below is empty, this function returns
+        # early, and the caller receives the placeholder -- 1.0 everywhere --
+        # with nothing to distinguish it from a genuine "no actions" answer.
+        #
+        # This is not hypothetical. It is how the corporate-action repair was
+        # first measured as having changed nothing: the verification read
+        # ["date", "symbol", "adj_factor"], got 1.0 for every cell, and reported
+        # zero affected names. The real figure was 4,905 (date, symbol) cells
+        # recovered across 165 symbols. A silent placeholder that reads exactly
+        # like a valid answer is worse than no answer, so it raises.
+        if requested is not None:
+            req = set(requested)
+            if "adj_factor" in req and not (req & {"open", "high", "low", "close"}):
+                raise IntegrityError(
+                    "adj_factor was requested without a price column. It is "
+                    "computed during adjustment, not stored; reading it alone "
+                    "returns a placeholder of 1.0 that is indistinguishable "
+                    "from 'no corporate actions'. Add a price column (e.g. "
+                    "'close') to the read.",
+                    columns=sorted(req),
+                )
         if not self.adjust_prices:
             return frame
         try:

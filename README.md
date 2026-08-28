@@ -17,10 +17,10 @@ It issues opinions. It has no order-routing code and no broker connection.
 | **Universe** | ~750 names, liquidity-screened point-in-time |
 | **Frequency** | Once per trading session, end-of-day |
 | **Horizon** | 63 sessions (~3 months) |
-| **Method** | Ridge regression on **5 factor families** — the individual factors are too collinear to fit separately — refit each run |
+| **Method** | Fama–MacBeth on **7 factor families**, gated at \|t\| ≥ 2 and shrunk; **2 themes are priced** (`mom`, `delivery`), 5 are zeroed. Refit each run |
 | **Output** | A ranked shortlist of 5, each with factor contributions |
 | **Execution** | None. No orders, no broker, no automation |
-| **Status** | Selection-period evidence only. Forward test re-registered, not started. Holdout deliberately unspent |
+| **Status** | **NOT READY.** Selection-period evidence only, and it does not support trading. Forward test re-registered, not started. Holdout deliberately unspent |
 
 > [!IMPORTANT]
 > **The holdout figures are withdrawn and have NOT been replaced.** They were
@@ -36,41 +36,98 @@ It issues opinions. It has no order-routing code and no broker connection.
 > **pre-registered forward test** is the designed path to an out-of-sample
 > answer and has been re-registered against this configuration.
 
-**What is measured, on the selection period, holdout untouched:**
+---
+
+## RESULTS OF RECORD
+
+> [!WARNING]
+> **These supersede every other number in this file.** Earlier sections quote
+> three mutually inconsistent CPCV results, produced at different times against
+> different code. They are kept as history — a bad result is never deleted here
+> — and each is marked SUPERSEDED where it appears. If a figure below and a
+> figure elsewhere disagree, this table is the live one.
+
+Regenerated end to end after remediation. Panel 35,730 rows over 85 dates;
+selection period 2019-02-18 → 2025-02-03; holdout untouched.
+
+**The ranking**
 
 | | |
 |---|---|
-| Pooled rank IC (CPCV, 36 paths) | **+0.0682** |
-| Paths below zero | **0%** |
-| Path Sharpe — min / median / max | +0.00 / +0.23 / +0.42 |
-| Top-decile excess | **+1.04%** per 63-session period |
-| Deflated Sharpe, charging 24 trials | **1.000 — pass** |
+| Pooled rank IC (CPCV, 45 splits, 9 paths) | **+0.0449** |
+| Top-decile excess | **+0.97%** per 63-session period |
+| Distinct test dates / independent observations | 70 / **23.6** |
+| Overlap-corrected t on the excess | **+1.20** (naive +2.06) |
+| Pre-committed significance bar | **t ≥ 3.0** |
+| Paths below zero | **11%** |
+| Path Sharpe — min / median / max | −0.03 / +0.20 / +0.37 |
+| Deflated Sharpe, charging **81** trials | **0.346 — FAIL** |
 
-**And at the book level**, which is what would actually be traded — 45 splits,
-sizing, stops, buffer bands and size-dependent costs applied:
+**The book, against the alternative it never used to be measured against** —
+equal-weight eligible universe over the same 70 holding windows:
 
-| | min | p25 | median | p75 | max |
-|---|---|---|---|---|---|
-| Sharpe | −3.13 | +0.03 | **+0.42** | +1.08 | +1.80 |
-| return/period | −3.72% | +0.11% | **+1.61%** | +3.54% | +6.00% |
-| max drawdown | −13.3% | −10.5% | **−6.9%** | −3.4% | −0.5% |
+| | book | benchmark |
+|---|---|---|
+| mean return / period | **+1.04%** | **+5.27%** |
+| Sharpe | +0.31 | +0.83 |
+| mean excess | **−4.23%** | — |
+| information ratio | **−0.83** | — |
+| beta to benchmark | +0.32 | — |
+| alpha / period | **−0.67%** | — |
+| periods beating the benchmark | **32.9%** | — |
+| worst drawdown on one schedule | −20.6% | — |
 
-**24% of splits have a negative Sharpe.** No t-statistic is quoted for either
-table, and the harness refuses to compute one: test dates recur across splits
-and the paths share training data and one calendar, so neither is a sample of
-independent experiments.
+*(`portfolio_sim._path_drawdown` documents −21.7%, which was the same statistic
+on the pre-W3/W5/W8 panel. −20.6% is the current figure.)*
 
-The honest summary is that the ranking carries information on the selection
-period and the book that trades it is positive at the median with a quarter of
-its splits under water. Whether that survives out of sample is what the forward
-test is for, and it has not run yet.
+**What the two tables say together.** The ranking carries a little information
+— IC +0.045, and remediation raised it from +0.034. The machinery that turns
+that ranking into a book destroys considerably more than the ranking creates:
+measured arm by arm, ranking earns +1.82% per period over the benchmark, risk
+budget sizing costs −1.14%, the 2.5×ATR stop costs −3.06%, the 3R target
+−0.36% and costs −0.67%. **The engine's own book underperforms buying its own
+universe equal-weighted, by 4.23% per period.**
+
+**Two further qualifications on the ranking figures.**
+
+*They describe the label, not the book.* The model is fitted against the
+63-session forward return; the book earns whatever the stop, target and
+invalidation level produce. Within-date rank correlation between the two is
+**+0.529** — the label explains 28% of the variance of what is actually earned.
+The book's positions leave by invalidation 39.2% of the time, by stop 32.2%, by
+target 17.9%, by timeout 10.7%. (Code comments quote +0.531 / 39.3% / 32.1%
+from the original audit's panel; the figures here are the re-measurement on the
+remediated panel, and the difference is the remediation.)
+
+*The traded coefficients are biased away from zero.* The gate selects on
+\|t\| ≥ 2 from the same sample that estimated λ. Corrected for that selection,
+`mom`'s implied true t is **+2.20** and `delivery`'s is **+1.46** — the second
+does not clear the gate it passed. The correction is reported, not traded; see
+`work/audit/W2_failure_model.md` for why it failed its own ship rule.
+
+---
+
+**Historical figures below are superseded.** No naive t-statistic is quoted
+from CPCV, and the harness refuses to compute one: test dates recur across
+splits and the woven paths share training data and one calendar, so neither is
+a sample of independent experiments. The overlap-corrected figure in RESULTS OF
+RECORD is what the harness will stand behind.
+
+The honest summary is that the ranking carries a little information on the
+selection period — pooled IC +0.045 — and that **the book which trades it
+underperforms the universe it selects from by 4.23% per period**, with an
+information ratio of −0.83 and alpha of −0.67%. The engine's problem is not
+that its ranking is worthless; it is that the sizing, the stop and the costs
+take more than the ranking creates. Whether any of it survives out of sample is
+what the forward test is for, and it has not run yet.
 
 ---
 
 ## What ProSignal is
 
 A **research instrument**. It ranks stocks by predicted 63-session forward
-return using a ridge model over factors drawn from published literature, and
+return using a gated Fama–MacBeth model over factors drawn from published
+literature — the ridge is available and is not what ships — and
 shows the reader the z-score, fitted coefficient and contribution behind each
 name.
 
@@ -329,7 +386,8 @@ yields a model trained on a short history — the same code and config hash
 producing materially different coefficients. See
 [Known limitations](#known-limitations).
 
-**Abstention.** Below `MIN_LOOKBACK + horizon + 60 = 376` sessions the model
+**Abstention.** Below `MIN_LOOKBACK + horizon + 60` sessions (**397** on the
+shipped configuration; this read 376 against an older `MIN_LOOKBACK`) the model
 refuses to fit. Stage 4 then falls back to a hand-weighted composite, which
 was measured at **−0.047% excess per month, t = −0.11**. The fallback is
 gated (`allow_composite_fallback: false` for non-benign failures) and a run
@@ -645,7 +703,17 @@ cannot be reconstructed and is not silently assumed to be nothing.
 announced, because charging fewer trials than were looked at is the bias the DSR
 exists to remove.
 
-### CPCV under the new label and estimator
+### CPCV under the new label and estimator — SUPERSEDED
+
+> [!CAUTION]
+> **Superseded by RESULTS OF RECORD.** Kept because a bad result is not
+> deleted. Two things are wrong with it beyond being stale. "2,401 scored
+> dates" counts (split, date) PAIRS — each date appears in many splits, so the
+> real figure was 70 distinct dates and about 24 independent observations. And
+> the Deflated Sharpe of 1.000 came from a defect: it ran on the duplicated
+> pooled vector with a null variance of 1/(n−1) at n = 2,401, which made the
+> multiple-testing defence insensitive to multiple testing. It passed at
+> 100,000 trials. Repaired, the same data gives **0.346 — FAIL**.
 
 | | |
 |---|---|
@@ -893,7 +961,17 @@ drifted up quietly, and the engine was stopped out of the first in week two.
 Fitting against it teaches the model to like trades it would have closed at a
 loss.
 
-Labels are now **triple-barrier** (López de Prado, ch. 3): profit barrier, stop
+> [!CAUTION]
+> **SUPERSEDED — the triple barrier is OFF on the shipped path.**
+> `labels.triple_barrier: false`. Fitting the ranker on the engine's own exit
+> geometry made the label a function of the stop, so the model learned to
+> predict its own risk management rather than returns. This section describes
+> the label as it was; the shipped label is the plain 63-session forward
+> return, and the consequences of that choice are in RESULTS OF RECORD —
+> notably that the label now explains only 28% of the variance of what the
+> book earns.
+
+Labels were **triple-barrier** (López de Prado, ch. 3): profit barrier, stop
 barrier, time barrier, and the label is whichever is touched **first**. On a
 constructed case:
 
@@ -999,11 +1077,22 @@ correlated members is supposed to do:
 
 Run it yourself: `prosignal research factors`.
 
-**All ranks are taken within sector** where the sector holds at least 12 names.
-Ranking across the whole market compares a bank's leverage with an IT firm's, so
-every factor otherwise carries an unintended sector bet on top of what it
-measures. A thin or absent sector falls back to the universe rank — common here,
-because the point-in-time universe reaches past any index constituent file.
+**Every rank is taken within a group.** A sector holding at least 12 names is
+its own group; every other name — no sector at all, or a sector below that
+floor — is ranked within a single residual `UNCLASSIFIED` pool. Ranking across
+the whole market compares a bank's leverage with an IT firm's, so every factor
+would otherwise carry an unintended sector bet on top of what it measures.
+
+> [!NOTE]
+> This sentence used to read *"all ranks are taken within sector [...] a thin or
+> absent sector falls back to the universe rank"*, and the two halves
+> contradicted each other. The fallback was not a detail: **58% of rows carried
+> a sector label and a median 46% of names per date were ranked within one**, so
+> roughly half of every cross-section was on the OTHER scale. A within-sector
+> rank of +0.9 in a fourteen-name sector and a universe rank of +0.9 are
+> different quantities, and both were averaged into the same family aggregate.
+> The residual pool now fixes that; `sector_rank_coverage()` reports the split.
+> Within-sector coverage on the current panel: median 41.2%, range 0–54.9%.
 
 ### The flat-day gate
 
@@ -1583,19 +1672,30 @@ what is trusted:
 - Leakage is controlled: purge enforced at the label horizon, embargo applied,
   holdout untouched, point-in-time universe with measured survivorship
 - Costs are realistic and size-dependent, applied before every net figure
-- The ranking carries out-of-sample information: 36 CPCV paths, none negative
 - Momentum's 41% IC share is one latent factor, not three
 - 63 sessions sits on a plateau, not a peak — not overfitted to horizon
 - Stage 6 band width is not a meaningful lever
+- **The book underperforms its own universe.** Mean excess −4.23% per period,
+  information ratio −0.83, alpha −0.67%, over 70 holding windows
 
 **Reasonably supported**
 
-- Holdout top-decile excess of +4.35% at corrected t=3.13, on six independent
-  windows
+- The ranking carries *some* out-of-sample information: pooled IC +0.045,
+  89% of woven paths positive
 
 **Preliminary**
 
 - The factor attribution is directionally unfavourable at 8 degrees of freedom
+
+**Withdrawn**
+
+- ~~"The ranking carries out-of-sample information: 36 CPCV paths, none
+  negative"~~ — 11% of paths are negative under the corrected harness
+- ~~"Holdout top-decile excess of +4.35% at corrected t=3.13, on six
+  independent windows"~~ — this was listed under *Reasonably supported* while
+  the executive summary above already declared the holdout figures withdrawn.
+  The two statements could not both be true. The holdout has not been re-run
+  and there is no replacement number
 
 **Unknown**
 
@@ -1614,7 +1714,7 @@ what is trusted:
 | Are the value factors evidenced? | **n = 11** |
 | Does it survive a momentum crash? | **No — the risk family amplifies it** |
 | Are the regime windows right? | **UNVALIDATED, never searched** |
-| Is the trial count complete? | **`cumulative_trials_logged: 0`** — never accumulated |
+| Is the trial count complete? | No, and it is now charged anyway: **81 trials** are charged against the DSR, up from the 24 and 44 quoted earlier in this file. The registry still under-counts what was actually looked at, so 81 is a floor |
 
 ---
 

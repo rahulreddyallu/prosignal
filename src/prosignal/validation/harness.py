@@ -71,6 +71,32 @@ class CpcvResult:
     purged_total: int = 0
     embargoed_total: int = 0
     notes: List[str] = field(default_factory=list)
+    #: Excess keyed by TEST DATE, so the duplication `excess` carries can be
+    #: collapsed before any statistic is computed on it. A date appears in
+    #: C(N-1,k-1) splits, so the pooled list counts each one that many times and
+    #: anything scaling with sqrt(n) reads inflated off it.
+    excess_by_date: Dict[object, List[float]] = field(default_factory=dict)
+    #: Label geometry, carried so the overlap correction can be derived here
+    #: rather than guessed by the caller.
+    horizon_sessions: int = 0
+    step_sessions: int = 21
+    #: WHAT THE IC AND THE EXCESS ARE MEASURED AGAINST. Not decoration. The
+    #: ranker is fitted against the h-session forward return; the book earns
+    #: whatever `resolve_exits` produces under a 2.5xATR stop, a 3R target and
+    #: a 50-session invalidation level. Measured across 35,643 rows on 86
+    #: dates, the within-date rank correlation between the two is 0.531 -- the
+    #: label explains about 28% of the variance of what the book actually
+    #: earns, and the book's own positions leave by invalidation 39.3% of the
+    #: time, by stop 32.1%, by target 17.9% and by timeout 10.7%.
+    #:
+    #: Every IC and every top-decile excess in this object is therefore a
+    #: statement about the LABEL, not about the book. Carrying the target's
+    #: name on the result is what stops the two being read as one number.
+    target: str = "label_rank"
+    #: Rank correlation between the label and the realised book outcome, where
+    #: the caller measured it. None means it was not measured, which is itself
+    #: worth printing -- it is not the same as "they agree".
+    label_book_rank_corr: Optional[float] = None
 
     # -- summary ------------------------------------------------------------
     @property
@@ -100,9 +126,83 @@ class CpcvResult:
             "share_negative": float((a < 0).mean()),
         }
 
+    # -- what the DSR is actually entitled to run on -------------------------
+    def excess_per_date(self) -> List[float]:
+        """One excess per DISTINCT test date, averaged over the splits that
+        scored it. This is the series a statistic may be computed on.
+
+        `excess` holds one entry per (split, date) pair. On the shipped geometry
+        that is ~639 entries over 71 dates -- nine copies of each. Anything
+        scaling with sqrt(n) read off the pooled list is inflated threefold
+        before the label overlap is even counted.
+        """
+        if not self.excess_by_date:
+            # NOT A SILENT FALLBACK. Returning the pooled vector here restores
+            # the exact defect this method exists to remove -- on a 540-entry,
+            # 60-date fixture it takes effective_n from 20.3 to 540 and the DSR
+            # from 0.878 FAIL to 1.0000 PASS, with no error and no note. A
+            # caller that built the result without keying by date does not get
+            # a worse answer, it gets a loud one.
+            raise ValueError(
+                "CpcvResult.excess_by_date is empty. The pooled `excess` list "
+                "holds one entry per (split, test-date) pair, so any statistic "
+                "computed on it counts each date many times over; that is what "
+                "produced a Deflated Sharpe of 1.000 which still passed at "
+                "100,000 trials. Populate excess_by_date (run_cpcv does) or do "
+                "not ask for a per-date series."
+            )
+        return [float(np.mean(v)) for _, v in sorted(
+            self.excess_by_date.items(), key=lambda kv: str(kv[0]))]
+
+    def effective_observations(self) -> float:
+        """Independent observations behind `excess_per_date`.
+
+        Two deductions, both arithmetic rather than estimated. Distinct dates
+        removes the CPCV duplication; the analytic variance inflation of an
+        h-session label sampled every s removes the overlap between neighbouring
+        dates. At h=63, s=21 the second costs a factor of about three.
+        """
+        from .significance import analytic_vif
+
+        n = len(self.excess_per_date())
+        if n < 3:
+            return float(n)
+        if self.horizon_sessions <= 0 or self.step_sessions <= 0:
+            # Same trap as above, one field along: without the label geometry
+            # the overlap correction silently does nothing and the DSR reads
+            # 60 independent observations where there are 20.
+            raise ValueError(
+                f"CpcvResult.horizon_sessions={self.horizon_sessions} and "
+                f"step_sessions={self.step_sessions}; the overlap inflation of "
+                f"an h-session label sampled every s cannot be derived without "
+                f"both. Leaving them unset silently reports overlapping "
+                f"observations as independent ones."
+            )
+        vif = analytic_vif(self.horizon_sessions, self.step_sessions, n)
+        return float(n / vif) if vif > 0 else float(n)
+
     def deflated(self, n_trials: int):
-        """DSR on the pooled per-period excess, charging the trial count."""
-        return deflated_sharpe_ratio(self.excess, n_trials=n_trials)
+        """DSR on the per-date excess, charged for the trial count, the CPCV
+        duplication and the label overlap.
+
+        Three things this call gets right that the previous one did not, all of
+        which pushed the same way:
+
+        * it runs on DISTINCT dates rather than (split, date) pairs;
+        * it declares how many of those dates are independent, so the PSR's
+          sqrt(n-1) term stops reading nine overlapping copies as evidence;
+        * it hands over the woven path Sharpes, which ARE Bailey & Lopez de
+          Prado's Var[SR] -- the cross-sectional dispersion across trials --
+          instead of falling through to a null approximation.
+
+        The previous version returned 1.000 on this data and still passed at
+        100,000 trials.
+        """
+        return deflated_sharpe_ratio(
+            self.excess_per_date(), n_trials=n_trials,
+            trial_sharpes=(self.path_sharpes if len(self.path_sharpes) > 1 else None),
+            effective_n=self.effective_observations(),
+        )
 
 
 def _rank_ic(pred: np.ndarray, actual: np.ndarray) -> float:
@@ -130,6 +230,13 @@ def run_cpcv(
     top_decile: float = 0.90,
     progress: Optional[Callable[[int, int], None]] = None,
     estimator: str = _ESTIMATOR_DEFAULT,
+    #: Override the estimator's own significance floor. Exists so a null test
+    #: can force every split to produce coefficients: under the gated estimator
+    #: shuffled labels clear no floor, no split scores, and a test asserting
+    #: "the harness finds nothing in noise" passes without ever running its
+    #: assertion. A vacuous null test on a validation harness is the worst
+    #: possible place for one.
+    significance_floor: Optional[float] = None,
 ) -> CpcvResult:
     """Fit and score the ridge model across every CPCV split.
 
@@ -173,7 +280,15 @@ def run_cpcv(
         label_horizon=purge_obs, embargo=embargo_obs,
     )
     by_date = {d: g for d, g in work.groupby("date")}
-    result = CpcvResult(n_splits=cv.n_splits, n_paths=cv.paths_per_observation())
+    result = CpcvResult(n_splits=cv.n_splits, n_paths=cv.paths_per_observation(),
+                        horizon_sessions=int(horizon_sessions),
+                        step_sessions=int(step_sessions))
+    # MEASURED HERE, not quoted from an audit. The field existed and nothing
+    # ever assigned it, so the CLI took its else-branch on every run and printed
+    # a hardcoded 0.531 as though it were this run's number. A constant
+    # presented as a measurement is worse than an omission: it cannot go stale
+    # visibly.
+    result.label_book_rank_corr = _label_book_rank_corr(work)
     # path_id -> per-date results, so each path can be scored as one backtest
     paths: Dict[int, List[Dict[str, float]]] = {}
     seen: Dict[int, int] = {}
@@ -194,7 +309,8 @@ def run_cpcv(
         result.purged_total += split.purged_count
         result.embargoed_total += split.embargoed_count
 
-        fit = _fit(train, cols, alpha, estimator, horizon_sessions, step_sessions)
+        fit = _fit(train, cols, alpha, estimator, horizon_sessions,
+                   step_sessions, significance_floor=significance_floor)
         if fit is None:
             result.notes.append(
                 f"split {split.split_id}: the estimator produced no tradeable "
@@ -225,6 +341,9 @@ def run_cpcv(
                     degenerate += 1
                     continue
                 result.excess.append(ex)
+                # Keyed by date as well as pooled, so the duplication can be
+                # collapsed before anything is inferred from it.
+                result.excess_by_date.setdefault(d, []).append(ex)
                 # Weave: the k-th time a date is tested it belongs to path k.
                 pid = seen.get(hash(d), 0)
                 seen[hash(d)] = pid + 1
@@ -251,6 +370,28 @@ def run_cpcv(
              extra={"splits": result.n_splits, "paths": len(result.path_sharpes),
                     "mean_ic": round(result.mean_ic, 5)})
     return result
+
+
+def _label_book_rank_corr(work: pd.DataFrame) -> Optional[float]:
+    """Within-date rank correlation between the LABEL and the book's realised
+    outcome, where the panel carries both.
+
+    The ranker is fitted against the h-session forward return; the book earns
+    whatever `resolve_exits` produces. Any IC or excess in this module is a
+    statement about the first quantity, and the gap is what stops it being read
+    as the second. Returns None when the panel has no realised-outcome column,
+    which the caller must print as NOT MEASURED rather than as agreement.
+    """
+    outcome = next((c for c in ("book_ret", "realised_ret", "exit_ret")
+                    if c in work.columns), None)
+    if outcome is None or "label" not in work.columns or "date" not in work.columns:
+        return None
+    try:
+        rc = (work.groupby("date")[["label", outcome]]
+                  .corr(method="spearman").unstack()[("label", outcome)]).dropna()
+    except Exception:
+        return None
+    return float(rc.mean()) if len(rc) else None
 
 
 def configuration_matrix(
@@ -284,8 +425,30 @@ def configuration_matrix(
     purge_obs = int(np.ceil(purge_sessions / step_sessions))
     out: Dict[str, Dict[pd.Timestamp, float]] = {}
 
+    single_theme_ungated = []
     for name, features in configurations.items():
         cols = [c for c in features if c in panel.columns]
+        # A SINGLE-THEME ARM IS RUN UNGATED, AND SAID SO.
+        #
+        # Under the gated Fama-MacBeth a one-theme arm is not a strategy scored
+        # on every split -- it is a strategy scored on the splits where that
+        # theme happened to clear |t| >= 2, and it holds cash on the rest. Its
+        # series is therefore conditioned on its own in-sample significance
+        # while a multi-theme arm's is not, and comparing them compares two
+        # different selection regimes, not two feature sets.
+        #
+        # Measured at audit time: `beta` alone traded on a minority of splits
+        # and its scored dates were exactly the ones where it measured, which
+        # is what carried the README's estimator-comparison conclusion.
+        #
+        # THIS CORRECTION RUNS IN THE FLATTERING DIRECTION and is flagged here
+        # for that reason. The artifact made the single-theme CONTROLS look
+        # good, so removing it can only help the production model. Every
+        # conclusion drawn from a matrix containing single-theme arms must be
+        # re-derived rather than inherited.
+        arm_floor = 0.0 if len(cols) == 1 else None
+        if arm_floor is not None:
+            single_theme_ungated.append(name)
         work = panel.dropna(subset=cols + ["label_rank", "label"]).reset_index(drop=True)
         dates = sorted(work["date"].unique())
         by_date = {d: g for d, g in work.groupby("date")}
@@ -297,7 +460,8 @@ def configuration_matrix(
             te = by_date[dates[i]]
             # `purge_sessions` IS the label horizon here -- that is what the
             # purge is sized from -- and it is what sets the Newey-West lag.
-            fit = _fit(train, cols, alpha, estimator, purge_sessions, step_sessions)
+            fit = _fit(train, cols, alpha, estimator, purge_sessions,
+                       step_sessions, significance_floor=arm_floor)
             if fit is None:
                 continue
             pred = predict(fit, te[cols].to_numpy("float64"))
@@ -316,6 +480,10 @@ def configuration_matrix(
         out[name] = series
 
     frame = pd.DataFrame(out)
+    if single_theme_ungated:
+        frame.attrs["single_theme_ungated"] = list(single_theme_ungated)
+        log.info("single-theme arms scored with the significance floor at zero",
+                 extra={"arms": list(single_theme_ungated)})
     # A configuration the ESTIMATOR REFUSES scores nothing at all -- under the
     # gated Fama-MacBeth a single-theme arm that never clears |t| >= 2 produces
     # no coefficients on any split. Its column is entirely empty, and the row

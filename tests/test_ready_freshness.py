@@ -40,12 +40,69 @@ def checks():
 
 
 def test_latest_session_is_reported_on_every_branch(checks):
+    """The key is present whatever branch /ready took, and it says what the
+    store actually holds.
+
+    THE ASSERTION THIS REPLACES WAS WRONG, and it was red at HEAD for that
+    reason. It required the value to be TRUTHY, which on an empty store means
+    requiring `/ready` to invent a session it does not have: ``null`` is the
+    honest report of a store with no prices. What the endpoint owes the caller
+    is that the key is always present and always agrees with the store -- the
+    original defect was that it appeared only on the fully-validated branch.
+
+    The half of the docstring's concern that survives is the CONSUMER's, and it
+    lives in the interface rather than here; `test_unknown_freshness_is_not_current`
+    below pins it.
+    """
     _, body = checks
-    assert "latest_session" in body["checks"]
-    assert body["checks"]["latest_session"], (
-        "the interface's staleness check compares against this and treats a "
-        "missing value as 'nothing to compare against', which reads as current"
-    )
+    c = body["checks"]
+    assert "latest_session" in c, (
+        "it used to be set only where the store had reached validated depth, "
+        "so the one state where freshness matters most reported nothing")
+
+    from prosignal.config.loader import load_config as _lc
+    from prosignal.data.store import DataStore
+    _cfg = _lc()
+    sessions = DataStore(_cfg.paths.curated, _cfg.paths.snapshots).price_sessions()
+    if sessions:
+        assert c["latest_session"] == sessions[-1].isoformat()
+    else:
+        assert c["latest_session"] is None, (
+            "a store with no sessions must report null, not a placeholder date")
+
+
+def test_unknown_freshness_is_not_current():
+    """The interface must not treat an unknown latest session as current.
+
+    `isCurrent()` read
+
+        if (!state.latestSession) return true;   // nothing to compare against
+
+    so a result from any past date passed the freshness test whenever /ready
+    could not report a session -- an empty store, a still-building one, a check
+    that raised, a response that never arrived. That is the failure the module
+    docstring describes, and it is the consumer's half of it.
+
+    Asserted against the source because the interface has no JS test harness.
+    A weak guard on the right defect beats a strong one on the wrong side of
+    the boundary.
+    """
+    import re
+    from pathlib import Path as _P
+    import prosignal
+
+    src = (_P(prosignal.__file__).parent / "static" / "index.html").read_text()
+    body = re.search(r"function isCurrent\(v\)\s*\{(.*?)\n\}", src, re.S)
+    assert body, "isCurrent() is gone; the freshness rule moved without this guard"
+    code = "\n".join(line for line in body.group(1).splitlines()
+                     if not line.strip().startswith("//"))
+    assert "return true" not in code, (
+        "isCurrent() has an unconditional true again. An unknown latest "
+        "session must read as NOT current: falling back to 'current' asserts "
+        "freshness nobody checked, in the state where the store is most "
+        "likely to be behind.")
+    assert re.search(r"if\s*\(!state\.latestSession\)\s*return false", code), (
+        "the unknown-latest-session branch must return false")
 
 
 def test_freshness_is_reported_at_all(checks):

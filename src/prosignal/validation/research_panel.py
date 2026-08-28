@@ -78,10 +78,17 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
     if prices is not None and turnover is not None:
         close, high, low = prices["close"], prices["high"], prices["low"]
         open_ = prices.get("open")
+        adj = prices.get("adj_factor")
     else:
+        # `adj_factor` travels with the read so the universe screen's price
+        # floor can be applied to the QUOTED price. Without it the research
+        # panel screens on back-adjusted prices and reproduces, inside the
+        # evaluation, the very look-ahead the production path was fixed for --
+        # which would have made the panel agree with a broken engine.
         px = store.read_prices(
             start=sessions[0], end=end,
-            columns=[DATE, SYMBOL, "close", "turnover", "high", "low", "open"])
+            columns=[DATE, SYMBOL, "close", "turnover", "high", "low", "open",
+                     "adj_factor"])
         px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
 
         def piv(col: str) -> pd.DataFrame:
@@ -90,6 +97,7 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
 
         close, turnover = piv("close"), piv("turnover")
         high, low, open_ = piv("high"), piv("low"), piv("open")
+        adj = piv("adj_factor") if "adj_factor" in px.columns else None
         del px
 
     delivery = None
@@ -112,7 +120,7 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
         lookback_sessions=iv(u.pit_adtv_lookback_sessions),
         max_names=iv(u.pit_max_names),
         min_history_sessions=iv(u.min_history_sessions),
-        min_price_inr=fv(u.min_price_inr))
+        min_price_inr=fv(u.min_price_inr), adj_factor=adj)
 
     horizon = iv(c4.model_horizon_sessions)
     lab = c4.labels

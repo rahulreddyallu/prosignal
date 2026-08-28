@@ -58,12 +58,41 @@ def test_it_finds_a_signal_that_is_there():
 
 
 def test_it_does_not_find_a_signal_that_is_not_there():
-    """Guards the guard. A harness that always reports an edge is worthless."""
+    """Guards the guard. A harness that always reports an edge is worthless.
+
+    THIS TEST WAS VACUOUS and an adversarial re-audit caught it. Under the
+    gated estimator shuffled labels clear no significance floor, so no split
+    produces coefficients, `r.ic` is empty, the early return fired, and the
+    substantive assertion never executed. The suite had no live check that the
+    validation harness declines to find signal in noise -- which is the single
+    thing a validation harness must never get wrong.
+
+    Refusal IS the stronger answer and is still accepted, but it is no longer
+    the end of the test: the floor is then dropped to zero, which forces every
+    split to produce coefficients, and the IC that comes back has to be near
+    zero. Both arms now assert something.
+    """
     panel = _panel()
     panel["label_rank"] = np.random.default_rng(7).permutation(panel["label_rank"].to_numpy())
     panel["label"] = np.random.default_rng(8).permutation(panel["label"].to_numpy())
     r = run_cpcv(panel, FEATURES, **KW)
-    assert abs(r.mean_ic) < 0.05, f"found IC {r.mean_ic} in shuffled labels"
+
+    if r.ic:
+        assert abs(r.mean_ic) < 0.05, (
+            f"shuffled labels produced IC {r.mean_ic:+.4f}")
+        return
+
+    # The gated estimator refused every split. Correct, and stated.
+    assert r.notes, "a harness that scored nothing must say why"
+    assert any("no tradeable coefficients" in n for n in r.notes)
+
+    ungated = run_cpcv(panel, FEATURES, **{**KW, "significance_floor": 0.0})
+    assert ungated.ic, (
+        "with the floor at zero every split must score; if nothing comes back "
+        "this test is vacuous again and the assertion below never runs")
+    assert abs(ungated.mean_ic) < 0.05, (
+        f"shuffled labels produced IC {ungated.mean_ic:+.4f}; the harness is "
+        f"finding structure that is not there")
 
 
 def test_purging_actually_removes_observations():
@@ -96,9 +125,21 @@ def test_the_configuration_matrix_scores_every_column_on_one_index():
         step_sessions=21, alpha=100.0, purge_sessions=63,
         min_train_dates=10, min_train_rows=200,
     )
+    # A configuration the ESTIMATOR REFUSES is not one anybody could have
+    # chosen, so it is dropped and NAMED rather than left as an empty column --
+    # one empty column plus a row-wise dropna deletes every date for every other
+    # arm. `noise_only` is refused here, which is the correct answer: a
+    # single-theme arm built on noise never clears the significance floor.
+    # Single-theme arms are run ungated (see W4), so all three score and the
+    # original strict assertion holds. It was relaxed to a two-element `in`
+    # check while the gated estimator could refuse `noise_only`; that is no
+    # longer possible, and a weaker assertion than the code supports is a
+    # weaker test for no reason.
     assert list(m.columns) == ["both", "signal_only", "noise_only"]
     assert not m.isna().any().any(), "a ragged matrix would bias the PBO ranking"
-    assert m["signal_only"].mean() > m["noise_only"].mean()
+    assert m["signal_only"].mean() > m["noise_only"].mean(), (
+        f"signal {m['signal_only'].mean():+.4f} did not beat noise "
+        f"{m['noise_only'].mean():+.4f}")
 
 
 # =============================================================================

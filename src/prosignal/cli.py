@@ -1200,17 +1200,56 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     pbo_bar = float(val.search_budget.max_acceptable_pbo)
     paths = np.asarray(result.path_sharpes, dtype="float64")
     _print()
-    ex = np.asarray(result.excess, dtype="float64")
+    # PER DISTINCT TEST DATE. `result.excess` holds one entry per (split, date)
+    # pair -- about nine copies of each date on the shipped geometry -- and
+    # printing its count as "scored test dates" invited every reader to treat
+    # the duplication as sample size. The pooled count is still shown, labelled
+    # for what it is.
+    ex = np.asarray(result.excess_per_date(), dtype="float64")
     ex = ex[np.isfinite(ex)]
+    n_pooled = int(np.isfinite(np.asarray(result.excess, dtype="float64")).sum())
     if ex.size:
-        _print(f"  pooled top-decile excess {ex.mean():+.2%} per "
-               f"{horizon}-session period, over {ex.size:,} scored test dates")
+        _print(f"  top-decile excess {ex.mean():+.2%} per {horizon}-session "
+               f"period, over {ex.size:,} DISTINCT test dates "
+               f"({n_pooled:,} split-date pairs, {result.effective_observations():.1f} "
+               f"independent after the {horizon}/{result.step_sessions} overlap)")
     else:
         # Printing "+nan%" here read as a number. It is the absence of one.
-        _print("  pooled top-decile excess: NOT MEASURABLE -- no test date "
+        _print("  top-decile excess: NOT MEASURABLE -- no test date "
                "produced a top decile to measure")
     _print(f"  Deflated Sharpe {dsr.deflated_sr:.3f} charging {trials} trials -- "
            f"{'PASS' if dsr.passes else 'FAIL'}")
+    # The inputs the DSR was computed from, printed alongside it. A deflated
+    # Sharpe cannot be checked by a reader who cannot see how many independent
+    # observations it credited or where its Var[SR] came from, and the previous
+    # version -- which returned 1.000 and passed at 100,000 trials -- survived
+    # for exactly that reason.
+    _print(f"    on {dsr.effective_n:.1f} effective observations "
+           f"from {dsr.n_observations:,} values; "
+           f"Var[SR] {dsr.sr_variance:.4g} ({dsr.sr_variance_source})")
+    # WHAT THESE NUMBERS ARE ABOUT. Every IC and excess above is measured
+    # against the LABEL the ranker is fitted on -- the h-session forward return
+    # -- and not against what the book earns, which is whatever the stop, the
+    # target and the invalidation level produce. The two are different
+    # quantities and the gap is measured, so it is printed rather than left for
+    # a reader to assume away.
+    _print(f"  measured against {result.target}, the {horizon}-session forward "
+           f"return -- NOT against the book's realised outcome")
+    if result.label_book_rank_corr is not None:
+        rc = float(result.label_book_rank_corr)
+        _print(f"  label vs realised book outcome: within-date rank corr "
+               f"{rc:+.3f} ({rc * rc:.0%} of variance). An excess figure here "
+               f"is a statement about the ranking, not about the book.")
+    else:
+        # NOT a number. The panel handed to CPCV carries no realised-outcome
+        # column, so this run did not measure the gap. Quoting the audit's
+        # figure here would present a constant as a measurement -- which is
+        # what this branch used to do, on every run, forever.
+        _print("  the gap between this label and the book's realised outcome "
+               "was NOT MEASURED on this run: the panel carries no realised "
+               "outcome column. Measured separately during the audit at rank "
+               "corr +0.53 on 85 dates, i.e. the label explains about 28% of "
+               "what the book earns. That figure is not from this run.")
     worst = float(paths.min()) if paths.size else float("nan")
     _print(f"  worst of {paths.size} paths: Sharpe {worst:+.2f}; "
            f"{spread.get('share_negative', float('nan')):.0%} of paths below zero")
@@ -1308,13 +1347,23 @@ def _portfolio_inputs(cfg: AppConfig, store, sessions, symbols, end):
     from .stages._cfg import fv, iv
 
     c7 = cfg.params.stage7_risk
+    # `turnover` and `adj_factor` travel with the read. `close * volume` is NOT
+    # turnover once prices are back-adjusted: close is divided by the cumulative
+    # factor and volume is not multiplied by it, so every pre-split date reads a
+    # turnover smaller than the exchange printed -- by 20x for a 1:20 split. The
+    # ADTV screen and the participation cap both consume this, so the error made
+    # names look thinner than they were exactly where a split later occurred.
+    # The exchange prints turnover directly; use it.
     px = store.read_prices(symbols=symbols, start=sessions[0], end=end,
-                           columns=[DATE, SYMBOL, "open", "high", "low", "close", "volume"])
+                           columns=[DATE, SYMBOL, "open", "high", "low", "close",
+                                    "volume", "turnover", "adj_factor"])
     px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
     panels = {
         col: px.pivot_table(index=DATE, columns=SYMBOL, values=col,
                             aggfunc="last", observed=True).sort_index()
-        for col in ("open", "high", "low", "close", "volume")
+        for col in ("open", "high", "low", "close", "volume", "turnover",
+                    "adj_factor")
+        if col in px.columns
     }
     del px
     close, high, low = panels["close"], panels["high"], panels["low"]
@@ -1327,7 +1376,31 @@ def _portfolio_inputs(cfg: AppConfig, store, sessions, symbols, end):
     panels["atr"] = true_range.ewm(alpha=1.0 / period, adjust=False,
                                    min_periods=period).mean()
     panels["ma"] = close.rolling(iv(c7.thesis_invalidation.structure_ma_sessions)).mean()
-    panels["adtv"] = (close * panels["volume"]).rolling(21).mean()
+    panels["adtv"] = panels["turnover"].rolling(21).mean()
+    # THE ALTERNATIVE, as a price index: equal-weight across the ELIGIBLE
+    # universe on each date, compounded. Every simulator run gets it, so no book
+    # can be reported without the number it has to beat.
+    #
+    # The screen is not optional here. Built over every symbol in the store this
+    # is not "the universe the book selects from" -- it is a different, wider
+    # and less liquid population, and calling it the eligible universe while
+    # computing it over everything would put a mislabelled number under the one
+    # conclusion that reverses the verdict. The screen is lagged one session,
+    # so membership on date t is decided by data through t-1.
+    from .features.crosssec import liquidity_mask
+    from .stages._cfg import fv as _fv, iv as _iv
+    u = cfg.params.stage1_universe
+    elig = liquidity_mask(
+        close, panels["turnover"],
+        min_adtv_inr=_fv(u.pit_min_adtv_inr),
+        lookback_sessions=_iv(u.pit_adtv_lookback_sessions),
+        max_names=_iv(u.pit_max_names),
+        min_history_sessions=_iv(u.min_history_sessions),
+        min_price_inr=_fv(u.min_price_inr),
+        adj_factor=panels.get("adj_factor"),
+    ).shift(1).fillna(False)
+    ret = close.pct_change(fill_method=None).where(elig)
+    panels["benchmark"] = (1.0 + ret.mean(axis=1, skipna=True).fillna(0.0)).cumprod()
     return panels
 
 
@@ -1770,7 +1843,7 @@ def cmd_research_spread(cfg: AppConfig, args: argparse.Namespace) -> int:
 
     _rule("Building panels")
     panels = _portfolio_inputs(cfg, store, sessions, None, end)
-    turnover_panel = (panels["close"] * panels["volume"])
+    turnover_panel = panels["turnover"]
     rp = build_research_panel(cfg, store, end, prices=panels,
                               turnover=turnover_panel)
     panel, fams, horizon = rp.panel, rp.features, rp.horizon
@@ -2125,7 +2198,7 @@ def cmd_research_volscale(cfg: AppConfig, args: argparse.Namespace) -> int:
     _rule("Building panels")
     panels = _portfolio_inputs(cfg, store, sessions, None, end)
     rp = build_research_panel(cfg, store, end, prices=panels,
-                              turnover=panels["close"] * panels["volume"])
+                              turnover=panels["turnover"])
     panel, fams, horizon = rp.panel, rp.features, rp.horizon
     base = _portfolio_params(cfg)
     _print(f"  {len(panel):,} rows over {rp.n_dates} dates")
@@ -2452,7 +2525,7 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     # so the store is read once. The simulator needs open/high/low/atr, which
     # is why this path loads them itself.
     panels = _portfolio_inputs(cfg, store, sessions, None, end)
-    turnover_panel = (panels["close"] * panels["volume"])
+    turnover_panel = panels["turnover"]
     rp = build_research_panel(cfg, store, end, prices=panels,
                               turnover=turnover_panel)
     panel, features, dropped, horizon = rp.panel, rp.features, rp.dropped, rp.horizon

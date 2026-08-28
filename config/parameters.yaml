@@ -1105,18 +1105,49 @@ stage4_core_score:
     #    ships -- these weights reach nothing. Only the ridge arm and the
     #    meta-label fit read them.
     #
-    # 2. More fundamentally, there is now nothing for them to weight. Since
-    #    `triple_barrier: false` every label runs the full horizon, so
-    #    `build_panel` assigns held = 63 to every row, and uniqueness is
-    #    computed WITHIN a symbol over identically-shaped spans. Measured on a
-    #    rebuilt panel the within-date standard deviation of uniqueness is
-    #    exactly 0.000 on every date. A per-date WLS is therefore arithmetically
-    #    identical to the per-date OLS already being run.
+    # 2. WITHDRAWN -- THIS REASON WAS FALSE. It read:
     #
-    # So implementing WLS in famamacbeth._ols_slopes would be a provable no-op,
-    # not an improvement. Uniqueness varied by name only while the barrier label
-    # let trades resolve early. Newey-West on the slope series already charges
-    # for the time-series overlap, which is the part that still exists.
+    #      "Since `triple_barrier: false` every label runs the full horizon, so
+    #       `build_panel` assigns held = 63 to every row [...] Measured on a
+    #       rebuilt panel the within-date standard deviation of uniqueness is
+    #       exactly 0.000 on every date. A per-date WLS is therefore
+    #       arithmetically identical to the per-date OLS already being run."
+    #
+    #    `held` IS 63 for every row. Uniqueness is not constant, because it
+    #    counts CONCURRENT labels rather than span length, and a symbol near the
+    #    edge of its eligibility window has fewer of them. Re-measured on the
+    #    rebuilt panel: within-date sd 0.082 to 0.207, zero on NONE of 87 dates,
+    #    values from 0.328 (three concurrent labels) to 1.000 (one), mean 0.441.
+    #    A per-date WLS is NOT arithmetically identical, and implementing it is
+    #    not a no-op. The claim was wrong and it was load-bearing.
+    #
+    # 2'. THE REPLACEMENT REASON, which survives measurement. Average uniqueness
+    #    measures redundancy ACROSS dates: a symbol's row at t overlaps its own
+    #    rows at t +/- 21. Within one cross-section every row shares the same
+    #    63-session window, so there is no within-date redundancy for a per-date
+    #    WLS to correct. What the weighting actually does is tilt every
+    #    cross-sectional regression toward names at the edge of their
+    #    eligibility span -- newly liquid names, and names about to drop out --
+    #    by up to 3x.
+    #
+    #    Measured, and recorded because it is the evidence for the refusal:
+    #
+    #      theme        OLS lam    t        WLS lam    t       gate
+    #      mom_f        +0.0678  +2.70      +0.0695  +2.58     priced -> priced
+    #      reversal_f   +0.0269  +1.53      +0.0408  +2.15     zeroed -> PRICED
+    #      delivery_f   +0.0504  +2.55      +0.0479  +2.25     priced -> priced
+    #
+    #    Weighting adds a third traded theme. "Reversal becomes significant once
+    #    names entering and leaving the universe are up-weighted threefold" is a
+    #    selection effect, not a discovery, and adopting it because it clears a
+    #    gate would be searching for a result. Newey-West with the analytic
+    #    variance inflation charges for the overlap that is real.
+    #
+    #    `fama_macbeth` now takes a `weight_col` and honours it correctly --
+    #    uniform weights reproduce OLS bit-for-bit, a zero weight removes a row
+    #    exactly. It is available for research and is not wired to the shipped
+    #    path, and `fit_coefficients` says so at the point of decision instead
+    #    of accepting the argument and dropping it.
     #
     # Left TRUE rather than flipped, because it is read and honoured on the
     # ridge and meta-label paths and flipping it would change those.
@@ -1763,6 +1794,41 @@ stage7_risk:
         help (positive serial correlation, which a momentum book satisfies) but
         NOT a multiplier. The practitioner "2x ATR" figure traces to blogs, not
         journals, so this is searched rather than assumed.
+
+        WITHDRAWN CLAIM. This parameter was previously justified as "corrected
+        at portfolio level, 2.5x is near-optimal and was left unchanged". That
+        comparison ran a grid of stop multiples against EACH OTHER. Every arm
+        had a stop, and an ablation whose grid does not contain OFF cannot
+        discover that the mechanism is negative -- only which setting inside it
+        is least bad.
+
+        Measured with the off arm present and against the equal-weight eligible
+        universe, out of sample over 70 purged CPCV dates, net of the shipped
+        cost model, per 63-session period:
+
+          arm                                   net    vs bench   worst   covid
+          NO stop / target / invalidation     +4.70%     +0.01%  -25.6%   -7.1%
+          stop 1.5x ATR + 3R                  -0.76%     -5.45%  -13.6%   -3.5%
+          stop 2.0x ATR + 3R                  +0.30%     -4.39%  -13.4%   -2.8%
+          stop 2.5x ATR + 3R  (shipped)       +1.28%     -3.41%  -12.3%   -4.1%
+          stop 3.5x ATR + 3R                  +2.06%     -2.63%  -11.1%   -7.3%
+          stop 5.0x ATR + 3R                  +2.36%     -2.33%  -10.3%   -7.6%
+          benchmark                           +4.68%      0.00%  -32.9%  -18.9%
+
+        The relationship is MONOTONE: every tightening costs return. The
+        ranking's own edge is +1.82% per period over the benchmark before any
+        exit machinery is applied, so the stop as configured costs roughly
+        twice the entire edge. Costs, by contrast, are the smallest layer at
+        -0.67%.
+
+        WHY IT IS NOT CHANGED HERE. The stop is a capital-preservation choice,
+        not a research parameter, and it demonstrably works as insurance: worst
+        cohort -12.3% against the benchmark's -32.9%, and -4.1% through the
+        COVID crash against -18.9%. What was wrong was the JUSTIFICATION, not
+        necessarily the value. The premium is now measured and stated so the
+        operator can decide whether -3.4% per period buys enough tail
+        protection to be worth it. Changing the traded stop is a strategy
+        decision and belongs to the operator, not to an audit.
     # Never place the stop further than this % from entry, regardless of ATR.
     max_stop_distance_pct:
       value: 15.0
