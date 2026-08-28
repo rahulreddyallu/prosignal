@@ -697,3 +697,80 @@ class TestDeadCrossSectionsAreNotMeasurements:
         r = fama_macbeth(self._panel(dead_dates=7), ["a_f", "b_f"])
         assert r.n_dates_by_feature, "the per-feature counts are not reported"
         assert r.n_dates_by_feature["b_f"] < r.n_dates_by_feature["a_f"]
+
+
+# =============================================================================
+# W3 -- one column, one normalisation
+# =============================================================================
+class TestSectorRankIsOneQuantity:
+    """The column carried a within-sector rank for 58% of rows and a UNIVERSE
+    rank for the rest, and both were averaged into the same family aggregate
+    and handed to the same regression. A within-sector +0.9 in a fourteen-name
+    sector is not a universe +0.9."""
+
+    @staticmethod
+    def _case(seed=0, n=200, big=(60, 40), tiny=5):
+        rng = np.random.default_rng(seed)
+        v = pd.Series(rng.normal(size=n), index=[f"s{i}" for i in range(n)])
+        labels = (["A"] * big[0] + ["B"] * big[1] + ["Tiny"] * tiny
+                  + [None] * (n - sum(big) - tiny))
+        return v, pd.Series(labels, index=v.index)
+
+    def test_every_group_is_normalised_the_same_way(self):
+        from prosignal.features.crosssec import sector_neutral_rank
+        v, sec = self._case()
+        r = sector_neutral_rank(v, sec)
+        groups = {
+            "A": r[sec == "A"], "B": r[sec == "B"],
+            "residual": r[(sec.isna()) | (sec == "Tiny")],
+        }
+        spreads = {k: float(x.std()) for k, x in groups.items()}
+        means = {k: float(x.mean()) for k, x in groups.items()}
+        for k, m in means.items():
+            assert abs(m) < 0.10, f"{k} mean rank {m:+.3f}; groups must centre alike"
+        lo, hi = min(spreads.values()), max(spreads.values())
+        assert hi - lo < 0.05, (
+            f"group spreads {spreads} differ; a rank from one group is not "
+            f"comparable with a rank from another, which is the defect")
+
+    def test_the_unclassified_pool_is_ranked_within_itself(self):
+        """Not against the universe. The discriminating case: an unsectored
+        name that is mid-pack market-wide but top of the unclassified pool."""
+        from prosignal.features.crosssec import sector_neutral_rank, cross_sectional_rank
+        v, sec = self._case()
+        resid = (sec.isna()) | (sec == "Tiny")
+        got = sector_neutral_rank(v, sec)[resid]
+        want = cross_sectional_rank(v[resid])
+        assert np.allclose(got.to_numpy(), want.to_numpy(), atol=1e-12), (
+            "the residual pool is still carrying universe ranks")
+        universe = cross_sectional_rank(v)[resid]
+        assert not np.allclose(got.to_numpy(), universe.to_numpy(), atol=1e-6), (
+            "the test cannot discriminate: within-pool and universe ranks agree")
+
+    def test_coverage_is_reportable(self):
+        """The 58% figure was only discoverable by instrumenting the code from
+        outside. A property that decides what a whole column means must be
+        readable from within."""
+        from prosignal.features.crosssec import sector_rank_coverage
+        _, sec = self._case()
+        cov = sector_rank_coverage(sec)
+        assert cov["n_sectors"] == 2, "Tiny is below the floor and is not a sector"
+        assert cov["within_sector"] == pytest.approx(0.5, abs=1e-9)
+        assert cov["unclassified"] == pytest.approx(0.5, abs=1e-9)
+
+    def test_a_residual_pool_too_small_to_rank_is_the_only_mixed_case(self):
+        from prosignal.features.crosssec import (MIN_SECTOR_NAMES,
+                                                 cross_sectional_rank,
+                                                 sector_neutral_rank)
+        rng = np.random.default_rng(3)
+        n = 80
+        v = pd.Series(rng.normal(size=n), index=[f"s{i}" for i in range(n)])
+        # one real sector plus a handful of orphans, fewer than the floor
+        orphans = MIN_SECTOR_NAMES - 1
+        sec = pd.Series(["A"] * (n - orphans) + [None] * orphans, index=v.index)
+        r = sector_neutral_rank(v, sec)
+        tail = r[sec.isna()]
+        assert np.allclose(tail.to_numpy(), cross_sectional_rank(v)[sec.isna()].to_numpy(),
+                           atol=1e-12), (
+            "below the floor the residual pool keeps the universe rank; this is "
+            "the one surviving mixed case and it is bounded by MIN_SECTOR_NAMES-1")

@@ -376,24 +376,82 @@ def sector_neutral_rank(
     screen cheap or fast, which is not what any of these factors claim to
     measure.
 
-    A sector under ``MIN_SECTOR_NAMES`` is not ranked within -- three names give
-    ranks of -1, 0 and +1 whatever the values were -- and falls back to the
-    universe rank. A name with no sector does the same, which is common here:
-    the point-in-time universe reaches past any index constituent file, so
-    sectors are genuinely absent for part of it.
+    EVERY NAME IS RANKED WITHIN A GROUP. A sector under ``MIN_SECTOR_NAMES`` is
+    not ranked within -- three names give ranks of -1, 0 and +1 whatever the
+    values were -- and neither is a name with no sector at all, which is common
+    here: the point-in-time universe reaches past any index constituent file, so
+    sectors are genuinely absent for part of it. Those names form ONE RESIDUAL
+    GROUP, `UNCLASSIFIED`, and are ranked within that.
+
+    WHY, AND WHAT THIS REPLACES. The fallback used to be the UNIVERSE rank, so
+    a single column carried two different quantities: "where you sit among your
+    peers" for a sectored name and "where you sit in the whole market" for the
+    rest. Measured on the shipped panel, 58.0% of rows carried a sector label
+    and a median 46.0% of names per date were ranked within one -- so roughly
+    half of every cross-section was on the other scale. A within-sector rank of
+    +0.9 in a fourteen-name sector can belong to a name that is unremarkable
+    market-wide; a universe rank of +0.9 cannot. Both were averaged into the
+    same family aggregate and handed to the same regression, whose design
+    column was therefore not one variable. On the last panel date 49% of the
+    top `mom_f` decile came from the 45% of names that were NOT within-sector
+    ranked.
+
+    A residual group is heterogeneous, and that is a real cost. It is a smaller
+    one than mixing two normalisations: the column now means one thing
+    everywhere, and the heterogeneity is visible in the group's name rather
+    than hidden in a fallback branch. The universe rank survives only where the
+    residual group is itself too small to rank within, which on this universe
+    means it barely exists.
+
+    Not done: dropping unsectored names, which discards 42% of the universe and
+    selects on which names a vendor file happens to cover; nor lowering
+    ``MIN_SECTOR_NAMES``, which buys coverage with noise dressed as neutrality.
     """
     universe = cross_sectional_rank(values)
     if sectors is None:
         return universe
     sectors = sectors.reindex(values.index)
     out = universe.copy()
+    residual = []
     for name, idx in values.groupby(sectors, observed=True).groups.items():
-        if name is None or str(name) in ("", "Unknown"):
-            continue
-        if len(idx) < MIN_SECTOR_NAMES:
+        if name is None or str(name) in ("", "Unknown") or len(idx) < MIN_SECTOR_NAMES:
+            residual.extend(list(idx))
             continue
         out.loc[idx] = cross_sectional_rank(values.loc[idx])
+    # Names the grouping dropped entirely -- a NaN sector is not a group key.
+    missing = values.index.difference(
+        pd.Index([i for name, idx in values.groupby(sectors, observed=True).groups.items()
+                  for i in idx]))
+    residual.extend(list(missing))
+    if residual:
+        resid = pd.Index(residual).unique()
+        if len(resid) >= MIN_SECTOR_NAMES:
+            out.loc[resid] = cross_sectional_rank(values.loc[resid])
+        # else: too few to rank within, and they keep the universe rank. This
+        # is the one surviving mixed case and it is bounded by 11 names.
     return out
+
+
+def sector_rank_coverage(sectors: pd.Series) -> Dict[str, float]:
+    """How much of a cross-section is ranked within a REAL sector.
+
+    The 58% figure that opened this finding was only discoverable by
+    instrumenting the code from outside. A property that decides what a whole
+    feature column means should be readable from the inside.
+    """
+    s = sectors.dropna()
+    n = int(len(sectors))
+    if n == 0:
+        return {"n": 0, "within_sector": 0.0, "unclassified": 0.0, "n_sectors": 0}
+    counts = s[~s.astype(str).isin(("", "Unknown"))].value_counts()
+    real = counts[counts >= MIN_SECTOR_NAMES]
+    within = int(real.sum())
+    return {
+        "n": n,
+        "within_sector": within / n,
+        "unclassified": (n - within) / n,
+        "n_sectors": int(len(real)),
+    }
 
 #: How much history the LIVE feature row reads. `resid_reversal` standardises by
 #: the trailing residual dispersion over REVERSAL_STD_WINDOW where it exists, so
