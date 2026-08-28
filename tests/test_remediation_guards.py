@@ -624,3 +624,76 @@ class TestPathDrawdownIsOneSchedule:
         assert '"max_drawdown_period"' in src
         assert '"max_drawdown_path"' in src
         assert '"max_drawdown"' in src
+
+
+# =============================================================================
+# W5 -- a dead cross-section is not a measurement of zero
+# =============================================================================
+class TestDeadCrossSectionsAreNotMeasurements:
+    """`lstsq` on a rank-deficient design returns the minimum-norm solution,
+    which sets a constant column's coefficient to exactly 0.0 -- silently, and
+    indistinguishably from a theme measured and found flat. Five of eighty-three
+    cross-sections entered `delivery_f`'s mean and standard error that way, and
+    removing them moved `lottery_f` across the |t| >= 2 gate."""
+
+    @staticmethod
+    def _panel(dead_dates=5, n_dates=40, n=200, seed=0):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for di, d in enumerate(pd.bdate_range("2020-01-01", periods=n_dates, freq="21B")):
+            a = rng.normal(size=n)
+            b = rng.normal(size=n)
+            dead = di < dead_dates
+            rows.append(pd.DataFrame({
+                "date": d, "a_f": a, "b_f": (np.zeros(n) if dead else b),
+                "label_rank": 0.3 * a + (0.0 if dead else 0.5) * b
+                              + rng.normal(size=n)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_a_constant_column_is_not_identified(self):
+        from prosignal.features.famamacbeth import _ols_slopes
+        rng = np.random.default_rng(1)
+        n = 200
+        a = rng.normal(size=n)
+        y = 0.3 * a + rng.normal(size=n)
+        for const in (0.0, 7.5, -3.0):
+            beta = _ols_slopes(np.column_stack([a, np.full(n, const)]), y)
+            assert np.isnan(beta[1]), (
+                f"a column constant at {const} carries no cross-sectional "
+                f"information; its slope is not identified and must not be "
+                f"reported as {beta[1]}")
+
+    def test_the_dead_column_does_not_disturb_its_neighbours(self):
+        """The orthogonality claim the fix rests on, asserted rather than
+        assumed: blanking a constant column must leave every other slope
+        bit-identical to the regression that never had it."""
+        from prosignal.features.famamacbeth import _ols_slopes
+        rng = np.random.default_rng(1)
+        n = 200
+        a = rng.normal(size=n)
+        y = 0.3 * a + rng.normal(size=n)
+        joint = _ols_slopes(np.column_stack([a, np.zeros(n)]), y)
+        alone = _ols_slopes(a.reshape(-1, 1), y)
+        assert joint[0] == pytest.approx(alone[0], abs=1e-12)
+
+    def test_the_theme_is_averaged_over_the_dates_that_measured_it(self):
+        from prosignal.features.famamacbeth import fama_macbeth
+        p = self._panel(dead_dates=5)
+        full = fama_macbeth(p, ["a_f", "b_f"])
+        live = sorted(p["date"].unique())[5:]
+        trimmed = fama_macbeth(p[p["date"].isin(live)], ["a_f", "b_f"])
+        assert full.n_dates_by_feature["b_f"] == full.n_dates - 5
+        assert full.n_dates_by_feature["a_f"] == full.n_dates
+        assert full.lam["b_f"] == pytest.approx(trimmed.lam["b_f"], abs=1e-12), (
+            "the dead dates are still entering the mean as zeros")
+        assert full.se["b_f"] == pytest.approx(trimmed.se["b_f"], abs=1e-12), (
+            "the dead dates are still suppressing the dispersion the standard "
+            "error is built from")
+
+    def test_the_per_feature_count_is_reported(self):
+        """A theme estimated on fewer cross-sections than its neighbours must
+        not read as though it were not."""
+        from prosignal.features.famamacbeth import fama_macbeth
+        r = fama_macbeth(self._panel(dead_dates=7), ["a_f", "b_f"])
+        assert r.n_dates_by_feature, "the per-feature counts are not reported"
+        assert r.n_dates_by_feature["b_f"] < r.n_dates_by_feature["a_f"]

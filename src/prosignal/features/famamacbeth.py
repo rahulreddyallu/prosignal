@@ -133,6 +133,11 @@ class FMResult:
     n_dates: int = 0
     nw_lags: int = 0
     skipped_dates: int = 0
+    #: Cross-sections that actually MEASURED each theme. Equal to `n_dates` for
+    #: a theme present throughout; smaller for one that was constant on some
+    #: dates, where its slope is not identified and is recorded as missing
+    #: rather than as a measured zero.
+    n_dates_by_feature: Dict[str, int] = field(default_factory=dict)
 
     def significant(self, threshold: float = 2.0) -> List[str]:
         return [f for f in self.features if abs(self.t_stat.get(f, 0.0)) >= threshold]
@@ -206,7 +211,26 @@ def newey_west_se(series: np.ndarray, lags: int,
 
 
 def _ols_slopes(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
-    """One cross-sectional regression with an intercept. None if degenerate."""
+    """One cross-sectional regression with an intercept. None if degenerate.
+
+    A feature with NO CROSS-SECTIONAL VARIATION on this date comes back `nan`,
+    not zero. `lstsq` on a rank-deficient design returns the minimum-norm
+    solution, which sets the coefficient on a constant column to exactly 0.0 --
+    silently, and indistinguishably from a theme that was measured and found
+    flat. Averaged over dates, those zeros attenuate the mean AND suppress the
+    dispersion the standard error is built from, so a theme that was dark for
+    part of the sample reads as better measured than it was.
+
+    Not hypothetical: `deliv_pct` begins in 2019 and `delivery_f` is
+    neutral-when-missing, so it was identically zero for every name on five of
+    eighty-three cross-sections. Those five entered its mean and its
+    Newey-West standard error as measurements, and removing them moved
+    `lottery_f` from t -2.26 to t -1.83, across the |t| >= 2 gate that decides
+    which themes are traded.
+
+    The predicate is exact zero variance, which is the only case where the
+    coefficient is not identified. Nothing here is thresholded.
+    """
     n, p = x.shape
     if n <= p + 1:
         return None
@@ -217,7 +241,13 @@ def _ols_slopes(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
         return None
     if not np.isfinite(beta).all():
         return None
-    return beta[1:]
+    out = beta[1:].astype("float64", copy=True)
+    # A constant column is orthogonal to every other column of the design, so
+    # blanking it does not disturb its neighbours' slopes. Asserted by
+    # `TestDeadCrossSectionsAreNotMeasurements`, not assumed.
+    dead = np.nanmax(x, axis=0) == np.nanmin(x, axis=0)
+    out[dead] = np.nan
+    return out
 
 
 def fama_macbeth(
@@ -260,7 +290,7 @@ def fama_macbeth(
             continue
         beta = _ols_slopes(group[cols].to_numpy("float64"),
                            group[target].to_numpy("float64"))
-        if beta is None:
+        if beta is None or not np.isfinite(beta).any():
             skipped += 1
             continue
         rows.append(beta)
@@ -276,7 +306,18 @@ def fama_macbeth(
     result = FMResult(features=list(cols), slopes=slopes, n_dates=len(slopes),
                       nw_lags=lags, skipped_dates=skipped)
     for c in cols:
+        # PER FEATURE. A theme is averaged over the cross-sections that
+        # measured it, not over every date in the panel. `n_dates` is the
+        # panel's; `n_dates_by_feature[c]` is this theme's, and where they
+        # differ the difference is visible rather than folded into the mean.
         s = slopes[c].to_numpy("float64")
+        s = s[np.isfinite(s)]
+        result.n_dates_by_feature[c] = int(s.size)
+        if s.size < 3:
+            result.lam[c] = 0.0
+            result.se[c] = float("nan")
+            result.t_stat[c] = float("nan")
+            continue
         mean = float(np.nanmean(s))
         # The sampling scheme is passed, so the standard error carries the
         # analytic overlap inflation as a floor rather than trusting what a
