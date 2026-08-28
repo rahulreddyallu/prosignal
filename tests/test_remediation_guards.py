@@ -802,3 +802,43 @@ class TestSectorRankIsOneQuantity:
                            atol=1e-12), (
             "below the floor the residual pool keeps the universe rank; this is "
             "the one surviving mixed case and it is bounded by MIN_SECTOR_NAMES-1")
+
+
+# =============================================================================
+# W4 -- a single-theme arm under a gated estimator is not a comparable arm
+# =============================================================================
+class TestSingleThemeArmsAreNotSelectedOnThemselves:
+    """Under the gated Fama-MacBeth a one-theme arm trades only on the splits
+    where that theme cleared |t| >= 2 and holds cash on the rest, so its series
+    is conditioned on its own in-sample significance while a multi-theme arm's
+    is not. Any comparison between them compares selection regimes.
+
+    NOTE THE DIRECTION. This correction flatters the production model, because
+    the artifact made the single-theme CONTROLS look good. It is guarded, and
+    every conclusion resting on such a matrix has to be re-derived."""
+
+    def test_a_one_feature_arm_is_run_ungated(self):
+        import inspect
+        from prosignal.validation import harness
+        src = inspect.getsource(harness.configuration_matrix)
+        assert "arm_floor = 0.0 if len(cols) == 1 else None" in src
+        assert "significance_floor=arm_floor" in src, (
+            "the per-arm floor is computed and not passed to the fit")
+
+    def test_the_treatment_is_declared_on_the_result(self):
+        """Silently changing an arm's estimator would be a worse defect than
+        the one it fixes."""
+        import inspect
+        from prosignal.validation import harness
+        src = inspect.getsource(harness.configuration_matrix)
+        assert 'frame.attrs["single_theme_ungated"]' in src, (
+            "a reader of the matrix must be able to see which arms were "
+            "treated differently and why")
+
+    def test_the_flattering_direction_is_recorded_at_the_change(self):
+        import inspect
+        from prosignal.validation import harness
+        src = inspect.getsource(harness.configuration_matrix)
+        assert "FLATTERING DIRECTION" in src.upper(), (
+            "a correction that can only help the system under audit must say "
+            "so where it is made")

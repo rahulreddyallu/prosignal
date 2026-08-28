@@ -350,8 +350,30 @@ def configuration_matrix(
     purge_obs = int(np.ceil(purge_sessions / step_sessions))
     out: Dict[str, Dict[pd.Timestamp, float]] = {}
 
+    single_theme_ungated = []
     for name, features in configurations.items():
         cols = [c for c in features if c in panel.columns]
+        # A SINGLE-THEME ARM IS RUN UNGATED, AND SAID SO.
+        #
+        # Under the gated Fama-MacBeth a one-theme arm is not a strategy scored
+        # on every split -- it is a strategy scored on the splits where that
+        # theme happened to clear |t| >= 2, and it holds cash on the rest. Its
+        # series is therefore conditioned on its own in-sample significance
+        # while a multi-theme arm's is not, and comparing them compares two
+        # different selection regimes, not two feature sets.
+        #
+        # Measured at audit time: `beta` alone traded on a minority of splits
+        # and its scored dates were exactly the ones where it measured, which
+        # is what carried the README's estimator-comparison conclusion.
+        #
+        # THIS CORRECTION RUNS IN THE FLATTERING DIRECTION and is flagged here
+        # for that reason. The artifact made the single-theme CONTROLS look
+        # good, so removing it can only help the production model. Every
+        # conclusion drawn from a matrix containing single-theme arms must be
+        # re-derived rather than inherited.
+        arm_floor = 0.0 if len(cols) == 1 else None
+        if arm_floor is not None:
+            single_theme_ungated.append(name)
         work = panel.dropna(subset=cols + ["label_rank", "label"]).reset_index(drop=True)
         dates = sorted(work["date"].unique())
         by_date = {d: g for d, g in work.groupby("date")}
@@ -363,7 +385,8 @@ def configuration_matrix(
             te = by_date[dates[i]]
             # `purge_sessions` IS the label horizon here -- that is what the
             # purge is sized from -- and it is what sets the Newey-West lag.
-            fit = _fit(train, cols, alpha, estimator, purge_sessions, step_sessions)
+            fit = _fit(train, cols, alpha, estimator, purge_sessions,
+                       step_sessions, significance_floor=arm_floor)
             if fit is None:
                 continue
             pred = predict(fit, te[cols].to_numpy("float64"))
@@ -382,6 +405,10 @@ def configuration_matrix(
         out[name] = series
 
     frame = pd.DataFrame(out)
+    if single_theme_ungated:
+        frame.attrs["single_theme_ungated"] = list(single_theme_ungated)
+        log.info("single-theme arms scored with the significance floor at zero",
+                 extra={"arms": list(single_theme_ungated)})
     # A configuration the ESTIMATOR REFUSES scores nothing at all -- under the
     # gated Fama-MacBeth a single-theme arm that never clears |t| >= 2 produces
     # no coefficients on any split. Its column is entirely empty, and the row
