@@ -420,10 +420,19 @@ class TestSurvivingMutations:
             "the panel's last label must resolve inside the frame; the loop "
             "bound is what guarantees it")
 
-    def test_uniqueness_weights_are_declared_inert_on_the_shipped_path(self):
-        """Removing them changed no test -- correctly, because the shipped
-        Fama-MacBeth branch never receives them. Pinned so the day someone
-        wires them in, the claim in the config stops being true loudly."""
+    def test_uniqueness_weights_are_refused_not_dropped(self):
+        """The shipped Fama-MacBeth branch deliberately does not weight, and
+        that decision is now stated where the code makes it.
+
+        WHAT CHANGED. This used to assert only that the weights never reached
+        `fama_macbeth`, citing a config note whose premise turned out to be
+        false: it claimed within-date uniqueness had sd exactly 0.000, which
+        would make a per-date WLS arithmetically identical. Measured, the sd
+        runs 0.082-0.207 and is zero on none of 87 dates. The conclusion
+        survives on a different argument -- uniqueness measures redundancy
+        across dates, and a per-date WLS instead up-weights names at the edge
+        of their eligibility span by up to 3x -- so the assertion now pins the
+        REASON as well as the behaviour."""
         import inspect
         from prosignal.features import crossmodel
         src = inspect.getsource(crossmodel.fit_coefficients)
@@ -432,9 +441,28 @@ class TestSurvivingMutations:
         assert "weights=weights" in ridge_branch, "the ridge branch honours them"
         fm_call = src.split("fm = fama_macbeth(")[1].split(")")[0]
         assert "weight" not in fm_call, (
-            "the Fama-MacBeth branch does not receive the uniqueness weights; if "
-            "that changes, the config note on `labels.uniqueness_weighting` "
-            "declaring it inert on the shipped path must change with it")
+            "the shipped Fama-MacBeth branch must not weight by uniqueness")
+        assert "0.082" in src and "across dates" in src, (
+            "the refusal must carry its measured reason at the point of "
+            "decision; a bare omission is what let a false justification "
+            "stand in the config for months")
+
+    def test_the_weighting_it_refuses_is_implemented_correctly(self):
+        """The capability exists and is right -- the decision not to use it is
+        a research judgement, not a gap. Uniform weights must reproduce OLS
+        bit-for-bit and a zero weight must remove a row exactly."""
+        from prosignal.features.famamacbeth import _ols_slopes
+        rng = np.random.default_rng(0)
+        n = 200
+        x = rng.normal(size=(n, 2))
+        y = x @ np.array([0.3, -0.2]) + rng.normal(size=n)
+        base = _ols_slopes(x, y)
+        assert np.allclose(base, _ols_slopes(x, y, w=np.ones(n)), atol=1e-12)
+        assert np.allclose(base, _ols_slopes(x, y, w=np.full(n, 7.3)), atol=1e-12)
+        w = np.ones(n)
+        w[:20] = 0.0
+        assert np.allclose(_ols_slopes(x, y, w=w), _ols_slopes(x[20:], y[20:]),
+                           atol=1e-12)
 
 
 # =============================================================================

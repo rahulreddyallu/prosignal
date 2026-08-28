@@ -1045,8 +1045,52 @@ def fit_coefficients(
     if estimator != "fama_macbeth":
         return None, None, f"unknown estimator {estimator!r}"
 
+    # WEIGHTS ARE USED OR REFUSED, NEVER ACCEPTED AND DROPPED. This branch used
+    # to take `weights` in its signature and forward them only to `ridge_fit`,
+    # so under the SHIPPED estimator the per-symbol uniqueness computation ran
+    # on every refit and its result went nowhere, silently.
+    #
+    # THE CONFIG'S STATED REASON FOR THAT BEING HARMLESS IS FALSE. It claimed
+    # "the within-date standard deviation of uniqueness is exactly 0.000 on
+    # every date", so a per-date WLS would be arithmetically identical to the
+    # OLS. `held` is indeed 63 for every row once the barrier is off -- but
+    # uniqueness counts CONCURRENT labels, and a symbol near the edge of its
+    # eligibility window has fewer of them. Measured on the rebuilt panel the
+    # within-date sd runs 0.082 to 0.207 and is zero on NONE of 87 dates,
+    # spanning 0.328 (three concurrent labels) to 1.000 (one).
+    #
+    # THEY ARE STILL NOT APPLIED, for a better reason. Average uniqueness
+    # measures redundancy ACROSS dates: a symbol's row at t overlaps its own
+    # rows at t +/- 21. Within a single cross-section every row shares the same
+    # 63-session window, so there is no within-date redundancy for a per-date
+    # WLS to correct. What such a weighting actually does is tilt every
+    # cross-sectional regression toward names at the edge of their eligibility
+    # span -- newly liquid names, and names about to drop out -- by up to 3x.
+    #
+    # Measured, and kept because it is the evidence for the refusal:
+    #
+    #     theme        OLS lam    t        WLS lam    t       gate
+    #     mom_f        +0.0678  +2.70      +0.0695  +2.58     priced -> priced
+    #     reversal_f   +0.0269  +1.53      +0.0408  +2.15     zeroed -> PRICED
+    #     delivery_f   +0.0504  +2.55      +0.0479  +2.25     priced -> priced
+    #
+    # Weighting adds a third traded theme. "Reversal becomes significant once
+    # names entering and leaving the universe are up-weighted threefold" is a
+    # selection effect with obvious economic content, not a discovery, and
+    # adopting it because it clears a gate is the exact move this remediation
+    # is forbidden to make. The overlap that IS real is across dates, and
+    # Newey-West with the analytic variance inflation already charges for it.
+    #
+    # `fama_macbeth` takes a `weight_col` and honours it correctly (uniform
+    # weights reproduce OLS bit-for-bit, a zero weight removes a row exactly);
+    # it is available for research and is not wired to the shipped path.
     fm = fama_macbeth(panel, cols, target=target, horizon=horizon, step=step,
                       window=window_dates)
+    if weights is not None:
+        log.debug("uniqueness weights are not applied under fama_macbeth; the "
+                  "overlap they measure is across dates and is charged by the "
+                  "Newey-West standard error instead",
+                  extra={"n_weights": int(np.size(weights))})
     if fm is None:
         n = panel["date"].nunique() if "date" in panel.columns else 0
         return None, None, (f"Fama-MacBeth needs at least 3 usable "

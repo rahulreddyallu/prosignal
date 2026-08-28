@@ -138,6 +138,10 @@ class FMResult:
     #: dates, where its slope is not identified and is recorded as missing
     #: rather than as a measured zero.
     n_dates_by_feature: Dict[str, int] = field(default_factory=dict)
+    #: Which column weighted the cross-sectional fits, or None for unweighted.
+    #: Recorded so a result cannot be compared against one estimated another
+    #: way without the difference being visible.
+    weight_col: Optional[str] = None
 
     def significant(self, threshold: float = 2.0) -> List[str]:
         return [f for f in self.features if abs(self.t_stat.get(f, 0.0)) >= threshold]
@@ -210,7 +214,8 @@ def newey_west_se(series: np.ndarray, lags: int,
     return math.sqrt(gamma0 * vif / t)
 
 
-def _ols_slopes(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
+def _ols_slopes(x: np.ndarray, y: np.ndarray,
+                w: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
     """One cross-sectional regression with an intercept. None if degenerate.
 
     A feature with NO CROSS-SECTIONAL VARIATION on this date comes back `nan`,
@@ -235,6 +240,17 @@ def _ols_slopes(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
     if n <= p + 1:
         return None
     design = np.column_stack([np.ones(n), x])
+    if w is not None:
+        # WLS as a rescaled OLS: minimising sum(w_i r_i^2) is least squares on
+        # sqrt(w)-scaled rows. Uniform weights reproduce the unweighted fit
+        # exactly, and a zero weight removes a row exactly -- both asserted.
+        ww = np.asarray(w, dtype="float64")
+        ww = np.where(np.isfinite(ww) & (ww > 0), ww, 0.0)
+        if ww.sum() <= 0:
+            return None
+        rt = np.sqrt(ww)[:, None]
+        design = design * rt
+        y = np.asarray(y, dtype="float64") * rt[:, 0]
     try:
         beta, *_ = np.linalg.lstsq(design, y, rcond=None)
     except np.linalg.LinAlgError:
@@ -245,7 +261,11 @@ def _ols_slopes(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
     # A constant column is orthogonal to every other column of the design, so
     # blanking it does not disturb its neighbours' slopes. Asserted by
     # `TestDeadCrossSectionsAreNotMeasurements`, not assumed.
-    dead = np.nanmax(x, axis=0) == np.nanmin(x, axis=0)
+    # Variation is judged on the rows that CARRY WEIGHT. A column varying only
+    # across rows the fit gives zero weight is not identified by that fit.
+    live = slice(None) if w is None else (np.asarray(w, dtype="float64") > 0)
+    xv = x[live] if w is not None else x
+    dead = (np.nanmax(xv, axis=0) == np.nanmin(xv, axis=0)) if len(xv) else np.ones(p, bool)
     out[dead] = np.nan
     return out
 
@@ -259,6 +279,7 @@ def fama_macbeth(
     nw_lags: Optional[int] = None,
     window: Optional[int] = None,
     min_cross_section: int = MIN_CROSS_SECTION,
+    weight_col: Optional[str] = None,
 ) -> Optional[FMResult]:
     """Estimate theme coefficients date by date, then average the slopes.
 
@@ -273,7 +294,11 @@ def fama_macbeth(
     if not cols or target not in panel.columns or "date" not in panel.columns:
         return None
 
-    frame = panel[["date", target] + cols].dropna()
+    keep_cols = ["date", target] + cols
+    use_w = bool(weight_col) and weight_col in panel.columns
+    if use_w:
+        keep_cols = keep_cols + [weight_col]
+    frame = panel[keep_cols].dropna()
     if frame.empty:
         return None
     dates = sorted(frame["date"].unique())
@@ -288,8 +313,10 @@ def fama_macbeth(
         if len(group) < min_cross_section:
             skipped += 1
             continue
-        beta = _ols_slopes(group[cols].to_numpy("float64"),
-                           group[target].to_numpy("float64"))
+        beta = _ols_slopes(
+            group[cols].to_numpy("float64"),
+            group[target].to_numpy("float64"),
+            w=(group[weight_col].to_numpy("float64") if use_w else None))
         if beta is None or not np.isfinite(beta).any():
             skipped += 1
             continue
@@ -304,7 +331,8 @@ def fama_macbeth(
     lags = int(nw_lags) if nw_lags is not None else max(0, math.ceil(horizon / max(step, 1)) - 1)
 
     result = FMResult(features=list(cols), slopes=slopes, n_dates=len(slopes),
-                      nw_lags=lags, skipped_dates=skipped)
+                      nw_lags=lags, skipped_dates=skipped,
+                      weight_col=(weight_col if use_w else None))
     for c in cols:
         # PER FEATURE. A theme is averaged over the cross-sections that
         # measured it, not over every date in the panel. `n_dates` is the

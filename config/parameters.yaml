@@ -1105,18 +1105,49 @@ stage4_core_score:
     #    ships -- these weights reach nothing. Only the ridge arm and the
     #    meta-label fit read them.
     #
-    # 2. More fundamentally, there is now nothing for them to weight. Since
-    #    `triple_barrier: false` every label runs the full horizon, so
-    #    `build_panel` assigns held = 63 to every row, and uniqueness is
-    #    computed WITHIN a symbol over identically-shaped spans. Measured on a
-    #    rebuilt panel the within-date standard deviation of uniqueness is
-    #    exactly 0.000 on every date. A per-date WLS is therefore arithmetically
-    #    identical to the per-date OLS already being run.
+    # 2. WITHDRAWN -- THIS REASON WAS FALSE. It read:
     #
-    # So implementing WLS in famamacbeth._ols_slopes would be a provable no-op,
-    # not an improvement. Uniqueness varied by name only while the barrier label
-    # let trades resolve early. Newey-West on the slope series already charges
-    # for the time-series overlap, which is the part that still exists.
+    #      "Since `triple_barrier: false` every label runs the full horizon, so
+    #       `build_panel` assigns held = 63 to every row [...] Measured on a
+    #       rebuilt panel the within-date standard deviation of uniqueness is
+    #       exactly 0.000 on every date. A per-date WLS is therefore
+    #       arithmetically identical to the per-date OLS already being run."
+    #
+    #    `held` IS 63 for every row. Uniqueness is not constant, because it
+    #    counts CONCURRENT labels rather than span length, and a symbol near the
+    #    edge of its eligibility window has fewer of them. Re-measured on the
+    #    rebuilt panel: within-date sd 0.082 to 0.207, zero on NONE of 87 dates,
+    #    values from 0.328 (three concurrent labels) to 1.000 (one), mean 0.441.
+    #    A per-date WLS is NOT arithmetically identical, and implementing it is
+    #    not a no-op. The claim was wrong and it was load-bearing.
+    #
+    # 2'. THE REPLACEMENT REASON, which survives measurement. Average uniqueness
+    #    measures redundancy ACROSS dates: a symbol's row at t overlaps its own
+    #    rows at t +/- 21. Within one cross-section every row shares the same
+    #    63-session window, so there is no within-date redundancy for a per-date
+    #    WLS to correct. What the weighting actually does is tilt every
+    #    cross-sectional regression toward names at the edge of their
+    #    eligibility span -- newly liquid names, and names about to drop out --
+    #    by up to 3x.
+    #
+    #    Measured, and recorded because it is the evidence for the refusal:
+    #
+    #      theme        OLS lam    t        WLS lam    t       gate
+    #      mom_f        +0.0678  +2.70      +0.0695  +2.58     priced -> priced
+    #      reversal_f   +0.0269  +1.53      +0.0408  +2.15     zeroed -> PRICED
+    #      delivery_f   +0.0504  +2.55      +0.0479  +2.25     priced -> priced
+    #
+    #    Weighting adds a third traded theme. "Reversal becomes significant once
+    #    names entering and leaving the universe are up-weighted threefold" is a
+    #    selection effect, not a discovery, and adopting it because it clears a
+    #    gate would be searching for a result. Newey-West with the analytic
+    #    variance inflation charges for the overlap that is real.
+    #
+    #    `fama_macbeth` now takes a `weight_col` and honours it correctly --
+    #    uniform weights reproduce OLS bit-for-bit, a zero weight removes a row
+    #    exactly. It is available for research and is not wired to the shipped
+    #    path, and `fit_coefficients` says so at the point of decision instead
+    #    of accepting the argument and dropping it.
     #
     # Left TRUE rather than flipped, because it is read and honoured on the
     # ridge and meta-label paths and flipping it would change those.
