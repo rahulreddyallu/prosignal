@@ -144,6 +144,46 @@ class PortfolioResult:
                 float(self.periods["cost_ret"].sum() / self.periods["gross_ret"].sum())
                 if "gross_ret" in self.periods
                 and float(self.periods["gross_ret"].sum()) > 0 else float("nan")),
+            **self._benchmark_block(periods_per_year),
+        }
+
+    def _benchmark_block(self, periods_per_year: float) -> Dict[str, float]:
+        """What the book earned ABOVE the alternative, or nothing if unknown.
+
+        A Sharpe ratio answers "was this better than cash". It does not answer
+        "was this better than owning the universe equal-weighted", and for a
+        long-only book selected from that universe the second question is the
+        one that decides whether the ranking is worth running. Reported here so
+        it cannot be omitted from a summary by not being computed.
+
+        `information_ratio` is the mean excess over its own standard deviation,
+        annualised. `alpha` and `beta` come from the same regression of book
+        return on benchmark return, so a book that is simply long beta shows it.
+        """
+        if "bench_ret" not in self.periods:
+            return {}
+        b = self.periods["bench_ret"].to_numpy(dtype="float64")
+        r = self.periods["ret"].to_numpy(dtype="float64")
+        ok = np.isfinite(b) & np.isfinite(r)
+        if ok.sum() < 3:
+            return {"benchmark_periods": int(ok.sum())}
+        b, r = b[ok], r[ok]
+        ex = r - b
+        sd_ex = float(ex.std(ddof=1))
+        var_b = float(b.var(ddof=1))
+        beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
+        alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
+        bench_eq = float(np.prod(1.0 + b) - 1.0)
+        return {
+            "benchmark_periods": int(len(b)),
+            "benchmark_mean_return": float(b.mean()),
+            "benchmark_total_return": bench_eq,
+            "mean_excess_return": float(ex.mean()),
+            "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
+                                  if sd_ex > 0 else float("nan")),
+            "beta_to_benchmark": beta,
+            "alpha_vs_benchmark": alpha,
+            "beats_benchmark_rate": float((ex > 0).mean()),
         }
 
 
@@ -225,7 +265,7 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
     return float(qty * entry), float(entry), float(liquidity if np.isfinite(liquidity) else 0.0)
 
 
-def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams
+def _hold(sym: str, i: int, close, high, low, open_, ma, atr, p: PortfolioParams
           ) -> Optional[float]:
     """Realised return of one position, from the SHARED exit resolver.
 
@@ -252,8 +292,15 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams
         horizon=p.horizon_sessions,
     )
     one = [sym]
-    out = resolve_exits(close[one], i, rules, high=None, low=low[one],
-                        open_=open_[one], atr=atr[one], ma=ma[one])
+    # `high` IS PASSED. Without it `resolve_exits` cannot see an intraday touch
+    # of the profit target, so the simulator took profit only when a CLOSE
+    # cleared 3R while the same resolver, given highs, took it intraday. The
+    # label and the book were therefore resolving the same position under two
+    # different rules, and the book's was the more optimistic of the two: a name
+    # that spiked through the target and closed below it was carried on to the
+    # horizon and whatever it did next was booked as the strategy's.
+    out = resolve_exits(close[one], i, rules, high=(None if high is None else high[one]),
+                        low=low[one], open_=open_[one], atr=atr[one], ma=ma[one])
     value = out["ret"].iloc[0] if len(out) else np.nan
     return None if not np.isfinite(value) else float(value)
 
@@ -275,6 +322,14 @@ def simulate(
     """
     close, low, open_ = prices["close"], prices["low"], prices["open"]
     atr, ma, adtv = prices["atr"], prices["ma"], prices["adtv"]
+    high = prices.get("high")
+    #: THE ALTERNATIVE. A per-period return series for the equal-weight eligible
+    #: universe over the SAME holding window, so every figure this simulator
+    #: produces can be read against what doing nothing clever would have paid.
+    #: Its absence is why a book returning +1.59% per period was reported as a
+    #: positive result for eleven months while the universe it selects from
+    #: returned +5.27% over the same windows.
+    bench = prices.get("benchmark")
     index = list(close.index)
     pos = {d: i for i, d in enumerate(index)}
     allowed = set(dates_allowed) if dates_allowed is not None else None
@@ -313,7 +368,7 @@ def simulate(
             if sized is None or sized[0] <= 0:
                 continue
             size, price, liquidity = sized
-            ret = _hold(sym, i, close, low, open_, ma, atr, params)
+            ret = _hold(sym, i, close, high, low, open_, ma, atr, params)
             if ret is None:
                 continue
             size *= scale
@@ -330,8 +385,21 @@ def simulate(
         pnl -= charged
         opening = equity
         equity += pnl
+        # The benchmark over the SAME window: entry at i, exit at the horizon,
+        # equal-weight across whatever the universe held. Computed here rather
+        # than annualised afterwards so it lines up period for period.
+        bench_ret = float("nan")
+        if bench is not None:
+            j_exit = min(i + params.horizon_sessions, len(index) - 1)
+            try:
+                b0 = float(bench.iloc[i]); b1 = float(bench.iloc[j_exit])
+                if np.isfinite(b0) and np.isfinite(b1) and b0 > 0:
+                    bench_ret = b1 / b0 - 1.0
+            except Exception:
+                bench_ret = float("nan")
         rows.append({
             "date": date, "ret": pnl / opening, "equity": equity,
+            "bench_ret": bench_ret, "excess_ret": (pnl / opening) - bench_ret,
             # The cost drag, kept separately. Netting it into `ret` and
             # discarding the parts makes the buy/hold spread unmeasurable: a
             # wider exit band earns its keep by NOT paying entry cost on a name
@@ -345,6 +413,33 @@ def simulate(
         held = {s: 1 for s in book}
 
     return PortfolioResult(periods=pd.DataFrame(rows))
+
+
+def _path_drawdown(usable: Sequence["PortfolioResult"]) -> float:
+    """Worst peak-to-trough along the WOVEN path, not the average of phases.
+
+    `phase_summary` used to report the MEAN of each phase's own drawdown. A
+    phase is one arbitrary rebalance offset covering a third of the dates, so
+    averaging three of them reports a drawdown no investor could have
+    experienced and always a milder one than the path: on the shipped book the
+    mean-of-phases figure was -14.9% where the woven path reached -21.7%.
+
+    The path is built by ordering every period across phases by date and
+    compounding. That is not a tradeable schedule either -- it interleaves three
+    of them -- but it errs toward the deeper number, which is the right
+    direction for a risk statistic.
+    """
+    frames = [x.periods for x in usable if not x.empty and "date" in x.periods]
+    if not frames:
+        return float("nan")
+    pooled = pd.concat(frames, ignore_index=True).sort_values("date")
+    r = pooled["ret"].to_numpy(dtype="float64")
+    r = r[np.isfinite(r)]
+    if r.size < 2:
+        return float("nan")
+    equity = np.cumprod(1.0 + r)
+    peak = np.maximum.accumulate(equity)
+    return float((equity / peak - 1.0).min())
 
 
 def phase_summary(
@@ -379,7 +474,13 @@ def phase_summary(
         "mean_return": float(r.mean()),
         "sharpe": float(r.mean() / sd * np.sqrt(periods_per_year)) if sd > 0 else 0.0,
         "periods_per_year": periods_per_year,
-        "max_drawdown": float(np.mean([m["max_drawdown"] for m in per_phase])),
+        # THE PATH figure. The mean of per-phase drawdowns is kept alongside
+        # under its own name rather than deleted, because the old reports quote
+        # it and a reader needs to be able to reconcile them.
+        "max_drawdown": _path_drawdown(usable),
+        "max_drawdown_path": _path_drawdown(usable),
+        "max_drawdown_mean_of_phases": float(
+            np.mean([m["max_drawdown"] for m in per_phase])),
         "worst_phase_sharpe": float(min(m["sharpe"] for m in per_phase)),
         "hit_rate": float((r > 0).mean()),
         "avg_names": float(pooled["n_held"].mean()),
@@ -397,4 +498,36 @@ def phase_summary(
             else float("nan")),
         "n_periods": int(len(r)),
         "n_phases": len(usable),
+        # The alternative, pooled the same way the book is. Absent only when no
+        # benchmark panel was supplied.
+        **({} if "bench_ret" not in pooled else _pooled_benchmark(
+            pooled, periods_per_year)),
+    }
+
+
+def _pooled_benchmark(pooled: pd.DataFrame, periods_per_year: float
+                      ) -> Dict[str, float]:
+    """Benchmark-relative figures over the pooled phases. Same definitions as
+    `PortfolioResult._benchmark_block`, computed on the pooled frame so a
+    summary and a single phase cannot disagree about what excess means."""
+    b = pooled["bench_ret"].to_numpy(dtype="float64")
+    r = pooled["ret"].to_numpy(dtype="float64")
+    ok = np.isfinite(b) & np.isfinite(r)
+    if ok.sum() < 3:
+        return {"benchmark_periods": int(ok.sum())}
+    b, r = b[ok], r[ok]
+    ex = r - b
+    sd_ex = float(ex.std(ddof=1))
+    var_b = float(b.var(ddof=1))
+    beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
+    alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
+    return {
+        "benchmark_periods": int(len(b)),
+        "benchmark_mean_return": float(b.mean()),
+        "mean_excess_return": float(ex.mean()),
+        "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
+                              if sd_ex > 0 else float("nan")),
+        "beta_to_benchmark": beta,
+        "alpha_vs_benchmark": alpha,
+        "beats_benchmark_rate": float((ex > 0).mean()),
     }

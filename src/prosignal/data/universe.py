@@ -141,8 +141,15 @@ class UniverseResolver:
                 as_of=as_of.isoformat(),
             )
         window = sessions[-int(lookback_sessions):]
+        # `adj_factor` travels with the read. `close` comes back BACK-ADJUSTED,
+        # and the price floor below is a tradeability test: it asks whether the
+        # share was cheap enough to be a penny stock ON THAT DAY, which is a
+        # question about the QUOTED price. See `crosssec.liquidity_mask` for the
+        # measurement -- 58,411 (date, symbol) cells excluded by the adjusted
+        # series that the raw bhavcopy admits, and none in the other direction.
         px = self.store.read_prices(
-            start=window[0], end=as_of, columns=["date", "symbol", "close", "turnover"]
+            start=window[0], end=as_of,
+            columns=["date", "symbol", "close", "turnover", "adj_factor"],
         )
         if px.empty:
             raise IntegrityError(
@@ -152,7 +159,19 @@ class UniverseResolver:
 
         # Median, not mean: one block deal should not buy a name a seat.
         adtv = px.groupby("symbol", observed=True)["turnover"].median()
-        last = px.sort_values("date").groupby("symbol", observed=True)["close"].last()
+        ordered = px.sort_values("date")
+        last = ordered.groupby("symbol", observed=True)["close"].last()
+        # THE QUOTED PRICE, recovered from the adjusted one. `adj_factor`
+        # multiplies pre-ex-date prices, so dividing undoes it. A factor that is
+        # missing or non-positive leaves the price where it was rather than
+        # inventing one.
+        if "adj_factor" in ordered.columns:
+            fac = ordered.groupby("symbol", observed=True)["adj_factor"].last()
+            fac = fac.reindex(last.index)
+            fac = fac.where(fac > 0)
+            quoted_close = last.divide(fac).fillna(last)
+        else:
+            quoted_close = last
         # History is measured from the listing date against the session list,
         # which is exact and costs one small read. Counting rows per symbol
         # across every year would rescan the whole price store on every run.
@@ -161,7 +180,7 @@ class UniverseResolver:
         eligible = adtv[adtv >= float(min_adtv_inr)].index
         keep = [
             s for s in eligible
-            if float(last.get(s, 0.0)) >= float(min_price_inr)
+            if float(quoted_close.get(s, 0.0)) >= float(min_price_inr)
             and s in listed_before
         ]
         ranked = adtv.reindex(keep).sort_values(ascending=False)
