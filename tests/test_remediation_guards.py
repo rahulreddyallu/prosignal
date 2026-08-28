@@ -842,3 +842,62 @@ class TestSingleThemeArmsAreNotSelectedOnThemselves:
         assert "FLATTERING DIRECTION" in src.upper(), (
             "a correction that can only help the system under audit must say "
             "so where it is made")
+
+
+# =============================================================================
+# W2 -- the selection-bias diagnostic (REPORTED, not traded: see
+# work/audit/W2_failure_model.md; criterion 6 failed at m >= 3.0)
+# =============================================================================
+class TestSelectionBiasDiagnostic:
+    """The gate keeps |t| >= floor and reports the survivor's lambda, so
+    selection and estimation share a sample and the survivor is biased away
+    from zero. This pins the correction's PROPERTIES; the decision not to trade
+    it is recorded in the failure model, because it failed its own
+    pre-committed simulation criterion where selection is barely binding."""
+
+    def test_it_decays_to_nothing_far_from_the_boundary(self):
+        from prosignal.features.famamacbeth import selection_corrected_t
+        assert selection_corrected_t(20.0, 2.0) == pytest.approx(20.0, abs=1e-6)
+        assert selection_corrected_t(10.0, 2.0) == pytest.approx(10.0, abs=1e-4)
+        near = abs(selection_corrected_t(2.1, 2.0) - 2.1)
+        far = abs(selection_corrected_t(6.0, 2.0) - 6.0)
+        assert near > far, "the bias must be largest at the boundary"
+
+    def test_it_only_ever_shrinks_toward_zero(self):
+        from prosignal.features.famamacbeth import selection_corrected_t
+        for t in (2.0, 2.3, 2.87, 3.5, 5.0, -2.1, -2.63, -4.0):
+            c = selection_corrected_t(t, 2.0)
+            assert abs(c) <= abs(t) + 1e-12, f"t {t} inflated to {c}"
+            assert c == 0.0 or np.sign(c) == np.sign(t), f"t {t} changed sign to {c}"
+
+    def test_an_unselected_theme_is_untouched(self):
+        """Nothing was conditioned, so nothing is corrected."""
+        from prosignal.features.famamacbeth import selection_corrected_t
+        for t in (0.0, 0.9, 1.5, -1.8):
+            assert selection_corrected_t(t, 2.0) == pytest.approx(t, abs=1e-12)
+
+    def test_it_recovers_the_truth_where_selection_binds(self):
+        """The criterion that decides whether the maths is right, at values
+        fixed before the result was seen. It holds for m <= 2.5 and fails at
+        m >= 3.0 -- which is why the correction is reported and not traded."""
+        from prosignal.features.famamacbeth import selection_corrected_t as corr
+        rng = np.random.default_rng(7)
+        for m in (0.5, 1.0, 1.5, 2.0):
+            draws = rng.normal(m, 1.0, size=60_000)
+            sel = draws[np.abs(draws) >= 2.0]
+            raw_err = abs(sel.mean() - m)
+            fixed_err = abs(np.mean([corr(t, 2.0) for t in sel[:8000]]) - m)
+            assert fixed_err < raw_err, (
+                f"at true m {m} the correction ({fixed_err:.3f}) is no better "
+                f"than the raw selected mean ({raw_err:.3f})")
+
+    def test_the_shipped_coefficients_are_not_corrected(self):
+        """W2 is OPEN. If someone wires the diagnostic into the traded path,
+        the failure model's ship rule has to be revisited first."""
+        import inspect
+        from prosignal.features import famamacbeth
+        src = inspect.getsource(famamacbeth.gated_shrink)
+        assert "selection_corrected" not in src, (
+            "the selection correction failed criterion 6 of its own "
+            "pre-committed ship rule; trading it requires re-deciding that, "
+            "not quietly wiring it in")

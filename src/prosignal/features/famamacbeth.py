@@ -628,6 +628,84 @@ def gated_shrink(
     return out
 
 
+def selection_corrected_t(t_obs: float, floor: float) -> float:
+    """The |t| a theme would have had if it had not been chosen for being large.
+
+    THE BIAS THIS REMOVES. `gated_shrink` keeps themes with |t| >= floor and
+    reports their lambda, so selection and estimation run on the same sample and
+    the surviving coefficient is conditioned on its own significance. With
+    lam_hat ~ N(lam, se^2) and m = lam/se,
+
+        E[lam_hat | |lam_hat| >= f.se] = lam + se . [phi(f-m) - phi(f+m)] / P
+        P                              = 1 - Phi(f-m) + Phi(-f-m)
+
+    The second term is strictly positive for m > 0 and strictly negative for
+    m < 0: a surviving coefficient is biased AWAY FROM ZERO, always, and most
+    at the boundary. `mom` and `delivery` sit at t +2.87 and +2.63 against a
+    floor of 2.0, which is where the bias is worst.
+
+    `tau2_from` already removes the winner's curse in tau^2. It does nothing
+    about the one in lam_hat, and that one propagates into the ranking, the
+    top-decile excess, the CPCV IC and the book's return alike.
+
+    This inverts the expression: it returns the m whose SELECTED expectation
+    equals the observed t. Solved by bisection because the map is monotone in m
+    and has no closed form. Sign-preserving, never inflating, and it takes no
+    parameter the config does not already carry.
+    """
+    t = float(t_obs)
+    f = abs(float(floor))
+    if not np.isfinite(t):
+        return float("nan")
+    sign = 1.0 if t >= 0 else -1.0
+    a = abs(t)
+    if f <= 0 or a < f:
+        # Nothing was selected, so nothing is conditioned.
+        return t
+
+    def selected_mean(m: float) -> float:
+        """E[t_hat | selected], in units of se, for a true m >= 0."""
+        p_hi = 0.5 * math.erfc((f - m) / math.sqrt(2.0))
+        p_lo = 0.5 * math.erfc((f + m) / math.sqrt(2.0))
+        pr = p_hi + p_lo
+        if pr <= 1e-300:
+            # Selection is essentially impossible at this m; the observed value
+            # is then all selection and the honest answer is the floor.
+            return f
+        phi = lambda z: math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+        return m + (phi(f - m) - phi(f + m)) / pr
+
+    # selected_mean(0) = the pure-selection expectation, which is >= f. If the
+    # observation does not exceed it, no positive true effect is implied.
+    if a <= selected_mean(0.0):
+        return 0.0
+    lo, hi = 0.0, max(a, f) + 10.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if selected_mean(mid) < a:
+            lo = mid
+        else:
+            hi = mid
+    return sign * 0.5 * (lo + hi)
+
+
+def selection_corrected(result: "FMResult", floor: float) -> Dict[str, float]:
+    """Bias-corrected lambda for every theme the floor would keep.
+
+    Returns lambda, not t: the correction is applied in t units and multiplied
+    back by the theme's own standard error, so a precisely measured theme loses
+    less in absolute terms than a badly measured one.
+    """
+    out: Dict[str, float] = {}
+    for c in result.features:
+        t = result.t_stat.get(c, float("nan"))
+        se = result.se.get(c, float("nan"))
+        if not (np.isfinite(t) and np.isfinite(se)):
+            out[c] = float("nan")
+            continue
+        out[c] = float(selection_corrected_t(float(t), floor) * float(se))
+    return out
+
 def is_degenerate(lam: Mapping[str, float], tol: float = 1e-12) -> bool:
     """True when no theme carries weight, so the score would be flat."""
     return all(abs(float(v)) <= tol for v in lam.values())
