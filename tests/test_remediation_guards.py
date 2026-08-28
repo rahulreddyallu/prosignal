@@ -932,3 +932,62 @@ class TestTheTargetTravelsWithTheFigure:
             "an unmeasured label-vs-book gap must say so explicitly")
         assert "NOT against the book" in block, (
             "the reported excess must name what it is measured against")
+
+
+# =============================================================================
+# C6 -- the README must not contradict the code or itself
+# =============================================================================
+class TestTheReadmeAgreesWithHead:
+    """The README carried three mutually inconsistent CPCV results, described
+    an estimator the engine does not use, and listed a holdout figure under
+    'Reasonably supported' four hundred lines after declaring the same holdout
+    withdrawn. Prose drifts silently; these are the claims worth pinning."""
+
+    @staticmethod
+    def _readme():
+        from pathlib import Path
+        import prosignal
+        return (Path(prosignal.__file__).parent.parent.parent / "README.md").read_text()
+
+    def test_there_is_one_live_results_section(self):
+        r = self._readme()
+        assert "## RESULTS OF RECORD" in r
+        assert "supersede every other number in this file" in r
+
+    def test_superseded_numbers_are_marked_not_deleted(self):
+        """Never delete a bad result. Mark it."""
+        r = self._readme()
+        assert r.count("SUPERSEDED") >= 2
+        # the old passing DSR is still visible, and labelled
+        assert "Deflated Sharpe, charging 44 trials | 1.000, pass" in r
+        assert "0.346 — FAIL" in r
+
+    def test_it_names_the_estimator_that_actually_ships(self):
+        r = self._readme()
+        from prosignal.config.loader import load_config
+        method = str(load_config().params.stage4_core_score.estimator.method)
+        assert method == "fama_macbeth"
+        head = r[:r.index("## RESULTS OF RECORD")]
+        assert "Fama–MacBeth" in head or "Fama-MacBeth" in head, (
+            "the executive summary described ridge regression while the engine "
+            "runs Fama-MacBeth")
+        assert "Ridge regression on **5 factor families**" not in r
+
+    def test_the_within_sector_claim_matches_the_code(self):
+        r = self._readme()
+        assert "All ranks are taken within sector**" not in r, (
+            "that sentence was false for roughly half of every cross-section")
+        assert "UNCLASSIFIED" in r
+
+    def test_the_withdrawn_holdout_is_not_also_supported(self):
+        r = self._readme()
+        assert "**Withdrawn**" in r
+        supported = r[r.index("**Reasonably supported**"):r.index("**Preliminary**")]
+        assert "+4.35%" not in supported, (
+            "the holdout excess is listed as supported while the executive "
+            "summary declares the same holdout withdrawn")
+
+    def test_the_book_result_is_stated_not_buried(self):
+        r = self._readme()
+        for claim in ("−4.23%", "−0.83", "information ratio"):
+            assert claim in r, f"the README does not state {claim}"
