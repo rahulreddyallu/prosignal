@@ -1241,9 +1241,15 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
                f"{rc:+.3f} ({rc * rc:.0%} of variance). An excess figure here "
                f"is a statement about the ranking, not about the book.")
     else:
+        # NOT a number. The panel handed to CPCV carries no realised-outcome
+        # column, so this run did not measure the gap. Quoting the audit's
+        # figure here would present a constant as a measurement -- which is
+        # what this branch used to do, on every run, forever.
         _print("  the gap between this label and the book's realised outcome "
-               "was NOT measured on this run; audit measured it at rank corr "
-               "0.531, i.e. the label explains ~28% of what the book earns")
+               "was NOT MEASURED on this run: the panel carries no realised "
+               "outcome column. Measured separately during the audit at rank "
+               "corr +0.53 on 85 dates, i.e. the label explains about 28% of "
+               "what the book earns. That figure is not from this run.")
     worst = float(paths.min()) if paths.size else float("nan")
     _print(f"  worst of {paths.size} paths: Sharpe {worst:+.2f}; "
            f"{spread.get('share_negative', float('nan')):.0%} of paths below zero")
@@ -1371,14 +1377,30 @@ def _portfolio_inputs(cfg: AppConfig, store, sessions, symbols, end):
                                    min_periods=period).mean()
     panels["ma"] = close.rolling(iv(c7.thesis_invalidation.structure_ma_sessions)).mean()
     panels["adtv"] = panels["turnover"].rolling(21).mean()
-    # THE ALTERNATIVE, as a price index: equal-weight across whatever the store
-    # holds for each date, compounded. Every simulator run gets it, so no book
-    # can be reported without the number it has to beat. It is deliberately the
-    # crude version -- no screen, no rebalancing rule -- because the point is
-    # what an investor gets for making no decisions at all.
-    panels["benchmark"] = (
-        1.0 + close.pct_change(fill_method=None).mean(axis=1).fillna(0.0)
-    ).cumprod()
+    # THE ALTERNATIVE, as a price index: equal-weight across the ELIGIBLE
+    # universe on each date, compounded. Every simulator run gets it, so no book
+    # can be reported without the number it has to beat.
+    #
+    # The screen is not optional here. Built over every symbol in the store this
+    # is not "the universe the book selects from" -- it is a different, wider
+    # and less liquid population, and calling it the eligible universe while
+    # computing it over everything would put a mislabelled number under the one
+    # conclusion that reverses the verdict. The screen is lagged one session,
+    # so membership on date t is decided by data through t-1.
+    from .features.crosssec import liquidity_mask
+    from .stages._cfg import fv as _fv, iv as _iv
+    u = cfg.params.stage1_universe
+    elig = liquidity_mask(
+        close, panels["turnover"],
+        min_adtv_inr=_fv(u.pit_min_adtv_inr),
+        lookback_sessions=_iv(u.pit_adtv_lookback_sessions),
+        max_names=_iv(u.pit_max_names),
+        min_history_sessions=_iv(u.min_history_sessions),
+        min_price_inr=_fv(u.min_price_inr),
+        adj_factor=panels.get("adj_factor"),
+    ).shift(1).fillna(False)
+    ret = close.pct_change(fill_method=None).where(elig)
+    panels["benchmark"] = (1.0 + ret.mean(axis=1, skipna=True).fillna(0.0)).cumprod()
     return panels
 
 

@@ -386,7 +386,15 @@ def liquidity_mask(
     price = close
     if adj_factor is not NO_ADJUSTMENT and adj_factor is not None:
         fac = adj_factor.reindex(index=close.index, columns=close.columns)
-        price = close.divide(fac.where(fac > 0))
+        # A MISSING FACTOR LEAVES THE PRICE ALONE. Dividing by NaN delists the
+        # name outright: a factor frame missing one column excluded that symbol
+        # on every date, and scattered NaN cells -- which is what a pivot over a
+        # sparse store produces -- excluded it on exactly those dates. That is a
+        # worse error than the one being fixed, and it runs the same direction:
+        # names vanish from the past for a data reason.
+        # `universe.resolve_liquidity_pit` already did this with `.fillna(last)`;
+        # the two paths now agree.
+        price = close.divide(fac.where(fac > 0)).fillna(close)
     ok = (
         (adtv >= float(min_adtv_inr))
         & (price >= float(min_price_inr))
@@ -701,12 +709,13 @@ def build_panel(
         return pd.DataFrame()
     panel = pd.concat(rows, ignore_index=True)
     del rows
-    # float32 across the feature block. Ranks and returns carry nowhere near
-    # seven significant figures, and the panel is the largest object the signal
-    # path allocates.
-    for c in panel.columns:
-        if panel[c].dtype == "float64" and c != "label":
-            panel[c] = panel[c].astype("float32")
+    # The float32 cast that used to sit here has moved BELOW THE RANKING. It
+    # ran before the ranks were computed, so training ranks were taken on
+    # float32 values while `features_for_date` -- the live path -- takes them on
+    # float64. Near-ties therefore ordered differently in training and at the
+    # decision, inside the function whose docstring promises the two "cannot
+    # drift apart in definition". Ranking is exactly where a lost significant
+    # figure changes an answer rather than rounding it.
     # How much of its own span each label holds alone. Consecutive rows share
     # most of their outcome window, so an unweighted fit counts one market
     # shock once per overlapping row.
@@ -739,4 +748,12 @@ def build_panel(
         # A neutral rank is 0.0 by construction, so a name with no delivery
         # print contributes nothing to the score instead of being discarded.
         panel[f + "_r"] = r.fillna(0.0) if f in NEUTRAL_WHEN_MISSING else r
+
+    # float32 across the feature block, AFTER ranking. Ranks and returns carry
+    # nowhere near seven significant figures and the panel is the largest
+    # object the signal path allocates, so the memory argument is unchanged --
+    # only the ordering of the cast relative to the ranking has moved.
+    for c in panel.columns:
+        if panel[c].dtype == "float64" and c != "label":
+            panel[c] = panel[c].astype("float32")
     return panel

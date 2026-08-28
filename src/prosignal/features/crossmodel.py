@@ -1468,20 +1468,47 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
                    max_fundamental_age_days: Optional[int] = None,
                    delivery: Optional[pd.DataFrame] = None,
                    sectors: Optional[Dict[str, str]] = None,
-                   actions: Optional[pd.DataFrame] = None):
+                   actions: Optional[pd.DataFrame] = None,
+                   high: Optional[pd.DataFrame] = None,
+                   low: Optional[pd.DataFrame] = None,
+                   exit_geometry: Optional["ExitRules"] = None):
     """Features for the decision date only.
 
     The cheap path: one date rather than a full training panel, so a cached
     model scores today without the large historical read.
+
+    ``high``, ``low`` and ``exit_geometry`` are here for the ADMISSIBLE MASK,
+    and they are not optional in spirit. `model_refit_every_sessions` is 21, so
+    `fit_predict` -- where the mask was first wired -- runs on one session in
+    twenty-one and every other day arrives here. Without them this path ranks
+    over the wider population the model was not fitted on, and the rare path
+    and the common one disagree about what a rank means. Left optional only so
+    a caller with no intraday frames degrades to the old behaviour rather than
+    crashing; every shipped call site passes them.
     """
     ts = pd.Timestamp(as_of)
     hist = close[close.index <= ts].tail(LIVE_HISTORY_SESSIONS)
     if len(hist) < MIN_LOOKBACK:
         return None
+    # THE ADMISSIBLE MASK APPLIES HERE TOO, and this is the path that runs on
+    # 20 of every 21 sessions. `model_refit_every_sessions` is 21, so
+    # `fit_predict` -- where the mask was wired -- executes on refit days only;
+    # every cached day came through here and ranked over the wider population
+    # the model was NOT fitted on. Fixing the rare path and leaving the common
+    # one is worse than not fixing it, because the two then disagree.
+    live_adm = None
+    if exit_geometry is not None and high is not None and low is not None:
+        _a = _admissible_frame(hist,
+                               high.reindex(hist.index).reindex(columns=hist.columns),
+                               low.reindex(hist.index).reindex(columns=hist.columns),
+                               exit_geometry)
+        if _a is not None and len(_a):
+            live_adm = _a.iloc[-1]
     # The LAST row of `hist`, which is `as_of`. Routing this through
     # `build_panel` scored a date four sessions earlier on every run.
     live = features_for_date(hist, turnover.reindex(hist.index),
-                             delivery=delivery, sectors=sectors)
+                             delivery=delivery, sectors=sectors,
+                             admissible=live_adm)
     if live.empty:
         return None
     live = _attach_fundamentals(live, fundamentals, hist,

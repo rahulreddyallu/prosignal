@@ -875,22 +875,30 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
         # `adj_factor` travels with the read: the universe screen's price
         # floor is a tradeability test and must read the QUOTED price, not
         # the back-adjusted one.
-        cols = [DATE, SYMBOL, "close", "turnover", "adj_factor"]
+        # `high`/`low` on BOTH paths, not only on a refit. The admissibility
+        # predicate needs ATR, and it has to be applied at the decision as well
+        # as in training or the two disagree about which names the model was
+        # fitted over. The cached read is one narrow window (LIVE_HISTORY_SESSIONS
+        # x ~750 names), so two more float columns cost single-digit megabytes;
+        # the wide read this block's memory budget was written around is the
+        # REFIT one, and it already carried them.
+        cols = [DATE, SYMBOL, "close", "turnover", "adj_factor", "high", "low"]
         # `lab` is read further up now, where the label fingerprint is built --
         # still inside this try, for the original reason: a config problem in
         # this block must not raise before the delivery check, whose failure is
         # the one the caller needs to see.
         est = cfg.estimator
-        # high/low are read on EVERY refit, not only when the barrier label is
-        # on: the ADMISSIBILITY predicate needs ATR, and that predicate is a
-        # property of what the engine can buy rather than of which label it
-        # fits. Coupling the two removed the mask from training when the barrier
-        # was turned off.
-        if refitting:
+        # `open` is the only column that is still label-gated: a bar gapping
+        # through the stop fills at the OPEN, and only the barrier label reads
+        # it. high/low moved up to the unconditional list above, because the
+        # admissibility predicate is a property of what the engine can BUY
+        # rather than of which label it fits -- coupling the two is what
+        # removed the mask from training when the barrier was turned off.
+        if refitting and bool(lab.triple_barrier):
             # `open` too: a bar that gaps through the stop fills at the OPEN,
             # not at the stop price, and assuming otherwise is the optimistic
             # error. The label reads it through the shared exit resolver.
-            cols += ["high", "low", "open"]
+            cols += ["open"]
         px = store.read_prices(
             symbols=None if refitting else list(symbols), start=start, end=as_of,
             columns=cols,
@@ -979,7 +987,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                       fundamentals=fundamentals,
                                       max_fundamental_age_days=max_age,
                                       delivery=delivery, sectors=sector_map,
-                                      actions=actions)
+                                      actions=actions,
+                                      high=high, low=low,
+                                      exit_geometry=(rules_from_config(cfg, risk_cfg)
+                                                     if risk_cfg is not None else None))
             if feats is None:
                 return None, None, "no symbol had a complete feature set today", None, None
             return (cm.score_with(cached, feats, multipliers), cached, None,
@@ -1070,7 +1081,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                               max_fundamental_age_days=max_age,
                                               delivery=delivery,
                                               sectors=sector_map,
-                                              actions=actions)
+                                              actions=actions,
+                                              high=high, low=low,
+                                              exit_geometry=(rules_from_config(cfg, risk_cfg)
+                                                             if risk_cfg is not None else None))
                     if feats is not None:
                         return (cm.score_with(held, feats, multipliers), held,
                                 None, feats, verdict)
@@ -1117,7 +1131,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                          fundamentals=fundamentals,
                                          max_fundamental_age_days=max_age,
                                          delivery=delivery, sectors=sector_map,
-                                         actions=actions)
+                                         actions=actions,
+                                         high=high, low=low,
+                                         exit_geometry=(rules_from_config(cfg, risk_cfg)
+                                                        if risk_cfg is not None else None))
                 return scores, model, reason, live, superseded
             # THE SAME KEYWORD SET AS EVERY OTHER PATH. This branch -- the
             # ACCEPTED refit, the common case on a refit day -- dropped
@@ -1133,7 +1150,10 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                      fundamentals=fundamentals,
                                      max_fundamental_age_days=max_age,
                                      delivery=delivery, sectors=sector_map,
-                                     actions=actions)
+                                     actions=actions,
+                                     high=high, low=low,
+                                     exit_geometry=(rules_from_config(cfg, risk_cfg)
+                                                    if risk_cfg is not None else None))
         else:
             live = None
         return scores, model, reason, live, None

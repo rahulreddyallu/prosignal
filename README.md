@@ -77,6 +77,9 @@ equal-weight eligible universe over the same 70 holding windows:
 | periods beating the benchmark | **32.9%** | — |
 | worst drawdown on one schedule | −20.6% | — |
 
+*(`portfolio_sim._path_drawdown` documents −21.7%, which was the same statistic
+on the pre-W3/W5/W8 panel. −20.6% is the current figure.)*
+
 **What the two tables say together.** The ranking carries a little information
 — IC +0.045, and remediation raised it from +0.034. The machinery that turns
 that ranking into a book destroys considerably more than the ranking creates:
@@ -92,7 +95,9 @@ universe equal-weighted, by 4.23% per period.**
 invalidation level produce. Within-date rank correlation between the two is
 **+0.529** — the label explains 28% of the variance of what is actually earned.
 The book's positions leave by invalidation 39.2% of the time, by stop 32.2%, by
-target 17.9%, by timeout 10.7%.
+target 17.9%, by timeout 10.7%. (Code comments quote +0.531 / 39.3% / 32.1%
+from the original audit's panel; the figures here are the re-measurement on the
+remediated panel, and the difference is the remediation.)
 
 *The traded coefficients are biased away from zero.* The gate selects on
 \|t\| ≥ 2 from the same sample that estimated λ. Corrected for that selection,
@@ -102,21 +107,27 @@ does not clear the gate it passed. The correction is reported, not traded; see
 
 ---
 
-**Historical figures below are superseded.** No t-statistic is quoted from
-CPCV, and the harness refuses to compute one: test dates recur across splits
-independent experiments.
+**Historical figures below are superseded.** No naive t-statistic is quoted
+from CPCV, and the harness refuses to compute one: test dates recur across
+splits and the woven paths share training data and one calendar, so neither is
+a sample of independent experiments. The overlap-corrected figure in RESULTS OF
+RECORD is what the harness will stand behind.
 
-The honest summary is that the ranking carries information on the selection
-period and the book that trades it is positive at the median with a quarter of
-its splits under water. Whether that survives out of sample is what the forward
-test is for, and it has not run yet.
+The honest summary is that the ranking carries a little information on the
+selection period — pooled IC +0.045 — and that **the book which trades it
+underperforms the universe it selects from by 4.23% per period**, with an
+information ratio of −0.83 and alpha of −0.67%. The engine's problem is not
+that its ranking is worthless; it is that the sizing, the stop and the costs
+take more than the ranking creates. Whether any of it survives out of sample is
+what the forward test is for, and it has not run yet.
 
 ---
 
 ## What ProSignal is
 
 A **research instrument**. It ranks stocks by predicted 63-session forward
-return using a ridge model over factors drawn from published literature, and
+return using a gated Fama–MacBeth model over factors drawn from published
+literature — the ridge is available and is not what ships — and
 shows the reader the z-score, fitted coefficient and contribution behind each
 name.
 

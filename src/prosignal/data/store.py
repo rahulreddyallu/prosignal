@@ -449,9 +449,11 @@ class DataStore:
         information: the adjusted series is what the holder actually
         experienced, and every index and vendor reports it this way.
         """
-        if not self.adjust_prices:
-            return frame
-        # A REQUEST-SHAPE CHECK, before anything is read. `adj_factor` is
+        # A REQUEST-SHAPE CHECK, BEFORE ANYTHING ELSE -- including the
+        # adjust_prices switch. It used to sit below that early return, so
+        # `DataStore(adjust_prices=False)` served the 1.0 placeholder silently
+        # for a caller that asked for adj_factor alone, which is the same
+        # silent-placeholder failure with one more way in. `adj_factor` is
         # COMPUTED here by `apply_adjustments` from the action table; the column
         # sitting in the parquet is a write-time placeholder. Ask for it without
         # a price column and `price_cols` below is empty, this function returns
@@ -475,6 +477,8 @@ class DataStore:
                     "'close') to the read.",
                     columns=sorted(req),
                 )
+        if not self.adjust_prices:
+            return frame
         try:
             actions = self.read_corporate_actions()
             if actions is None or actions.empty:

@@ -137,7 +137,20 @@ class CpcvResult:
         before the label overlap is even counted.
         """
         if not self.excess_by_date:
-            return list(self.excess)
+            # NOT A SILENT FALLBACK. Returning the pooled vector here restores
+            # the exact defect this method exists to remove -- on a 540-entry,
+            # 60-date fixture it takes effective_n from 20.3 to 540 and the DSR
+            # from 0.878 FAIL to 1.0000 PASS, with no error and no note. A
+            # caller that built the result without keying by date does not get
+            # a worse answer, it gets a loud one.
+            raise ValueError(
+                "CpcvResult.excess_by_date is empty. The pooled `excess` list "
+                "holds one entry per (split, test-date) pair, so any statistic "
+                "computed on it counts each date many times over; that is what "
+                "produced a Deflated Sharpe of 1.000 which still passed at "
+                "100,000 trials. Populate excess_by_date (run_cpcv does) or do "
+                "not ask for a per-date series."
+            )
         return [float(np.mean(v)) for _, v in sorted(
             self.excess_by_date.items(), key=lambda kv: str(kv[0]))]
 
@@ -155,7 +168,16 @@ class CpcvResult:
         if n < 3:
             return float(n)
         if self.horizon_sessions <= 0 or self.step_sessions <= 0:
-            return float(n)
+            # Same trap as above, one field along: without the label geometry
+            # the overlap correction silently does nothing and the DSR reads
+            # 60 independent observations where there are 20.
+            raise ValueError(
+                f"CpcvResult.horizon_sessions={self.horizon_sessions} and "
+                f"step_sessions={self.step_sessions}; the overlap inflation of "
+                f"an h-session label sampled every s cannot be derived without "
+                f"both. Leaving them unset silently reports overlapping "
+                f"observations as independent ones."
+            )
         vif = analytic_vif(self.horizon_sessions, self.step_sessions, n)
         return float(n / vif) if vif > 0 else float(n)
 
@@ -208,6 +230,13 @@ def run_cpcv(
     top_decile: float = 0.90,
     progress: Optional[Callable[[int, int], None]] = None,
     estimator: str = _ESTIMATOR_DEFAULT,
+    #: Override the estimator's own significance floor. Exists so a null test
+    #: can force every split to produce coefficients: under the gated estimator
+    #: shuffled labels clear no floor, no split scores, and a test asserting
+    #: "the harness finds nothing in noise" passes without ever running its
+    #: assertion. A vacuous null test on a validation harness is the worst
+    #: possible place for one.
+    significance_floor: Optional[float] = None,
 ) -> CpcvResult:
     """Fit and score the ridge model across every CPCV split.
 
@@ -254,6 +283,12 @@ def run_cpcv(
     result = CpcvResult(n_splits=cv.n_splits, n_paths=cv.paths_per_observation(),
                         horizon_sessions=int(horizon_sessions),
                         step_sessions=int(step_sessions))
+    # MEASURED HERE, not quoted from an audit. The field existed and nothing
+    # ever assigned it, so the CLI took its else-branch on every run and printed
+    # a hardcoded 0.531 as though it were this run's number. A constant
+    # presented as a measurement is worse than an omission: it cannot go stale
+    # visibly.
+    result.label_book_rank_corr = _label_book_rank_corr(work)
     # path_id -> per-date results, so each path can be scored as one backtest
     paths: Dict[int, List[Dict[str, float]]] = {}
     seen: Dict[int, int] = {}
@@ -274,7 +309,8 @@ def run_cpcv(
         result.purged_total += split.purged_count
         result.embargoed_total += split.embargoed_count
 
-        fit = _fit(train, cols, alpha, estimator, horizon_sessions, step_sessions)
+        fit = _fit(train, cols, alpha, estimator, horizon_sessions,
+                   step_sessions, significance_floor=significance_floor)
         if fit is None:
             result.notes.append(
                 f"split {split.split_id}: the estimator produced no tradeable "
@@ -334,6 +370,28 @@ def run_cpcv(
              extra={"splits": result.n_splits, "paths": len(result.path_sharpes),
                     "mean_ic": round(result.mean_ic, 5)})
     return result
+
+
+def _label_book_rank_corr(work: pd.DataFrame) -> Optional[float]:
+    """Within-date rank correlation between the LABEL and the book's realised
+    outcome, where the panel carries both.
+
+    The ranker is fitted against the h-session forward return; the book earns
+    whatever `resolve_exits` produces. Any IC or excess in this module is a
+    statement about the first quantity, and the gap is what stops it being read
+    as the second. Returns None when the panel has no realised-outcome column,
+    which the caller must print as NOT MEASURED rather than as agreement.
+    """
+    outcome = next((c for c in ("book_ret", "realised_ret", "exit_ret")
+                    if c in work.columns), None)
+    if outcome is None or "label" not in work.columns or "date" not in work.columns:
+        return None
+    try:
+        rc = (work.groupby("date")[["label", outcome]]
+                  .corr(method="spearman").unstack()[("label", outcome)]).dropna()
+    except Exception:
+        return None
+    return float(rc.mean()) if len(rc) else None
 
 
 def configuration_matrix(

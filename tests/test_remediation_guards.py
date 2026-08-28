@@ -634,13 +634,18 @@ class TestPathDrawdownIsOneSchedule:
         from prosignal.validation.portfolio_sim import _path_drawdown
         # Two phases that each recover fully. Concatenated they compound into a
         # far deeper hole than either schedule ever saw.
-        a = self._phase([-0.25, 0.40, -0.25, 0.40])
-        b = self._phase([-0.25, 0.40, -0.25, 0.40])
-        one = _path_drawdown([a])
+        # DELIBERATELY DIFFERENT. Two identical phases would let any per-phase
+        # reduction pass -- min, max, mean, first -- so the test would not
+        # distinguish the fix from several wrong answers.
+        a = self._phase([-0.25, 0.40, -0.25, 0.40])   # worst dd -25%
+        b = self._phase([-0.10, 0.20, -0.10, 0.20])   # worst dd -10%
+        assert _path_drawdown([a]) == pytest.approx(-0.25, abs=1e-9)
+        assert _path_drawdown([b]) == pytest.approx(-0.10, abs=1e-9)
         both = _path_drawdown([a, b])
-        assert both == pytest.approx(one, abs=1e-12), (
-            f"adding an identical second phase changed the drawdown from {one} "
-            f"to {both}; the figure is being pooled across schedules")
+        assert both == pytest.approx(-0.25, abs=1e-9), (
+            f"got {both}: two phases that each recover fully must report the "
+            f"WORSE schedule (-25%), not their mean (-17.5%) and not the "
+            f"end-to-end compounding of both")
 
     def test_the_mean_of_phases_is_still_reported_under_its_own_name(self):
         """Never delete a number that earlier reports quote. The mean-of-phases
@@ -761,6 +766,24 @@ class TestSectorRankIsOneQuantity:
             f"group spreads {spreads} differ; a rank from one group is not "
             f"comparable with a rank from another, which is the defect")
 
+        # THE DISCRIMINATING PART. The two assertions above pass on the OLD
+        # code too -- an adversarial re-audit reverted `sector_neutral_rank` to
+        # the universe-rank fallback and this test still went green, spreads
+        # differing by only 0.013. Ranks are near-uniform either way; what
+        # distinguishes the constructions is WHICH VALUES the residual pool
+        # gets. Under the fallback its ranks are the universe's, computed over
+        # every name; under the fix they are computed within the pool.
+        from prosignal.features.crosssec import cross_sectional_rank
+        resid_mask = (sec.isna()) | (sec == "Tiny")
+        within_pool = cross_sectional_rank(v[resid_mask])
+        universe = cross_sectional_rank(v)[resid_mask]
+        assert not np.allclose(within_pool.to_numpy(), universe.to_numpy(), atol=1e-6), (
+            "fixture is not discriminating: the two constructions agree")
+        assert np.allclose(groups["residual"].to_numpy(),
+                           within_pool.to_numpy(), atol=1e-12), (
+            "the residual pool is ranked against the whole universe, so the "
+            "column still carries two different normalisations")
+
     def test_the_unclassified_pool_is_ranked_within_itself(self):
         """Not against the universe. The discriminating case: an unsectored
         name that is mid-pack market-wide but top of the unclassified pool."""
@@ -877,19 +900,48 @@ class TestSelectionBiasDiagnostic:
             assert selection_corrected_t(t, 2.0) == pytest.approx(t, abs=1e-12)
 
     def test_it_recovers_the_truth_where_selection_binds(self):
-        """The criterion that decides whether the maths is right, at values
-        fixed before the result was seen. It holds for m <= 2.5 and fails at
-        m >= 3.0 -- which is why the correction is reported and not traded."""
+        """The criterion that decides whether the maths is right.
+
+        TWO THINGS THIS TEST GOT WRONG, both found by an adversarial re-audit
+        and both fixed here, because a criterion that cannot see the error it
+        was written to catch is worse than none:
+
+        * It conditioned on ``abs(draws) >= 2``. A surviving theme survived
+          with a KNOWN SIGN and that sign is what gets traded, so the
+          conditioning is one-sided. Averaging over both tails let the negative
+          survivors' corrections cancel the positive ones and hid the defect.
+        * Its grid omitted m = 0 -- the only value that matters for a
+          false-discovery correction, and the one where the old two-sided
+          estimator was worst: it reported a theme with NO true effect at all,
+          scraping the gate on noise, as a genuine +1.0 sigma effect.
+
+        Still fails at m >= 3.0, which is why the correction is reported and
+        not traded. See work/audit/W2_failure_model.md.
+        """
         from prosignal.features.famamacbeth import selection_corrected_t as corr
         rng = np.random.default_rng(7)
-        for m in (0.5, 1.0, 1.5, 2.0):
-            draws = rng.normal(m, 1.0, size=60_000)
-            sel = draws[np.abs(draws) >= 2.0]
+        for m in (0.0, 0.5, 1.0, 1.5, 2.0, 2.5):
+            draws = rng.normal(m, 1.0, size=200_000)
+            sel = draws[draws >= 2.0]                      # ONE-SIDED
             raw_err = abs(sel.mean() - m)
             fixed_err = abs(np.mean([corr(t, 2.0) for t in sel[:8000]]) - m)
             assert fixed_err < raw_err, (
                 f"at true m {m} the correction ({fixed_err:.3f}) is no better "
                 f"than the raw selected mean ({raw_err:.3f})")
+
+    def test_a_theme_at_the_pure_selection_expectation_implies_no_effect(self):
+        """The case the old two-sided version got exactly backwards.
+
+        With floor 2.0, a theme with a true effect of ZERO that survives has
+        E[t | t >= +2] = 2.373. Anything at or below that is fully explained by
+        the selection and must correct to zero. The two-sided estimator
+        returned +0.99 here."""
+        from prosignal.features.famamacbeth import selection_corrected_t as corr
+        for t in (2.0, 2.2, 2.373):
+            assert corr(t, 2.0) == pytest.approx(0.0, abs=1e-9), (
+                f"t {t} is at or below the pure-selection expectation of 2.373 "
+                f"and implies no effect; got {corr(t, 2.0):+.3f}")
+        assert corr(2.5, 2.0) > 0.0, "the test must still admit a real effect"
 
     def test_the_shipped_coefficients_are_not_corrected(self):
         """W2 is OPEN. If someone wires the diagnostic into the traded path,
@@ -920,18 +972,33 @@ class TestTheTargetTravelsWithTheFigure:
         assert r.target == "label_rank"
         assert hasattr(r, "label_book_rank_corr")
 
-    def test_an_unmeasured_gap_is_not_silence(self):
-        """None must print as 'not measured', never be skipped -- 'we did not
-        check' and 'they agree' are different statements."""
-        import inspect
-        from prosignal import cli
-        src = inspect.getsource(cli)
-        block = src[src.index("Var[SR] {dsr.sr_variance"):]
-        block = block[:2000]
-        assert "was NOT measured on this run" in block, (
-            "an unmeasured label-vs-book gap must say so explicitly")
-        assert "NOT against the book" in block, (
-            "the reported excess must name what it is measured against")
+    def test_the_gap_is_measured_when_the_panel_carries_the_outcome(self):
+        """The field existed and NOTHING EVER ASSIGNED IT, so the CLI took its
+        else-branch on every run and printed a hardcoded 0.531 as though it
+        were that run's number. Behavioural, because the source-grep version of
+        this guard broke on a wording change while the behaviour was fine --
+        which is the wrong way round."""
+        from prosignal.validation.harness import _label_book_rank_corr
+        rng = np.random.default_rng(4)
+        rows = []
+        for d in pd.bdate_range("2021-01-01", periods=12, freq="21B"):
+            lab = rng.normal(size=200)
+            # a deliberately imperfect relative: rank corr well below 1
+            book = 0.5 * lab + rng.normal(size=200)
+            rows.append(pd.DataFrame({"date": d, "label": lab, "book_ret": book}))
+        work = pd.concat(rows, ignore_index=True)
+        got = _label_book_rank_corr(work)
+        assert got is not None
+        assert 0.2 < got < 0.8, f"expected a partial correlation, got {got}"
+
+    def test_an_unmeasured_gap_returns_none_rather_than_a_constant(self):
+        """'We did not check' and 'they agree' are different statements, and a
+        constant presented as a measurement is worse than an omission because
+        it cannot go stale visibly."""
+        from prosignal.validation.harness import _label_book_rank_corr
+        work = pd.DataFrame({"date": pd.bdate_range("2021-01-01", periods=50),
+                             "label": np.arange(50.0)})
+        assert _label_book_rank_corr(work) is None
 
 
 # =============================================================================
@@ -1038,3 +1105,127 @@ class TestForwardTestIsBenchmarkRelative:
             reg = register(Path(d), config_version="v", engine_version="e",
                            git_commit="c", started_on=dt.date(2026, 1, 1))
         assert any("benchmark" in i.lower() for i in reg.invalidation)
+
+
+# =============================================================================
+# Findings from the ADVERSARIAL RE-AUDIT of this remediation.
+# Every one of these is a defect the remediation itself introduced or left.
+# =============================================================================
+class TestAdversarialFindings:
+
+    def test_the_cached_live_path_masks_the_admissible_population(self):
+        """`model_refit_every_sessions` is 21, so `fit_predict` -- where the
+        admissible mask was wired -- runs on 1 session in 21. Every other day
+        came through `today_features`, which called `features_for_date` with no
+        `admissible` argument and ranked over the wider population the model
+        was not fitted on. Fixing the rare path and leaving the common one is
+        worse than not fixing it: the two then disagree."""
+        import inspect
+        from prosignal.features import crossmodel
+        src = inspect.getsource(crossmodel.today_features)
+        assert "admissible=live_adm" in src, (
+            "the cached live path, which runs 20 days in 21, does not apply "
+            "the admissible mask")
+        assert "_admissible_frame" in src
+
+    def test_a_result_without_its_date_keys_refuses_rather_than_reverts(self):
+        """`excess_by_date` defaulted to {} and `horizon_sessions` to 0, so a
+        result built without them silently returned the POOLED vector and the
+        raw count -- restoring the exact defect the methods exist to remove.
+        Measured on a 540-entry/60-date fixture: effective_n 20.3 -> 540 and
+        DSR 0.878 FAIL -> 1.0000 PASS, with no error and no note."""
+        from prosignal.validation.harness import CpcvResult
+        bare = CpcvResult(n_splits=9, n_paths=3, excess=[0.01] * 540)
+        with pytest.raises(ValueError, match="excess_by_date"):
+            bare.excess_per_date()
+        keyed = CpcvResult(n_splits=9, n_paths=3,
+                           excess_by_date={i: [0.01] for i in range(60)})
+        with pytest.raises(ValueError, match="step_sessions|horizon"):
+            keyed.effective_observations()
+
+    def test_a_missing_adjustment_factor_does_not_delist_a_name(self):
+        """Dividing by NaN excluded the name outright -- a factor frame missing
+        one column dropped that symbol on EVERY date. Worse than the bug being
+        fixed, and running the same direction: names vanish from the past for a
+        data reason. `universe.resolve_liquidity_pit` already did the right
+        thing; the two paths now agree."""
+        from prosignal.features.crosssec import liquidity_mask
+        close, turnover, _h, _l = _frames(n=400)
+        kw = dict(min_adtv_inr=1e6, lookback_sessions=21, max_names=len(SYMS),
+                  min_history_sessions=50, min_price_inr=10.0)
+        base = liquidity_mask(close, turnover, **kw)
+        fac = pd.DataFrame(1.0, index=close.index, columns=close.columns)
+        fac = fac.drop(columns=[close.columns[0]])          # one column absent
+        got = liquidity_mask(close, turnover, adj_factor=fac, **kw)
+        assert got[close.columns[0]].sum() == base[close.columns[0]].sum(), (
+            "a symbol with no adjustment factor was delisted entirely")
+        sparse = pd.DataFrame(1.0, index=close.index, columns=close.columns)
+        sparse.iloc[10:20, 1] = np.nan
+        got2 = liquidity_mask(close, turnover, adj_factor=sparse, **kw)
+        assert got2.equals(base), "scattered NaN factors changed the screen"
+
+    def test_a_weighted_fit_respects_the_effective_row_count(self):
+        """The n <= p + 1 guard read the RAW row count while weights were
+        applied afterwards, so 60 rows with non-zero weight on 3 of them passed
+        a check the same 3 rows fail unweighted, and lstsq returned four
+        fabricated slopes from an underdetermined system."""
+        from prosignal.features.famamacbeth import _ols_slopes
+        rng = np.random.default_rng(0)
+        n = 60
+        x = rng.normal(size=(n, 4))
+        y = rng.normal(size=n)
+        w = np.zeros(n)
+        w[:3] = 1.0
+        assert _ols_slopes(x, y, w=w) is None, (
+            "an underdetermined weighted fit returned slopes")
+        assert _ols_slopes(x[:3], y[:3]) is None, "control: unweighted refuses"
+
+    def test_liveness_is_judged_on_the_weights_the_fit_used(self):
+        """`live` tested the RAW weights while the fit used the sanitised ones,
+        so a column varying only at an inf-weight row -- sanitised to zero, and
+        contributing nothing -- was judged live and its slope of -3e-17 entered
+        the average. That is the dead-cross-section failure reintroduced inside
+        the fix for it."""
+        from prosignal.features.famamacbeth import _ols_slopes
+        rng = np.random.default_rng(0)
+        n = 60
+        x = rng.normal(size=(n, 4))
+        y = rng.normal(size=n)
+        x[:, 1] = 0.0
+        x[0, 1] = 5.0
+        w = np.ones(n)
+        w[0] = np.inf
+        beta = _ols_slopes(x, y, w=w)
+        assert beta is not None
+        assert np.isnan(beta[1]), (
+            f"a column live only at a zero-weight row was measured as "
+            f"{beta[1]}")
+
+    def test_the_benchmark_is_the_population_the_book_selects_from(self):
+        """Built over every symbol in the store it is a wider, less liquid
+        population than the book's -- and it carries the one conclusion that
+        reverses the verdict, so a mislabelled benchmark would be the worst
+        possible place for this error."""
+        import inspect
+        from prosignal import cli
+        src = inspect.getsource(cli._portfolio_inputs)
+        assert "liquidity_mask" in src, (
+            "the benchmark is computed over the whole store while every caller "
+            "describes it as the eligible universe")
+        assert ".shift(1)" in src, (
+            "the screen must be lagged: membership on date t decided by data "
+            "through t-1")
+
+    def test_training_and_live_ranks_are_computed_at_the_same_precision(self):
+        """build_panel cast to float32 and THEN ranked; features_for_date ranks
+        float64. Near-ties therefore ordered differently in training and at the
+        decision -- inside the function whose docstring promises the two cannot
+        drift apart in definition."""
+        import inspect
+        from prosignal.features import crosssec
+        src = inspect.getsource(crosssec.build_panel)
+        cast = src.index('astype("float32")')
+        rank = src.index("sector_neutral_rank(g[f]")
+        assert cast > rank, (
+            "the float32 cast still runs before the ranking; training ranks "
+            "are taken at a different precision from live ranks")

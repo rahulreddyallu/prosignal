@@ -239,6 +239,16 @@ def _ols_slopes(x: np.ndarray, y: np.ndarray,
     n, p = x.shape
     if n <= p + 1:
         return None
+    if w is not None:
+        # THE EFFECTIVE ROW COUNT, not the raw one. Weights are applied after
+        # this guard, so a fit with 60 rows and 4 features but non-zero weight
+        # on only 3 of them passed a check it should have failed: `lstsq`
+        # returns the minimum-norm solution of an underdetermined system, every
+        # coefficient is finite, and four fabricated slopes enter the average.
+        # The same three rows passed unweighted are correctly refused.
+        ww0 = np.asarray(w, dtype="float64")
+        if int(np.sum(np.isfinite(ww0) & (ww0 > 0))) <= p + 1:
+            return None
     design = np.column_stack([np.ones(n), x])
     if w is not None:
         # WLS as a rescaled OLS: minimising sum(w_i r_i^2) is least squares on
@@ -263,7 +273,14 @@ def _ols_slopes(x: np.ndarray, y: np.ndarray,
     # `TestDeadCrossSectionsAreNotMeasurements`, not assumed.
     # Variation is judged on the rows that CARRY WEIGHT. A column varying only
     # across rows the fit gives zero weight is not identified by that fit.
-    live = slice(None) if w is None else (np.asarray(w, dtype="float64") > 0)
+    # Judged on the SANITISED weights the fit actually used. Testing the raw
+    # `w` here let a column that varies only at an inf-weight row -- sanitised
+    # to zero above, so contributing nothing -- be judged live, and its slope of
+    # -3.3e-17 entered the average as a measurement. That is the "dead
+    # cross-section is not a measurement of zero" failure, reintroduced inside
+    # the fix for it.
+    live = slice(None) if w is None else (
+        np.asarray(w, dtype="float64") > 0) & np.isfinite(np.asarray(w, dtype="float64"))
     xv = x[live] if w is not None else x
     dead = (np.nanmax(xv, axis=0) == np.nanmin(xv, axis=0)) if len(xv) else np.ones(p, bool)
     out[dead] = np.nan
@@ -633,25 +650,34 @@ def selection_corrected_t(t_obs: float, floor: float) -> float:
 
     THE BIAS THIS REMOVES. `gated_shrink` keeps themes with |t| >= floor and
     reports their lambda, so selection and estimation run on the same sample and
-    the surviving coefficient is conditioned on its own significance. With
-    lam_hat ~ N(lam, se^2) and m = lam/se,
+    the surviving coefficient is conditioned on its own significance.
 
-        E[lam_hat | |lam_hat| >= f.se] = lam + se . [phi(f-m) - phi(f+m)] / P
-        P                              = 1 - Phi(f-m) + Phi(-f-m)
+    THE CONDITIONING IS ONE-SIDED, and getting that wrong is the whole game. A
+    surviving theme is not merely "large in absolute value" -- it survived WITH
+    A KNOWN SIGN, and that sign is what the engine trades. Conditioning on
+    t_hat >= f (given the observed sign) rather than on |t_hat| >= f gives
 
-    The second term is strictly positive for m > 0 and strictly negative for
-    m < 0: a surviving coefficient is biased AWAY FROM ZERO, always, and most
-    at the boundary. `mom` and `delivery` sit at t +2.87 and +2.63 against a
-    floor of 2.0, which is where the bias is worst.
+        E[t_hat | t_hat >= f] = m + phi(f - m) / (1 - Phi(f - m))
 
-    `tau2_from` already removes the winner's curse in tau^2. It does nothing
-    about the one in lam_hat, and that one propagates into the ranking, the
-    top-decile excess, the CPCV IC and the book's return alike.
+    the inverse Mills ratio. The two-sided version of this function was wrong in
+    a way that mattered: at a TRUE EFFECT OF ZERO the two-sided expression is
+    0 by symmetry, so its inversion reported a theme with no effect at all --
+    one that scraped the gate on noise -- as a genuine +1.0 sigma effect.
+    Measured over a million draws at m = 0, floor 2.0: E[t | t >= +2] = 2.373,
+    and the two-sided correction returned +0.99 for it. It should return 0.
 
-    This inverts the expression: it returns the m whose SELECTED expectation
-    equals the observed t. Solved by bisection because the map is monotone in m
-    and has no closed form. Sign-preserving, never inflating, and it takes no
-    parameter the config does not already carry.
+    Found by an adversarial re-audit of this remediation, which also found that
+    the pre-committed simulation criterion could not see the error because it
+    averaged over BOTH tails, where the negative survivors' corrections cancel
+    the positive ones, and because its grid omitted m = 0 -- the only value that
+    matters for a false-discovery correction.
+
+    CLAMPED AT ZERO. As t_obs approaches the floor the implied m diverges to
+    minus infinity: a theme that exactly hits the threshold carries no evidence
+    of an effect beyond the selection itself. Reporting a NEGATIVE true effect
+    for a theme selected for being positive would be an artefact of the
+    estimator rather than a statement about the world, so the estimate is
+    floored at zero and zero is read as "indistinguishable from selection".
     """
     t = float(t_obs)
     f = abs(float(floor))
@@ -664,23 +690,21 @@ def selection_corrected_t(t_obs: float, floor: float) -> float:
         return t
 
     def selected_mean(m: float) -> float:
-        """E[t_hat | selected], in units of se, for a true m >= 0."""
-        p_hi = 0.5 * math.erfc((f - m) / math.sqrt(2.0))
-        p_lo = 0.5 * math.erfc((f + m) / math.sqrt(2.0))
-        pr = p_hi + p_lo
-        if pr <= 1e-300:
-            # Selection is essentially impossible at this m; the observed value
-            # is then all selection and the honest answer is the floor.
-            return f
-        phi = lambda z: math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
-        return m + (phi(f - m) - phi(f + m)) / pr
+        """E[t_hat | t_hat >= f] for a true effect m, same sign convention."""
+        z = f - m
+        # 1 - Phi(z), computed as erfc to stay accurate in the far tail.
+        tail = 0.5 * math.erfc(z / math.sqrt(2.0))
+        phi = math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+        if tail <= 1e-300:
+            return m          # selection is certain; no conditioning left
+        return m + phi / tail
 
-    # selected_mean(0) = the pure-selection expectation, which is >= f. If the
-    # observation does not exceed it, no positive true effect is implied.
+    # Monotone increasing in m, with selected_mean(m) -> f as m -> -inf. An
+    # observation at or below the pure-selection expectation implies no effect.
     if a <= selected_mean(0.0):
         return 0.0
-    lo, hi = 0.0, max(a, f) + 10.0
-    for _ in range(200):
+    lo, hi = 0.0, max(a, f) + 20.0
+    for _ in range(300):
         mid = 0.5 * (lo + hi)
         if selected_mean(mid) < a:
             lo = mid
