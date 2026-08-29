@@ -73,7 +73,8 @@ EXECUTION_MODEL = "statutory-india-v1+liquidity-gate-r13"
 
 
 def _git_sha(root: Path) -> str:
-    """HEAD, or `"unversioned"`. Never a guess."""
+    """HEAD, or `"unversioned"`. Never a guess. Informational only -- the
+    REPRODUCIBILITY gate compares `_code_sha`, for the reason given there."""
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
                              capture_output=True, text=True, timeout=10)
@@ -81,6 +82,43 @@ def _git_sha(root: Path) -> str:
         return sha[:12] if out.returncode == 0 and len(sha) >= 12 else "unversioned"
     except (OSError, subprocess.SubprocessError):
         return "unversioned"
+
+
+#: Tracked directories whose contents ARE the running engine. `config/` is
+#: deliberately absent: `config_version` already fingerprints every tunable,
+#: and folding it in here would report one change as two.
+_CODE_TREES = ("src",)
+
+
+def _code_sha(root: Path) -> str:
+    """A hash of the CODE, stable across commits that touch only provenance.
+
+    THIS USED TO BE `git rev-parse HEAD`, and that made the REPRODUCIBILITY
+    gate unsatisfiable in the same way the dirty-tree check was. Opening an
+    epoch writes `data/ledger/epochs.jsonl`; that row has to be committed;
+    committing it moves HEAD; the gate then reports that the tree has drifted
+    from an epoch opened seconds earlier, on a tree where not one line of the
+    engine changed. Measured on this repository: three consecutive attempts to
+    open an epoch and restart the forward test, each refused for a commit that
+    contained only the previous attempt's epoch row.
+
+    `git rev-parse HEAD:src` is the tree object for the source directory. It
+    changes when any source file changes and does not change when a provenance
+    commit lands, which is exactly the property the gate needs.
+    """
+    parts = []
+    for tree in _CODE_TREES:
+        try:
+            out = subprocess.run(["git", "rev-parse", f"HEAD:{tree}"], cwd=str(root),
+                                 capture_output=True, text=True, timeout=10)
+            if out.returncode != 0 or len(out.stdout.strip()) < 12:
+                return "unversioned"
+            parts.append(out.stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            return "unversioned"
+    if len(parts) == 1:
+        return parts[0][:12]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:12]
 
 
 #: Tracked paths the epoch machinery WRITES WHILE OPENING AN EPOCH. They are
@@ -175,6 +213,10 @@ class Identity:
     feature_schema_sha: str
     universe_policy: str
     execution_model: str
+    #: HEAD at the moment the epoch was opened. Recorded so a reader can find
+    #: the commit; NOT compared by the gate, because a provenance-only commit
+    #: moves it without changing the engine.
+    commit_sha: str = "unversioned"
 
     def fingerprint(self) -> str:
         payload = json.dumps({
@@ -182,6 +224,7 @@ class Identity:
             # the tree an epoch was opened from, not the model. Two clean runs
             # of the same commit must fingerprint identically.
             "code_sha": self.code_sha,
+            "commit_sha": self.commit_sha,
             "model_sources_sha": self.model_sources_sha,
             "config_version": self.config_version,
             "data_manifest_sha": self.data_manifest_sha,
@@ -209,7 +252,8 @@ def current_identity(cfg) -> Identity:
 
     root = Path(cfg.paths.root)
     return Identity(
-        code_sha=_git_sha(root),
+        code_sha=_code_sha(root),
+        commit_sha=_git_sha(root),
         code_dirty=_dirty(root),
         model_sources_sha=source_digest(),
         config_version=str(getattr(cfg, "version", "")),

@@ -222,3 +222,42 @@ def test_the_feature_fingerprint_covers_what_actually_ranks():
     finally:
         v2mod.V2_FACTORS = original
     assert E._feature_schema_sha() == before
+
+
+def test_the_code_sha_survives_a_provenance_only_commit(tmp_path):
+    """The other half of the same unsatisfiable gate.
+
+    Opening an epoch writes `data/ledger/epochs.jsonl`; that row has to be
+    committed; committing it moved HEAD; the gate then reported that the tree
+    had drifted from an epoch opened seconds earlier, on a tree where not one
+    line of the engine had changed. `code_sha` is now the source TREE object,
+    so a provenance commit leaves it alone and a source edit does not.
+    """
+    import subprocess
+
+    from prosignal.validation import epoch as E
+
+    root = tmp_path / "repo"
+    (root / "src" / "prosignal").mkdir(parents=True)
+    (root / "data" / "ledger").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    (root / "src" / "prosignal" / "a.py").write_text("x = 1\n")
+    (root / "data" / "ledger" / "epochs.jsonl").write_text("{}\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+    first = E._code_sha(root)
+    head_first = E._git_sha(root)
+    assert first != "unversioned"
+
+    (root / "data" / "ledger" / "epochs.jsonl").write_text('{"epoch":1}\n')
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "epoch row"], cwd=root, check=True)
+    assert E._git_sha(root) != head_first, "HEAD must have moved, or this proves nothing"
+    assert E._code_sha(root) == first, "a provenance commit must not drift the code sha"
+
+    (root / "src" / "prosignal" / "a.py").write_text("x = 2\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "code"], cwd=root, check=True)
+    assert E._code_sha(root) != first, "a source edit must drift it"
