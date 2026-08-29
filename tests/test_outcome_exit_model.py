@@ -213,7 +213,15 @@ def test_every_resolved_row_carries_the_model_that_produced_it():
 
 def test_rows_from_an_older_exit_rule_are_not_served(tmp_path):
     """Two strategies in one file averaged together is exactly the failure this
-    module exists to detect elsewhere."""
+    module exists to detect elsewhere.
+
+    `epoch="*"` because there are now TWO partitions and this test is about
+    one of them. The rows below carry no `epoch_id`, so under the default they
+    are served only while no epoch is open -- which made this test pass for
+    eight months and then fail the day one was, for a reason that has nothing
+    to do with exit models. Asking for every epoch explicitly is what keeps it
+    a test of the exit-model partition.
+    """
     import json
 
     path = tmp_path / "outcomes.jsonl"
@@ -224,8 +232,44 @@ def test_rows_from_an_older_exit_rule_are_not_served(tmp_path):
         + json.dumps({"ticker": "CURRENT", "net_return": 0.1,
                       "exit_model": EXIT_MODEL}) + "\n"
     )
-    assert [r["ticker"] for r in load_outcomes(path)] == ["CURRENT"]
-    assert len(load_outcomes(path, model=None)) == 3, "the record is still readable"
+    served = load_outcomes(path, epoch="*")
+    assert [r["ticker"] for r in served] == ["CURRENT"]
+    assert len(load_outcomes(path, model=None, epoch="*")) == 3, (
+        "the record is still readable"
+    )
+
+
+def test_the_two_partitions_are_independent_and_both_bind(tmp_path):
+    """The epoch partition must not be able to substitute for the exit-model
+    one, or vice versa.
+
+    A row can match the current epoch and the wrong exit rule, or the right
+    exit rule and a retired epoch. Both are a different strategy, and serving
+    either would pool two engines under one heading.
+    """
+    import json
+
+    from prosignal.outcomes import PRE_EPOCH
+
+    path = tmp_path / "outcomes.jsonl"
+    rows = [
+        {"ticker": "BOTH_RIGHT", "net_return": 0.1,
+         "exit_model": EXIT_MODEL, "epoch_id": "E2"},
+        {"ticker": "OLD_RULE", "net_return": 0.1,
+         "exit_model": "stop-target-v1", "epoch_id": "E2"},
+        {"ticker": "OLD_EPOCH", "net_return": 0.1,
+         "exit_model": EXIT_MODEL, "epoch_id": "E1"},
+        {"ticker": "NEITHER", "net_return": 0.1,
+         "exit_model": "stop-target-v1", "epoch_id": "E1"},
+    ]
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    assert [r["ticker"] for r in load_outcomes(path, epoch="E2")] == ["BOTH_RIGHT"]
+    assert [r["ticker"] for r in load_outcomes(path, epoch="E1")] == ["OLD_EPOCH"]
+    assert [r["ticker"] for r in load_outcomes(path, model=None, epoch="E1")] == \
+        ["OLD_EPOCH", "NEITHER"]
+    assert len(load_outcomes(path, model=None, epoch="*")) == 4
+    assert load_outcomes(path, epoch=PRE_EPOCH) == []
 
 
 # ------------------------------------------------------- the price basis

@@ -32,6 +32,7 @@ from ..core.logging import get_logger
 from ..costs import CostModel
 from ._cfg import bv, fv, iv, v
 from ..indicators import atr, realised_volatility
+from ..liquidity import LiquidityState, assess
 
 __all__ = ["build_plan", "STAGE_NAME"]
 
@@ -129,7 +130,7 @@ def build_plan(
     category = _category(composite_score, rel_vol, cfg)
 
     # ---- position size: risk budget vs capital vs LIQUIDITY ---------------
-    qty, size_notes, size_inputs = _position_size(
+    qty, size_notes, size_inputs, liquidity_state = _position_size(
         reference_price, risk_per_share, adtv_inr, category, p, costs
     )
     notes.extend(size_notes)
@@ -190,6 +191,7 @@ def build_plan(
         estimated_impact_bps=round(impact_bps, 1) if impact_bps else None,
         liquidity_ratio_recent=liquidity_ratio,
         liquidity_warning=liquidity_warning,
+        liquidity_state=liquidity_state,
         notes=notes,
     )
 
@@ -260,8 +262,20 @@ def _recent_liquidity(frame, adtv_inr, cfg) -> Tuple[Optional[float], Optional[s
     return round(ratio, 3), warning
 
 
-def _position_size(price, risk_per_share, adtv, category, params, costs) -> Tuple[int, List[str], Dict[str, float]]:
-    """Smallest of: risk budget, capital slot, liquidity cap."""
+def _position_size(price, risk_per_share, adtv, category, params, costs
+                   ) -> Tuple[int, List[str], Dict[str, float], str]:
+    """Smallest of: risk budget, capital slot, liquidity cap.
+
+    UNKNOWN LIQUIDITY SIZES TO ZERO. It used to fall back to `qty_slot`, so a
+    name with no measurable ADTV was simply never liquidity-constrained and
+    took the full capital slot -- while the cost model, for the same name,
+    returned the cheapest fill it could produce. An absence of information
+    bought the largest position and the best execution assumption in the engine.
+
+    `liquidity.assess` distinguishes MISSING from INVALID from a real reading
+    that has gone stale, because they license different actions and collapsing
+    them is what made the old fallback look reasonable.
+    """
     notes: List[str] = []
     capital = fv(params.capital.total_capital_inr)
     slot = float(params.capital.position_value_inr())
@@ -273,7 +287,19 @@ def _position_size(price, risk_per_share, adtv, category, params, costs) -> Tupl
     qty_slot = int((slot * frac) / price) if price > 0 else 0
 
     cap_pct = fv(params.capital.max_participation_of_adtv)
-    qty_liq = int((adtv * cap_pct) / price) if adtv and price > 0 else qty_slot
+    view = assess(adtv)
+    if view.adtv_inr is None or price <= 0:
+        qty_liq = 0
+        notes.append(
+            f"NOT SIZED. {view.describe()} A position cannot be sized against a "
+            f"liquidity nobody measured, and the engine will not substitute the "
+            f"capital slot for one -- that would award the largest position "
+            f"available to the name it knows least about."
+        )
+    else:
+        qty_liq = int((view.adtv_inr * cap_pct) / price)
+        if view.state is not LiquidityState.KNOWN_VALID:
+            notes.append(f"Liquidity is {view.describe()}")
 
     qty = max(min(qty_risk, qty_slot, qty_liq), 0)
     binding = min(
@@ -284,7 +310,7 @@ def _position_size(price, risk_per_share, adtv, category, params, costs) -> Tupl
         f"Size {qty:,} shares (Rs {qty*price:,.0f}). Binding constraint: {binding}. "
         f"Risk category {category.value} scales the budget to {frac:.0%}."
     )
-    if binding == "liquidity cap":
+    if binding == "liquidity cap" and qty > 0:
         notes.append(
             "Liquidity is the binding constraint, not conviction. The statistically "
             "attractive size is not executable here without moving the price."
@@ -292,7 +318,7 @@ def _position_size(price, risk_per_share, adtv, category, params, costs) -> Tupl
     return qty, notes, {
         "qty_by_risk": float(qty_risk), "qty_by_slot": float(qty_slot),
         "qty_by_liquidity": float(qty_liq), "risk_budget_inr": round(risk_budget, 2),
-    }
+    }, view.state.value
 
 
 def _exit_hierarchy(cfg, stop, invalidation, t1, t2) -> List[ExitCondition]:

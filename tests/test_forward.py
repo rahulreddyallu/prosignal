@@ -28,7 +28,8 @@ from prosignal.validation.forward import (
 
 def open_test(tmp_path, started=dt.date(2026, 8, 23), version="cfg@aaa"):
     return register(tmp_path, config_version=version, engine_version="0.1.0",
-                    git_commit="deadbeef" * 5, started_on=started)
+                    git_commit="deadbeef" * 5, started_on=started,
+                    unchecked_reason="fixture: this file tests the registration itself, not the readiness gate that guards it")
 
 
 def row(date, version="cfg@aaa", error=None):
@@ -69,7 +70,8 @@ def test_a_second_registration_is_refused(tmp_path):
 def test_restarting_is_possible_but_must_be_explicit(tmp_path):
     open_test(tmp_path)
     reg = register(tmp_path, config_version="cfg@bbb", engine_version="0.1.0",
-                   git_commit="x" * 40, overwrite=True)
+                   git_commit="x" * 40, overwrite=True,
+                   unchecked_reason="fixture: the gate has its own file")
     assert reg.config_version == "cfg@bbb"
 
 

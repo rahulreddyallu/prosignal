@@ -48,12 +48,24 @@ meta:
   # of every `value` in this file to produce the config_version stamped onto
   # every research-ledger row. Change the label when you make a deliberate
   # regime change to your research; the hash changes automatically regardless.
-  config_label: "baseline-v1"
+  config_label: "baseline-v2"
   owner: "rahulreddyallu"
   description: >-
-    Baseline India solo-quant decision-support configuration. Every research
-    parameter is UNVALIDATED until a CPCV run on point-in-time NSE data
-    promotes it. Nothing in this file has been backtested yet.
+    India solo-quant decision-support configuration, epoch v2. Supersedes
+    baseline-v1@127d8a314ec49aa2, which is recorded VOID in the epoch ledger:
+    its forward test was registered against a configuration the engine had
+    already left, and three repairs its readiness dossier reported as complete
+    were absent from the code.
+
+    v2 differs from v1 in what it TRADES by exactly one parameter,
+    universe.train_on_admissible_only, which moves false -> true. That
+    restricts the training panel to the population the book can actually open
+    and therefore moves the fitted coefficients. Everything else that changed
+    between the two is a correction to how the engine MEASURES itself, which
+    leaves what it trades untouched; docs/REAUDIT.md separates the two.
+
+    Every research parameter is UNVALIDATED until a CPCV run on point-in-time
+    NSE data promotes it.
 
 
 # -----------------------------------------------------------------------------
@@ -322,6 +334,23 @@ universe:
     note: >-
       Measured IC is flat between 500 and the full ADTV set; the cap exists to
       bound the panel, not because 750 is optimal.
+
+  # THE POPULATION THE MODEL IS FITTED ON MUST BE THE ONE THE BOOK CAN OPEN.
+  train_on_admissible_only:
+    value: true
+    status: UNVALIDATED
+    note: >-
+      Restricts the training panel to names that satisfy
+      `exits.tradeable_at_entry` on the decision date -- the same predicate
+      stage 3 and stage 6 apply live, and the one `resolve_exits` applies to the
+      label. It was unreachable while `labels.triple_barrier` is false, because
+      that routes `build_panel` past `resolve_exits` entirely, so the model
+      ranked a population about a fifth larger than the engine will trade and
+      the simulator found out at fill time: 7.29 of 8 selected slots filled.
+
+      Turning it on moves the traded coefficients. That is the expected
+      consequence of correcting the training set, not a reason to leave it off.
+      It opens a new research epoch; see docs/REAUDIT.md and the epoch ledger.
 
   pre_snapshot_policy:
     value: "flag"
@@ -2201,6 +2230,23 @@ costs:
       value: 5.0
       status: UNVALIDATED
       search_range: [1.0, 50.0]
+    # UNKNOWN LIQUIDITY IS PRICED AS THE WORST CASE THE MODEL ALLOWS.
+    unknown_liquidity_participation:
+      value: 0.01
+      status: STRUCTURAL
+      note: >-
+        Participation assumed when ADTV cannot be measured. It used to be
+        implicit and equal to ZERO: `impact_bps` returned the half-spread alone,
+        which is the cheapest fill the model can produce, and it returned it for
+        exactly the names whose liquidity was unknown -- while the sizer gave
+        those same names the largest position the capital slot allowed.
+
+        Set to capital.max_participation_of_adtv, the cap the engine will not
+        knowingly exceed, so an unmeasured name can never price better than a
+        measured one traded at the limit. The engine refuses to trade these
+        names at all (universe/liquidity gate, R13); this exists so that a cost
+        model asked an unanswerable question answers pessimistically rather than
+        optimistically.
 
   # Mandatory stress tests (research program section 9).
   stress_tests:

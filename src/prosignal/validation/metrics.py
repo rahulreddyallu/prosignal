@@ -203,6 +203,34 @@ def expected_max_sharpe(n_trials: int, sr_variance: float) -> float:
     return sqrt(sr_variance) * term
 
 
+#: What `sr_variance` was in the end. The DSR is more sensitive to this than to
+#: anything else it is given -- on this engine's own evidence, moving it between
+#: two defensible estimates moved the answer from 0.38 to 0.91 -- so a result
+#: that does not say where it came from cannot be read.
+SR_VAR_FROM_TRIALS = "trials"
+SR_VAR_SUPPLIED = "supplied"
+SR_VAR_UNIT = "unit_conservative"
+SR_VAR_UNDERCOVERED = "unit_undercovered_trials"
+
+#: Share of the CHARGED trials that must carry a recorded score before their
+#: variance is used as Var[SR].
+#:
+#: Bailey & Lopez de Prado's expected maximum assumes Var[SR] is the dispersion
+#: across the configurations that were searched. A registry holding scores for
+#: some of them estimates that dispersion from whichever arms happened to be
+#: scored -- and those are systematically the most SIMILAR ones, because a
+#: command that sweeps eighteen buy/hold bands records eighteen near-identical
+#: results while the genuinely different ideas were compared once and moved on
+#: from. Measured here: 18 scored arms out of 87 charged gave Var[SR] 0.00178,
+#: an expected-maximum bar of 0.105, and a comfortable PASS -- lower than the
+#: unit fallback by a factor of 560 and lower than the truth by an unknown one.
+#:
+#: Under-covered scores are therefore INFORMATIVE, not authoritative: they are
+#: reported, and the bar is set from the conservative variance until enough of
+#: the search has been priced for its spread to mean anything.
+MIN_TRIAL_SCORE_COVERAGE = 0.5
+
+
 @dataclass
 class DsrResult:
     observed_sr: float
@@ -239,6 +267,10 @@ class DsrResult:
             "kurtosis": self.kurtosis,
             "passes": self.passes,
             "interpretation": self.interpretation,
+            "sr_variance": self.sr_variance,
+            "sr_variance_source": self.sr_variance_source,
+            "sr_variance_measured": self.sr_variance_measured,
+            "trials_scored": self.trials_scored,
         }
 
 
@@ -254,7 +286,11 @@ def deflated_sharpe_ratio(
     Parameters
     ----------
     returns:
-        Per-period returns of the SELECTED configuration.
+        Per-period returns of the SELECTED configuration. They must be
+        INDEPENDENT observations. Feeding a vector that counts each period
+        several times -- the pooled (split, test-date) excess a CPCV run
+        produces, for instance -- inflates `n` and collapses the fallback
+        variance, and the result passes whatever the strategy did.
     n_trials:
         Honest count of configurations tried -- from the research ledger, not
         from memory. Understating it inflates the result.

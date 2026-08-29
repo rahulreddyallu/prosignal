@@ -117,6 +117,24 @@ class ExitRules:
     #: stage4_core_score.model_horizon_sessions
     horizon: int = 63
 
+    #: stage7_risk.exit_hierarchy -- WHICH EXITS ARE ARMED AT ALL.
+    #:
+    #: These existed in `config/parameters.yaml` and were read by exactly one
+    #: place: `stage7_risk._exit_hierarchy`, which decides what the CARD prints.
+    #: Nothing in the measurement path read them -- not `rules_from_config`, not
+    #: `resolve_exits`, not the label, not the portfolio simulator. So setting
+    #: `stop_loss_breach: false` removed the stop from the card and left it in
+    #: every backtest, every label and every validation number, and an operator
+    #: who turned it off would have seen the measurements not move and concluded
+    #: the stop was free.
+    #:
+    #: All three ship armed, so honouring them here leaves
+    #: `baseline-v1@127d8a314ec49aa2` byte-identical. It is a config value
+    #: meaning what it says, not a change to what is traded.
+    use_stop: bool = True
+    use_target: bool = True
+    use_invalidation: bool = True
+
     def stop_fraction(self, atr: np.ndarray, entry: np.ndarray) -> np.ndarray:
         """Stop distance as a fraction of entry, clipped exactly as Stage 7 does."""
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -263,7 +281,13 @@ def resolve_exits(
     def _first(mask: np.ndarray) -> np.ndarray:
         return np.where(mask.any(axis=0), mask.argmax(axis=0), n_bars + 1)
 
-    f_stop, f_target, f_inval = _first(hit_stop), _first(hit_target), _first(hit_inval)
+    never = np.full(len(e), n_bars + 1)
+    # A DISARMED EXIT NEVER FIRES, rather than firing and being ignored. See
+    # `ExitRules.use_stop`: these switches come from `exit_hierarchy`, which
+    # until now reached the card and nothing else.
+    f_stop = _first(hit_stop) if rules.use_stop else never
+    f_target = _first(hit_target) if rules.use_target else never
+    f_inval = _first(hit_inval) if rules.use_invalidation else never
     first = np.minimum(np.minimum(f_stop, f_target), f_inval)
     timed_out = first > n_bars
 
@@ -327,6 +351,10 @@ def rules_from_config(c4, c7) -> ExitRules:
     """
     from ..stages._cfg import fv, iv
 
+    def _armed(node) -> bool:
+        return bool(getattr(node, "value", node))
+
+    h = c7.exit_hierarchy
     return ExitRules(
         stop_atr_multiple=fv(c7.stop_loss.atr_multiple),
         min_stop_distance_pct=fv(c7.stop_loss.min_stop_distance_pct),
@@ -337,4 +365,9 @@ def rules_from_config(c4, c7) -> ExitRules:
         atr_period_sessions=iv(c7.atr.period_sessions),
         atr_method=str(c7.atr.method.value),
         horizon=iv(c4.model_horizon_sessions),
+        # `exit_hierarchy` decided what the CARD printed and nothing else. A
+        # stop switched off in the config stayed switched on in every backtest.
+        use_stop=_armed(h.stop_loss_breach),
+        use_target=_armed(h.target_achieved),
+        use_invalidation=_armed(h.thesis_invalidation),
     )

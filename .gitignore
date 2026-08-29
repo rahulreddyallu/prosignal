@@ -37,10 +37,14 @@ htmlcov/
 
 # --- Project data (NEVER commit market data or credentials) ---
 data/raw/
-data/curated/
 data/snapshots/
 data/cache/
-data/ledger/
+# `data/curated/` and `data/ledger/` are excluded by CONTENTS rather than as
+# directories. Git cannot re-include a file whose parent directory is excluded,
+# and three small files under these two are the whole point of the
+# reproducibility work -- see the negations further down.
+data/curated/*
+data/ledger/*
 logs/
 *.parquet
 *.duckdb
@@ -67,3 +71,25 @@ Thumbs.db
 data/jobs.sqlite3
 .claude/
 data/curated/.store.lock
+
+# --- Provenance: the three files that must be committed -----------------------
+# `data/curated/` and `data/ledger/` are excluded above and must stay excluded:
+# they hold a quarter of a gigabyte of market data and the run ledger. But three
+# small files under them are the whole point of the reproducibility work, and an
+# ignore rule that swallowed them would leave every result unable to name its
+# own inputs -- which is finding D1.
+!data/curated/MANIFEST.json
+!data/curated/trial_registry.jsonl
+!data/ledger/epochs.jsonl
+# Belt and braces: a stray parquet under either must never be re-included by
+# one of the negations above.
+data/curated/**/*.parquet
+data/ledger/**/*.parquet
+
+# --- Research caches: derived, large, and reconstructable ---------------------
+# `work/*.py` rebuilds every one of these from the store in about eight minutes,
+# and `work/cache/panels.pkl` alone is 134 MB. A repository that carries derived
+# binaries is a repository whose history cannot be cloned.
+work/cache/
+work/cache_v1/
+work/*.log

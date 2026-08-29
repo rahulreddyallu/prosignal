@@ -104,11 +104,22 @@ class Registration:
     #: Conditions under which the test is abandoned rather than graded.
     invalidation: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    #: THE BENCHMARK-RELATIVE HYPOTHESIS.
+    #:
+    #: `primary` regresses on factors and `secondary` scores the ranking, and
+    #: neither asks whether the book beats the alternative of holding the
+    #: universe it selects from. Measured on the selection period the shipped
+    #: book returns about 4 points per period LESS than an equal-weight hold of
+    #: its own eligible universe, so that is the question, and until this field
+    #: existed the forward test could be passed by an engine that loses to
+    #: buying everything.
+    #:
+    #: Optional only so that registrations written before it existed still
+    #: load. A NEW registration that omits it is refused by `register`.
+    tertiary: str = ""
 
-    def fingerprint(self) -> str:
-        """Hash of everything that must not change. Excludes nothing that
-        would let the criteria be edited after the fact."""
-        payload = json.dumps({
+    def _payload(self, *, legacy: bool) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
             "started_on": self.started_on,
             "config_version": self.config_version,
             "target_sessions": self.target_sessions,
@@ -117,8 +128,26 @@ class Registration:
             "secondary": self.secondary,
             "tertiary": self.tertiary,
             "invalidation": sorted(self.invalidation),
-        }, sort_keys=True).encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()[:16]
+        }
+        if not legacy:
+            # Inside the hash, so a hypothesis cannot be added, softened or
+            # deleted once observations have started landing.
+            out["tertiary"] = self.tertiary
+        return out
+
+    def fingerprint(self, *, legacy: bool = False) -> str:
+        """Hash of everything that must not change. Excludes nothing that
+        would let the criteria be edited after the fact.
+
+        ``legacy`` recomputes it the way it was computed before the
+        benchmark-relative hypothesis existed. Registrations written under that
+        scheme are not tampered with, and saying they are would be exactly the
+        kind of untrue message this engine is being audited for -- so `verify`
+        checks both and `progress` distinguishes the two cases.
+        """
+        blob = json.dumps(self._payload(legacy=legacy),
+                          sort_keys=True).encode("utf-8")
+        return hashlib.sha256(blob).hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -232,13 +261,41 @@ def register(
     git_commit: str,
     started_on: Optional[dt.date] = None,
     overwrite: bool = False,
+    cfg: Any = None,
+    unchecked_reason: str = "",
 ) -> Registration:
     """Write the pre-registration. Refuses to overwrite an existing one.
 
     Overwriting would silently reset the clock and let a disappointing window
     be replaced by a fresh one, which is the specific failure this whole
     exercise exists to avoid.
+
+    R1 -- AND IT ALSO REFUSES TO OPEN ONTO AN ENGINE THAT IS STILL CHANGING.
+    The window this replaces is void because the configuration moved under it.
+    Restarting while a restart-blocking finding is open, the data is
+    unmanifested, or no epoch describes the engine would void the new window
+    the same way, just later and after eighteen months of waiting. So `cfg` is
+    gated through `validation.readiness` before anything is written.
+
+    `cfg` has no default that skips the check: a caller must either supply the
+    configuration to gate on, or state in `unchecked_reason` why it is not
+    gating -- which is legitimate for a fixture and is not legitimate anywhere
+    in `src`, where a test asserts no such string appears. An optional gate is
+    a gate nobody calls; that is how `holdout.sacred` came to be read by no
+    code at all (R12).
     """
+    if cfg is None and not unchecked_reason:
+        raise ValueError(
+            "register() needs the configuration it is registering against, so "
+            "it can check that the engine is in a state worth measuring. Pass "
+            "cfg=..., or pass unchecked_reason='...' to state why this call "
+            "is deliberately ungated."
+        )
+    if cfg is not None:
+        from .readiness import check_may_restart
+
+        check_may_restart(cfg)
+
     path = _path(root)
     if path.is_file() and not overwrite:
         raise FileExistsError(
@@ -337,8 +394,16 @@ def load_registration(root: Path) -> Optional[Registration]:
         return None
 
 
-def verify(root: Path) -> bool:
-    """Whether the registration on disk still matches its own hash."""
+def verify(root: Path, *, allow_legacy: bool = True) -> bool:
+    """Whether the registration on disk still matches its own hash.
+
+    ``allow_legacy`` accepts a fingerprint computed before the tertiary
+    hypothesis joined the hash. Such a file has not been edited; it was written
+    under an earlier definition. It is still not GRADEABLE -- `progress` refuses
+    it for having no benchmark-relative hypothesis -- but "you tampered with
+    this" and "this predates the current contract" are different statements and
+    the engine should not make the first when it means the second.
+    """
     path = _path(root)
     if not path.is_file():
         return False
@@ -351,7 +416,30 @@ def verify(root: Path) -> bool:
         reg = Registration(**data)
     except TypeError:
         return False
-    return stored == reg.fingerprint()
+    if stored == reg.fingerprint():
+        return True
+    return bool(allow_legacy and stored == reg.fingerprint(legacy=True))
+
+
+def fingerprint_scheme(root: Path) -> str:
+    """"current", "legacy", "mismatch", or "absent"."""
+    path = _path(root)
+    if not path.is_file():
+        return "absent"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "mismatch"
+    stored = data.pop("fingerprint", None)
+    try:
+        reg = Registration(**data)
+    except TypeError:
+        return "mismatch"
+    if stored == reg.fingerprint():
+        return "current"
+    if stored == reg.fingerprint(legacy=True):
+        return "legacy"
+    return "mismatch"
 
 
 def progress(
@@ -418,7 +506,8 @@ def progress(
     months = (today.year - start.year) * 12 + (today.month - start.month)
 
     broken: List[str] = []
-    if not verify(root):
+    scheme = fingerprint_scheme(root)
+    if scheme == "mismatch":
         broken.append("the pre-registration file no longer matches its hash")
     # The check that does not need an observation to have landed yet.
     if live_config_version and live_config_version != reg.config_version:

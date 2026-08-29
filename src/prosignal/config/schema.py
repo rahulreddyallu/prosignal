@@ -360,6 +360,22 @@ class UniverseConfig(_Base):
     pit_min_adtv_inr: TF
     pit_adtv_lookback_sessions: TI
     pit_max_names: TI
+    #: Fit and rank ONLY on names the engine could actually open on the date --
+    #: `exits.tradeable_at_entry`, the predicate stage 3 and stage 6 apply live.
+    #:
+    #: It was applied live and, in the label path, inside `resolve_exits`, which
+    #: `build_panel` reaches only when exit rules exist -- which under
+    #: `labels.triple_barrier: false` they do not. So the model was fitted and
+    #: ranked on a population about a fifth larger than the book can buy, and
+    #: the simulator discovered the difference at fill time by leaving slots
+    #: empty: 7.29 of 8 filled.
+    #:
+    #: Turning this on changes the population the model is fitted on and
+    #: therefore the traded coefficients. That is not a reason to leave it off;
+    #: it is the expected consequence of correcting the training set. It is a
+    #: config value rather than a code constant so the change is dated, hashed
+    #: and carried on every ledger row from the moment it is made.
+    train_on_admissible_only: TB
 
     @model_validator(mode="after")
     def _check_policy(self) -> "UniverseConfig":
@@ -1447,6 +1463,11 @@ class ImpactModelConfig(_Base):
     coefficient: TF
     exponent: TF
     assumed_half_spread_bps: TF
+    #: Participation assumed when ADTV is unknown. The engine refuses to TRADE
+    #: such a name; this is what the cost model answers if it is asked anyway,
+    #: and it is set at the model's own participation cap so that unknown
+    #: liquidity can never price cheaper than known-thin liquidity.
+    unknown_liquidity_participation: TF
 
     @model_validator(mode="after")
     def _check(self) -> "ImpactModelConfig":

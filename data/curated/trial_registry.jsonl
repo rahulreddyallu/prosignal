@@ -1,0 +1,126 @@
+{"key": "837818b48a5d577f", "command": "research estimator", "label": "PRODUCTION: gate+shrink", "recorded_at": "2026-08-26T09:09:36+00:00"}
+{"key": "d57ed2353bc64d99", "command": "research estimator", "label": "equal weight 1/N", "recorded_at": "2026-08-26T09:09:36+00:00"}
+{"key": "2c61201ef8777a43", "command": "research estimator", "label": "fama-macbeth raw", "recorded_at": "2026-08-26T09:09:36+00:00"}
+{"key": "b1e84a24c5b40958", "command": "research estimator", "label": "ridge, pooled", "recorded_at": "2026-08-26T09:09:36+00:00"}
+{"key": "60f7e08176b4c126", "command": "research estimator", "label": "shrunk, no gate", "recorded_at": "2026-08-26T09:09:36+00:00"}
+{"key": "dddd6091d51f74a1", "command": "research spread", "label": "entry=5,exit=5", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "dbc3b7e46570c522", "command": "research spread", "label": "entry=5,exit=8", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "89c00d380969f8a5", "command": "research spread", "label": "entry=5,exit=10", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "5e38d8a010a412b7", "command": "research spread", "label": "entry=5,exit=12", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "e8f83b01ef778213", "command": "research spread", "label": "entry=5,exit=16", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "95a5a8e93b3407ad", "command": "research spread", "label": "entry=5,exit=20", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "573adf2e865080dc", "command": "research spread", "label": "entry=5,exit=25", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "97ba75699b8ce140", "command": "research spread", "label": "entry=8,exit=8", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "21e07139a779e18c", "command": "research spread", "label": "entry=8,exit=10", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "4b18b19ab1f1991e", "command": "research spread", "label": "entry=8,exit=12", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "36323f24f72a3ea2", "command": "research spread", "label": "entry=8,exit=16", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "0b467caae3d334a2", "command": "research spread", "label": "entry=8,exit=20", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "d1f1b85be26534f7", "command": "research spread", "label": "entry=8,exit=25", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "b2ac19d2d335a49e", "command": "research spread", "label": "entry=10,exit=10", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "cb2ac0a87edd6355", "command": "research spread", "label": "entry=10,exit=12", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "1293f1bb4628aa15", "command": "research spread", "label": "entry=10,exit=16", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "419cc506cb936c0f", "command": "research spread", "label": "entry=10,exit=20", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "b943843ec89e6fa7", "command": "research spread", "label": "entry=10,exit=25", "recorded_at": "2026-08-26T09:13:20+00:00"}
+{"key": "71cd0ca16090ea0e", "command": "research metalabel", "label": "top_k=50,l2=1", "recorded_at": "2026-08-26T09:16:59+00:00"}
+{"key": "be596cd3e92084cb", "command": "research cpcv (pbo)", "label": "all themes", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "523e554cdd095b98", "command": "research cpcv (pbo)", "label": "delivery alone", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "d1d63b1840eb6f21", "command": "research cpcv (pbo)", "label": "lottery alone", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "709759e78c106a46", "command": "research cpcv (pbo)", "label": "mom alone", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "10ffc8966eae2ddc", "command": "research cpcv (pbo)", "label": "reversal alone", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "385f4aedbcc76ffa", "command": "research cpcv (pbo)", "label": "risk alone", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "76df79f1d3b978c1", "command": "research cpcv (pbo)", "label": "without delivery", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "54047c28bec1a9f7", "command": "research cpcv (pbo)", "label": "without lottery", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "98c7aacee857f705", "command": "research cpcv (pbo)", "label": "without mom", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "af62fe9397b7b341", "command": "research cpcv (pbo)", "label": "without reversal", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "41d721abc8723de8", "command": "research cpcv (pbo)", "label": "without risk", "recorded_at": "2026-08-26T09:36:10+00:00"}
+{"key": "eaf52c19e759f574", "command": "research volscale", "label": "target=0.10", "recorded_at": "2026-08-26T12:44:05+00:00"}
+{"key": "3435c3ac6607737e", "command": "research volscale", "label": "target=0.15", "recorded_at": "2026-08-26T12:44:05+00:00"}
+{"key": "1c7e92ea5651e5ae", "command": "research volscale", "label": "target=0.20", "recorded_at": "2026-08-26T12:44:05+00:00"}
+{"key": "1bb9eebf985e1716", "command": "research volscale", "label": "target=0.25", "recorded_at": "2026-08-26T12:44:05+00:00"}
+{"key": "dae88f51143eeb66", "command": "research volscale", "label": "off", "recorded_at": "2026-08-26T12:44:05+00:00"}
+{"key": "107258ab8ec77e6e", "command": "audit remediation E1/E1b admission", "label": "unfiltered", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "d89bd51142f50b5f", "command": "audit remediation E1/E1b admission", "label": "restricted-to-label-population", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "1c78241e7a789dfd", "command": "audit remediation E2 exit band", "label": "8/8", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "2493201a1182f68b", "command": "audit remediation E2 exit band", "label": "8/16", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "402428a9e0be1997", "command": "audit remediation E2 exit band", "label": "12/24", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "d6c863f6f6824717", "command": "audit remediation E2 exit band", "label": "16/32", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "bd2395edeb1feaf3", "command": "audit remediation E2 exit band", "label": "8/40", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "1e465e02d8419e59", "command": "audit remediation E3/E4 label target", "label": "3.0R", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "d5e3c806b494ce2e", "command": "audit remediation E3/E4 label target", "label": "1.5R", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "f0f94201b8d2809e", "command": "audit remediation E3/E4 label target", "label": "6.0R", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "3b1f173610aca8b8", "command": "audit remediation E5 label x book", "label": "3R/3R", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "0d0f3419e6a7147b", "command": "audit remediation E5 label x book", "label": "1.5R/1.5R", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "304efb5ebd887cd1", "command": "audit remediation E5 label x book", "label": "3R/1.5R", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "85af27b965cb875e", "command": "audit remediation E5 label x book", "label": "1.5R/3R", "recorded_at": "2026-08-26T16:39:13+00:00"}
+{"key": "ec43ab2695245242", "command": "audit remediation E7 label horizon", "label": "21", "recorded_at": "2026-08-26T21:46:20+00:00"}
+{"key": "370179961e21e900", "command": "audit remediation E7 label horizon", "label": "42", "recorded_at": "2026-08-26T21:46:20+00:00"}
+{"key": "6fdd55b7b4dd48a2", "command": "audit remediation E7 label horizon", "label": "63", "recorded_at": "2026-08-26T21:46:20+00:00"}
+{"key": "d1157b0b9bde004e", "command": "audit remediation E8 stage5 penalties", "label": "none", "recorded_at": "2026-08-27T00:43:39+00:00"}
+{"key": "912d7516079b3185", "command": "audit remediation E8 stage5 penalties", "label": "both", "recorded_at": "2026-08-27T00:43:39+00:00"}
+{"key": "b7a59518396c347a", "command": "audit remediation E8 stage5 penalties", "label": "low_volume_only", "recorded_at": "2026-08-27T00:43:39+00:00"}
+{"key": "dfab8ea2775889df", "command": "audit remediation E8 stage5 penalties", "label": "overextension_only", "recorded_at": "2026-08-27T00:43:39+00:00"}
+{"key": "a020bf8a754554d0", "command": "research cpcv (pbo)", "label": "beta alone", "recorded_at": "2026-08-28T17:47:04+00:00"}
+{"key": "4ff49e581bc32648", "command": "research cpcv (pbo)", "label": "drawdown alone", "recorded_at": "2026-08-28T17:47:04+00:00"}
+{"key": "ebbcc242d2a4c329", "command": "research cpcv (pbo)", "label": "skew alone", "recorded_at": "2026-08-28T17:47:04+00:00"}
+{"key": "dc1ebf955cc1e9cb", "command": "research cpcv (pbo)", "label": "without beta", "recorded_at": "2026-08-28T17:47:04+00:00"}
+{"key": "b8e561344c46c800", "command": "research cpcv (pbo)", "label": "without drawdown", "recorded_at": "2026-08-28T17:47:04+00:00"}
+{"key": "927418b35bd79ac7", "command": "research cpcv (pbo)", "label": "without skew", "recorded_at": "2026-08-28T17:47:04+00:00"}
+{"key": "dddd6091d51f74a1", "command": "research spread", "label": "entry=5,exit=5", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.44480850252712095}
+{"key": "dbc3b7e46570c522", "command": "research spread", "label": "entry=5,exit=8", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.4676206989386995}
+{"key": "89c00d380969f8a5", "command": "research spread", "label": "entry=5,exit=10", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.44878207147748433}
+{"key": "5e38d8a010a412b7", "command": "research spread", "label": "entry=5,exit=12", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.44878207147748433}
+{"key": "e8f83b01ef778213", "command": "research spread", "label": "entry=5,exit=16", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.44878207147748433}
+{"key": "95a5a8e93b3407ad", "command": "research spread", "label": "entry=5,exit=20", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.44878207147748433}
+{"key": "573adf2e865080dc", "command": "research spread", "label": "entry=5,exit=25", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.44878207147748433}
+{"key": "97ba75699b8ce140", "command": "research spread", "label": "entry=8,exit=8", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5767597785813002}
+{"key": "21e07139a779e18c", "command": "research spread", "label": "entry=8,exit=10", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5355703841243595}
+{"key": "4b18b19ab1f1991e", "command": "research spread", "label": "entry=8,exit=12", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.4701484204210029}
+{"key": "36323f24f72a3ea2", "command": "research spread", "label": "entry=8,exit=16", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5241773585144504}
+{"key": "0b467caae3d334a2", "command": "research spread", "label": "entry=8,exit=20", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5241773585144504}
+{"key": "d1f1b85be26534f7", "command": "research spread", "label": "entry=8,exit=25", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5241773585144504}
+{"key": "b2ac19d2d335a49e", "command": "research spread", "label": "entry=10,exit=10", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5355703841243595}
+{"key": "cb2ac0a87edd6355", "command": "research spread", "label": "entry=10,exit=12", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.4701484204210029}
+{"key": "1293f1bb4628aa15", "command": "research spread", "label": "entry=10,exit=16", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5241773585144504}
+{"key": "419cc506cb936c0f", "command": "research spread", "label": "entry=10,exit=20", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5241773585144504}
+{"key": "b943843ec89e6fa7", "command": "research spread", "label": "entry=10,exit=25", "recorded_at": "2026-08-28T19:21:31+00:00", "score": 0.5241773585144504}
+{"key": "837818b48a5d577f", "command": "research estimator", "label": "PRODUCTION: gate+shrink", "recorded_at": "2026-08-28T19:29:04+00:00", "score": -0.0077426993656954084}
+{"key": "d57ed2353bc64d99", "command": "research estimator", "label": "equal weight 1/N", "recorded_at": "2026-08-28T19:29:04+00:00", "score": -0.32363423347828635}
+{"key": "2c61201ef8777a43", "command": "research estimator", "label": "fama-macbeth raw", "recorded_at": "2026-08-28T19:29:04+00:00", "score": -0.09766856838408804}
+{"key": "60f7e08176b4c126", "command": "research estimator", "label": "shrunk, no gate", "recorded_at": "2026-08-28T19:29:04+00:00", "score": -0.09560288995713641}
+{"key": "1e95fadcb41ad2b9", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: no stop", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.8680069777090501}
+{"key": "cabd1a9b1f8cfd3c", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: 1.5x ATR", "recorded_at": "2026-08-28T19:34:09+00:00", "score": -0.1938499921232746}
+{"key": "651837a2eaf2ee15", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: 2x ATR", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.1670359884567696}
+{"key": "4cdd1faba3e31188", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: 2.5x ATR  <- SHIPPED", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.5382023988793943}
+{"key": "0c9282a1244a8b39", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: 3x ATR", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.5299132813257892}
+{"key": "6a277defd86b7176", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: 3.5x ATR", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.672785164471453}
+{"key": "88908537c71c7a68", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: 5x ATR", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.7326998058812274}
+{"key": "7392781c8037f64e", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: component: shipped", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.5382023988793943}
+{"key": "308d67ef4d8b6215", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: component: no target", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.6535069318092138}
+{"key": "4710f97a1b9e2ccf", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: component: no invalidation", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.5602169633691959}
+{"key": "fe54869bcb8d1e3d", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: component: no stop", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.8680069777090501}
+{"key": "e87a2906118f28a1", "command": "reaudit 2026-08 execution layer", "label": "stop/exit arm: component: no exits at all", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 1.1056605865374902}
+{"key": "670b9a7f2f3e610a", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: shipped (config v1)", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.5382023988793943}
+{"key": "096e2822a5afaf3c", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2a  book held fully invested", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.5494120644716723}
+{"key": "6d39665e40279619", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2b  stop 3.5x ATR", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.672785164471453}
+{"key": "4f561c128e8a6188", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2c  stop 5.0x ATR", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.7326998058812274}
+{"key": "d2ba07cdd7d87a94", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2d  no stop, invalidation kept", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.8680069777090501}
+{"key": "ebc6f8c182d9c562", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2e  no stop, no target, no invalidation", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 1.1056605865374902}
+{"key": "90689214c3ee4eb0", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2a+v2b  invested + 3.5x", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.6669438924460238}
+{"key": "7d3c01a43862511b", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2a+v2d  invested + no stop", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 0.8609936135456135}
+{"key": "8c42be2116b1b998", "command": "reaudit 2026-08 execution layer", "label": "v2 candidate: v2a+v2e  invested + no exits", "recorded_at": "2026-08-28T19:34:09+00:00", "score": 1.2016920375614144}
+{"key": "2967667f729db8ab", "command": "reaudit 2026-08 execution layer", "label": "label: horizon return", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "b8a8eba6480696f4", "command": "reaudit 2026-08 execution layer", "label": "label: engine geometry rupee", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "538426600f37cc47", "command": "reaudit 2026-08 execution layer", "label": "label: engine geometry R-multiple", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "4f16bccc3c453d0d", "command": "reaudit 2026-08 execution layer", "label": "panel: admission mask on", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "b56f41af5cb395b4", "command": "reaudit 2026-08 execution layer", "label": "flat stop 8%", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "4a0ae2b685872d47", "command": "reaudit 2026-08 execution layer", "label": "flat stop 10%", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "3c185189a0f06dc3", "command": "reaudit 2026-08 execution layer", "label": "flat stop 12%", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "0d71a9ecb250e585", "command": "reaudit 2026-08 execution layer", "label": "flat stop 15%", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "982b3581fc93d087", "command": "reaudit 2026-08 execution layer", "label": "flat stop 20%", "recorded_at": "2026-08-28T19:34:09+00:00"}
+{"key": "dae88f51143eeb66", "command": "research volscale", "label": "off", "recorded_at": "2026-08-28T19:36:37+00:00", "score": 0.5241773585144504}
+{"key": "eaf52c19e759f574", "command": "research volscale", "label": "target=0.10", "recorded_at": "2026-08-28T19:36:37+00:00", "score": 0.47376165168303197}
+{"key": "3435c3ac6607737e", "command": "research volscale", "label": "target=0.15", "recorded_at": "2026-08-28T19:36:37+00:00", "score": 0.4781533424209947}
+{"key": "1c7e92ea5651e5ae", "command": "research volscale", "label": "target=0.20", "recorded_at": "2026-08-28T19:36:37+00:00", "score": 0.5065467016669776}
+{"key": "1bb9eebf985e1716", "command": "research volscale", "label": "target=0.25", "recorded_at": "2026-08-28T19:36:37+00:00", "score": 0.5229721028913717}
+{"key": "927b869ef51983fc", "command": "audit remediation R9 refit", "label": "train-population=all_eligible", "recorded_at": "2026-08-29T00:31:47+00:00", "score": 0.5382023988793943}
+{"key": "071354edc25494cd", "command": "audit remediation R9 refit", "label": "train-population=admissible", "recorded_at": "2026-08-29T00:31:47+00:00", "score": 0.31426295657202363}

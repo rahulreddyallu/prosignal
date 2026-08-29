@@ -63,8 +63,15 @@ class CpcvResult:
     n_paths: int
     #: Rank IC per test date, pooled across every split.
     ic: List[float] = field(default_factory=list)
-    #: Top-decile excess return per test date, pooled.
+    #: Top-decile excess return per test date, pooled. ONE ENTRY PER (SPLIT,
+    #: DATE) PAIR: with N=10, k=2 every date is tested in nine splits, so a
+    #: 70-date panel produces ~630 entries describing 70 observations. Fine for
+    #: a mean, fatal for anything that divides by the count. `deflated()` is
+    #: the one caller that does, and it reduces first.
     excess: List[float] = field(default_factory=list)
+    #: The date each entry in `excess` belongs to, in the same order. Without
+    #: it the duplication above is not recoverable downstream.
+    excess_dates: List[object] = field(default_factory=list)
     #: One Sharpe per woven path -- the distribution walk-forward cannot show.
     path_sharpes: List[float] = field(default_factory=list)
     path_ics: List[float] = field(default_factory=list)

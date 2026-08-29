@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .exits import ExitRules, atr_panel, ma_panel
+from .exits import ExitRules, atr_panel, ma_panel, tradeable_at_entry
 from .labels import (BarrierSpec, average_uniqueness, engine_barrier,
                      triple_barrier)
 
@@ -633,6 +633,18 @@ def build_panel(
 
     The benchmark is built from the eligible names too. An equal-weight mean
     over today's survivors is not the market as it stood.
+
+    ``admission_rules`` restricts the panel to names the ENGINE COULD OPEN on
+    each date -- `exits.tradeable_at_entry`, the same predicate stage 3 and
+    stage 6 apply live. It is separate from ``exit_rules`` on purpose: the
+    admission question and the label question are independent, and tying them
+    together is how the two came apart. With `triple_barrier: false` there are
+    no exit rules, so `resolve_exits` never runs, so the mask never ran either
+    -- and the model was fitted on a population about a fifth larger than the
+    book can buy. Left as None the panel keeps the wider population, which is
+    the shipped v1 behaviour and is preserved so that config
+    `baseline-v1@127d8a314ec49aa2` continues to reproduce coefficient for
+    coefficient.
     """
     dates = list(close.index)
     if eligible is not None:
@@ -650,6 +662,28 @@ def build_panel(
         atr = atr_panel(high, low, close, exit_rules.atr_period_sessions,
                         exit_rules.atr_method)
         ma = ma_panel(close, exit_rules.invalidation_ma_sessions)
+    # The admission predicate needs its own ATR and moving average, because it
+    # must work when there are no exit rules at all -- which is the case the
+    # mask went missing in.
+    adm_atr = adm_ma = None
+    if admission_rules is not None:
+        if exit_rules is not None and atr is not None and ma is not None and (
+                exit_rules.atr_period_sessions == admission_rules.atr_period_sessions
+                and exit_rules.atr_method == admission_rules.atr_method
+                and exit_rules.invalidation_ma_sessions
+                == admission_rules.invalidation_ma_sessions):
+            adm_atr, adm_ma = atr, ma
+        elif high is not None and low is not None:
+            adm_atr = atr_panel(high, low, close,
+                                admission_rules.atr_period_sessions,
+                                admission_rules.atr_method)
+            adm_ma = ma_panel(close, admission_rules.invalidation_ma_sessions)
+        else:
+            raise ValueError(
+                "admission_rules needs high/low to compute the ATR the "
+                "invalidation level is measured in. Silently skipping the mask "
+                "is what produced the population divergence in the first place."
+            )
     rows: List[pd.DataFrame] = []
     for i in range(MIN_LOOKBACK, len(dates) - horizon, step):
         feats = _features_at(close, turnover, i, bench_full[: i + 1], delivery=delivery)

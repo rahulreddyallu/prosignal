@@ -1184,6 +1184,20 @@ def fit_predict(
     have admitted on each date. ``score_symbols`` restricts what is ranked
     today, which is a different question: the training set has to be
     point-in-time, and today's ranking is over today's eligible universe.
+
+    ``admission_rules`` is R9 and it is a THIRD population question, separate
+    from both. `eligible` asks what the universe screen would have listed;
+    `admission_rules` asks what the BOOK could have opened on the day -- a name
+    already below its thesis-invalidation level is eligible, is scored, and
+    cannot be bought. Fitting on it estimates coefficients over a population
+    the engine does not trade.
+
+    It arrives as a parameter rather than being read from config here because
+    this module has no config, and because a research caller measuring the
+    other population deliberately is the one legitimate reason to want the
+    wide panel. `stage4_core_score` supplies it from
+    `universe.train_on_admissible_only`, and `label_fingerprint` records which
+    population was used so a cached fit from the other one is refused.
     """
     H = int(horizon if horizon is not None else HORIZON)
     A = float(alpha if alpha is not None else ALPHA)
