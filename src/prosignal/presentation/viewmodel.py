@@ -154,6 +154,8 @@ def build_view(
     entry_rank: int = 8,
     exit_rank: int = 16,
     slots: int = SLOTS,
+    horizon_sessions: Optional[int] = None,
+    entry_clock: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build the screen's data from one completed analysis payload."""
     names = company_names or {}
@@ -192,8 +194,20 @@ def build_view(
             "withheld": slate.withheld_reason,
         },
         "picks": picks,
+        # THE SHAPE OF THE BOOK, so the screen stops carrying its own copy of
+        # it. The interface had "top 18", the horizon and the book size written
+        # into strings in three places, which is how it went on describing a
+        # five-name book with a profit target after the engine had moved to six
+        # names with neither.
+        "book": {
+            "size": int(slots),
+            "entry_rank": int(entry_rank),
+            "exit_rank": int(exit_rank),
+            "horizon_sessions": horizon_sessions,
+        },
         "departures": list(payload.get("slate_departures") or []),
         "new_entries_blocked": payload.get("new_entries_blocked"),
+        "entry_clock": dict(entry_clock or payload.get("entry_clock") or {}),
         # Held names the run could not evaluate: suspended, dropped from the
         # universe, or delisted. This is the risk the screen was least able to
         # show, because the position simply stopped being mentioned.
@@ -522,17 +536,62 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[D
     return rows if top is None else rows[:top]
 
 
+#: Which price level each disarmable exit rung owns. A level whose rung is not
+#: armed is not a level this run will act on, so the screen must not show it as
+#: one.
+_LEVEL_RUNG = {
+    "invalidation": "thesis_invalidation",
+    "target_1": "target_achieved",
+    "target_2": "target_achieved",
+}
+
+
+def _armed_rungs(card: Dict[str, Any]) -> set:
+    """The exit rungs this run actually armed, read off the recorded list.
+
+    The list is what Stage 7 emitted for THIS run, so it survives a payload
+    written under a different configuration -- which is the case that matters,
+    because a stale payload is exactly when the screen would otherwise present
+    a retired exit as a live one.
+    """
+    armed = set()
+    for line in (card.get("exits") or []):
+        text = str(line)
+        if text.startswith("NOT an exit"):
+            continue
+        head = text.split("--", 1)[0]
+        head = head.split("(", 1)[0]
+        rung = head.split(".", 1)[-1].strip() if "." in head else head.strip()
+        if rung:
+            armed.add(rung)
+    return armed
+
+
 def _levels(card: Dict[str, Any]) -> Dict[str, Any]:
-    """Only levels the engine actually defines. Nothing is derived here."""
+    """Only levels the engine actually defines, and only those it will act on.
+
+    Stage 7 still COMPUTES the target and the invalidation -- the ledger records
+    them and `outcomes` scores historical trades against them, so they cannot
+    simply stop existing. But `exit_hierarchy` disarms all three of
+    thesis_invalidation, target_achieved and trailing_stop, so none of them can
+    close a position any more. Shipping them in the view put a TARGET on the
+    card as the headline upside and an INVALIDATION beside it labelled "thesis
+    gone", both describing exits this engine measured, priced and then removed.
+
+    A level is emitted only when its rung is armed. `stop` and `entry` have no
+    rung to check: the stop is the disaster floor, which is always armed, and
+    the entry zone is not an exit at all.
+    """
     zone = card.get("entry_zone")
-    return {
+    armed = _armed_rungs(card)
+    levels = {
         "entry": list(zone) if zone else None,
         "stop": card.get("stop"),
-        "invalidation": card.get("invalidation"),
-        "target_1": card.get("target_1"),
-        "target_2": card.get("target_2"),
         "exits": card.get("exits") or [],
     }
+    for name, rung in _LEVEL_RUNG.items():
+        levels[name] = card.get(name) if rung in armed else None
+    return levels
 
 
 def _market(regime: Dict[str, Any]) -> Dict[str, Any]:

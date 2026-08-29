@@ -38,7 +38,116 @@ order-routing code and no broker connection.
 > multiple-testing problem the Deflated Sharpe exists to charge for, and would
 > buy a nicer number at the cost of the one clean test left. The
 > **pre-registered forward test** is the designed path to an out-of-sample
-> answer and has been re-registered against this configuration.
+> answer, and it has **not** been re-registered. `data/ledger/forward_test.json`
+> still names `baseline-v1@a30a8d4847080ddc` while the engine runs
+> `baseline-v2@9ffe2b1b65e17832`; `prosignal research forward` reports the
+> window INVALID on three counts (the config changed after registration, the
+> pre-registration file no longer matches its hash, and the registration
+> carries no benchmark-relative hypothesis). Until it is re-registered the
+> observations are being recorded but are not evidence. The Settings drawer
+> says so on the screen.
+
+---
+
+## What changed in the tuning pass (2026-08-29)
+
+The engine was measured at TRADE level rather than at IC level: 4,877
+configurations on a rebuilt point-in-time panel (2,212 sessions, 1,517
+ever-eligible symbols), entries taken only on cron dates, exits checked every
+session, and every result scored against an **investable equal-weight benchmark
+of the same eligible universe** rather than against zero.
+
+Four things changed, each on its own measurement. Findings T1–T6 in
+`prosignal.validation.findings` carry the full arithmetic.
+
+**The fitted composite stopped choosing what to buy.** It lost to the benchmark
+in all 144 of its configurations; its own 6-1 momentum input, ranked
+sector-neutrally and traded alone, returned +20.3% annualised alpha. The cause is
+that the composite is fitted against a cross-sectional RANK, and rank rewards
+ordering the middle of a distribution whose money is in the right tail — at H=63
+its rank IC is +0.0338 while its **top-decile excess is −0.35%**. Three repairs
+were tried and each failed on measurement: refitting on the return, using the
+composite as an exclusion filter, and trading the engine's own three-column
+momentum family. The composite is still fitted, still on the card, still
+monitored by `research decay`.
+
+**Three of the four price exits came off.** Measured one at a time rather than as
+a bundle: the 3R target cost 0.9 points of annual alpha, the MA50 − 1.5 ATR
+invalidation cost 14.3 and 15.6 points of per-trade win probability. The stop
+went the other way — walked out to a **disaster floor at 8×ATR**, it *adds* 2.0
+points of alpha (better in 52 of 54 paired configurations) and cuts the worst
+single trade by 21.5 points. The invalidation level survives as the ADMISSION
+predicate, which is a different and cheaper use of the same number.
+
+**Buying became a schedule.** The engine still runs every session — the floor is
+a price level, the rank band and eligibility can release a position any day, and
+outcomes resolve daily — but new positions open every 21st session, counted in
+sessions from a fixed anchor so a holiday cannot re-phase it. The 21-session stem
+is the only one on the surface positive in all six calendar years.
+
+**Every trade now records what it is.** Cadence, planned hold, risk at the floor,
+and the frozen frequencies of the study it belongs to, written into the ledger
+row rather than read from the config later. That is what makes the paper-trading
+record scoreable against the engine's own claim and not only against the market.
+
+### What the shipped configuration measured
+
+258 trades over 7.5 years, net of 40 bps, against the equal-weight eligible
+universe:
+
+| | |
+|---|---|
+| Probability of a net profit | **57.8%** |
+| Probability of beating the universe | **51.2%** |
+| Mean net return per trade | **+7.09%** (median +3.65%) |
+| Mean excess over the benchmark | **+3.74%** (median +0.69%) |
+| Annualised book return | **+42.6%** vs benchmark +18.9% |
+| Annualised alpha | **+20.3%**, 95% CI [+7.7%, +30.9%] |
+| Sharpe / excess Sharpe | 1.59 / 1.12 |
+| Maximum drawdown | −32.6% vs benchmark −42.4% |
+| Positive alpha | **6 of 6** calendar years since 2021 |
+| Median sessions held | 42 |
+
+How a trade ends, which is where the shape of the distribution lives:
+
+| exit | trades | win rate | mean net |
+|---|---|---|---|
+| rank band | 149 | 53.7% | +3.3% |
+| time limit | 100 | **69.0%** | **+16.1%** |
+| disaster floor | 9 | 0.0% | −31.0% |
+
+Two thirds of the return comes from the 39% of positions that survive to the
+time limit. Every rule that was removed was a rule that sold part of that
+population early.
+
+### What it has not cleared
+
+| | |
+|---|---|
+| Deflated Sharpe, all 4,877 trials | **0.030 — FAILS** (threshold: annual excess Sharpe 1.80; this has 1.12) |
+| Deflated Sharpe, variance within the winning family | 0.50 |
+| Deflated Sharpe, within the final 378-cell surface | 0.97 |
+| PBO (CSCV, 3,432 splits) | 0.388 — passes, not comfortably |
+
+All three DSR readings are published because choosing one silently is how a
+search gets laundered. The spread is driven almost entirely by the trial
+variance, and the DSR's null — every trial has zero true Sharpe and they differ
+only by noise — is false when the trials include signals that differ for real
+reasons.
+
+What supports shipping is different evidence: **every one of the 378
+configurations on the final surface has positive mean excess over 2021–2026**,
+the shipped cell is positive in all six years, and a stationary block bootstrap
+(blocked at the holding period) puts annual alpha at [+7.7%, +30.9%] with
+P(alpha ≤ 0) = 0.000 over 4,000 resamples. A six-year walk-forward of the
+SELECTION PROCEDURE — choose the best cell on data available at each year end,
+then trade it — returns +13.2% mean out-of-sample alpha against +8.9% for not
+choosing at all, and lands at the 53rd percentile of the surface. That is the
+honest reading: the region works and the exact cell within it is not identified,
+which is why the plateau rather than the peak is what ships.
+
+This is the best-supported hypothesis the search found. It is not an established
+result. The forward paper-trading record is what would establish it.
 
 ---
 

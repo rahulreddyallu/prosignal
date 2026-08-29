@@ -19,7 +19,7 @@ import datetime as dt
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
@@ -317,8 +317,13 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # impossible and let the live view, the history page and the outcome record
     # each derive a different list from the same run.
     admission = config.params.stage6_entry.admission
+    # The screen is the BOOK, so its size comes from the same parameter the
+    # book does. It used to fall back to a hardcoded 5 in the presentation
+    # layer while `entry_rank` was 6, which put five of six positions on the
+    # screen and, because the slate is recorded, into the ledger with them.
     slate_entries, slate_departures = _build_slate(
         buys, watch, previous_slate,
+        slots=int(v(admission.entry_rank)),
         exit_rank=int(v(admission.exit_rank)),
         as_of=resolved,
     )
@@ -357,6 +362,7 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
             else (None if regime.allow_new_entries and not defense.market_halt
                   else (no_trade.reason if no_trade else None))
         ),
+        entry_clock=_clock_record(clock, sessions, resolved),
         data_quality_flags=flags,
         manifest=manifest,
         stage_timings_ms={k: round(v, 1) for k, v in timings.items()},
@@ -416,7 +422,42 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
 
 
 # =============================================================================
-def _build_slate(buys, watch, previous_slate, *, exit_rank: int, as_of: dt.date):
+def _clock_record(clock, sessions, as_of: dt.date) -> Dict[str, Any]:
+    """The entry schedule as data, for the record and for the screen.
+
+    `sessions_until_next` is counted on the exchange calendar rather than in
+    calendar days, for the same reason the clock itself is: a count in days
+    changes meaning across a holiday and cannot be reproduced.
+    """
+    until = None
+    nxt = clock.next_entry_date
+    if nxt is not None:
+        try:
+            here = [d for d in sessions if d > as_of and d <= nxt]
+            until = len(here) or None
+        except TypeError:
+            until = None
+    return {
+        "cadence_sessions": int(clock.cadence_sessions),
+        "is_entry_date": bool(clock.is_entry_date),
+        "sessions_since_anchor": clock.sessions_since_anchor,
+        "next_entry_date": nxt.isoformat() if nxt else None,
+        "sessions_until_next": until,
+        "anchor": clock.anchor.isoformat() if clock.anchor else None,
+        # The clock FAILS OPEN when it cannot place the run date -- an anchor
+        # still in the future is the ordinary case before an epoch starts. That
+        # is the right behaviour and the wrong thing to hide: "entries open
+        # because the schedule has not begun" and "entries open because today
+        # is the twenty-first session" are different states, and a screen that
+        # renders both as "buying session" says the schedule is running when it
+        # is not.
+        "resolved": clock.sessions_since_anchor is not None,
+        "reason": clock.reason,
+    }
+
+
+def _build_slate(buys, watch, previous_slate, *, slots: int, exit_rank: int,
+                 as_of: dt.date):
     """Decide the screen for this run, carrying the previous one where the band allows.
 
     Returns the ordered slate and the departures. The selection rule itself
@@ -447,6 +488,7 @@ def _build_slate(buys, watch, previous_slate, *, exit_rank: int, as_of: dt.date)
     slate = select_slate(
         [_card(r) for r in buys],
         [_card(r) for r in watch],
+        slots=slots,
         held_slate=held_tickers,
         exit_rank=exit_rank,
     )

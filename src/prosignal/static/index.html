@@ -326,25 +326,20 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 /* The ticker sits with the position label rather than on a row of its own.
    That row was mostly empty and the space now carries the factor arithmetic. */
 .card-top .rank .tk { color: var(--ink-2); letter-spacing: .05em; }
-
-/* Factor contributions. Fixed columns and tabular figures so the z-scores,
-   coefficients and products line up down the card and can be read as a
-   table rather than as prose. */
-.contrib { display: grid; gap: 3px; font-variant-numeric: tabular-nums;
-           font-family: var(--mono); font-size: 11.5px; }
-/* Fixed px, not em. The header is 10px and the body 11.5px, so an em-based
-   column was 46px in one row and 53px in the next and no column lined up. */
-.contrib div { display: grid; grid-template-columns: minmax(0,1fr) 52px 62px 62px;
-               gap: var(--sp-2); align-items: baseline; }
 .contrib .fx { color: var(--ink); overflow: hidden; text-overflow: ellipsis;
                white-space: nowrap; }
 .contrib .z, .contrib .co { color: var(--ink-3); text-align: right; }
-.contrib .cn { text-align: right; font-weight: 600; }
 
 /* --- shortlist card: the numbers a decision needs --- */
 .figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: var(--sp-3); margin-top: var(--sp-4);
         padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+/* An entry zone is two prices and a dash. At a third of a 375px screen it
+   wraps mid-number, so on a phone the row becomes two columns and the third
+   figure takes the line below it. */
+@media (max-width: 460px) {
+  .figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .fig { min-width: 0; }
 .fl { display: block; font-size: 10.5px; letter-spacing: .04em;
       text-transform: uppercase; color: var(--ink-3); }
@@ -378,16 +373,53 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .gate span { display: block; font-size: 10.5px; letter-spacing: .04em;
              text-transform: uppercase; color: var(--ink-3); margin-bottom: 3px; }
 .gate.warn { border-left-color: var(--neg); }
+/* The one sentence that answers "why is this on my screen". It leads, so it
+   gets the accent rather than the neutral rule the supporting notes carry. */
+.gate.lead { border-left-color: var(--accent); background: var(--accent-soft);
+             color: var(--ink); font-size: 13px; }
+.gate.lead span { color: var(--accent); }
 .ph { font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-      color: var(--ink-3); margin: var(--sp-5) 0 var(--sp-2); }
+      color: var(--ink-3); margin: var(--sp-5) 0 var(--sp-2);
+      display: flex; align-items: baseline; gap: var(--sp-2);
+      flex-wrap: wrap; }
+/* A heading that has to disclaim itself. "Monitored, not the chooser" is the
+   whole reason this table is allowed to stay on the panel. */
+.ph-s { text-transform: none; letter-spacing: 0; font-size: 10.5px;
+        color: var(--ink-3); opacity: .85; }
+.exits-l .ex-l { font-variant-numeric: tabular-nums; color: var(--ink-3);
+                 font-size: 11.5px; }
+
+/* --------------------------------------------------------- entry clock */
+.clock { display: flex; align-items: baseline; gap: var(--sp-3);
+         flex-wrap: wrap; margin-top: var(--sp-4);
+         padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md);
+         background: var(--surface-sunk); border: 1px solid var(--line); }
+.clock-d { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.clock.open .clock-d { color: var(--buy); }
+.clock-t { font-size: 12.5px; color: var(--ink-2); min-width: 0; }
+.clock-c { margin-left: auto; font-size: 10.5px; letter-spacing: .05em;
+           text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+@media (max-width: 560px) {
+  .clock-c { margin-left: 0; flex-basis: 100%; }
+}
 .ftab { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .ftab th { text-align: left; font-weight: 500; color: var(--ink-3);
            font-size: 10.5px; letter-spacing: .03em; text-transform: uppercase;
            padding: 0 10px 5px 0; white-space: nowrap; }
+/* `white-space: nowrap` on EVERY cell is right for the summary table, whose
+   labels are two or three words, and wrong for the member table underneath,
+   whose first column is a full sentence -- "mean of the 5 largest daily
+   returns in 21 sessions". Held on one line those rows measured 685px inside a
+   375px panel, so reading the second column meant scrolling the table
+   sideways. The numbers keep nowrap, because a wrapped figure is worse than a
+   narrow one; the prose column wraps. */
 .ftab td { padding: 7px 10px 7px 0; border-top: 1px solid var(--line);
            white-space: nowrap; }
-.ftab .num { text-align: right; font-variant-numeric: tabular-nums; }
-.ftab .fx { color: var(--ink); width: 99%; }
+.ftab .num { text-align: right; font-variant-numeric: tabular-nums;
+             white-space: nowrap; }
+.ftab .fx { color: var(--ink); width: 99%; white-space: normal;
+            overflow-wrap: anywhere; }
+.fam .ftab .fx { min-width: 0; }
 .ftab code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
 .adv { margin-top: var(--sp-5); border-top: 1px solid var(--line);
        padding-top: var(--sp-3); }
@@ -413,21 +445,6 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
        font-size: 11px; line-height: 1.55; color: var(--ink-2);
        background: var(--surface-sunk); border-radius: var(--r-sm);
        white-space: pre-wrap; overflow-x: auto; }
-
-/* --- footer: ownership right, copyright left --- */
-.contrib-n { font-size: 10.5px; color: var(--ink-3); margin-top: 5px;
-             letter-spacing: .01em; }
-.contrib .hdr { color: var(--ink-3); font-size: 10px; letter-spacing: .06em;
-                text-transform: uppercase; font-family: var(--font);
-                border-bottom: 1px solid var(--line); padding-bottom: 3px;
-                margin-bottom: 2px; }
-
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { font-size: 12.5px; color: var(--ink-2); background: var(--surface-sunk);
-        border: 1px solid var(--line); border-radius: 100px; padding: 3px 10px; }
-.card .thesis { color: var(--ink-2); font-size: 14px; line-height: 1.6;
-                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-                overflow: hidden; }
 .card-foot { display: flex; align-items: center; justify-content: space-between;
              gap: var(--sp-3); flex-wrap: wrap; }
 .confirm { font-size: 12.5px; color: var(--ink-3); }
@@ -456,6 +473,18 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
             box-shadow: var(--shadow); }
 .progress h3 { font-size: 16px; }
 .progress .stage { color: var(--ink-2); font-size: 14px; margin-top: 4px; }
+/* The step counter and Cancel were siblings in a block with no rule between
+   them, so the button landed hard against the text on the left margin. They
+   are one row: the count reads left, the action sits right, and on a narrow
+   screen the button takes the full width under it rather than crushing the
+   count. */
+.progress .foot-row { display: flex; align-items: center; gap: var(--sp-4);
+                      justify-content: space-between; flex-wrap: wrap;
+                      margin-top: var(--sp-4); }
+.progress .foot-row .btn { flex: none; }
+@media (max-width: 460px) {
+  .progress .foot-row .btn { width: 100%; }
+}
 .track { display: flex; gap: 4px; margin: var(--sp-5) 0 var(--sp-3); }
 .seg { height: 4px; flex: 1; border-radius: 2px; background: var(--surface-sunk);
        overflow: hidden; position: relative; }
@@ -477,18 +506,10 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 }
 .progress .steps { color: var(--ink-3); font-size: 12.5px; }
 
-/* --------------------------------------------------------------- journey */
-.journey { display: grid; gap: 0; }
-.jstep { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-4);
-         padding: var(--sp-4) 0; border-bottom: 1px solid var(--line);
-         align-items: baseline; }
-.jstep:last-child { border-bottom: 0; }
-.jstep .l { font-weight: 500; font-size: 14.5px; }
-.jstep .d { color: var(--ink-2); font-size: 13px; margin-top: 3px; max-width: 62ch; }
-.jstep .n { font-size: 19px; font-weight: 600; text-align: right; }
-.jstep .rm { color: var(--ink-3); font-size: 12px; font-weight: 400;
-             display: block; text-align: right; }
-.jstep.final .n { color: var(--accent); }
+/* The journey/funnel styles were removed from here. The run records the
+   funnel -- 750 evaluated, 453 eligible, 45 defended, 6 shown -- and the
+   payload still carries it, but nothing on the screen has drawn it for some
+   time, so these were nine rules styling an element that is never created. */
 
 /* ---------------------------------------------------------------- panel */
 /* Above the drawer (61), not level with its scrim. A confirmation asked for
@@ -548,25 +569,7 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
               color: var(--ink-3); font-weight: 550; margin-bottom: var(--sp-3); }
 .prose { font-size: 14.5px; line-height: 1.65; color: var(--ink); }
 .prose.muted { color: var(--ink-2); }
-
-.ev { display: grid; gap: var(--sp-2); }
-.ev-row { border: 1px solid var(--line); border-radius: var(--r-md);
-          background: var(--surface); overflow: hidden; }
-.ev-sum { display: flex; align-items: center; gap: var(--sp-3);
-          padding: 12px var(--sp-4); cursor: pointer; list-style: none; }
-.ev-sum::-webkit-details-marker { display: none; }
-.ev-sum .lab { font-weight: 500; font-size: 14px; }
-.ev-sum .vd { margin-left: auto; font-size: 12.5px; font-weight: 600; }
-.ev-sum .car { color: var(--ink-3); transition: transform .18s ease; font-size: 11px; }
-details[open] .ev-sum .car { transform: rotate(90deg); }
-.ev-detail { padding: 0 var(--sp-4) var(--sp-4); border-top: 1px solid var(--line);
-             padding-top: var(--sp-3); }
 .ev-detail .d { color: var(--ink-2); font-size: 13.5px; margin-bottom: var(--sp-3); }
-.sig { padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px;
-       line-height: 1.5; }
-.sig:last-child { border-bottom: 0; }
-.sig .sl { color: var(--ink-2); }
-.sig .sv { font-weight: 550; white-space: nowrap; }
 .v-pos { color: var(--buy); } .v-neg { color: var(--neg); } .v-neu { color: var(--ink-2); }
 
 .levels { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr));
@@ -576,10 +579,6 @@ details[open] .ev-sum .car { transform: rotate(90deg); }
 .level .k { color: var(--ink-3); font-size: 11.5px; text-transform: uppercase;
             letter-spacing: .05em; }
 .level .v { font-size: 16px; font-weight: 600; margin-top: 3px; }
-
-.callout { background: var(--surface-2); border: 1px solid var(--line);
-           border-left: 3px solid var(--accent); border-radius: var(--r-md);
-           padding: var(--sp-4); font-size: 14px; line-height: 1.6; color: var(--ink-2); }
 .callout.watch { border-left-color: var(--watch); }
 
 details.adv { border: 1px solid var(--line); border-radius: var(--r-md);
@@ -598,18 +597,7 @@ details.adv .adv-body { padding: 0 var(--sp-4) var(--sp-4); }
 /* ----------------------------------------------------------------- table */
 /* A list of names, not a grid of dates. Each row is a control. */
 .names { display: grid; gap: var(--sp-2); }
-.namerow { display: grid; grid-template-columns: minmax(0,1fr) auto;
-           gap: var(--sp-4); align-items: center; width: 100%; text-align: left;
-           background: var(--surface); border: 1px solid var(--line);
-           border-radius: var(--r-md); padding: var(--sp-4); cursor: pointer;
-           font: inherit; color: inherit;
-           transition: border-color .14s ease, box-shadow .14s ease; }
-.namerow:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
-.namerow .nm { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
 .namerow .sb { color: var(--ink-3); font-size: 12.5px; margin-top: 2px; }
-
-.tablewrap { overflow-x: auto; border: 1px solid var(--line);
-             border-radius: var(--r-lg); background: var(--surface); }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 th, td { padding: 11px var(--sp-4); text-align: left; white-space: nowrap; }
 th { background: var(--surface-2); color: var(--ink-3); font-weight: 550;
@@ -620,11 +608,6 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--surface-2); }
 td.r { text-align: right; }
-
-/* ----------------------------------------------------------------- misc */
-.panel-section { margin-top: var(--sp-7); }
-.panel-section > h2 { font-size: 18px; letter-spacing: -0.02em;
-                      margin-bottom: var(--sp-2); }
 .panel-section > .lead { color: var(--ink-2); font-size: 14px;
                          margin-bottom: var(--sp-4); max-width: 68ch; }
 .box { background: var(--surface); border: 1px solid var(--line);
@@ -681,7 +664,6 @@ td.r { text-align: right; }
 /* A glyph middot sits on its own baseline and reads low between two links.
    A drawn circle centres on the flex axis, which is where the eye expects it. */
 
-
 @media (max-width: 640px) {
   /* The ownership line must not wrap mid-name -- it reads as one statement
      rather than two fragments. */
@@ -697,16 +679,27 @@ td.r { text-align: right; }
 .fine { color: var(--ink-3); font-size: 11.5px; line-height: 1.5;
         margin-top: var(--sp-3); }
 
+/* A call from a retired configuration, shown because it is this name's
+   history and dimmed because it is not this engine's record. */
+.call.old { opacity: .5; }
+
 .fam { margin: 14px 0; }
 .fam.gated { opacity: .55; }
+/* These four carried a --dim custom property and NOTHING DEFINES IT. An
+   undefined custom property does not fall back to grey; it resolves to unset,
+   so each of these inherited whatever colour its container had. The muted
+   rows rendered at full body contrast and the visual hierarchy this panel is
+   built around did not exist. --ink-3 is the token they meant. */
 .fam-h { display:flex; justify-content:space-between; align-items:baseline;
          gap:12px; padding:6px 0; border-bottom:1px solid var(--line); }
-.fam-h code { font-size:13px; font-weight:600; }
-.fam-h span { font-size:11.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
-.fam-lede { font-size:12.5px; color:var(--dim); margin:8px 0 4px; line-height:1.5; }
-.fam-note { font-size:12px; color:var(--dim); margin-top:12px; line-height:1.5;
+.fam-h b { font-size:13px; font-weight:600; color: var(--ink); }
+.fam-h span { font-size:11.5px; color:var(--ink-3); font-variant-numeric:tabular-nums;
+              text-align:right; }
+.fam-lede { font-size:12.5px; color:var(--ink-3); margin:8px 0 4px; line-height:1.5; }
+.fam-note { font-size:12px; color:var(--ink-3); margin-top:12px; line-height:1.5;
             padding-top:10px; border-top:1px solid var(--line); }
-.fx-d { font-size:11px; color:var(--dim); margin-top:2px; font-family:inherit; }
+.fx-d { font-size:11px; color:var(--ink-3); margin-top:3px; font-family:inherit; }
+.fx-d code { font-family: var(--mono); font-size:10.5px; }
 
 /* ===== settings drawer ============================================= */
 /* A fixed element translated past the right edge is still reachable by a
@@ -728,21 +721,38 @@ html, body { overflow-x: hidden; max-width: 100%; }
                padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line);
                flex: none; }
 .drawer-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+/* THE COLUMN IS minmax(0,1fr), NOT auto.
+   A grid item's automatic minimum is its MIN-CONTENT size, and the implicit
+   `auto` track honoured that instead of the drawer's width: the rows measured
+   619px inside a 380px drawer, the overflow was clipped rather than scrolled,
+   and every switch and button in Settings rendered 240px off the right edge
+   where nothing could reach them. Measured before the fix at 1440x900: the
+   drawer 1060..1440, its rows 1060..1704. `min-width: 0` on each nesting level
+   is the other half -- without it the same automatic minimum reappears one
+   level down. */
 .drawer-body { padding: var(--sp-3) var(--sp-5) var(--sp-6);
-               overflow-y: auto; display: grid; gap: var(--sp-4); }
+               overflow-y: auto; overflow-x: hidden;
+               display: grid; grid-template-columns: minmax(0, 1fr);
+               gap: var(--sp-4); }
+.drawer-body > *, .grp > *, .row > * { min-width: 0; }
 
-.grp { display: grid; }
+.grp { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .grp.quiet .rl { color: var(--ink-2); font-weight: 450; font-size: 13px; }
 .grp-h { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
          color: var(--ink-3); padding-bottom: 6px; }
+/* `height: 58px` with a nowrap, ellipsised subtitle truncated every row that
+   had anything to say -- "2,212 sessions stored - 3 sessions behi...",
+   "Erases the price store and re-fetches it ...". A subtitle cut mid-word is
+   not shorter, it is unreadable, so the row grows to its content and the
+   subtitle wraps. */
 .row { display: flex; align-items: center; justify-content: space-between;
-       gap: var(--sp-4); height: 58px; padding: 0;
-       border-bottom: 1px solid var(--line); }
-.rs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+       gap: var(--sp-4); min-height: 58px; padding: var(--sp-3) 0;
+       border-bottom: 1px solid var(--line); min-width: 0; }
 .grp .row:last-of-type { border-bottom: none; }
 .row-t { min-width: 0; }
 .rl { font-size: 14px; color: var(--ink); font-weight: 500; }
-.rs { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.rs { font-size: 11.5px; color: var(--ink-3); margin-top: 3px;
+      line-height: 1.45; overflow-wrap: anywhere; }
 .row-c { flex: none; }
 .warn-t { color: var(--neg); }
 .danger-t { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 35%, transparent); }
@@ -766,9 +776,6 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .sw:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .past { margin-top: 6px; display: grid; gap: 3px; }
-.pr { display: flex; justify-content: space-between; gap: var(--sp-4);
-      font-size: 11.5px; color: var(--ink-3); }
-.pf { font-variant-numeric: tabular-nums; opacity: .75; }
 
 @media (max-width: 560px) {
   /* Still from the side, just narrower. */
@@ -794,7 +801,15 @@ html, body { overflow-x: hidden; max-width: 100%; }
 
 /* ===== history ===================================================== */
 .chart { padding-bottom: var(--sp-3); }
-.chart-h { margin-bottom: var(--sp-4); }
+/* The headline, and beside it the two rates that qualify it. A single big
+   number with nothing next to it is what let a pooled sum sit here for months
+   looking authoritative. */
+.chart-h { margin-bottom: var(--sp-4); display: flex; align-items: flex-end;
+           gap: var(--sp-6); flex-wrap: wrap; }
+.chart-k { display: grid; gap: 1px; }
+.chart-k b { font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+             font-variant-numeric: tabular-nums; }
+.chart-k span { font-size: 11px; color: var(--ink-3); }
 .chart-v { font-size: 30px; font-weight: 600; letter-spacing: -0.02em;
            font-variant-numeric: tabular-nums; }
 .chart-s { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
@@ -802,7 +817,23 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .chart path { vector-effect: non-scaling-stroke; }
 path.cs { fill: none; stroke: var(--accent); stroke-width: 1.75;
           stroke-linejoin: round; stroke-linecap: round; }
-path.ca { fill: var(--accent); opacity: .09; stroke: none; }
+/* THE BENCHMARK LINE AND ITS LEGEND HAD NO STYLES AT ALL. The function that
+   draws them never ran -- a duplicate definition further down the file
+   replaced it -- so nothing ever revealed that `.cb`, `.curve`, `.clegend`
+   and `.ck` were undeclared. With the duplicate gone the index line appeared
+   as a black FILLED shape, because an SVG path with no stroke and no fill
+   declared is filled black by default, and the legend read "ShortlistIndex". */
+path.cb { fill: none; stroke: var(--ink-3); stroke-width: 1.25;
+          stroke-dasharray: 4 3; opacity: .8;
+          stroke-linejoin: round; stroke-linecap: round; }
+.curve { display: grid; gap: var(--sp-2); }
+.clegend { display: flex; align-items: center; gap: var(--sp-2);
+           font-size: 11px; color: var(--ink-3); flex-wrap: wrap; }
+.clegend .ck + * { margin-left: 0; }
+.ck { width: 14px; height: 0; border-top-width: 2px; border-top-style: solid;
+      display: inline-block; flex: none; }
+.ck.cs { border-top-color: var(--accent); }
+.ck.cb { border-top-color: var(--ink-3); border-top-style: dashed; }
 .cz { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
 
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -870,7 +901,6 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
 .nr-v { grid-area: v; font-size: 14px; font-variant-numeric: tabular-nums;
         white-space: nowrap; }
 
-
 @media (max-width: 640px) {
       .tile-h { flex-direction: column; gap: var(--sp-3); }
   .count.sm .num { font-size: 22px; }
@@ -910,7 +940,6 @@ path.ca { fill: var(--accent); opacity: .09; stroke: none; }
   .card { padding: var(--sp-4); }
   .card-top { gap: var(--sp-3); }
   .panel { width: 100%; border-left: 0; }
-  .jstep { grid-template-columns: 1fr auto; }
 }
 </style>
 </head>
@@ -1101,55 +1130,13 @@ function ask(title, body, confirmLabel) {
   });
 }
 
-/* One row per past call, used by both the day view and the stock view.
-   A name flagged today has nothing to report, and saying so plainly beats
-   printing zeroes and dashes into every column. */
-function outcomeRow(o, headline, sub) {
-  const pending = o.resolved === "pending";
-  const verdict =
-    o.resolved === "target" ? '<span class="pill buy">Target reached</span>' :
-    o.resolved === "stop"   ? '<span class="pill watch">Stop touched</span>' :
-    o.resolved === "both"   ? '<span class="chip">Target and stop both touched</span>' :
-    pending                 ? '<span class="chip">Not followed yet</span>' :
-                              '<span class="chip">Still running</span>';
+/* `outcomeRow` was removed from here. Nothing called it -- both callers named
+   in its own comment were gone -- and every verdict it could render described
+   an exit this engine no longer has: "Target reached", "Stop touched",
+   "Target and stop both touched". `target_achieved` and `thesis_invalidation`
+   are disarmed, so those three branches could not fire even if something did
+   call it. Its only helper, `pctHTML`, went with it. */
 
-  const move = pending
-    ? '<span class="v-neu">Awaiting the next session</span>'
-    : pctHTML(o.change_pct);
-  const sessions = pending ? "" :
-    '<div style="color:var(--ink-3);font-size:12px">' +
-    o.sessions + (o.sessions === 1 ? " session" : " sessions") + '</div>';
-
-  const prices = pending
-    ? money(o.signal_price) + " when flagged"
-    : money(o.signal_price) + " when flagged  →  " + money(o.last_price) + " now";
-
-  // "Peak" and "trough" are trading desk words. This says what they mean.
-  const range = (!pending && o.peak_gain_pct != null && o.worst_drop_pct != null)
-    ? '<div class="sig" style="border-bottom:0;padding:4px 0 0">' +
-      '<span class="v-neu" style="font-size:12.5px">Best it reached ' +
-      (o.peak_gain_pct > 0 ? "+" : "") + o.peak_gain_pct.toFixed(2) +
-      '%, worst it fell ' + o.worst_drop_pct.toFixed(2) + '%</span></div>'
-    : "";
-
-  return '<div class="ev-row" style="padding:var(--sp-4)">' +
-    '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;' +
-      'gap:var(--sp-3);align-items:start">' +
-      '<div style="min-width:0">' + headline +
-        '<div style="color:var(--ink-3);font-size:12.5px">' + sub + '</div></div>' +
-      '<div style="text-align:right">' + move + sessions + '</div>' +
-    '</div>' +
-    '<div class="sig" style="border-bottom:0;padding-top:var(--sp-3)">' +
-      '<span class="v-neu">' + prices + '</span></div>' + range +
-    '<div style="margin-top:8px">' + verdict + '</div>' +
-    (o.note ? '<p class="prose muted" style="font-size:12.5px;margin-top:8px">' +
-      esc(o.note) + '</p>' : "") +
-  '</div>';
-}
-
-/* --------------------------------------------------------------- stages
-   Nine real pipeline stages. The engine reports which one it is on, so the
-   indicator reflects backend state rather than a timer pretending to. */
 const STAGES = [
   "Preparing today's market data",
   "Validating data quality",
@@ -1461,10 +1448,12 @@ function renderProgress(step) {
       '<h3>Scanning the market</h3>' +
       '<div class="stage">' + esc(STAGES[Math.min(step, total - 1)]) + '</div>' +
       '<div class="track">' + segs + '</div>' +
-      '<div class="steps">Step ' + Math.min(step + 1, total) + ' of ' + total + '</div>' +
-      (state.jobId
-        ? '<button class="btn ghost sm" id="cancel-scan">Cancel scan</button>'
-        : "") +
+      '<div class="foot-row">' +
+        '<div class="steps">Step ' + Math.min(step + 1, total) + ' of ' + total + '</div>' +
+        (state.jobId
+          ? '<button class="btn ghost sm" id="cancel-scan">Cancel scan</button>'
+          : "") +
+      '</div>' +
     '</div>';
   const c = $("#cancel-scan");
   if (c) c.addEventListener("click", cancelScan);
@@ -1577,11 +1566,12 @@ function render() {
    phone screen and read as though each one needed defending. A control whose
    name does not explain it is misnamed. */
 
-function setRow(label, sub, control) {
+function setRow(label, sub, control, warn) {
   return '<div class="row">' +
     '<div class="row-t"><div class="rl">' + label + '</div>' +
-    (sub ? '<div class="rs">' + sub + '</div>' : "") + '</div>' +
-    '<div class="row-c">' + control + '</div></div>';
+    (sub ? '<div class="rs' + (warn ? " warn-t" : "") + '">' + sub + '</div>' : "") +
+    '</div>' +
+    (control ? '<div class="row-c">' + control + '</div>' : "") + '</div>';
 }
 
 function toggle(id, on, label) {
@@ -1590,6 +1580,23 @@ function toggle(id, on, label) {
     'aria-label="' + esc(label) + '"><span class="knob"></span></button>';
 }
 
+/* SETTINGS IS TWO SWITCHES, A STATUS BLOCK AND A DANGER BLOCK.
+
+   It carried six action buttons, of which two did work the engine already
+   does for itself:
+
+   REFIT retired the cached coefficients so the next run would fit fresh ones.
+   The model refits on its own every `model_refit_every_sessions`, and a refit
+   is reviewed by the promotion gate when it happens; forcing one early is an
+   expert escape hatch, not a control anybody should meet on a settings screen.
+
+   RESOLVE scored signals whose window had closed. Resolution already runs on
+   every read of /performance and /outcomes -- the endpoint's own docstring
+   says so -- and the nightly job warms both. Pressing it did what opening the
+   page had just done.
+
+   Both are gone. What is left either changes behaviour (the two switches),
+   reports state the operator cannot otherwise see, or is destructive. */
 function renderSettings() {
   const ops = state.ops || {};
   const mdl = state.model || {};
@@ -1599,6 +1606,12 @@ function renderSettings() {
   const c = state.coverage || {};
   const on = !sch.paused;
 
+  /* Shown only when there is something to do about it. A Refresh button on a
+     current store is a control whose only outcome is a no-op, and every one of
+     those teaches the reader that the buttons here do not mean anything. */
+  const refresh = c.data_stale
+    ? '<button class="btn ghost xs" id="ingest">Refresh</button>' : "";
+
   return (
     '<div class="grp">' +
       setRow("Daily signals",
@@ -1606,59 +1619,48 @@ function renderSettings() {
                        : "Runs every weekday after the close")
                 : "Off \u2014 nothing is being recorded",
              toggle("sw-cron", on, "Daily signals")) +
-    '</div>' +
-
-    '<div class="grp">' +
       setRow("Dark mode", "", toggle("sw-theme", currentTheme() === "dark",
                                      "Dark mode")) +
     '</div>' +
 
-    // Everything below used to need a terminal on the box. The engine is
-    // meant to be operated from here, and an action that requires SSH is one
-    // that does not get taken.
     '<div class="grp">' +
-      // Staleness is the STORE's property, and /ready is the one place that
-      // measures it -- against the same arithmetic Stage 1 halts on. This row
-      // read `mdl.stale`, which /admin/model never returned, so the hint could
-      // not appear on any state.
+      '<div class="grp-h">Status</div>' +
       setRow("Market data",
              (c.price_sessions != null ? c.price_sessions.toLocaleString("en-IN") : "\u2014") +
-             " sessions stored" +
-             (c.data_stale ? " \u2014 " + (c.sessions_behind || 0) +
-                             " sessions behind, refresh needed" : ""),
-             '<button class="btn ghost xs" id="ingest">Refresh</button>') +
+             " sessions" +
+             (c.data_stale
+                ? " \u2014 " + (c.sessions_behind || 0) + " behind the exchange"
+                : " \u00b7 current to " + esc(String(c.latest_session || "\u2014"))),
+             refresh) +
       setRow("Model",
              mdl.fitted
                ? (mdl.priced + " of " + (mdl.themes || []).length +
-                  " themes priced, fitted " + esc(String(mdl.fitted_for || "\u2014")) +
-                  (mdl.stale ? " \u2014 the store has moved on since" : ""))
-               : "Not fitted yet",
-             '<button class="btn ghost xs" id="refit">Refit</button>') +
-      setRow("Outcomes",
-             "Score signals whose holding window has closed",
-             '<button class="btn ghost xs" id="resolve">Resolve</button>') +
-    '</div>' +
-
-    '<div class="grp">' +
+                  " themes priced \u00b7 fitted " +
+                  esc(String(mdl.fitted_for || "\u2014")))
+               : "Fits on the next scan",
+             "") +
       setRow("Forward test",
              fwd.registered
                ? (fwd.config_matches
                     ? (fwd.sessions_elapsed + " of " + fwd.sessions_target +
                        " sessions since " + esc(String(fwd.started_on)))
-                    : "\u26a0 The configuration has changed since it was registered")
+                    : "Not valid \u2014 the configuration changed after it was " +
+                      "registered, so the window is not one experiment")
                : "Not registered",
              '<button class="btn ghost xs" id="fwd">' +
-             (fwd.registered && !fwd.config_matches ? "Re-open" : "Open") +
-             '</button>') +
+             (fwd.registered && !fwd.config_matches ? "Re-register" : "Register") +
+             '</button>',
+             fwd.registered && !fwd.config_matches) +
     '</div>' +
 
     '<div class="grp quiet">' +
+      '<div class="grp-h">Destructive</div>' +
       setRow("Recorded results", "Clears the History page",
-             '<button class="btn ghost xs" id="wipe">Clear</button>') +
+             '<button class="btn ghost xs danger-t" id="wipe">Clear</button>') +
       setRow("Rebuild storage",
              "Erases the price store and re-fetches it \u2014 hours, and it " +
              "discards the history the model trains on",
-             '<button class="btn ghost xs" id="rebuild">Rebuild</button>') +
+             '<button class="btn ghost xs danger-t" id="rebuild">Rebuild</button>') +
     '</div>'
   );
 }
@@ -1719,10 +1721,6 @@ function paintSettings() {
   if (wp) wp.addEventListener("click", confirmWipe);
   const ig = $("#ingest");
   if (ig) ig.addEventListener("click", doIngest);
-  const rf = $("#refit");
-  if (rf) rf.addEventListener("click", doRefit);
-  const rs = $("#resolve");
-  if (rs) rs.addEventListener("click", doResolve);
   const fw = $("#fwd");
   if (fw) fw.addEventListener("click", doForward);
 }
@@ -1761,19 +1759,11 @@ async function doIngest() {
   if (d && d.id) { state.jobId = d.id; state.jobKind = d.kind || "ingest"; startMonitor(); }
 }
 
-function doRefit() {
-  if (!confirm("Retire the current coefficients?\n\nThe next scan fits fresh " +
-               "ones, which takes several minutes instead of seconds. The " +
-               "current model is archived, not deleted.")) return;
-  settingsPost("/admin/refit", null, "Retiring the model\u2026",
-    (d) => d.retired ? "Model retired. The next scan will refit."
-                     : (d.message || "There was no cached model."));
-}
-
-function doResolve() {
-  settingsPost("/admin/resolve-outcomes", null, "Scoring closed positions\u2026",
-    (d) => d.message || "Outcomes resolved.");
-}
+/* doRefit and doResolve lived here and are gone with the buttons that called
+   them. The ENDPOINTS remain -- /admin/refit and /admin/resolve-outcomes are
+   real operator tools and something may want them over the API -- but neither
+   belongs on a screen whose job is to stay out of the way of an engine that
+   refits and resolves on its own. */
 
 async function doForward() {
   const f = state.forward || {};
@@ -1945,7 +1935,11 @@ function renderChrome(v) {
   // redundant with anything. It moves to the subtitle, in words.
   const titles = {
     overview: ["Today's opportunities", "The names the engine ranks highest, and the case for each."],
-    history: ["History", "Every name surfaced so far, and what the market did after."],
+    // "Every name surfaced so far" was true of a page that pooled every
+    // configuration the ledger has ever run. It does not, now: the figures are
+    // scoped to the engine that is running, and the subtitle has to say which
+    // record the reader is looking at or the scoping reads as missing data.
+    history: ["History", "What this configuration has done, marked against the index."],
   };
   const [title, sub] = titles[state.tab] || titles.overview;
   $("#page-title").textContent = title;
@@ -2076,15 +2070,30 @@ function viewOverview(v) {
   /* A regime block stops NEW positions; it does not close open ones. The two
      used to be the same thing here, because the engine returned an empty book
      and the screen showed "nothing met the bar" over positions that existed. */
-  const blocked = v.new_entries_blocked
+  /* Only a HALT belongs in a warning box. The entry cadence also arrives
+     through `new_entries_blocked` -- correctly, the field means "entries were
+     refused and here is why" -- but it is a schedule, not a fault, and it
+     fires on twenty sessions out of every twenty-one. Rendering it as a
+     warning taught the reader to ignore the warning. The clock strip above
+     states the schedule; this box is now only for the conditions. */
+  const clk = v.entry_clock || {};
+  const blocked = (v.new_entries_blocked && clk.is_entry_date !== false)
     ? '<div class="box-warn"><b>New positions are not being opened</b>' +
       '<p>' + esc(v.new_entries_blocked) + '</p></div>'
     : "";
 
-  return unscored + marketBlock(v) + blocked + alerts +
+  return unscored + marketBlock(v) + clockHTML(v) + blocked + alerts +
     '<div class="slate-head">' +
       '<h2>Shortlist</h2>' +
       '<div class="count">' + counts.join(" ") + '</div>' +
+      (function () {
+        const b = v.book || {};
+        if (!b.exit_rank && !b.horizon_sessions) return "";
+        const bits = [];
+        if (b.exit_rank) bits.push("held while inside the top " + b.exit_rank);
+        if (b.horizon_sessions) bits.push("up to " + b.horizon_sessions + " sessions");
+        return '<div class="note">' + bits.join(" \u00b7 ") + '</div>';
+      })() +
     '</div>' +
     '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>' +
     gone +
@@ -2100,6 +2109,45 @@ function viewOverview(v) {
    considers them held, but it produced no card, so without this block the
    position is invisible at exactly the moment it needs attention. A delisting
    is the one case that requires the reader to act. */
+/* THE ENTRY CLOCK.
+
+   The engine runs every session and BUYS every twenty-first, counted in
+   sessions from a fixed anchor so a holiday cannot re-phase it. Nothing on the
+   screen had ever said so. A reader watching the shortlist change daily had no
+   way to tell that most of those days are not buying days -- which makes the
+   difference between a list of ideas and a list of orders. */
+function clockHTML(v) {
+  const c = v.entry_clock || {};
+  if (!c.cadence_sessions || c.cadence_sessions === 1) return "";
+
+  let head, body, open = false;
+  if (c.resolved === false) {
+    // The anchor has not been reached, so the cadence has not started and the
+    // clock deliberately fails open. Saying "buying session" here would claim
+    // a schedule is running that has not begun.
+    head = "Entry schedule not started";
+    body = (c.anchor ? "The " + c.cadence_sessions + "-session clock starts " +
+                       esc(day(c.anchor)) + ". "
+                     : "") +
+           "Until then every session can open a position.";
+  } else if (c.is_entry_date === true) {
+    head = "Buying session"; open = true;
+    body = "New positions open at today\u2019s close.";
+  } else {
+    head = "Not a buying session";
+    const when = c.next_entry_date ? day(c.next_entry_date) : null;
+    const until = c.sessions_until_next;
+    body = "Next on " + (when ? esc(when) : "the next scheduled session") +
+      (until ? " \u00b7 " + until + (until === 1 ? " session" : " sessions") +
+               " away" : "");
+  }
+  return '<div class="clock' + (open ? " open" : "") + '">' +
+    '<span class="clock-d">' + head + '</span>' +
+    '<span class="clock-t">' + body + '</span>' +
+    '<span class="clock-c">every ' + c.cadence_sessions + ' sessions</span>' +
+  '</div>';
+}
+
 function alertsHTML(v) {
   const a = v.open_position_alerts || [];
   if (!a.length) return "";
@@ -2120,13 +2168,31 @@ function alertsHTML(v) {
    A name simply disappearing is indistinguishable from a name that was never
    there. The engine now records a reason for every departure, so the reader
    can tell a position the exit band closed from one that failed a data check. */
+/* Names that were on the screen yesterday and are not on it today.
+
+   Every departure carried its own copy of the reason, and on a normal turnover
+   day the reason is the same for all of them -- five rows of "the engine did
+   not produce it this run, so there is nothing to show. It failed an
+   eligibility, data-quality or defence check." is one fact printed five times
+   and eighty words spent on it. Identical reasons are collapsed to a single
+   line naming the tickers; genuinely different reasons still get their own. */
 function departuresHTML(v) {
   const d = v.departures || [];
   if (!d.length) return "";
+  const groups = new Map();
+  d.forEach((x) => {
+    const key = String(x.reason || "");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(String(x.ticker || ""));
+  });
+  const short = (r) => r
+    .replace(/^the engine did not produce it this run,[^.]*\.\s*/i, "")
+    .replace(/^It failed/, "Failed") || r;
+  const items = [...groups.entries()].map(([reason, tickers]) =>
+    '<li><b>' + tickers.map(esc).join(", ") + '</b> \u00b7 ' +
+    esc(short(reason)) + '</li>').join("");
   return '<div class="departures"><h3>Left the shortlist</h3><ul>' +
-    d.map(function (x) {
-      return '<li><b>' + esc(x.ticker) + '</b> \u00b7 ' + esc(x.reason) + '</li>';
-    }).join("") + '</ul></div>';
+    items + '</ul></div>';
 }
 
 function marketBlock(v) {
@@ -2158,21 +2224,11 @@ function marketBlock(v) {
    The engine's own closed trades say median 14, with a 10th-90th spread of
    2 to 44 -- so the useful number is a typical hold and its spread, not a
    policy range printed as though it were a forecast. */
-function holdText() {
-  const h = (state.perf && state.perf.holding) || null;
-  if (!h || !h.n || h.median == null) return null;
-  return { main: "~" + Math.round(h.median),
-           sub: "sessions \u00b7 " + Math.round(h.p10) + "\u2013" +
-                Math.round(h.p90) + " typical" };
-}
-
 /* How long this name has been on the screen.
 
    The engine holds a name while its rank stays inside the exit band, so a row
    is either a new idea or a position being carried -- and the card showed no
-   difference between them. A name held for six sessions and one first seen
-   this morning rendered identically, which is what let a top-5 list turn over
-   completely every session without the screen ever saying so. */
+   difference between them. */
 function heldText(p) {
   if (!p.carried || !p.shown_since || !state.view || !state.view.as_of) return null;
   const from = new Date(p.shown_since + "T00:00:00");
@@ -2189,42 +2245,54 @@ function heldText(p) {
   return n <= 0 ? null : n;
 }
 
-function upside(p) {
-  const t = (p.levels || {}).target_1, c = p.price;
-  if (!t || !c) return null;
-  return t / c - 1;
-}
 function downside(p) {
   const st = (p.levels || {}).stop, c = p.price;
   if (!st || !c) return null;
   return st / c - 1;
 }
 
-/* One line, from the run. The pills said "Momentum strong / Trend Position
-   strong" on nearly every name, which is what a shortlist ranked on momentum
-   will always say -- a label that never varies is not information. This
-   names the factor that actually moved this score most, and by how much. */
+/* WHY THIS NAME IS IN THE BOOK -- which is not what this used to say.
+
+   It named the largest contributor to the fitted composite. The composite does
+   not choose: the book is ordered by `mom_6_1_r` alone, and the composite is
+   fitted, recorded and monitored beside it as a diagnostic. So the old line
+   answered "what moved a score nothing acts on" while the reader was asking
+   "why is this on my screen". The run states the real reason itself, in
+   `technical.why_raw[0]`; this trims it to the clause that carries it. */
 function whyLine(p) {
+  const raw = ((p.technical || {}).why_raw || [])[0];
+  if (raw && /mom_6_1_r/.test(raw)) {
+    const m = raw.match(/^Ranked #(\d+) of the eligible universe/);
+    const where = m ? "Ranked #" + m[1] + " on 6-1 momentum" : "Ranked on 6-1 momentum";
+    const mom = (p.contributions || []).find((c) => c.factor === "mom");
+    return where + (mom ? " \u00b7 " + (mom.z > 0 ? "+" : "") + mom.z.toFixed(2) +
+                          " sd vs the universe" : "");
+  }
   const c = (p.contributions || [])[0];
-  if (!c) return "";
-  const share = (p.contributions || []).slice(0, 3)
-    .reduce((t, r) => t + Math.abs(r.contribution), 0);
-  const total = (p.contributions || [])
-    .reduce((t, r) => t + Math.abs(r.contribution), 0) || 1;
-  return esc(c.label) + " leads at " + (c.z > 0 ? "+" : "") + c.z.toFixed(2) +
-    " sd \u00b7 top three carry " + Math.round((share / total) * 100) +
-    "% of the score";
+  return c ? esc(c.label) + " leads at " + (c.z > 0 ? "+" : "") + c.z.toFixed(2) + " sd" : "";
 }
 
 function cardHTML(p) {
   const isBuy = p.status === "BUY";
-  const up = upside(p), dn = downside(p);
+  const dn = downside(p);
   const L = p.levels || {};
+  const band = (state.view && state.view.book && state.view.book.exit_rank) || null;
   const fig = (label, value, sub, cls) =>
     '<div class="fig"><span class="fl">' + label + '</span>' +
     '<span class="fv">' + value + '</span>' +
     (sub ? '<span class="fs ' + (cls || "") + '">' + sub + '</span>' : "") +
     '</div>';
+
+  /* THREE FIGURES, AND NO TARGET AMONG THEM.
+     Target was the card's headline number and the engine has no profit target:
+     `exit_hierarchy.target_achieved` is false, measured at a cost of 0.9 points
+     of annual alpha. Printing a level nothing will ever act on, in the largest
+     type on the row, told a reader to expect an exit that cannot happen.
+     What replaces it is the thing that does decide the position: its rank
+     against the band it is held inside. */
+  const rank = p.rank != null
+    ? fig("Rank", "#" + p.rank, "of the eligible universe", "")
+    : "";
 
   return '<button class="card ' + (isBuy ? "is-buy" : "is-watch") + '" ' +
     'data-pos="' + p.position + '">' +
@@ -2245,21 +2313,21 @@ function cardHTML(p) {
       '<div class="p num">' + money(p.price) + '</div>' +
     '</div>' +
     '<div class="figs">' +
-      fig("Target", money(L.target_1),
-          up != null ? (up > 0 ? "+" : "") + (up * 100).toFixed(1) + "%" : "",
-          "v-pos") +
+      rank +
       fig("Stop", money(L.stop),
           dn != null ? (dn * 100).toFixed(1) + "%" : "", "v-neg") +
-      (function () {
-        const h = holdText();
-        // NO CONFIGURED RANGE HERE. "15-63 sessions" is the backstop pair from
-        // parameters.yaml, identical on every name, and printing it in a slot
-        // labelled Hold reads as a forecast for THIS one. Until enough
-        // positions have closed to measure it, the honest answer is that it
-        // has not been measured.
-        return h ? fig("Hold", h.main, h.sub)
-                 : fig("Hold", "\u2014", "not yet measured");
-      })() +
+      /* HOLD CAME OFF THE CARD. It read the same on all six -- the horizon is
+         a configuration constant, not a property of this name -- and a column
+         whose value never varies is a column that carries no information while
+         taking a third of the row. The rule it states is real, so it is stated
+         ONCE, in the shortlist header, where it applies to the whole book.
+
+         What takes the slot is the entry zone, which is per-name, changes
+         every session, and is the only number on the card anybody would act
+         on. It was buried in a grey line inside the analysis panel. */
+      (L.entry && L.entry.length === 2
+        ? fig("Entry", money(L.entry[0]) + "\u2013" + money(L.entry[1]), "zone")
+        : "") +
     '</div>' +
     '<div class="why">' + whyLine(p) + '</div>' +
     '<div class="card-foot"><span></span>' +
@@ -2306,35 +2374,50 @@ function curveSVG(curve) {
     zero + bench +
     '<path d="' + line(pts.map((c) => c.cumulative)) + '" class="cs"/>' +
     '</svg>' +
-    '<div class="clegend"><span class="ck cs"></span>Shortlist' +
-    (paired.length > 1 ? '<span class="ck cb"></span>Index' : "") + '</div>' +
+    '<div class="clegend"><span class="ck cs"></span><span>Shortlist</span>' +
+    (paired.length > 1 ? '<span class="ck cb"></span><span>Index</span>' : "") +
+    '</div>' +
   '</div>';
 }
 
 /* The curve. Cumulative return by exit date -- summed, not compounded,
    because the book holds several names at once and compounding overlapping
    holds would draw a line the strategy never earned. */
-function curveSVG(curve) {
-  const pts = (curve || []).filter((c) => c && isFinite(c.cumulative));
-  if (pts.length < 2) return "";
-  const W = 640, H = 132, PAD = 4;
-  let lo = Math.min.apply(null, pts.map((c) => c.cumulative));
-  let hi = Math.max.apply(null, pts.map((c) => c.cumulative));
-  if (hi - lo < 1e-9) { hi += 0.01; lo -= 0.01; }
-  const x = (i) => PAD + (i / (pts.length - 1)) * (W - PAD * 2);
-  const y = (v) => PAD + (1 - (v - lo) / (hi - lo)) * (H - PAD * 2);
-  const d = pts.map((c, i) =>
-    (i ? "L" : "M") + x(i).toFixed(1) + " " + y(c.cumulative).toFixed(1)).join(" ");
-  const area = d + " L" + x(pts.length - 1).toFixed(1) + " " + y(lo).toFixed(1) +
-               " L" + x(0).toFixed(1) + " " + y(lo).toFixed(1) + " Z";
-  const zero = (lo <= 0 && hi >= 0)
-    ? '<line x1="' + PAD + '" x2="' + (W - PAD) + '" y1="' + y(0).toFixed(1) +
-      '" y2="' + y(0).toFixed(1) + '" class="cz"/>' : "";
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
-    'role="img" aria-label="Cumulative return of the shortlist over time">' +
-    zero + '<path d="' + area + '" class="ca"/>' +
-    '<path d="' + d + '" class="cs"/></svg>';
-}
+/* THE SECOND DEFINITION OF THIS FUNCTION USED TO LIVE HERE and it won,
+   because a later `function` declaration replaces an earlier one. It drew the
+   shortlist alone. The one above it -- the one that was actually written for
+   this page -- draws the shortlist AGAINST THE BENCHMARK, with a legend, and
+   never ran a single time.
+
+   That is the comparison the whole result rests on: this engine is measured
+   against an investable equal-weight benchmark of the same eligible universe,
+   not against zero, so a curve without the index answers a question nobody
+   asked. */
+
+/* HOW A POSITION ENDED, in words.
+
+   Two copies of this map lived in two functions and BETWEEN THEM they covered
+   only exits this engine no longer takes -- `target_1`, `target_2` and
+   `time_exit`. The reasons the resolver actually writes are `book_exit`,
+   `stop`, `stop_gap` and `time_expiration`, none of which were in either map,
+   so every closed call on the History page rendered the raw key: "book_exit".
+   That is 115 of the 128 resolved rows on this store.
+
+   The retired reasons stay, because the ledger is append-only and rows written
+   under the old exit rule are still in it and still readable. */
+const EXIT_WORDS = {
+  book_exit: "left the rank band",
+  stop: "stopped out",
+  stop_gap: "gapped through the stop",
+  time_expiration: "reached the holding limit",
+  // Retired rules, kept for rows recorded under them.
+  time_exit: "ran out of time",
+  target_1: "hit its target",
+  target_2: "hit its target",
+  thesis_invalidation: "thesis invalidated",
+  trailing_stop: "trailing stop hit",
+  signal_reversal: "left the rank band",
+};
 
 /* One name, one row: what it returned and how it ended.
 
@@ -2342,15 +2425,13 @@ function curveSVG(curve) {
    single exit -- by_ticker reports exit_mix and win_rate, and reading a
    scalar exit_reason off it produced a dangling separator and nothing else. */
 function nameRow(r) {
-  const how = { stop: "stopped out", target_1: "hit its target",
-                target_2: "hit its target", time_exit: "ran out of time" };
   let sub;
   if (r.n > 1) {
     const won = Math.round(r.win_rate * r.n);
     sub = r.n + " positions \u00b7 " + won + " paid off";
   } else {
     const only = Object.keys(r.exit_mix || {})[0];
-    sub = how[only] || "closed";
+    sub = EXIT_WORDS[only] || "closed";
   }
   return '<button class="nr" data-stock="' + esc(r.ticker) + '">' +
     '<span class="nr-t">' + esc(r.ticker) + '</span>' +
@@ -2413,64 +2494,97 @@ function openHTML(op) {
     '</div>';
 }
 
+/* THE RECORD OF THIS CONFIGURATION, and nothing else.
+
+   What this page used to lead with was "-234.53%", the SUM of per-trade
+   returns across 97 trades, most of them held at the same time. Two positions
+   funded from one slot cannot both be paid for, so summing them is a return on
+   capital the book never had -- and every one of those 97 trades was decided
+   by baseline-v1, whose epoch is recorded CLOSED VOID. The largest number on
+   the screen was a quantity that does not exist, describing an engine that no
+   longer runs.
+
+   The endpoint now scopes every figure to the running configuration. When that
+   record is empty the page says so plainly rather than reaching backwards for
+   something to print. */
 function viewHistory(v) {
   const perf = state.perf;
   if (perf === null || perf === undefined) {
     return '<div class="box"><div class="skel" style="height:260px"></div></div>';
   }
-  const h = perf.headline || {};
-  const rows = perf.by_ticker || [];
-  const open = (perf.open || {}).n || 0;
-
   if (perf.failed) {
     return '<div class="box empty"><h3>Could not read the results</h3>' +
       '<p>' + esc(perf.failed) + '</p></div>';
   }
 
-  if (!rows.length) {
-    // Open calls are the whole story until the first one closes.
-    if (open) {
-      return openHTML(perf.open) +
-        '<p class="fine">Nothing has closed yet. A call lands in the totals ' +
-        'the day the market takes it to its target or its stop.</p>';
-    }
-    return '<div class="box empty"><h3>No results yet</h3>' +
-      '<p>' + (open
-        ? '<b>' + open + '</b> ' + (open === 1 ? 'call is' : 'calls are') +
-          ' still open \u2014 the market has not taken any of them to a ' +
-          'target or a stop yet. Each one lands here the day it closes.'
-        : 'Every call the engine makes lands here the day it closes, with ' +
-          'what it returned.') + '</p></div>';
+  const h = perf.headline || {};
+  const rows = perf.by_ticker || [];
+  const ep = perf.epoch || {};
+  const open = perf.open || {};
+  const nOpen = open.n || 0;
+  const nClosed = h.n || 0;
+
+  /* One line, not a section. What is excluded and why -- so an empty page
+     reads as "nothing has closed under this configuration" rather than as a
+     page that is broken. */
+  const excluded = ep.excluded_closed
+    ? '<p class="fine">' + ep.excluded_closed + ' earlier ' +
+      (ep.excluded_closed === 1 ? 'position was' : 'positions were') +
+      ' decided by a superseded configuration and are not counted here.</p>'
+    : "";
+
+  if (!nClosed && !nOpen) {
+    return '<div class="box empty">' +
+      '<h3>The record opens here</h3>' +
+      '<p>No position has closed under this configuration yet. Every call ' +
+      'lands on this page the day it closes, with what it returned against ' +
+      'the index over the same days.</p></div>' + excluded;
   }
 
+  /* THE CURVE FIRST. It was below a per-ticker wall of text, which is the
+     wrong way round: the question this page answers is what the engine did,
+     and the two lists underneath are how it did it. */
+  const chart = (perf.curve && perf.curve.length > 1)
+    ? '<div class="box chart">' +
+        '<div class="chart-h">' +
+          '<div><div class="chart-v">' + signed(h.avg_excess) + '</div>' +
+            '<div class="chart-s">average per position vs the index \u00b7 ' +
+            nClosed + ' closed' +
+            (nOpen ? " \u00b7 " + nOpen + " open" : "") + '</div></div>' +
+          (h.win_rate != null
+            ? '<div class="chart-k"><b>' + Math.round(h.win_rate * 100) + '%</b>' +
+              '<span>paid off</span></div>' : "") +
+          (h.beat_rate != null
+            ? '<div class="chart-k"><b>' + Math.round(h.beat_rate * 100) + '%</b>' +
+              '<span>beat the index</span></div>' : "") +
+        '</div>' +
+        curveSVG(perf.curve) +
+      '</div>'
+    : "";
+
+  /* PER POSITION, NOT SUMMED. `avg_excess` is the average one position
+     returned against the index over the days it was held -- a number an
+     equal-slot book can actually earn. */
   const won = rows.filter((r) => r.total_return > 0)
                   .sort((a, b) => b.total_return - a.total_return);
   const lost = rows.filter((r) => r.total_return <= 0)
                    .sort((a, b) => a.total_return - b.total_return);
-  const sum = (xs) => xs.reduce((t, r) => t + r.total_return, 0);
+  const list = (title, items, tone) => items.length
+    ? '<div class="col ' + tone + '">' +
+        '<div class="col-h"><span>' + title + '</span>' +
+          '<b>' + items.length + '</b></div>' +
+        '<div class="col-b">' + items.map(nameRow).join("") + '</div>' +
+      '</div>'
+    : "";
 
-  const list = (title, items, tone) =>
-    '<div class="col ' + tone + '">' +
-      '<div class="col-h"><span>' + title + '</span>' +
-        '<b>' + signed(sum(items)) + '</b></div>' +
-      '<div class="col-b">' + items.map(nameRow).join("") + '</div>' +
-    '</div>';
+  const closed = nClosed
+    ? '<div class="cols">' + list("Paid off", won, "up") +
+      list("Went against", lost, "dn") + '</div>'
+    : '<p class="fine">Nothing has closed yet. A position lands in the ' +
+      'figures above the day the market takes it to its stop, its rank band ' +
+      'or its holding limit.</p>';
 
-  return (
-    openHTML(perf.open) +
-    '<div class="box chart">' +
-      '<div class="chart-h">' +
-        '<div><div class="chart-v">' + signed(h.total_return) + '</div>' +
-          '<div class="chart-s">' + h.n + ' closed' +
-          (open ? " \u00b7 " + open + " running" : "") + '</div></div>' +
-      '</div>' +
-      curveSVG(perf.curve) +
-    '</div>' +
-    '<div class="cols">' +
-      list("Paid off", won, "up") +
-      list("Went against", lost, "dn") +
-    '</div>'
-  );
+  return chart + openHTML(open) + closed + excluded;
 }
 
 async function confirmWipe() {
@@ -2533,16 +2647,19 @@ async function openStock(ticker) {
     return;
   }
 
-  const how = { stop: "stopped out", target_1: "hit its target",
-                target_2: "hit its target", time_exit: "ran out of time" };
 
+  const live = (state.perf && state.perf.epoch && state.perf.epoch.config_version) || null;
+  const superseded = live
+    ? d.calls.filter((c) => c.config_version && c.config_version !== live).length
+    : 0;
   const rows = d.calls.map((c, i) =>
-    '<div class="call">' +
+    '<div class="call' +
+      (live && c.config_version && c.config_version !== live ? " old" : "") + '">' +
       '<div class="call-n">' + (i + 1) + '</div>' +
       '<div class="call-m">' +
         '<div class="call-d">' + esc(day(c.entry_date)) + ' \u2192 ' +
           esc(day(c.exit_date)) + '</div>' +
-        '<div class="call-s">' + esc(how[c.exit_reason] || c.exit_reason) +
+        '<div class="call-s">' + esc(EXIT_WORDS[c.exit_reason] || c.exit_reason) +
           ' after ' + c.sessions_held +
           (c.sessions_held === 1 ? " session" : " sessions") + ' \u00b7 ' +
           money(c.entry_price) + ' \u2192 ' + money(c.exit_price) + '</div>' +
@@ -2577,19 +2694,17 @@ async function openStock(ticker) {
     '<div class="stock">' +
       twoWays +
       '<h4 class="callh">Each call</h4>' +
+      (superseded
+        ? '<p class="fine">' + superseded + ' of these ' +
+          (superseded === 1 ? 'was' : 'were') + ' decided by a superseded ' +
+          'configuration and ' + (superseded === 1 ? 'is' : 'are') +
+          ' not part of this engine\u2019s record.</p>'
+        : "") +
       '<div class="calls">' + rows + '</div>' +
       (d.open ? '<p class="fine">' + d.open +
         (d.open === 1 ? ' call is' : ' calls are') +
         ' still open and not counted above.</p>' : "") +
     '</div>';
-}
-
-/* Colour and a word, never colour alone. */
-function pctHTML(value) {
-  if (value == null) return '<span class="v-neu">—</span>';
-  const cls = value > 0 ? "v-pos" : value < 0 ? "v-neg" : "v-neu";
-  return '<span class="' + cls + ' num">' + (value > 0 ? "+" : "") +
-         value.toFixed(2) + '%</span>';
 }
 
 /* ----------------------------------------------------------------- panel */
@@ -2657,16 +2772,72 @@ function techHTML(t) {
 
 /* The exit ladder is an ordered list, so it is rendered as one rather than
    as a wall of preformatted text. */
+/* WHAT ACTUALLY CLOSES THE POSITION.
+
+   The rungs arrive as engine strings -- "1. stop_loss_breach (Rs 466.45) --
+   protective stop breached [rung 2]" -- and were printed verbatim, machine
+   name, internal rung index and all. Under baseline-v1 the list ran to eight
+   entries including a profit target, a trailing stop and a thesis
+   invalidation; three of those are now disarmed and the run no longer emits
+   them, but the parsing has to be defensive anyway because a persisted payload
+   can outlive the configuration that wrote it.
+
+   The trailing "NOT an exit: ..." line is the engine explaining what it
+   removed and why. It is kept, as a note rather than a numbered rung, because
+   a reader who remembers the old card needs to see that the target did not go
+   missing -- it was measured and taken off. */
+const EXIT_NAMES = {
+  stop_loss_breach: "The disaster stop is breached",
+  new_hard_rejection: "It fails an eligibility or data-quality gate",
+  severe_regime_change: "The market moves to a no-new-entry regime",
+  signal_reversal: "Its rank falls outside the band",
+  time_expiration: "It reaches the holding limit",   // the number is appended
+  thesis_invalidation: "The invalidation level is breached",
+  trailing_stop: "The trailing stop is hit",
+  target_achieved: "The profit target is reached",
+};
+
 function exitsHTML(exits) {
-  return '<ol class="exits-l">' + exits.map((e) => {
-    const t = String(e).replace(/^\d+\.\s*/, "");
-    return '<li>' + esc(t) + '</li>';
-  }).join("") + '</ol>';
+  const rungs = [];
+  let note = "";
+  (exits || []).forEach((e) => {
+    const text = String(e);
+    if (/^NOT an exit/i.test(text)) { note = text; return; }
+    // "3. signal_reversal (Rs 12.30) -- description [rung 5]"
+    const body = text.replace(/^\s*\d+\.\s*/, "").replace(/\s*\[rung \d+\]\s*$/, "");
+    const key = body.split(/[\s(]/)[0];
+    const level = (body.match(/\(Rs\s*([\d.,]+)\)/) || [])[1];
+    let label = EXIT_NAMES[key] || body.split(" -- ")[0].replace(/_/g, " ");
+    // The horizon is a number, and this is the one place it means something
+    // about THIS position rather than about the configuration -- it is the
+    // rung that ends the trade, and on this engine it is the exit most winners
+    // take. It sat in a Hold column on every card reading the same value.
+    const horizon = (state.view && state.view.book &&
+                     state.view.book.horizon_sessions) || null;
+    if (key === "time_expiration" && horizon) {
+      label += " of " + horizon + " sessions";
+    }
+    rungs.push('<li>' + esc(label) +
+      (level ? ' <span class="ex-l">Rs ' + esc(level) + '</span>' : "") + '</li>');
+  });
+  if (!rungs.length) return "";
+  // The engine's note runs to three sentences and carries the measurement that
+  // justified each removal. The first sentence is the part a reader of this
+  // card needs -- that the target did not go missing, it was taken off -- and
+  // the arithmetic behind it belongs in the findings register, not here.
+  const short = note ? note.split(/\.\s/)[0] + "." : "";
+  return '<h4 class="ph">What closes this position</h4>' +
+    '<ol class="exits-l">' + rungs.join("") + '</ol>' +
+    (short ? '<p class="fine">' + esc(short) + '</p>' : "");
 }
 
 function panelHTML(p) {
   const L = p.levels || {};
-  const up = upside(p), dn = downside(p);
+  // Only meaningful when the target rung is armed, which it is not on this
+  // configuration -- `_levels` emits a null target and the slot is skipped.
+  const L1 = (p.levels || {}).target_1;
+  const up = (L1 && p.price) ? (L1 / p.price - 1) : null;
+  const dn = downside(p);
   const rows = p.contributions || [];
 
   // Numbers first. They were four screens down, under three paragraphs and
@@ -2676,18 +2847,29 @@ function panelHTML(p) {
     '<div class="kv ' + (cls || "") + '">' + value + '</div>' +
     (sub ? '<div class="ks">' + sub + '</div>' : "") + '</div>';
 
+  /* FOUR SLOTS BECAME THREE, because two of the four described exits this
+     engine does not have. TARGET was `target_achieved`, disarmed. INVALIDATION
+     was captioned "thesis gone", and `thesis_invalidation` is disarmed too --
+     the level survives as the ADMISSION predicate, which is a test applied
+     before a position opens, not a reason one closes. The viewmodel now emits
+     null for both when their rung is not armed, so this renders whatever the
+     run actually armed rather than a fixed set of four. */
+  const book = (state.view && state.view.book) || {};
   const key =
     '<div class="keys">' +
       num("Price", money(p.price),
-          (function () { const h = holdText();
-            return h ? h.main + " " + h.sub
-                     : "not yet measured \u2014 fewer than 20 closed positions"; })()) +
-      num("Target", money(L.target_1),
-          up != null ? (up > 0 ? "+" : "") + (up * 100).toFixed(1) + "%" : "",
-          "v-pos") +
+          p.sector ? esc(p.sector) : "") +
       num("Stop", money(L.stop),
-          dn != null ? (dn * 100).toFixed(1) + "%" : "", "v-neg") +
-      num("Invalidation", money(L.invalidation), "thesis gone") +
+          dn != null ? (dn * 100).toFixed(1) + "% \u00b7 disaster floor" : "disaster floor",
+          "v-neg") +
+      (book.exit_rank
+        ? num("Rank", p.rank != null ? "#" + p.rank : "\u2014",
+              "held while inside " + book.exit_rank)
+        : "") +
+      (L.target_1 ? num("Target", money(L.target_1),
+                        up != null ? (up > 0 ? "+" : "") + (up * 100).toFixed(1) + "%" : "",
+                        "v-pos") : "") +
+      (L.invalidation ? num("Invalidation", money(L.invalidation), "thesis gone") : "") +
     '</div>' +
     (L.entry ? '<div class="kentry">Entry ' + money(L.entry[0]) + ' \u2013 ' +
       money(L.entry[1]) + (p.cost_note ? ' \u00b7 ' + esc(p.cost_note) : "") +
@@ -2705,11 +2887,24 @@ function panelHTML(p) {
   // would move it is a list entry with no next step, and a check that could
   // not run is the engine admitting the case rests on partial evidence --
   // both are the opposite of fluff.
-  const gate = p.what_would_change
-    ? '<div class="gate"><span>' +
-      (p.status === "BUY" ? "What would close this" : "What would move this to Buy") +
-      '</span>' + esc(p.what_would_change) + '</div>'
-    : "";
+  /* On a BUY this said "held while inside the top 18 ... the disaster stop
+     sits at Rs 466.45" -- both of which the exit list below now states, as
+     rules rather than prose. What is NOT in that list is the sentence naming
+     the softest part of the case, which is the only part of the paragraph a
+     reader could not get elsewhere, so on a BUY that is all that is kept. A
+     WATCH keeps the whole thing: there is no exit list for a name that is not
+     held, and "what would move this to Buy" is the entire point of the row. */
+  const gate = (function () {
+    if (!p.what_would_change) return "";
+    if (p.status !== "BUY") {
+      return '<div class="gate"><span>What would move this to Buy</span>' +
+        esc(p.what_would_change) + '</div>';
+    }
+    const route = (p.what_would_change.match(/The most likely route[^.]*\./) || [])[0];
+    return route
+      ? '<div class="gate"><span>Where it is weakest</span>' + esc(route) + '</div>'
+      : "";
+  })();
   const nt = (p.technical && p.technical.not_testable) || [];
   const untested = nt.length
     ? '<div class="gate warn"><span>Checks that could not run</span>' +
@@ -2717,9 +2912,34 @@ function panelHTML(p) {
       'available, so this name rests on partial evidence.</div>'
     : "";
 
+  /* WHY IT IS IN THE BOOK -- stated before, and separately from, the model's
+     factor table.
+
+     This panel is opened to answer "why this name". It answered with the
+     composite's factor attribution under the heading "What moved the score",
+     and the composite does not choose what to buy: the book is ordered by
+     `mom_6_1_r` alone, one measured column, because the fitted composite lost
+     to the benchmark in all 144 of its configurations. So the panel's headline
+     explanation was a model that had been explicitly taken off the decision,
+     and on a card where momentum's coefficient was gated to zero it read
+     "Medium-term momentum ... 0.0000" beside a name momentum had picked.
+
+     The run says this itself. `why_raw[0]` is the ranking sentence; the rest
+     are the composite's readings, which stay -- they are the diagnostic that
+     would let a future window overturn the decision -- under a heading that
+     says what they are. */
+  const ranking = ((p.technical || {}).why_raw || [])[0];
+  const lead = ranking && /mom_6_1_r/.test(ranking)
+    ? '<div class="gate lead"><span>Why it is in the book</span>' +
+      esc(ranking.split(" -- ")[0].replace(/\s*by mom_6_1_r\s*$/, "")) +
+      ' on sector-neutral 6-1 momentum \u2014 the one column that orders this ' +
+      'book.</div>'
+    : "";
+
   const drivers = rows.length
-    ? '<h4 class="ph">What moved the score</h4>' +
-      '<div class="tw"><table class="ftab drv"><thead><tr><th>Factor</th>' +
+    ? '<h4 class="ph">The fitted model\u2019s separate reading' +
+      '<span class="ph-s">monitored, not the chooser</span></h4>' +
+      '<div class="tw"><table class="ftab drv"><thead><tr><th>Theme</th>' +
       '<th class="num">sd</th><th class="num">adds</th>' +
       '</tr></thead><tbody>' + top + '</tbody></table></div>'
     : "";
@@ -2740,21 +2960,33 @@ function panelHTML(p) {
     members += ms.length;
     if (!ms.length) return "";
     const gated = Math.abs(r.coefficient) < 1e-12;
+    /* The theme's LABEL, not its column key. This read <code>mom</code> and
+       <code>delivery</code> -- the names the estimator uses internally -- on a
+       panel whose own summary table two sections up calls the same things
+       "Medium-term momentum" and "Delivery-backed participation". The same
+       theme under two names in one panel reads as two different things. */
     return '<div class="fam' + (gated ? " gated" : "") + '">' +
-      '<div class="fam-h"><code>' + esc(r.factor) + '</code>' +
+      '<div class="fam-h"><b>' + esc(r.label || r.factor) + '</b>' +
       '<span>' + (gated
         ? "not used \u2014 below the significance floor"
         : "coefficient " + (r.coefficient > 0 ? "+" : "") +
           r.coefficient.toFixed(5) + " \u00b7 " +
           (r.contribution > 0 ? "adds " : "takes ") +
           Math.abs(r.contribution).toFixed(4)) + '</span></div>' +
-      '<table class="ftab"><tbody>' + ms.map((m) =>
-        '<tr><td class="fx"><code>' + esc(m.name) + '</code>' +
-        (m.description ? '<div class="fx-d">' + esc(m.description) + '</div>' : "") +
+      /* Description first, column key second. It was the other way round --
+         `max5_21`, `idio_vol`, `downside_vol` in monospace with the sentence
+         that explains them underneath in grey. The reader who opens this wants
+         to know what was measured; the key matters only to someone
+         cross-referencing the code, and it stays for them. */
+      '<div class="tw"><table class="ftab"><tbody>' + ms.map((m) =>
+        '<tr><td class="fx">' +
+        (m.description ? esc(m.description) + '<div class="fx-d"><code>' +
+                         esc(m.name) + '</code></div>'
+                       : '<code>' + esc(m.name) + '</code>') +
         '</td><td class="num">' +
         (m.rank == null ? "\u2014"
                         : (m.rank > 0 ? "+" : "") + Number(m.rank).toFixed(3)) +
-        '</td></tr>').join("") + '</tbody></table></div>';
+        '</td></tr>').join("") + '</tbody></table></div></div>';
   }).join("");
 
   // The columns the run computed and did NOT price. Saying "26 factors" while
@@ -2763,25 +2995,28 @@ function panelHTML(p) {
   const ledger = unscored
     ? '<div class="fam-note">' + esc(unscored) + '</div>' : "";
 
+  /* THE EXIT LIST CAME OUT OF THE DRAWER.
+     It was the last thing inside a collapsed <details> headed "All 12 measured
+     factors", three sections below the fold -- so the one part of the panel
+     that says how the position ends was the hardest part to find. It is a
+     top-level section now, above the model diagnostics. */
+  const exits = (L.exits && L.exits.length) ? exitsHTML(L.exits) : "";
+
   const advanced = members
     ? '<details class="adv"><summary>All ' + members +
         ' measured factors behind these ' + rows.length + ' themes</summary>' +
-        '<p class="fam-lede">The model fits one coefficient per THEME, over the ' +
-        'average of its members\u2019 cross-sectional ranks. Seventeen ' +
-        'coefficients over a set this collinear is not estimable, so the theme ' +
-        'is what carries weight and these are what it is made of. Ranks run ' +
+        '<p class="fam-lede">One coefficient is fitted per THEME, over the ' +
+        'average of its members\u2019 cross-sectional ranks. Ranks run ' +
         '\u22121 to +1 against today\u2019s universe, within sector where the ' +
         'sector is large enough.</p>' +
         blocks + ledger +
         techHTML(p.technical) +
-        (L.exits && L.exits.length ? exitsHTML(L.exits) : "") +
       '</details>'
     : '<details class="adv"><summary>What the run recorded</summary>' +
         techHTML(p.technical) +
-        (L.exits && L.exits.length ? exitsHTML(L.exits) : "") +
       '</details>';
 
-  return key + gate + untested + drivers + advanced;
+  return key + lead + gate + untested + exits + drivers + advanced;
 }
 
 function wire() {
@@ -2912,7 +3147,12 @@ async function loadPerformance() {
     state.perf = { headline: { n: 0 }, by_ticker: [],
                    failed: e.message || String(e) };
   }
-  if (state.tab === "history") render();
+  // REPAINT WHATEVER IS OPEN. This repainted only History, while Today's
+  // cards read the same payload for their hold figure -- so on Today the
+  // fetch completed, the value sat in state, and nothing ever drew it. The
+  // Hold slot showed a dash until some unrelated event forced a render,
+  // which is why it looked like the number was never populated at all.
+  render();
 }
 
 async function loadHistory() {

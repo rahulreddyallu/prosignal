@@ -102,10 +102,17 @@ def test_the_view_is_json_serialisable():
     "could not be completed",         # a failed run must not imply a trade
     "Checks that could not run",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the near misses stay actionable
-    "No results yet",           # history with an empty ledger
+    # "No results yet" was the empty History page. It is now "The record opens
+    # here", because the page is scoped to the running configuration and the
+    # honest statement is not "there are no results" -- there are 128 of them --
+    # but "none of them were decided by this engine".
+    "The record opens here",
+    "superseded configuration",       # and what is being left out, in one line
     "New market data",       # store moved on, results did not
-    "Every name surfaced so far",     # history keyed by name, not by date
-    "Not followed yet",               # a call with no sessions behind it
+    "What this configuration has done",  # history is scoped, and says so
+    # "Not followed yet" belonged to `outcomeRow`, which was removed: nothing
+    # called it and every verdict it could render ("Target reached", "Stop
+    # touched") described an exit this engine has disarmed.
     "Clear the run history?",         # destructive action is confirmed
 ])
 def test_every_reachable_state_has_markup(state):
@@ -186,7 +193,7 @@ _AMBIENT = {
     "new", "Promise", "Number", "String", "Date", "Array", "Object", "JSON",
     "Math", "fetch", "setTimeout", "parseInt", "parseFloat", "isNaN",
     "isFinite", "encodeURIComponent", "Error", "addEventListener",
-    "confirm", "alert",
+    "confirm", "alert", "Map", "Set", "RegExp", "Boolean",
     "setInterval", "clearInterval", "clearTimeout",
     "removeEventListener", "querySelector", "querySelectorAll",
     "getElementById", "getItem", "setItem", "setAttribute", "removeAttribute",
@@ -222,7 +229,13 @@ def test_every_function_the_interface_calls_is_defined():
         r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", body))
     # No whitespace before the paren: a real call never has one, and allowing
     # it matched prose like "returned an error (" inside a string literal.
-    called = set(re.findall(r"\b([A-Za-z_$][\w$]*)\(", body))
+    # And NOT PRECEDED BY A DOT. `\b` matches immediately after ".", so
+    # `map.get(k)` was read as a call to a bare `get`, and every method name in
+    # the file had to be added to _AMBIENT to keep this quiet -- which is why
+    # that set is forty browser methods long. A method call is not a reference
+    # to a function this file has to define, so it is excluded at the pattern
+    # rather than allowlisted afterwards.
+    called = set(re.findall(r"(?<![.\w$])([A-Za-z_$][\w$]*)\(", body))
     # Handlers are passed by REFERENCE and never called, so the paren scan
     # cannot see them. confirmWipe was deleted with a neighbouring block and
     # this test passed anyway -- the Clear button threw on click.
@@ -291,7 +304,14 @@ def test_the_arithmetic_is_in_the_panel_and_covers_every_factor():
     assert "r.z.toFixed" in panel, "the standardised loading"
     assert "r.coefficient.toFixed" in panel, "the fitted coefficient"
     assert "r.contribution.toFixed" in panel, "their product"
-    assert "esc(r.factor)" in panel, "the model's own name, not a paraphrase"
+    # The theme's LABEL leads and its column key follows it. `esc(r.factor)`
+    # alone put <code>mom</code> and <code>delivery</code> in the heading of a
+    # block whose summary table two sections above calls the same things
+    # "Medium-term momentum" and "Delivery-backed participation" -- the same
+    # theme under two names in one panel. The key is still rendered, beside the
+    # members it belongs to, so a quant can still cross-reference it.
+    assert "r.label || r.factor" in panel, "the theme's label, with its key kept"
+    assert "esc(m.name)" in panel, "the model's own identifier, on the members"
     assert "rows.map(" in panel, "every theme, not a top slice"
     vm = UI.parents[1] / "presentation" / "viewmodel.py"
     assert "top: Optional[int] = None" in vm.read_text(encoding="utf-8"), \
@@ -716,13 +736,26 @@ def test_history_is_a_graph_and_two_lists():
         assert gone not in html, gone
 
 
-def test_the_two_lists_are_split_by_sign_and_each_carries_its_total():
+def test_the_two_lists_are_split_by_sign_and_neither_sums_its_column():
+    """The split stays. The COLUMN TOTAL does not.
+
+    Each column header carried `sum(items)` -- the sum of per-name total
+    returns. Those names were held at the same time in a six-slot book, so
+    adding them is a return on more capital than the strategy ever had; the
+    same arithmetic put "-234.53%" at the top of this page as though it were a
+    result. A count is what a list of names can honestly report about itself,
+    and the return figures live per row, where they mean something.
+    """
     html = _html()
     start = html.index("function viewHistory")
     body = html[start:html.index("\nfunction ", start + 20)]
     assert "total_return > 0" in body
     assert "total_return <= 0" in body
-    assert "sum(items)" in body
+    assert "sum(items)" not in body, (
+        "a summed column of overlapping positions is a return on capital the "
+        "book never had"
+    )
+    assert "items.length" in body, "the column reports how many, not how much"
 
 
 def test_a_name_row_says_what_it_returned_and_how_it_ended():
@@ -740,21 +773,46 @@ def test_the_curve_is_summed_not_compounded():
     assert "summed, not compounded" in html
 
 
-def test_an_empty_history_explains_what_open_calls_are():
-    """"23 are running now" said a number without saying what it counted."""
+def test_an_empty_history_explains_itself():
+    """An empty page must say WHY it is empty.
+
+    It used to say "No results yet ... the day the market takes it to its
+    target or its stop" -- two exits this engine has disarmed, on a page that
+    was not actually empty. Scoped to the running configuration it genuinely is
+    empty, and the honest statement is that nothing has closed UNDER THIS
+    CONFIGURATION, with the count of what was left out beside it.
+    """
     html = _html()
-    assert "No results yet" in html
-    assert "still open" in html
-    assert "target or a stop" in html
+    assert "The record opens here" in html
+    assert "closed under this configuration" in html
+    assert "superseded configuration" in html, \
+        "an empty page must say what it excluded, or it reads as broken"
     assert "the day it closes" in html
+    assert "target or a stop" not in html, \
+        "the target and the stop-as-exit are not how a position ends any more"
 
 
-def test_the_history_shows_the_whole_record_not_just_the_open_period():
-    """Scoping matters for a t-statistic. This page is a record of what the
-    calls did, and scoping it meant turning the daily run on emptied a
-    history of 136 closed trades."""
+def test_the_history_is_scoped_by_configuration_and_not_by_measurement_period():
+    """Two different scopings, and only one of them is right.
+
+    MEASUREMENT PERIOD, off by default. A period is an operator's clock; it can
+    be started for any reason, and scoping by it meant turning the daily run on
+    emptied a history of 136 closed trades that were perfectly valid.
+
+    CONFIGURATION, on. Trades decided by a superseded configuration describe a
+    different engine -- a different universe, a different sizer, a different
+    exit rule -- and averaging them with current ones reports two engines as
+    one. That is the failure `exit_model` and `epoch_id` already guard against
+    elsewhere, and this endpoint was exempt from it: its headline was the sum
+    of 97 baseline-v1 trades from an epoch recorded CLOSED VOID.
+    """
     src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
-    assert 'def performance_report(period: str = "all")' in src
+    assert 'def performance_report(period: str = "all")' in src, \
+        "the measurement period must still default to off"
+    assert 'r.get("config_version") or ""' in src, \
+        "the statistics must be scoped to the configuration that produced them"
+    assert '"excluded_closed"' in src, \
+        "and the page must be able to say how much it left out"
 
 
 def test_the_icons_are_drawn_not_typed():
@@ -943,10 +1001,17 @@ def test_open_calls_are_shown_not_just_counted():
     assert "entry_price" in body and "last_price" in body
     assert "unrealised" in body
     assert "sessions_held" in body
-    # And it must be reachable with nothing closed at all.
+    # And it must be reachable with nothing closed at all. Asserted on the
+    # RETURN EXPRESSION rather than on where the strings happen to sit in the
+    # source: the closed-trade copy is built into a variable above the return,
+    # so a source-position comparison reads the order backwards.
     view = html[html.index("function viewHistory"):]
     view = view[:view.index("\nfunction ", 20)]
-    assert view.index("openHTML") < view.index("No results yet")
+    ret = re.search(r"return chart \+ ([^;]+);", view)
+    assert ret, "viewHistory must end in one composed return"
+    order = ret.group(1)
+    assert order.index("openHTML(open)") < order.index("closed"), \
+        "the open marks must render above the closed record, not after it"
 
 
 def test_an_open_mark_is_never_presented_as_a_result():

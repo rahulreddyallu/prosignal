@@ -102,5 +102,29 @@ warm() {
     say "could not warm ${path} (harmless: it will resolve on first open)"
   fi
 }
-warm "/performance"
+# EVERY ENDPOINT THE SCREEN OPENS WITH, not just the slow one.
+#
+# The interface fetches /ready, /today and /performance on load, and the
+# History tab adds /history/names and /history. Warming two of the five left
+# the first visitor of the day paying for the other three -- and /today is the
+# one that rebuilds the whole view model, so the screen that was meant to be
+# ready before anyone looked at it still opened on a skeleton.
 warm "/ready"
+warm "/today"
+warm "/performance"
+warm "/history/names?limit=60"
+warm "/history?limit=30"
+
+# A last, cheap assertion that the screen the operator opens has something on
+# it. This job never checked its own output: an analysis exits 0 having
+# produced an empty slate, and the only way that was ever discovered was by
+# opening the page the next morning and finding it blank.
+TODAY_JSON=$(curl -fsS -m 300 \
+  ${PROSIGNAL_AUTH_TOKEN:+-H "x-api-key: ${PROSIGNAL_AUTH_TOKEN}"} \
+  "${API}/today" 2>/dev/null || true)
+case "$TODAY_JSON" in
+  "")            alert "could not read /today after the run -- the screen may be empty" ;;
+  *'"picks":[]'*) alert "the run put NO names on the screen -- check the funnel before acting on an empty shortlist" ;;
+  *'"picks"'*)   say "screen ready" ;;
+  *)             alert "/today returned no view -- the screen has nothing to show" ;;
+esac

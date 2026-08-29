@@ -30,31 +30,31 @@ def watches(n: int, start: int = 20) -> list:
 
 # ------------------------------------------------------- the ten cases
 def test_case_1_ten_buys_gives_the_top_five():
-    s = select_slate(buys(10), [])
+    s = select_slate(buys(10), [], slots=5)
     assert s.buy_count == 5 and s.watch_count == 0
     assert [p["ticker"] for p in s.picks] == ["BUY1", "BUY2", "BUY3", "BUY4", "BUY5"]
 
 
 def test_case_2_five_buys_gives_five_buys():
-    s = select_slate(buys(5), watches(10))
+    s = select_slate(buys(5), watches(10), slots=5)
     assert (s.buy_count, s.watch_count) == (5, 0)
 
 
 def test_case_3_four_buys_and_ten_watch_gives_four_plus_one():
-    s = select_slate(buys(4), watches(10))
+    s = select_slate(buys(4), watches(10), slots=5)
     assert (s.buy_count, s.watch_count) == (4, 1)
     assert s.picks[-1]["ticker"] == "WATCH20"
     assert s.picks[-1]["status"] == WATCH
 
 
 def test_case_4_two_buys_and_twenty_watch_gives_two_plus_three():
-    s = select_slate(buys(2), watches(20))
+    s = select_slate(buys(2), watches(20), slots=5)
     assert (s.buy_count, s.watch_count) == (2, 3)
     assert [p["status"] for p in s.picks] == [BUY, BUY, WATCH, WATCH, WATCH]
 
 
 def test_case_5_no_buys_gives_five_watch():
-    s = select_slate([], watches(20))
+    s = select_slate([], watches(20), slots=5)
     assert (s.buy_count, s.watch_count) == (0, 5)
     assert all(p["status"] == WATCH for p in s.picks)
 
@@ -92,7 +92,7 @@ def test_case_9_identical_ranks_break_deterministically():
 
 def test_case_10_a_name_in_both_lists_takes_one_slot_as_a_buy():
     """A name can reach the payload from more than one path. Two rows for one
-    ticker would spend two of five slots on the same position."""
+    ticker would spend two slots on the same position."""
     s = select_slate([card("DUAL", 1)], [card("DUAL", 1), card("OTHER", 2)])
     assert [p["ticker"] for p in s.picks] == ["DUAL", "OTHER"]
     assert s.picks[0]["status"] == BUY
@@ -121,13 +121,13 @@ def test_a_name_without_a_model_rank_does_not_sort_to_the_top():
 
 
 def test_positions_are_numbered_from_one_across_both_statuses():
-    s = select_slate(buys(2), watches(10))
+    s = select_slate(buys(2), watches(10), slots=5)
     assert [p["slate_position"] for p in s.picks] == [1, 2, 3, 4, 5]
 
 
 def test_the_full_ranked_lists_survive_for_the_deeper_views():
     """The slate is what the dashboard leads with, not all the engine found."""
-    s = select_slate(buys(8), watches(44))
+    s = select_slate(buys(8), watches(44), slots=5)
     assert len(s.picks) == 5
     assert len(s.ranked_buys) == 8 and len(s.ranked_watch) == 44
 
@@ -143,5 +143,26 @@ def test_slots_cannot_be_negative():
         select_slate(buys(3), [], slots=-1)
 
 
-def test_the_default_slate_is_five():
-    assert SLOTS == 5
+def test_the_slate_is_the_book():
+    """The screen shows the book, so its size is the book's size.
+
+    Pinned against the live configuration rather than against a literal. The
+    constant read 5 while `entry_rank` and `max_open_positions` both read 6,
+    so every screen and every recorded slate held five of the six positions the
+    engine opened -- and the old assertion, `SLOTS == 5`, was green throughout
+    because it pinned the stale number instead of the relationship.
+    """
+    from prosignal.config.loader import load_config
+    from prosignal.stages._cfg import iv
+
+    config = load_config()
+    entry_rank = iv(config.params.stage6_entry.admission.entry_rank)
+    positions = iv(config.params.capital.max_open_positions)
+
+    assert SLOTS == entry_rank, (
+        f"the slate shows {SLOTS} names but the engine admits the top "
+        f"{entry_rank}"
+    )
+    assert SLOTS == positions, (
+        f"the slate shows {SLOTS} names but the book holds {positions}"
+    )

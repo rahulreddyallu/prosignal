@@ -28,6 +28,14 @@ CUR = "2026-08-29-cafebabe"
 OLD = "2026-01-02-deadbeef"
 
 
+class _FakeEpoch:
+    """The two fields the stamp reads: the id, and the config it was opened on."""
+
+    def __init__(self, epoch_id: str, config_version: str):
+        self.epoch_id = epoch_id
+        self.identity = {"config_version": config_version}
+
+
 def _row(net, epoch, model=EXIT_MODEL, **kw):
     row = {"net_return": net, "sessions_held": 5, "exit_reason": "target",
            "exit_model": model, "epoch_id": epoch}
@@ -155,7 +163,10 @@ def test_a_row_written_now_carries_the_open_epoch(live_cfg, tmp_path, monkeypatc
 
     from .test_outcomes import _Store, _bars
 
-    monkeypatch.setattr(out_mod, "_active_epoch_id", lambda *a, **k: CUR)
+    # The open epoch is now consulted as an OBJECT, because the stamp depends
+    # on its identity as well as its id -- see the companion test below.
+    monkeypatch.setattr(out_mod, "_active_epoch",
+                        lambda *a, **k: _FakeEpoch(CUR, "c"))
 
     n = int(live_cfg.params.stage7_risk.holding_period
             .max_holding_sessions.value) + 5
@@ -179,6 +190,54 @@ def test_a_row_written_now_carries_the_open_epoch(live_cfg, tmp_path, monkeypatc
         "pools again"
     )
     assert out_mod.load_outcomes(out, epoch=PRE_EPOCH) == []
+
+
+def test_a_row_decided_by_another_configuration_is_not_stamped_current(
+        live_cfg, tmp_path, monkeypatch):
+    """The stamp names which engine DECIDED the trade, not which was open when
+    it was resolved.
+
+    Resolution runs on read and re-resolves the whole file, so stamping
+    whatever epoch happens to be open labelled every historical trade with
+    today's. Measured on the real store: 128 outcomes carried the open
+    baseline-v2 epoch id while every one recorded `config_version:
+    baseline-v1@...`, from an epoch recorded CLOSED VOID. Every page that
+    partitions on the stamp -- which is the entire point of the stamp -- was
+    therefore served void-epoch trades as the live record.
+
+    Same fixture as the test above, one difference: the open epoch's
+    configuration is not the one the ledger row was decided under.
+    """
+    import prosignal.outcomes as out_mod
+
+    from .test_outcomes import _Store, _bars
+
+    monkeypatch.setattr(out_mod, "_active_epoch",
+                        lambda *a, **k: _FakeEpoch(CUR, "a-different-config"))
+
+    n = int(live_cfg.params.stage7_risk.holding_period
+            .max_holding_sessions.value) + 5
+    f = _bars("AAA", "2024-01-01", n, open_=100.0, high=120.0, low=80.0,
+              close=100.0)
+    led, out = tmp_path / "ledger", tmp_path / "outcomes.jsonl"
+    led.mkdir()
+    (led / "runs-2024.jsonl").write_text(json.dumps({
+        "run_id": "r1", "date": "2024-01-01", "config_version": "c",
+        "engine_version": "e", "signals_generated": ["AAA"],
+        "stocks_scored": [{"ticker": "AAA", "last_close": 100.0, "stop": 90.0,
+                           "target_1": 110.0, "target_2": 115.0,
+                           "composite_score": 0.9}],
+    }) + "\n")
+    out_mod.resolve_pending(_Store(f, [d.date() for d in f["date"]]), led, out,
+                            live_cfg, as_of=f["date"].iloc[-1].date())
+
+    rows = out_mod.load_outcomes(out, epoch="*")
+    assert rows, "the fixture must resolve something or this proves nothing"
+    assert all(r["epoch_id"] == PRE_EPOCH for r in rows), (
+        "a trade decided under a different configuration was stamped with the "
+        "open epoch, so the live record now contains another engine's trades"
+    )
+    assert out_mod.load_outcomes(out, epoch=CUR) == []
 
 
 def test_a_missing_epoch_ledger_does_not_stop_resolution(tmp_path):

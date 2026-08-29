@@ -49,7 +49,12 @@ def test_stop_wins_when_a_bar_touches_both(live_cfg, tmp_path):
                            "target_2": 115.0, "composite_score": 0.9}],
     }) + "\n")
     O.resolve_pending(store, led, out, live_cfg, as_of=f["date"].iloc[-1].date())
-    rows = O.load_outcomes(out)
+    # epoch="*": what this test is about is the EXIT RULE, and the fixture's
+    # config_version ("c") is deliberately not the open epoch's, so the default
+    # per-epoch filter would hide the row and the assertion would pass
+    # vacuously on an empty list. Reading every epoch keeps the subject the
+    # subject.
+    rows = O.load_outcomes(out, epoch="*")
     assert len(rows) == 1
     assert rows[0]["exit_reason"] == "stop"
     assert rows[0]["gross_return"] < 0
@@ -87,7 +92,9 @@ def test_resolution_is_idempotent(live_cfg, tmp_path):
     b = O.resolve_pending(store, led, out, live_cfg, as_of=f["date"].iloc[-1].date())
     assert a["resolved"] == 1
     assert b["resolved"] == 0
-    assert len(O.load_outcomes(out)) == 1
+    # epoch="*" for the same reason as above: idempotence is about writing one
+    # row, not about which experiment that row belongs to.
+    assert len(O.load_outcomes(out, epoch="*")) == 1
 
 
 def test_summarise_reports_sample_size_with_every_ratio():

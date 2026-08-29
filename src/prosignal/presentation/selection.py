@@ -44,7 +44,19 @@ from typing import Any, Dict, List, Optional, Sequence
 
 #: The dashboard leads with this many names. Not a maximum to be filled at any
 #: cost -- if the engine produced fewer real candidates, the slate is shorter.
-SLOTS = 5
+#:
+#: THIS IS THE BOOK, and it is a fallback rather than the authority. The run
+#: passes `slots` from `stage6_entry.admission.entry_rank`, which the loader
+#: pins to `capital.max_open_positions`; this constant only applies to a caller
+#: that has no config in hand.
+#:
+#: It read 5 while the engine opened 6, so the screen omitted one position of
+#: every book it described -- and because the slate is RECORDED, the sixth name
+#: was also missing from the ledger, the history page and the outcome record.
+#: The card's own thesis text said "inside the top 6", which is how the
+#: disagreement stayed invisible: the prose came from the config and the list
+#: came from here.
+SLOTS = 6
 
 BUY = "BUY"
 WATCH = "WATCH"
