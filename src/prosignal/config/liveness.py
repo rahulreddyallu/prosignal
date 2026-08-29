@@ -276,9 +276,6 @@ RESERVED: Dict[str, str] = {
 
     # -- research protocol: describes how research is conducted, not what the
     # -- engine does. There is no harness in the package that consumes them.
-    "sacred": "states that the holdout is used once. Enforced by discipline, "
-              "not by the loader -- nothing can technically prevent a second look",
-
     # -- housekeeping that was specified and never built ----------------------
     "retain_runs": "ledger pruning is not implemented; runs are kept forever",
     "retain_sessions": "store pruning by session count is not implemented",

@@ -496,7 +496,13 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             led = Path(cfg.paths.ledger)
             path = led / "outcomes.jsonl"
             _out.resolve_pending(store, led, path, cfg)
-            rows = _apply_clear_mark(_out.load_outcomes(path))
+            # Every epoch, deliberately. This feeds the per-name history and
+            # the open-position list, which are a record of what the engine
+            # DID -- serving only the current epoch would erase a name's whole
+            # past the moment an epoch opens. Each row carries `epoch_id`, so
+            # the reader can tell which engine made the call; what must not be
+            # pooled is the STATISTICS, and `/outcomes` partitions those.
+            rows = _apply_clear_mark(_out.load_outcomes(path, epoch="*"))
             horizon = int(iv(cfg.params.stage4_core_score.model_horizon_sessions))
             op = _perf.open_positions(_ledger_after_clear(), rows,
                                       store, max_hold=horizon)
@@ -951,6 +957,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         import subprocess
 
         from .validation import forward
+        from .validation.readiness import RestartRefused
 
         led = Path(cfg.paths.ledger)
         existing = forward.load_registration(led)
@@ -968,9 +975,22 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                                     timeout=10).stdout.strip() or "unknown"
         except Exception:
             commit = "unknown"
-        reg = forward.register(led, config_version=str(cfg.version),
-                               engine_version=ENGINE_VERSION,
-                               git_commit=commit, overwrite=True)
+        try:
+            reg = forward.register(led, config_version=str(cfg.version),
+                                   engine_version=ENGINE_VERSION,
+                                   git_commit=commit, overwrite=True, cfg=cfg)
+        except RestartRefused as exc:
+            # 409, not 400: the request is well-formed and the engine is in
+            # the wrong state for it. A button that opened a window onto a
+            # half-corrected engine would waste eighteen months before anyone
+            # found out.
+            raise HTTPException(409, {
+                "message": "The forward test cannot be restarted yet.",
+                "reasons": exc.reasons,
+                "note": ("Each reason is a precondition. The window this would "
+                         "replace is void because the engine changed under it; "
+                         "opening a new one now repeats that."),
+            })
         log.info("forward test registered", extra={"config": reg.config_version})
         return {"registered": True, "started_on": reg.started_on,
                 "config_version": reg.config_version,
@@ -1002,22 +1022,56 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
         Resolution runs on read so the record catches up without a scheduler.
         Only signals whose full holding window has elapsed are scored.
+
+        PARTITIONED BY RESEARCH EPOCH. `summary` and `calibration` describe the
+        CURRENT epoch only. The trades recorded before the population and
+        liquidity corrections were produced by a different engine on a
+        different universe, so pooling them into one win rate reports two
+        strategies as one -- the failure `exit_model` already guards against
+        for the exit rule, extended to everything else that moves.
+
+        They are still served, in `by_epoch`, labelled and retired. Dropping
+        them would leave a page reading "no trades yet" when the truth is
+        "the trades we have describe a different engine", and `pooled` shows
+        exactly what the un-partitioned answer would have claimed.
         """
         from . import outcomes as _out
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
         led = Path(cfg.paths.ledger)
         path = led / "outcomes.jsonl"
         counts = _out.resolve_pending(store, led, path, cfg)
-        rows = _out.load_outcomes(path)
+        every = _out.load_outcomes(path, epoch="*")
+        part = _out.summarise_by_epoch(every, ledger_root=led)
+        current = part["current_epoch"]
+        mine = [r for r in every
+                if (r.get("epoch_id") or _out.PRE_EPOCH) == current]
+        note = (
+            "composite_score is a cross-sectional rank, not a probability. "
+            "The calibration table tests only whether a higher rank wins "
+            "more often."
+        )
+        if part["spans_multiple_epochs"]:
+            note += (
+                f" These figures cover research epoch {current} only; "
+                f"{len(every) - len(mine)} earlier trades were decided under a "
+                f"superseded epoch and are listed separately, not averaged in."
+            )
+        if part["current_epoch_has_no_record"] and every:
+            note += (
+                " The current epoch has no resolved trades yet. That is an "
+                "empty forward record, not a bad one -- the history below "
+                "belongs to the engine this one replaced."
+            )
         return {
             "resolution": counts,
-            "summary": _out.summarise(rows),
-            "calibration": _out.calibration(rows),
-            "note": (
-                "composite_score is a cross-sectional rank, not a probability. "
-                "The calibration table tests only whether a higher rank wins "
-                "more often."
-            ),
+            "epoch": current,
+            "summary": _out.summarise(mine),
+            "calibration": _out.calibration(mine),
+            "by_epoch": part["epochs"],
+            "pooled": part["pooled"],
+            "pooling_overstates_expectancy_by":
+                part["pooling_overstates_expectancy_by"],
+            "note": note,
         }
 
     # Resolution walks the whole ledger and reads prices for every name it

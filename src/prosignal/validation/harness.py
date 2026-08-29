@@ -63,8 +63,15 @@ class CpcvResult:
     n_paths: int
     #: Rank IC per test date, pooled across every split.
     ic: List[float] = field(default_factory=list)
-    #: Top-decile excess return per test date, pooled.
+    #: Top-decile excess return per test date, pooled. ONE ENTRY PER (SPLIT,
+    #: DATE) PAIR: with N=10, k=2 every date is tested in nine splits, so a
+    #: 70-date panel produces ~630 entries describing 70 observations. Fine for
+    #: a mean, fatal for anything that divides by the count. `deflated()` is
+    #: the one caller that does, and it reduces first.
     excess: List[float] = field(default_factory=list)
+    #: The date each entry in `excess` belongs to, in the same order. Without
+    #: it the duplication above is not recoverable downstream.
+    excess_dates: List[object] = field(default_factory=list)
     #: One Sharpe per woven path -- the distribution walk-forward cannot show.
     path_sharpes: List[float] = field(default_factory=list)
     path_ics: List[float] = field(default_factory=list)
@@ -136,6 +143,16 @@ class CpcvResult:
         scaling with sqrt(n) read off the pooled list is inflated threefold
         before the label overlap is even counted.
         """
+        if not self.excess_by_date and self.excess_dates and len(
+                self.excess_dates) == len(self.excess):
+            # THE SAME REDUCTION FROM THE OTHER FIELD, not a fallback to the
+            # pooled vector. A result built with `excess_dates` rather than
+            # `excess_by_date` carries the identical information; refusing it
+            # would push a caller toward the pooled list, which is the defect.
+            by: Dict[object, List[float]] = {}
+            for d, x in zip(self.excess_dates, self.excess):
+                by.setdefault(d, []).append(float(x))
+            return [float(np.mean(by[d])) for d in sorted(by, key=str)]
         if not self.excess_by_date:
             # NOT A SILENT FALLBACK. Returning the pooled vector here restores
             # the exact defect this method exists to remove -- on a 540-entry,
@@ -181,26 +198,97 @@ class CpcvResult:
         vif = analytic_vif(self.horizon_sessions, self.step_sessions, n)
         return float(n / vif) if vif > 0 else float(n)
 
-    def deflated(self, n_trials: int):
+    def independent_excess(self, horizon_sessions: int,
+                           step_sessions: int) -> List[float]:
+        """`excess`, reduced to observations that do not overlap AT ALL.
+
+        Two reductions, both arithmetic:
+
+        1. A date tested in nine splits appears nine times; averaging the
+           splits' scores for a date leaves one score per date.
+        2. Panel dates are `step_sessions` apart and a label spans
+           `horizon_sessions`, so consecutive dates share most of their outcome
+           window. Taking every `ceil(horizon/step)`-th date leaves a series
+           with no shared bars.
+
+        On this engine's own panel that is 612 -> 68 -> 23.
+
+        This is the STRICT view. `excess_per_date` plus
+        `effective_observations` is the one `deflated` uses: it keeps every
+        date in the estimate and deflates only the COUNT by the analytic
+        variance inflation, which is the same correction applied without
+        discarding two thirds of the sample. Both are exposed because they
+        answer different questions and disagreeing with each other would be
+        informative.
+        """
+        if not self.excess:
+            return []
+        if len(self.excess_dates) != len(self.excess):
+            raise ValueError(
+                "excess and excess_dates have drifted apart "
+                f"({len(self.excess)} vs {len(self.excess_dates)}); the "
+                "duplication cannot be reduced and a DSR computed from the "
+                "pooled vector would silently pass"
+            )
+        by_date: Dict[object, List[float]] = {}
+        for d, x in zip(self.excess_dates, self.excess):
+            by_date.setdefault(d, []).append(float(x))
+        ordered = sorted(by_date, key=str)
+        stride = max(int(np.ceil(horizon_sessions / max(step_sessions, 1))), 1)
+        return [float(np.mean(by_date[d])) for d in ordered[::stride]]
+
+    def deflated(self, n_trials: int, *, horizon_sessions: int,
+                 step_sessions: int,
+                 trial_sharpes: Optional[Sequence[float]] = None):
         """DSR on the per-date excess, charged for the trial count, the CPCV
         duplication and the label overlap.
 
-        Three things this call gets right that the previous one did not, all of
+        `horizon_sessions` and `step_sessions` are REQUIRED rather than
+        defaulted. They are what makes the overlap deduction correct, and a
+        default would let a caller recover the old pooled answer by omission.
+
+        `trial_sharpes` must be the scores of the TRIALS THAT WERE SEARCHED
+        OVER, from the registry. It is deliberately NOT defaulted to
+        `path_sharpes`: the woven paths are resamples of the ONE selected
+        configuration, so their variance measures sampling noise in this
+        strategy rather than dispersion across the alternatives it was chosen
+        from. It is the smaller number and using it shrinks the
+        multiple-testing bar -- measured here, 0.0083 against 0.0455, which
+        moves the answer from FAIL 0.38 to PASS 0.91.
+
+        Three things this call gets right that the original did not, all of
         which pushed the same way:
 
         * it runs on DISTINCT dates rather than (split, date) pairs;
         * it declares how many of those dates are independent, so the PSR's
           sqrt(n-1) term stops reading nine overlapping copies as evidence;
-        * it hands over the woven path Sharpes, which ARE Bailey & Lopez de
-          Prado's Var[SR] -- the cross-sectional dispersion across trials --
-          instead of falling through to a null approximation.
+        * it does not hand the benchmark a variance measured on one strategy.
 
         The previous version returned 1.000 on this data and still passed at
         100,000 trials.
         """
+        if int(horizon_sessions) <= 0 or int(step_sessions) <= 0:
+            raise ValueError(
+                f"deflated() needs the sampling scheme: horizon_sessions="
+                f"{horizon_sessions}, step_sessions={step_sessions}. Without "
+                f"both, the overlap inflation of an h-session label sampled "
+                f"every s cannot be derived and overlapping observations are "
+                f"reported as independent ones."
+            )
+        self.horizon_sessions = int(horizon_sessions)
+        self.step_sessions = int(step_sessions)
+        # EVERY DISTINCT DATE in the estimate, the COUNT deflated by the
+        # analytic overlap inflation. `independent_excess` -- the strict view,
+        # which sub-samples every ceil(h/s)-th date -- is exposed alongside and
+        # lands on the same effective count (23.6 against 24 on this geometry),
+        # but discards two thirds of the sample from the mean for nothing. The
+        # duplication that mattered is the (split, date) one, and
+        # `excess_per_date` removes all of it.
         return deflated_sharpe_ratio(
             self.excess_per_date(), n_trials=n_trials,
-            trial_sharpes=(self.path_sharpes if len(self.path_sharpes) > 1 else None),
+            trial_sharpes=(list(trial_sharpes)
+                           if trial_sharpes is not None and len(trial_sharpes) > 1
+                           else None),
             effective_n=self.effective_observations(),
         )
 
@@ -344,6 +432,7 @@ def run_cpcv(
                 # Keyed by date as well as pooled, so the duplication can be
                 # collapsed before anything is inferred from it.
                 result.excess_by_date.setdefault(d, []).append(ex)
+                result.excess_dates.append(d)
                 # Weave: the k-th time a date is tested it belongs to path k.
                 pid = seen.get(hash(d), 0)
                 seen[hash(d)] = pid + 1

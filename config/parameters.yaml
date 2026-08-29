@@ -24,6 +24,16 @@
 #    UNVALIDATED  A hypothesis. Never been through CPCV on point-in-time India
 #                 data. The engine will happily use it AND will tell the user,
 #                 on every single output, that it is unvalidated.
+#    MEASURED     There IS a recorded experiment behind this number and it has
+#                 NOT cleared the promotion bar. The note beside the value names
+#                 the experiment. Still a research hypothesis for every purpose
+#                 the engine enforces -- the unvalidated warning still fires and
+#                 the search budget still counts it -- but a reader knows that
+#                 changing it means arguing with evidence, not with a
+#                 placeholder. Added because the two-state ladder forced a
+#                 choice between calling a 4,877-configuration result
+#                 "unvalidated", which drains the warning of meaning, and
+#                 calling it "validated", which it is not.
 #    VALIDATED    Promoted after a real CPCV/PBO/DSR run. You must also fill in
 #                 `validated_by` (ledger trial id) and `validated_on` (date).
 #                 The loader REFUSES to accept VALIDATED without both.
@@ -48,12 +58,24 @@ meta:
   # of every `value` in this file to produce the config_version stamped onto
   # every research-ledger row. Change the label when you make a deliberate
   # regime change to your research; the hash changes automatically regardless.
-  config_label: "baseline-v1"
+  config_label: "baseline-v2"
   owner: "rahulreddyallu"
   description: >-
-    Baseline India solo-quant decision-support configuration. Every research
-    parameter is UNVALIDATED until a CPCV run on point-in-time NSE data
-    promotes it. Nothing in this file has been backtested yet.
+    India solo-quant decision-support configuration, epoch v2. Supersedes
+    baseline-v1@127d8a314ec49aa2, which is recorded VOID in the epoch ledger:
+    its forward test was registered against a configuration the engine had
+    already left, and three repairs its readiness dossier reported as complete
+    were absent from the code.
+
+    v2 differs from v1 in what it TRADES by exactly one parameter,
+    universe.train_on_admissible_only, which moves false -> true. That
+    restricts the training panel to the population the book can actually open
+    and therefore moves the fitted coefficients. Everything else that changed
+    between the two is a correction to how the engine MEASURES itself, which
+    leaves what it trades untouched; docs/REAUDIT.md separates the two.
+
+    Every research parameter is UNVALIDATED until a CPCV run on point-in-time
+    NSE data promotes it.
 
 
 # -----------------------------------------------------------------------------
@@ -187,15 +209,21 @@ capital:
     note: "Total deployable equity book. Set this to your real number."
 
   max_open_positions:
-    value: 8
-    status: OPERATIONAL
+    value: 6
+    status: MEASURED
     optimization_tier: A_SEARCH
     search_points: 3
     search_range: [3, 30]
     note: >-
-      Experiment #7 (top-5 vs top-15 vs top-30). Genuinely changes the
-      conviction/diversification trade-off, so it earns a place in the search
-      grid. 8 is a placeholder, not a finding.
+      No longer a placeholder. Measured at trade level across book sizes 5, 6,
+      8, 10, 12 and 15 on the surviving signal: 6 and 8 are the two live
+      candidates and 12/15 are worse on every metric. Six is chosen for the
+      reasons recorded at stage6_entry.admission.entry_rank -- it is the only
+      configuration on the surface with positive excess in all six calendar
+      years -- and it must equal that entry_rank, which the loader enforces.
+      Equal weight across the six; conviction weighting toward the top of the
+      ranking was tested (linear, squared and top-3 tilts) and its advantage
+      did not survive changing the cadence, so it is not shipped.
 
   # Value of a single new position, in rupees. If null, computed as
   # total_capital_inr / max_open_positions.
@@ -322,6 +350,23 @@ universe:
     note: >-
       Measured IC is flat between 500 and the full ADTV set; the cap exists to
       bound the panel, not because 750 is optimal.
+
+  # THE POPULATION THE MODEL IS FITTED ON MUST BE THE ONE THE BOOK CAN OPEN.
+  train_on_admissible_only:
+    value: true
+    status: UNVALIDATED
+    note: >-
+      Restricts the training panel to names that satisfy
+      `exits.tradeable_at_entry` on the decision date -- the same predicate
+      stage 3 and stage 6 apply live, and the one `resolve_exits` applies to the
+      label. It was unreachable while `labels.triple_barrier` is false, because
+      that routes `build_panel` past `resolve_exits` entirely, so the model
+      ranked a population about a fifth larger than the engine will trade and
+      the simulator found out at fill time: 7.29 of 8 selected slots filled.
+
+      Turning it on moves the traded coefficients. That is the expected
+      consequence of correcting the training set, not a reason to leave it off.
+      It opens a new research epoch; see docs/REAUDIT.md and the epoch ledger.
 
   pre_snapshot_policy:
     value: "flag"
@@ -846,6 +891,85 @@ stage3_eligibility:
 # 9. STAGE 4  --  CORE STOCK SCORE
 # -----------------------------------------------------------------------------
 stage4_core_score:
+  # ==========================================================================
+  # WHAT ORDERS THE BOOK.
+  #
+  # This is the largest change in the engine's history and it is here rather
+  # than buried in code, because it is the one decision every other number
+  # depends on.
+  #
+  # THE MEASUREMENT. 4,877 trade-level configurations were simulated on a
+  # rebuilt point-in-time panel: 2,212 sessions, 1,517 ever-eligible symbols,
+  # entries taken only on cron dates, exits checked every session, scored
+  # against an INVESTABLE equal-weight benchmark of the same eligible universe
+  # rather than against zero. Six candidate signals, four cost scenarios, and
+  # an early/recent split at 2024-01-24.
+  #
+  # The fitted composite -- the thing that has been ordering this book -- lost
+  # to that benchmark in EVERY ONE of its 144 configurations. Its best was
+  # -5.2% annualised alpha and its best excess Sharpe was -0.50. Its own
+  # 6-1 momentum input, ranked sector-neutrally and traded alone, returned
+  # +19.5% alpha at excess Sharpe +1.25 on the configuration below.
+  #
+  #   signal                        configs   median alpha   share positive
+  #   mom_6_1_r  (sector-neutral)       960        +7.0%          98.1%
+  #   score_ew   (1/N over families)    960        +3.0%          84.9%
+  #   composite refitted on RETURN      960        -4.7%           6.2%
+  #   fitted composite as shipped       144           --           0.0%
+  #
+  # WHY IT FAILS, MECHANICALLY. The composite is fitted against the
+  # CROSS-SECTIONAL RANK of the forward outcome. Rank is a target that rewards
+  # ordering the middle of the distribution, and the cross-section is strongly
+  # right-skewed -- +1.87 at 63 sessions, +4.85 at 1. A book of eight names out
+  # of seven hundred lives entirely in the top 1%, which is exactly the region
+  # a rank target is indifferent to. Measured at H=63 the composite's rank IC is
+  # +0.0338 while its TOP-DECILE excess is -0.35% (t -0.28): it orders the
+  # universe adequately on average and mis-orders the only part of it that ever
+  # gets bought.
+  #
+  # THE THREE REPAIRS THAT WERE TRIED AND FAILED, recorded so they are not
+  # tried again:
+  #
+  #   1. Refit on the RETURN instead of the rank. Rank IC improves
+  #      (+0.0338 -> +0.0403) and the top decile does not (+0.18%, t +0.19).
+  #      At trade level it is WORSE than the rank target: positive alpha in
+  #      6.2% of 960 configurations against the rank version's own failure.
+  #      Changing the target does not fix a fitting problem.
+  #   2. Keep the composite as an EXCLUSION filter -- rank on momentum, but
+  #      drop the bottom of the composite first. Every level tested cost
+  #      return: alpha 10.8% (no filter) -> 7.5% (drop 20%) -> 1.6% (drop 10%)
+  #      -> 1.8% (drop 33%). It carries no information in the left tail either.
+  #   3. Trade the engine's own `mom` FAMILY -- the average of mom_6_1_r,
+  #      prox_52w_r and resid_mom_r. It fails: median alpha -1.8% at stressed
+  #      cost, positive in 33% of configurations, against mom_6_1_r's +4.4%
+  #      and 86%. The family averages one good factor with one harmful one --
+  #      prox_52w alone is negative in 100% of its configurations -- and the
+  #      average is worse than the good member.
+  #
+  # SO: the book is ordered by ONE measured column. The composite is still
+  # fitted, still recorded, still shown on the card and still monitored by
+  # `research decay` -- it is the diagnostic it has always been good at, and
+  # keeping it live is what will let a future window overturn this decision.
+  # It just does not choose what to buy.
+  #
+  # WHAT WOULD REVERSE THIS. `research estimator` showing the composite's
+  # top-decile excess positive with t >= 2 on a window that does not overlap
+  # the one above. That is the same bar this change had to clear.
+  ranking:
+    #: measured_factor -- rank on `column`, which is a sector-neutral rank
+    #: already, and use the fitted composite for attribution only.
+    #: fitted_composite -- the previous behaviour, kept so the comparison can
+    #: be re-run rather than argued about.
+    #: family_average -- rank on a `_f` family column.
+    source: "measured_factor"
+    column: "mom_6_1_r"
+    note: >-
+      Jegadeesh & Titman (1993) construction, skipping the most recent 21
+      sessions to avoid short-term reversal (Jegadeesh 1990). Sector-neutral
+      within any sector holding at least 12 eligible names, universe-wide
+      otherwise. This is the same column the composite already computes; only
+      its weight changes, from fitted to one.
+
   # DEFAULT IS EQUAL WEIGHT. The research program predicts equal-weighting wins
   # or ties against rank-IC weighting out-of-sample (Experiment #4), because
   # in-sample IC gains are usually overfitting. Do not change this to
@@ -1647,22 +1771,77 @@ stage6_entry:
   # is transfer coefficient -- price structure is uncorrelated with the model's
   # ranking, so the book held was not the book the model ranked.
   admission:
+    # HOW OFTEN THE BOOK MAY OPEN A POSITION.
+    #
+    # The engine runs every session and must keep running every session: the
+    # disaster floor is checked on every bar, the open book is re-evaluated,
+    # and outcomes are resolved. What changes here is that NEW ENTRIES are
+    # opened only on a cadence date. A daily entry clock and a 21-session entry
+    # clock are two different strategies, and only one of them was measured.
+    #
+    # Measured across 378 (cadence, book size, hold, band, floor) cells, six
+    # calendar years each. Every cell in the surface has positive mean excess
+    # over 2021-2026, so this is a choice within a working region rather than a
+    # search for one; what separates the cadences is how the region behaves in
+    # its worst year:
+    #
+    #   stem (cad/K/hold/band)   median yr excess   median WORST year   6/6 positive
+    #   21 / 6 / 63 / 3.0             +17.8%             +6.6%             100%
+    #   10 / 8 / 126 / 2.0            +12.7%             +1.7%              83%
+    #   10 / 8 / 84 / 2.0             +11.7%             +2.2%              67%
+    #   21 / 8 / 84 / 2.0             +17.4%             -0.8%              33%
+    #
+    # The 21-session stem is the only one whose entire floor ladder -- every
+    # level from 6 to 12 ATR -- is positive in all six years. That is the
+    # robustness claim being bought here, and it is bought with turnover: 34
+    # trades a year against 57 at cadence 10.
+    #
+    # The anchor makes the schedule REPRODUCIBLE. Cadence dates are counted in
+    # SESSIONS from the anchor against the exchange calendar, not in calendar
+    # days, so a holiday shifts nothing and two machines asked the same
+    # question give the same answer.
+    entry_cadence_sessions:
+      value: 21
+      status: MEASURED
+      search_range: [1, 63]
+      note: >-
+        Sessions between entry opportunities. 1 restores the previous daily
+        behaviour. Exits, the disaster floor and outcome resolution run every
+        session regardless.
+    entry_cadence_anchor:
+      value: "2026-09-01"
+      status: OPERATIONAL
+      note: >-
+        The session on or after this date is cadence date zero. Change it only
+        to re-phase the schedule deliberately; changing it silently moves every
+        entry date in the recorded history relative to the live one.
+
     entry_rank:
-      value: 8
-      status: UNVALIDATED
+      value: 6
+      status: MEASURED
       search_range: [3, 30]
       note: >-
         Matches capital.max_open_positions; the loader enforces it. A name
-        outside this is not bought.
+        outside this is not bought. Six rather than eight: at cadence 21 with
+        a 63-session backstop and a 3x band, six names measured p_win 0.578
+        against eight's 0.561, mean excess +3.7% against +4.4% but positive in
+        all six calendar years against three of six, and worst-year excess
+        +6.4% against +0.04%. The concentration costs 0.14 of excess Sharpe
+        (1.11 against 1.25) and five points of relative drawdown (-22.3%
+        against -17.4%); it buys the only stem on the surface that never had a
+        losing year.
     exit_rank:
-      value: 16
-      status: UNVALIDATED
+      value: 18
+      status: MEASURED
       search_range: [4, 60]
       note: >-
-        Twice entry_rank, the index-construction convention. Measured across
-        entry 5/8/10/12 and exit at 2x and 3x, holdout Sharpe ran 1.40-1.58
-        against +0.46 for the trigger -- the result does not turn on the exact
-        width, which is why a convention was used rather than a search.
+        THREE times entry_rank, not the two-times index convention that shipped.
+        Measured on the same surface: at cadence 21 with six names and a
+        63-session backstop, the 3x band returned +20.0% alpha against +17.4%
+        at 2x, with p_win 0.578 against 0.569 and a worst year of +6.4% against
+        -0.9%. The mechanism is turnover -- a wider band lets a name that
+        wobbles out of the top six stay in the book instead of being sold and
+        re-bought -- and it is the same direction the cost model predicts.
 
     # A name already below its own thesis-invalidation level is not an entry.
     # Stage 7 lists invalidation as exit condition #1, so opening there issues a
@@ -1779,68 +1958,131 @@ stage7_risk:
       status: STRUCTURAL
 
   stop_loss:
-    # Kaminski & Lo (2014) establish WHEN stops help (positive serial
-    # correlation -- satisfied by a momentum-anchored book). They do NOT
-    # establish a multiplier. Anyone quoting "2x ATR is optimal" is quoting a
-    # blog, not a journal.
+    # THE STOP IS NOW A DISASTER FLOOR, NOT A TRADING RULE.
+    #
+    # The previous note recorded the monotone finding -- every tightening of the
+    # stop costs return -- and then declined to act on it, on the ground that
+    # the stop is a capital-preservation choice belonging to the operator. That
+    # was the right instinct and the wrong conclusion, because the grid it rested
+    # on stopped at 5 ATR. Walked further out, the cost does not merely shrink;
+    # it changes sign.
+    #
+    # THE PAIRED TEST. 54 configurations of (cadence, book size, hold, band),
+    # each run with and without a floor at each level, so the comparison holds
+    # everything else fixed:
+    #
+    #   floor    mean alpha vs NO floor    better in    worst trade improves by
+    #   3 ATR             +0.5 pt           n/a                +0.0 pt
+    #   6 ATR             -0.2 pt           25 of 54          +24.3 pt
+    #   7 ATR             +1.0 pt           37 of 54          +24.3 pt
+    #   8 ATR             +2.0 pt           52 of 54          +21.5 pt
+    #   9 ATR             +1.4 pt           51 of 54          +21.6 pt
+    #  10 ATR             +1.0 pt           46 of 54          +18.6 pt
+    #  12 ATR             +0.2 pt           35 of 54           +9.6 pt
+    #
+    # 52 of 54 is not a p-value -- the configurations share their trades and are
+    # nowhere near independent -- but the ridge is smooth across neighbouring
+    # levels and dies away on both sides, which is what a real effect looks like
+    # and what a lucky cell does not.
+    #
+    # WHY IT WORKS AT ALL, given that every tighter stop hurt. A momentum book's
+    # left tail is a name in genuine collapse, and holding one of those to the
+    # rank-band exit -- up to 21 sessions away -- is expensive. A floor eight
+    # ATRs out never touches an ordinary drawdown; on the shipped configuration
+    # it fired 9 times in 258 trades, every one of them a loss averaging -28%.
+    # It is insurance that is cheap because it almost never pays out.
     atr_multiple:
-      value: 2.5
-      status: UNVALIDATED
+      value: 8.0
+      status: MEASURED
       optimization_tier: A_SEARCH
       search_points: 4
-      search_range: [1.5, 3.5]
+      search_range: [3.0, 12.0]
       note: >-
-        Explicitly a free parameter. Kaminski & Lo (2014) establish WHEN stops
-        help (positive serial correlation, which a momentum book satisfies) but
-        NOT a multiplier. The practitioner "2x ATR" figure traces to blogs, not
-        journals, so this is searched rather than assumed.
-
-        WITHDRAWN CLAIM. This parameter was previously justified as "corrected
-        at portfolio level, 2.5x is near-optimal and was left unchanged". That
-        comparison ran a grid of stop multiples against EACH OTHER. Every arm
-        had a stop, and an ablation whose grid does not contain OFF cannot
-        discover that the mechanism is negative -- only which setting inside it
-        is least bad.
-
-        Measured with the off arm present and against the equal-weight eligible
-        universe, out of sample over 70 purged CPCV dates, net of the shipped
-        cost model, per 63-session period:
-
-          arm                                   net    vs bench   worst   covid
-          NO stop / target / invalidation     +4.70%     +0.01%  -25.6%   -7.1%
-          stop 1.5x ATR + 3R                  -0.76%     -5.45%  -13.6%   -3.5%
-          stop 2.0x ATR + 3R                  +0.30%     -4.39%  -13.4%   -2.8%
-          stop 2.5x ATR + 3R  (shipped)       +1.28%     -3.41%  -12.3%   -4.1%
-          stop 3.5x ATR + 3R                  +2.06%     -2.63%  -11.1%   -7.3%
-          stop 5.0x ATR + 3R                  +2.36%     -2.33%  -10.3%   -7.6%
-          benchmark                           +4.68%      0.00%  -32.9%  -18.9%
-
-        The relationship is MONOTONE: every tightening costs return. The
-        ranking's own edge is +1.82% per period over the benchmark before any
-        exit machinery is applied, so the stop as configured costs roughly
-        twice the entire edge. Costs, by contrast, are the smallest layer at
-        -0.67%.
-
-        WHY IT IS NOT CHANGED HERE. The stop is a capital-preservation choice,
-        not a research parameter, and it demonstrably works as insurance: worst
-        cohort -12.3% against the benchmark's -32.9%, and -4.1% through the
-        COVID crash against -18.9%. What was wrong was the JUSTIFICATION, not
-        necessarily the value. The premium is now measured and stated so the
-        operator can decide whether -3.4% per period buys enough tail
-        protection to be worth it. Changing the traded stop is a strategy
-        decision and belongs to the operator, not to an audit.
-    # Never place the stop further than this % from entry, regardless of ATR.
+        Kaminski & Lo (2014) establish WHEN stops help -- positive serial
+        correlation, which a momentum book satisfies -- but not a multiple, so
+        this is measured. 8 is the peak of the paired test above and the level
+        whose neighbourhood (7 to 10) all points the same way; the difference
+        between 8, 9 and 10 is inside the noise and 8 is chosen because it won
+        the test that varied everything else.
+    # THE CLIP IS A SEPARATE DECISION AND WAS MEASURED AS ONE.
+    #
+    # "8 ATR" describes a multiple, not a risk. Measured on this universe, ATR
+    # runs 1.4% of price at the 1st percentile and 7.5% at the 99th, so eight of
+    # them is a stop between 11% and 60% below entry -- and 45% of names would
+    # sit beyond 30%. An uncapped floor is not a floor.
+    #
+    # Measured across four (cadence, size, hold, band) stems, pooled median:
+    #
+    #   clip     alpha    p_win    worst trade    stops fired
+    #   none    +19.0%    0.560       -46.1%           11
+    #   50%     +19.0%    0.560       -46.1%           11
+    #   40%     +17.7%    0.560       -40.4%           12.5
+    #   35%     +17.8%    0.559       -35.4%           14.5
+    #   30%     +17.6%    0.559       -30.4%           19.5
+    #   25%     +16.3%    0.559       -25.4%           31
+    #   20%     +14.3%    0.546       -20.4%           51
+    #
+    # On the SHIPPED stem the 35% clip is free and slightly better: alpha +20.3%
+    # against +20.0% uncapped, identical p_win 0.578 and worst year +6.4%,
+    # excess Sharpe 1.120 against 1.109 -- and the worst single trade improves
+    # from -42.6% to -35.4%. Below 35% the clip starts converting the disaster
+    # floor back into a trading stop, and the return goes with it.
     max_stop_distance_pct:
-      value: 15.0
-      status: UNVALIDATED
-      search_range: [5.0, 30.0]
+      value: 35.0
+      status: MEASURED
+      search_range: [20.0, 60.0]
+      note: >-
+        Was 15.0, which would have bound on essentially every name and turned an
+        8 ATR floor into a 4 ATR trading stop -- the setting the paired test
+        measures as costly.
     min_stop_distance_pct:
       value: 2.0
-      status: UNVALIDATED
+      status: OPERATIONAL
       search_range: [0.5, 8.0]
+      note: >-
+        Inert on the measurement -- it binds on 0.4% of names and changed no
+        figure to three decimals at any clip level -- and kept because a
+        degenerate ATR on a halted or newly listed name should not place the
+        stop on top of the entry.
 
+  # ==========================================================================
+  # THE EXIT ABLATION. Every rule below is switched off, and each one was
+  # measured ALONE on the shipped configuration rather than removed as a bundle,
+  # because "the old geometry was bad" is not evidence about any single rule.
+  #
+  # 258-385 trades, seven and a half years, net of 40 bps round trip, against
+  # the equal-weight eligible universe:
+  #
+  #   arm                                    p_win   p_beat   alpha   ShExc  yrs+
+  #   floor only            (SHIPPED)        0.578    0.512   +20.3%   1.12   6/6
+  #   + 3R profit target                     0.578    0.512   +19.4%   1.08   6/6
+  #   + 1.5R profit target                   0.571    0.498   +15.7%   0.93   6/6
+  #   + MA50 - 3.0 ATR invalidation          0.526    0.471   +14.7%   0.80   5/6
+  #   + MA50 - 1.5 ATR invalidation          0.422    0.422    +6.0%   0.32   3/6
+  #   + target AND invalidation              0.422    0.422    +6.4%   0.34   3/6
+  #   OLD GEOMETRY 2.5 ATR / 3R / 1.5 inv    0.384    0.377    +3.1%   0.15   2/6
+  #   minimum hold of 15 sessions            0.578    0.512   +20.3%   1.12   6/6
+  #
+  # The geometry that shipped cost 19 points of per-trade win probability and
+  # 17 points of annual alpha. The single most damaging rule is the thesis
+  # invalidation, and the damage is not a tuning problem -- widening its buffer
+  # from 1.5 to 3.0 ATR recovers most of it, which is another way of saying the
+  # rule is best when it barely fires.
+  #
+  # WHY THIS IS NOT SURPRISING. All three rules sell strength or sell weakness
+  # early, and a momentum book earns its return from the 40% of positions that
+  # survive to the time backstop: those 102 trades won 68% of the time and
+  # averaged +15.1% net, against +2.8% for the 151 that left on the rank band.
+  # Any rule that removes a position before the backstop is, on average,
+  # removing the part of the distribution the strategy exists to hold.
+  #
+  # WHAT REPLACES THEM. Nothing was removed without something in its place. The
+  # book still exits four ways: the rank band (the position is no longer one of
+  # the best 18 names), the time backstop at 63 sessions, the disaster floor at
+  # 8 ATR, and the eligibility screen. What is gone is the machinery that
+  # second-guessed the ranking between those points.
   trailing_stop:
-    enabled: true
+    enabled: false
     style:
       value: "chandelier"            # chandelier (from highest high since entry)
       status: STRUCTURAL
@@ -1848,6 +2090,11 @@ stage7_risk:
       value: 3.0
       status: UNVALIDATED
       search_range: [1.5, 5.0]
+      note: >-
+        Retained for the research CLI and inert while `enabled` is false. A
+        chandelier is a profit-taking rule wearing a risk label: it can only
+        ever shorten a position that is winning, which is the population the
+        ablation above shows must not be shortened.
     # Only start trailing after the position has moved this many R in favour.
     activate_after_r:
       value: 1.0
@@ -1855,14 +2102,27 @@ stage7_risk:
       search_range: [0.0, 3.0]
 
   targets:
-    # Expressed as multiples of initial risk (R = entry - stop).
+    # LEVELS, NOT EXITS. Both targets are still computed, still printed on the
+    # card and still recorded as milestones on a resolved outcome -- whether a
+    # trade reached 1.5R or 3R before it ended is real information about that
+    # trade. Neither ENDS a position any more: `exit_hierarchy.target_achieved`
+    # is false, and the ablation above is why. Booking at 3R cost 0.9 points of
+    # annual alpha and 0.04 of excess Sharpe with no improvement in win rate;
+    # booking at 1.5R cost 4.6 points and four points of worst-year.
+    #
+    # The R multiples themselves are now measured in a different unit than they
+    # used to be: R is entry minus an 8 ATR floor, so 3R is roughly 90% above
+    # entry rather than 22%. A target that far out is never touched, which is
+    # the honest reason it stopped mattering -- and the reason the levels are
+    # kept as milestones rather than deleted is that the milestone question is
+    # asked against the OLD geometry in every historical outcome row.
     t1_r_multiple:
       value: 1.5
-      status: UNVALIDATED
+      status: OPERATIONAL
       search_range: [0.5, 4.0]
     t2_r_multiple:
       value: 3.0
-      status: UNVALIDATED
+      status: OPERATIONAL
       search_range: [1.5, 8.0]
     # Also snap targets to nearby swing highs when one is within this % of the
     # R-derived level (levels, never guarantees).
@@ -1876,8 +2136,35 @@ stage7_risk:
       search_range: [63, 756]
 
   thesis_invalidation:
-    # Distinct from the mechanical stop: the level/condition at which the
-    # ORIGINAL SIGNAL is falsified.
+    # A LEVEL THAT IS SHOWN AND NO LONGER SOLD ON.
+    #
+    # This was the most expensive rule in the engine. Measured alone on the
+    # shipped configuration it took per-trade win probability from 0.578 to
+    # 0.422 and annual alpha from +20.3% to +6.0%, and it turned a book that was
+    # positive in all six calendar years into one positive in three.
+    #
+    # The mechanism is visible in the buffer: widening it from 1.5 to 3.0 ATR
+    # recovers most of the damage (+6.0% -> +14.7%), so the rule is least bad
+    # when it least often fires. A rule with that gradient is not calibrated
+    # wrongly; it is measuring the wrong thing. Closing below MA50 is what a
+    # momentum name in a normal drawdown does on its way to the return the
+    # strategy is holding for -- 40% of the book's positions run the full
+    # 63-session backstop and average +15.1% net, and this rule sells a large
+    # share of them in week three.
+    #
+    # The previous note recorded a holdout comparison that put buffer 1.5 ahead
+    # of OFF on drawdown, and it is worth saying why that is not overturned so
+    # much as superseded: that comparison ran with a 2.5 ATR stop and a 3R
+    # target also firing, so "off" meant removing one of three overlapping exits
+    # rather than measuring the rule against a book that otherwise holds. The
+    # ablation above holds the rest of the geometry fixed at what ships.
+    #
+    # KEPT AS A LEVEL. Stage 7 still computes it, the card still prints it as
+    # exit condition #1, and it is still the ADMISSION predicate -- a name
+    # already below its own invalidation level is not bought, which is a
+    # different and cheaper use of the same number, and one the training panel
+    # depends on (universe.train_on_admissible_only).
+    enabled_as_exit: false
     # Momentum score falling below this percentile of the eligible universe
     # means the thesis is dead even if the stop has not been hit.
     momentum_rank_exit_percentile:
@@ -1937,33 +2224,67 @@ stage7_risk:
       search_range: [21, 252]
 
   holding_period:
-    # Backstop only. Primary exit is signal deterioration (#5 in the hierarchy).
     min_holding_sessions:
-      value: 15
-      status: UNVALIDATED
-      search_range: [5, 60]
+      value: 0
+      status: MEASURED
+      search_range: [0, 60]
+      note: >-
+        Was 15, and it was inert: on a 21-session entry clock nothing can exit
+        on the rank band before session 21 anyway, and the run with it set to 15
+        is identical to three decimals on every figure. Set to 0 so the file
+        stops implying a floor the engine does not enforce. The two exits that
+        CAN fire earlier -- the disaster floor and the eligibility screen -- are
+        both things that must be allowed to fire early.
     max_holding_sessions:
       value: 63                      # ~3 months
-      status: UNVALIDATED
+      status: MEASURED
       optimization_tier: A_SEARCH
       search_points: 3
       search_range: [21, 252]
       note: >-
-        Experiment #9 (calendar exit vs signal-deterioration exit). Time
-        expiration remains a BACKSTOP, never the primary trigger -- what is
-        being searched is how loose the backstop should be, not whether to
-        promote it.
+        No longer a backstop in the sense the old note meant. With the
+        invalidation and target exits off, the time limit is a real exit: 102 of
+        258 trades reach it, they win 68% of the time and average +15.1% net
+        against +2.8% for the 151 that leave on the rank band. That is where the
+        strategy's return comes from.
+
+        Measured at 42, 63, 84 and 126 on the shipped stem: 63 is best on
+        worst-year excess (+6.4% against -4.4% at 84 and -10.3% at 126) and on
+        per-trade win probability (0.578 against 0.541 and 0.554). Longer holds
+        raise mean excess per trade and lower the win rate -- the same right-tail
+        trade-off the horizon study found -- and 63 is where the two cross for
+        this book.
 
   # Exit priority hierarchy. Order is fixed by the research program (section
   # 6.2); these switches only let you disable a rung, never reorder it.
+  #
+  # FOUR OF EIGHT RUNGS ARE NOW OFF, each on its own measurement. The book exits
+  # on the rank band (signal_reversal), the disaster floor (stop_loss_breach),
+  # the eligibility screen (new_hard_rejection), the regime halt, or the time
+  # limit. Nothing else second-guesses the ranking in between. See the ablation
+  # table above `trailing_stop`.
   exit_hierarchy:
-    thesis_invalidation: true
+    #: OFF. Cost 15.6 points of per-trade win probability and 14.3 points of
+    #: annual alpha when measured alone. Still computed, still shown, still the
+    #: admission predicate -- just not an exit.
+    thesis_invalidation: false
+    #: ON, at 8 ATR clipped to 35%. This is the disaster floor and it is the
+    #: only price-based exit that measured POSITIVE.
     stop_loss_breach: true
+    #: ON. A name that fails Stage 3 eligibility is not something the book can
+    #: hold, whatever the ranking says.
     new_hard_rejection: true
+    #: ON. `regime.allow_new_entries` false is a halt, not a preference.
     severe_regime_change: true
+    #: ON. This IS the rank band -- rank outside exit_rank -- and it is the
+    #: primary exit, closing 151 of 258 positions.
     signal_reversal: true
-    trailing_stop: true
-    target_achieved: true
+    #: OFF. A chandelier can only shorten a winning position.
+    trailing_stop: false
+    #: OFF. Booking at 3R cost 0.9 points of alpha, at 1.5R cost 4.6.
+    target_achieved: false
+    #: ON, at 63 sessions, and no longer a backstop: it is the exit that
+    #: produces the return.
     time_expiration: true
 
 
@@ -2201,12 +2522,128 @@ costs:
       value: 5.0
       status: UNVALIDATED
       search_range: [1.0, 50.0]
+    # UNKNOWN LIQUIDITY IS PRICED AS THE WORST CASE THE MODEL ALLOWS.
+    unknown_liquidity_participation:
+      value: 0.01
+      status: STRUCTURAL
+      note: >-
+        Participation assumed when ADTV cannot be measured. It used to be
+        implicit and equal to ZERO: `impact_bps` returned the half-spread alone,
+        which is the cheapest fill the model can produce, and it returned it for
+        exactly the names whose liquidity was unknown -- while the sizer gave
+        those same names the largest position the capital slot allowed.
+
+        Set to capital.max_participation_of_adtv, the cap the engine will not
+        knowingly exceed, so an unmeasured name can never price better than a
+        measured one traded at the limit. The engine refuses to trade these
+        names at all (universe/liquidity gate, R13); this exists so that a cost
+        model asked an unanswerable question answers pessimistically rather than
+        optimistically.
 
   # Mandatory stress tests (research program section 9).
   stress_tests:
     cost_multiplier: 2.0
     impact_multiplier: 3.0
     require_edge_survives_stress: true
+
+
+# -----------------------------------------------------------------------------
+# 14b. EXPECTANCY  --  what a trade from THIS configuration has historically done
+# -----------------------------------------------------------------------------
+#
+# WHY THIS EXISTS. The engine could always say what it liked and, months later,
+# what happened. It could not say what it EXPECTED, so nothing was ever scored
+# against its own forecast and no calibration was possible. Every run now stamps
+# these frequencies onto every trade it issues, which makes the claim
+# falsifiable: after fifty live trades the realised win rate can be compared
+# against `probability_of_profit` and the difference is evidence.
+#
+# WHAT THESE NUMBERS ARE, EXACTLY. They are the outcomes of the 258 trades this
+# configuration took in the study named below. They are NOT a forecast for any
+# particular name -- this engine estimates no per-name edge, and a per-name
+# number on the card would be the most dangerous thing it prints. They describe
+# the population a new trade is drawn from, nothing more.
+#
+# THE STUDY. Sector-neutral 6-1 momentum rank, six names, entries every 21
+# sessions, held to a 63-session backstop or until the name leaves the top 18,
+# with a disaster floor at 8 ATR clipped to 35% of entry. Simulated on a rebuilt
+# point-in-time panel of 2,212 sessions and 1,517 ever-eligible symbols, scored
+# against an investable equal-weight benchmark of the same eligible universe.
+#
+#   trades                                    258 over 7.5 years (34 a year)
+#   probability of a net profit             0.578
+#   probability of beating the benchmark    0.512
+#   mean net return per trade               +7.09%
+#   median net return per trade             +3.65%
+#   mean excess over the benchmark          +3.74%
+#   median excess                           +0.69%
+#   median sessions held                       42
+#   annualised book return                 +42.6%   benchmark +18.9%
+#   annualised alpha                       +20.3%   95% CI [+7.7%, +30.9%]
+#   Sharpe / excess Sharpe                   1.59 / 1.12
+#   maximum drawdown                       -32.6%   benchmark -42.4%
+#   positive alpha in                       6 of 6 calendar years since 2021
+#
+# HOW A TRADE ENDS, which is where the shape of the distribution lives:
+#
+#   exit           trades   win rate   mean net   median sessions
+#   rank band        149       53.7%     +3.3%          21
+#   time backstop    100       69.0%    +16.1%          63
+#   disaster floor     9        0.0%    -31.0%          27
+#
+# Two thirds of the return comes from the 39% of positions that survive to the
+# backstop. That is what makes the mean and the median so different, and it is
+# why both are quoted on the card.
+#
+# WHAT THIS CONFIGURATION HAS NOT CLEARED, stated here rather than in a footnote
+# because the numbers above are the ones people quote:
+#
+#   Deflated Sharpe        0.030 against 4,877 trials  -- FAILS
+#   PBO (CSCV, 3,432 splits)                    0.388  -- passes, not comfortably
+#
+# The DSR threshold is an annual excess Sharpe of 1.80 and this configuration
+# has 1.12. The threshold is high partly because the trial variance is measured
+# across signals that differ for real reasons rather than by noise, which is not
+# the DSR's null -- computed within the family the winner was selected from it
+# reads 0.50, and within the final surface 0.97. All three are recorded because
+# choosing one of them silently is exactly how a search gets laundered.
+#
+# The honest summary: this is the best-supported hypothesis the search found,
+# it is not statistically established, and the forward paper-trading record is
+# what would establish it. That is what these fields are for.
+expectancy:
+  #: Set false to stop stamping plans. The fields become null on the card and
+  #: the ledger; nothing else changes.
+  enabled: true
+  study: "horizon-map-2026-08 / 21-6-63-3.0-8atr-35pct"
+  measured_on: "2026-08-29"
+  sample_trades: 258
+  sample_period: "2018-11-27 to 2026-08-25"
+  #: The cost the figures are net of. Must match one of the scenarios below.
+  assumed_cost_bps: 40.0
+  probability_of_profit: 0.578
+  probability_of_beating_benchmark: 0.512
+  expected_return_pct: 7.09
+  median_return_pct: 3.65
+  expected_excess_pct: 3.74
+  median_excess_pct: 0.69
+  expected_hold_sessions: 42.0
+  #: Quoted so the card can say what it assumed rather than one number with no
+  #: assumption. The edge is robust to cost -- 120 bps still leaves p_win 0.550
+  #: and +6.29% mean -- which is the single most reassuring line in the study,
+  #: because cost is the one input that is certain to be worse live.
+  #: A LIST OF ROWS, not a mapping keyed by scenario. Written as a mapping
+  #: first, and the liveness check was right to object twice: `base` collided
+  #: with `providers.nse_json_api.base` so it could no longer tell whether every
+  #: copy of that name was read, and the renamed keys then read as four settings
+  #: that nothing consumes -- because the code iterates the table rather than
+  #: naming its rows. Both complaints have the same root: these are DATA, four
+  #: rows of one measurement, and a row of a table is not a configuration key.
+  by_cost:
+    - { name: optimistic,   cost_bps: 25,  p_win: 0.581, p_beat: 0.516, mean_net_pct: 7.24, median_net_pct: 3.80 }
+    - { name: base,         cost_bps: 40,  p_win: 0.578, p_beat: 0.512, mean_net_pct: 7.09, median_net_pct: 3.65 }
+    - { name: conservative, cost_bps: 70,  p_win: 0.570, p_beat: 0.504, mean_net_pct: 6.79, median_net_pct: 3.35 }
+    - { name: stressed,     cost_bps: 120, p_win: 0.550, p_beat: 0.496, mean_net_pct: 6.29, median_net_pct: 2.85 }
 
 
 # -----------------------------------------------------------------------------

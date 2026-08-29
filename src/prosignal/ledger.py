@@ -218,6 +218,16 @@ def row_from_output(
                 "target_1": rec.target_1,
                 "target_2": rec.target_2,
                 "strength_band": rec.signal_strength_band.value,
+                # THE PLAN, recorded with the decision rather than reconstructed
+                # from the config later. A config is a moving object -- the
+                # cadence, the planned hold and the expectancy study all change
+                # -- so reading today's config to explain a trade issued in
+                # March would describe a strategy that trade was never part of.
+                # This is what makes the paper-trading record self-contained:
+                # every row carries the frequency it was issued at, the hold it
+                # was planned for and the expectation it was issued under.
+                "trade_plan": (rec.trade_plan.model_dump(mode="json")
+                               if rec.trade_plan else None),
             }
         )
 

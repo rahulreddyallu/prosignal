@@ -70,8 +70,18 @@ def _composite_only(config):
     redundancy report -- on fixtures with nowhere near enough history to fit
     the cross-sectional model. Stage 4 refuses to fall back silently, which is
     the point of allow_composite_fallback, so a composite test has to say so.
+
+    TWO SWITCHES NOW, and the second one is the interesting half. Since the book
+    is ordered by a single measured column rather than by the fitted composite,
+    "run the composite path" also means "and let it decide the order". Without
+    this, these tests fail with RankingUnavailable -- which is the ranking policy
+    working exactly as designed: there is no live feature frame on a fixture with
+    120 sessions, so there is no `mom_6_1_r` to rank by, and the engine refuses
+    to quietly reach for the scorer it has retired. Saying so here keeps that
+    refusal intact everywhere else.
     """
     config.params.stage4_core_score.allow_composite_fallback = True
+    config.params.stage4_core_score.ranking.source = "fitted_composite"
     return config
 
 
@@ -372,10 +382,52 @@ def test_targets_are_r_multiples_of_the_actual_stop(cfg):
     assert plan.reward_to_risk_t2 == pytest.approx(t2_r, abs=0.05)
 
 
-def test_exit_hierarchy_puts_thesis_invalidation_first(cfg):
+def test_exit_hierarchy_puts_thesis_invalidation_first_when_it_is_armed(cfg):
+    """ORDER, not membership -- and the two came apart when the rung was
+    disarmed.
+
+    The hierarchy's ordering rule has not changed: while thesis invalidation is
+    an exit at all, it outranks the stop, because a dead thesis is a reason to
+    leave regardless of where the price happens to be. What changed is that the
+    rung now ships OFF -- measured alone on the production configuration it cost
+    15.6 points of per-trade win probability and 14.3 points of annual alpha --
+    so on the shipped config the first condition is the disaster floor.
+
+    Asserting the shipped order alone would have been the weaker test: it would
+    pass just as well if the ordering rule had been deleted. So both are
+    checked, and the arming is what selects between them.
+    """
     plan = stage7_risk.build_plan("X", _frame(), 1000.0, 0.8, 5e8, cfg, CostModel(cfg))
-    assert plan.exit_conditions[0].reason.value == "thesis_invalidation"
-    assert plan.exit_conditions[0].priority == 1
+    assert not cfg.params.stage7_risk.exit_hierarchy.thesis_invalidation, (
+        "the shipped config disarms this rung; if that changed, this test's "
+        "premise changed with it")
+    assert plan.exit_conditions[0].reason.value == "stop_loss_breach"
+    # PRIORITY 2, not 1, and that is the contract. `priority` identifies the
+    # rung; it is not a position in the list. Renumbering when a rung is
+    # disarmed would make "rung 1" mean the invalidation on one config and the
+    # stop on another, so two runs could not be compared and a recorded outcome
+    # could not say which rule it was scored under. The CARD renumbers for
+    # display and says which rungs are off.
+    assert plan.exit_conditions[0].priority == 2
+    assert not any(c.reason.value == "thesis_invalidation"
+                   for c in plan.exit_conditions), (
+        "a disarmed rung must not appear in the exit list at all -- a level "
+        "the engine will not act on, printed among the ones it will, is worse "
+        "than not printing it")
+
+    # Arm the rung and the ORDER must reassert itself. Mutated in place and
+    # restored rather than deep-copied: AppConfig is not a pydantic model and a
+    # partial copy would silently test a different object.
+    h = cfg.params.stage7_risk.exit_hierarchy
+    try:
+        h.thesis_invalidation = True
+        plan2 = stage7_risk.build_plan("X", _frame(), 1000.0, 0.8, 5e8, cfg,
+                                       CostModel(cfg))
+        assert plan2.exit_conditions[0].reason.value == "thesis_invalidation"
+        assert plan2.exit_conditions[0].priority == 1
+        assert plan2.exit_conditions[1].reason.value == "stop_loss_breach"
+    finally:
+        h.thesis_invalidation = False
 
 
 def test_cost_estimate_is_attached_to_the_plan(cfg):

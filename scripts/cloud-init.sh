@@ -116,6 +116,20 @@ systemctl reload caddy || systemctl restart caddy
 # --- 7. the daily observation -------------------------------------------
 # 20:30 IST: the close is 15:30, the bhavcopy lands around 18:00-19:00 and
 # delivery later, so this leaves five hours of margin.
+#
+# STILL DAILY, AND THAT IS DELIBERATE. The book now OPENS positions only every
+# 21st session, but the job that runs must keep running every session: the
+# disaster floor is a price level checked against every bar, the rank band and
+# the eligibility screen can release a position on any day, and outcomes resolve
+# from prices that arrive daily. Moving the cron itself to a 21-session rhythm
+# would mean a stop breached on day 3 is noticed on day 21.
+#
+# The entry schedule lives in the config, not here --
+# `stage6_entry.admission.entry_cadence_sessions` -- counted in SESSIONS from a
+# fixed anchor against the exchange calendar, so it is reproducible and immune
+# to holidays. cron cannot count sessions; it does not know an NSE holiday from
+# a Tuesday. Putting the schedule in the only place that can see the calendar is
+# what keeps the live entry dates and the backtested ones the same dates.
 cat > /etc/cron.d/prosignal <<EOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

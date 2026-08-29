@@ -33,6 +33,7 @@ from ..core.contracts import (
 )
 from ..core.enums import Decision, EntryStatus, StrengthBand
 from ..core.logging import get_logger
+from ..tradeplan import build_trade_plan
 
 __all__ = ["run", "STAGE_NAME", "PROBABILITY_UNAVAILABLE"]
 
@@ -185,7 +186,8 @@ def run(
         defense_res = defense.per_stock[sym]
         return _card(sym, names.get(sym), score, defense_res, decision,
                      plans.get(sym), regime, eligibility, scores,
-                     defense_res.score_after, cfg, position=positions[sym])
+                     defense_res.score_after, cfg, position=positions[sym],
+                     config=config)
 
     # -- the score gate, applied once, in score order ------------------------
     # Score gate first, then the entry trigger. Counting the trigger before
@@ -460,6 +462,32 @@ def run(
     # live book, which makes that the exact case where the count matters.
     gate_counts["buys"] = len(buys)
 
+    # SLOTS THE BOOK COULD NOT FILL, and why. The entry band is `model_rank <=
+    # entry_rank`, so a name inside the band that Stage 5 hard-rejects is not
+    # replaced by the next one down: the band is a rank threshold, not a queue.
+    # The book then runs one name light and the cash sits idle.
+    #
+    # DISCLOSED RATHER THAN CHANGED. Backfilling from rank K+1 is a strategy
+    # change -- it is what the trade-level study simulated, since that study had
+    # no false-signal defense to reject anybody -- and it has not been measured
+    # against the defense that actually runs. The honest position is to say the
+    # book is short and which rank went missing, so the drag is visible in the
+    # record rather than showing up later as an unexplained gap between the
+    # study's 96.5% fill and the live one.
+    want = iv(cfg.portfolio.max_signals_per_run)
+    if buys and len(buys) < want:
+        taken = {r.model_rank for r in buys}
+        missing = [r for r in range(1, want + 1) if r not in taken]
+        if missing:
+            notes_short = ", ".join(f"#{r}" for r in missing)
+            for r in buys:
+                r.data_quality_note.append(
+                    f"The book is holding {len(buys)} of {want} slots: rank(s) "
+                    f"{notes_short} were inside the entry band and did not "
+                    f"survive to a card. The band is a rank threshold, not a "
+                    f"queue, so the next name down does not take the slot -- "
+                    f"that capital stays in cash for this cycle.")
+
     if buys:
         log.info("stage 8 complete",
                  extra={"buys": len(buys), "watch": len(watch),
@@ -483,6 +511,22 @@ def run(
             scores, gate_counts, cfg, defense=defense, entries=entries,
         ), gate_counts
 
+    # THE CALENDAR IS NOT A VERDICT ON THE EVIDENCE. On a session the entry
+    # clock has closed, every candidate is held back by the schedule rather
+    # than by a gate, and reporting "the evidence does not justify risking
+    # capital" would be false in the most misleading direction available: an
+    # operator reading it three sessions running would conclude the engine had
+    # found nothing worth buying, when what it found was a day it does not buy.
+    if not getattr(entries, "entries_open", True):
+        return [], watch, _no_trade(
+            (entries.entries_closed_reason
+             or "New entries are closed on this session by the entry cadence.")
+            + " This is the schedule, not a judgement about the candidates: "
+              "they cleared the ranking and are held on the watchlist for the "
+              "next entry date.",
+            scores, gate_counts, cfg, defense=defense, entries=entries,
+        ), gate_counts
+
     return [], watch, _no_trade(
         "No candidate cleared every gate. This is the designed outcome when the "
         "evidence does not justify risking capital.",
@@ -500,9 +544,26 @@ def _band(score: float, cfg) -> StrengthBand:
 
 
 def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
-          scores, final_score, cfg, position: int = 0) -> Recommendation:
+          scores, final_score, cfg, position: int = 0,
+          config=None) -> Recommendation:
     """Build the recommendation, including the evidence AGAINST it."""
     why: List[str] = []
+    # WHAT PUT THIS NAME HERE, first, before any theme attribution. Under
+    # `ranking.source: measured_factor` the book is ordered by one column and
+    # the fitted composite explains the THEMES behind a name without deciding
+    # anything. Leading with the theme attribution -- as this card did -- reads
+    # as "the model liked it for these reasons", which is no longer what
+    # happened, and a reader has no way to tell from a list of coefficients
+    # that the coefficients did not choose.
+    rank_cfg = (getattr(config.params.stage4_core_score, "ranking", None)
+                if config is not None else None)
+    if rank_cfg is not None and str(rank_cfg.source) != "fitted_composite":
+        why.append(
+            f"Ranked #{score.rank} of the eligible universe by {rank_cfg.column} "
+            f"-- sector-neutral 6-1 momentum, the single column that orders this "
+            f"book. The themes below are the fitted model's separate reading of "
+            f"the same name; they are recorded and monitored, and they did not "
+            f"choose it.")
     model_tier = [f for f in score.factors.values() if f.evidence_tier == "model"]
     if model_tier:
         # Attribution from the fit. raw_value is this factor's contribution to
@@ -602,9 +663,36 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
 
     sell: List[str] = []
     if plan:
-        for e in plan.exit_conditions:
+        # Numbered by DISPLAY POSITION, not by the rung's stable priority. Four
+        # rungs ship disarmed, so the priorities that survive are 2, 3, 4, 5 and
+        # 8, and a card that printed those verbatim would read as though five
+        # conditions had gone missing. The rung id is kept in the text so the
+        # two numbering schemes can still be reconciled against the config.
+        for i, e in enumerate(plan.exit_conditions, start=1):
             lvl = f" (Rs {e.level:,.2f})" if e.level else ""
-            sell.append(f"{e.priority}. {e.reason.value}{lvl} -- {e.description}")
+            sell.append(f"{i}. {e.reason.value}{lvl} -- {e.description} "
+                        f"[rung {e.priority}]")
+        # WHAT WILL NOT CLOSE THIS POSITION, said out loud. Someone holding a
+        # name needs to know that reaching the target does not sell it and that
+        # losing MA(50) does not sell it, and the absence of a line cannot
+        # communicate that.
+        # `cfg` here is stage8's own block; the exit rules live in stage 7.
+        c7 = config.params.stage7_risk if config is not None else None
+        if c7 is not None:
+            h = c7.exit_hierarchy
+            off = [name for flag, name in (
+                (h.thesis_invalidation, "thesis invalidation"),
+                (h.trailing_stop, "trailing stop"),
+                (h.target_achieved, "profit target"),
+            ) if not bool(getattr(flag, "value", flag))]
+            if off:
+                sell.append(
+                    f"NOT an exit: {', '.join(off)}. Each was measured alone "
+                    f"against this configuration and each cost return -- the "
+                    f"invalidation exit most of all, at 15.6 points of per-trade "
+                    f"win probability. The position ends on the rank band, the "
+                    f"{iv(c7.holding_period.max_holding_sessions)}-session limit, "
+                    f"the disaster stop, or loss of eligibility.")
 
     return Recommendation(
         ticker=sym,
@@ -618,6 +706,11 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
             f"{plan.expected_holding_sessions[0]}-{plan.expected_holding_sessions[1]} sessions"
             if plan else "unknown"
         ),
+        # WHAT THIS TRADE IS, recorded with it. The cadence it belongs to, the
+        # hold it is planned for, and what the configuration's own 258 study
+        # trades did -- so a resolved outcome months from now can be compared
+        # against the engine's claim and not only against the market.
+        trade_plan=(build_trade_plan(config, plan) if config is not None else None),
         entry_zone=decision.entry_zone,
         invalidation_level=plan.invalidation_level if plan else None,
         initial_stop=plan.stop_price if plan else None,

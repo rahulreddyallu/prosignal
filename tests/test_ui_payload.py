@@ -827,8 +827,8 @@ def test_clearing_results_is_applied_where_results_are_read():
     src = (UI.parents[1] / "api.py").read_text(encoding="utf-8")
     # Both readers now share one resolution, and the mark is applied inside
     # it -- so it cannot be applied to one screen and forgotten on the other.
-    body = src[src.index("def _resolved_rows"):]
-    assert "_apply_clear_mark" in body[:900]
+    body = src[src.index("def _resolved_rows"):src.index("@app.get(\"/stock/")]
+    assert "_apply_clear_mark" in body
     for reader in ("def performance_report", "def stock_calls"):
         r = src[src.index(reader):]
         assert "_resolved_rows()" in r[:1600], reader

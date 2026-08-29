@@ -116,12 +116,28 @@ class TestDeflatedSharpeCanFail:
 
     @staticmethod
     def _series(n=71, seed=5):
-        return list(np.random.default_rng(seed).normal(0.011, 0.043, n))
+        """A DETERMINISTICALLY STRONG series.
+
+        The direction tests below need the observed Sharpe to sit ABOVE the
+        benchmark: the PSR is Phi((SR - SR*) * sqrt(n_eff - 1) / den), so below
+        the bar a smaller n_eff moves the answer UP toward 0.5 and the
+        assertion reverses for arithmetic reasons rather than wiring ones. The
+        earlier fixture drew SR ~ 0.26 against a bar that could exceed it.
+        """
+        x = np.random.default_rng(seed).normal(0.0, 0.04, n)
+        x = x - x.mean() + 0.030          # SR ~ 0.75 per period, deterministic
+        return list(x)
 
     def test_effective_n_moves_the_answer(self):
         r = self._series()
-        naive = deflated_sharpe_ratio(r, n_trials=81)
-        honest = deflated_sharpe_ratio(r, n_trials=81, effective_n=len(r) / 2.96)
+        naive = deflated_sharpe_ratio(r, n_trials=81, sr_variance=0.005)
+        # `sr_variance` is PINNED so the only thing that differs between the
+        # two calls is the independent-observation count. Without it the
+        # comparison is confounded: an argument that changed BOTH the PSR's
+        # sqrt(n-1) term and the benchmark could cancel itself and still look
+        # wired. See metrics.deflated_sharpe_ratio's variance ladder.
+        honest = deflated_sharpe_ratio(r, n_trials=81, effective_n=len(r) / 2.96,
+                                       sr_variance=0.005)
         assert honest.deflated_sr < naive.deflated_sr, (
             "declaring fewer independent observations must lower the DSR; if it "
             "does not, the overlap correction is not reaching the statistic")
@@ -154,10 +170,20 @@ class TestDeflatedSharpeCanFail:
     def test_it_reports_where_its_variance_came_from(self):
         r = self._series()
         a = deflated_sharpe_ratio(r, n_trials=10, effective_n=24)
+        # SIX scores against ten charged trials: above
+        # MIN_TRIAL_SCORE_COVERAGE, so the measured dispersion is allowed to
+        # set the bar. Four of ten is under-covered and falls back to the
+        # conservative unit, which is a different branch and a different test.
         b = deflated_sharpe_ratio(r, n_trials=10, effective_n=24,
-                                  trial_sharpes=[0.1, 0.4, -0.2, 0.3])
-        assert "no trial Sharpes" in a.sr_variance_source
-        assert "trial Sharpes" in b.sr_variance_source
+                                  trial_sharpes=[0.1, 0.4, -0.2, 0.3, 0.25, -0.05])
+        # The SOURCE is a stable machine token; the human phrase lives in the
+        # interpretation. Asserting the phrase against the token coupled a
+        # report string to an enum and broke when the enum was named.
+        from prosignal.validation.metrics import (SR_VAR_UNIT,
+                                                   SR_VAR_FROM_TRIALS)
+        assert a.sr_variance_source == SR_VAR_UNIT
+        assert "no trial Sharpes" in a.interpretation
+        assert b.sr_variance_source == SR_VAR_FROM_TRIALS
         assert a.sr_variance != b.sr_variance
 
 
@@ -271,24 +297,51 @@ class TestAdmissiblePopulation:
     dates."""
 
     def test_the_mask_removes_rows_from_the_panel(self):
+        """The predicate is DERIVED, not injected.
+
+        The earlier version handed `build_panel` a boolean frame. That could
+        not catch the failure it existed for -- the live gate computes the
+        predicate from price against the invalidation level, so a test that
+        supplies its own answer never exercises the construction the engine
+        uses. Here the first twenty symbols are driven below their own
+        invalidation level and the panel must drop them on its own.
+        """
+        from prosignal.features.exits import ExitRules
         close, turnover, high, low = _frames(n=SESSIONS)
-        adm = pd.DataFrame(True, index=close.index, columns=close.columns)
-        adm[SYMS[:20]] = False
+        close = close.copy()
+        # A sustained collapse: the last 120 sessions at a third of the level,
+        # which puts price far under the 50-session average less 1.5 ATR.
+        close.loc[close.index[-120:], SYMS[:20]] = (
+            close.loc[close.index[-120:], SYMS[:20]] * 0.33)
+        high = close * 1.005
+        low = close * 0.995
+        rules = ExitRules()
         full = build_panel(close, turnover, horizon=63, step=21)
-        masked = build_panel(close, turnover, horizon=63, step=21, admissible=adm)
+        masked = build_panel(close, turnover, horizon=63, step=21,
+                             high=high, low=low, admission_rules=rules)
         assert not full.empty and not masked.empty
-        assert len(masked) < len(full)
-        assert not set(masked["symbol"]) & set(SYMS[:20])
+        assert len(masked) < len(full), (
+            "the admission predicate removed nothing; the panel is still the "
+            "population the book cannot buy from")
+        tail = masked[masked["date"] >= close.index[-90]]
+        assert not set(tail["symbol"]) & set(SYMS[:20]), (
+            "a name below its own invalidation level is still in the panel")
 
     def test_ranks_are_taken_after_the_mask(self):
         """The point of the mask: a rank must mean the same thing in training and
         at the decision. If ranks were taken first, the surviving rows would
         carry ranks computed over a population that includes names Stage 6
         refuses."""
+        from prosignal.features.exits import ExitRules
         close, turnover, high, low = _frames(n=SESSIONS)
-        adm = pd.DataFrame(True, index=close.index, columns=close.columns)
-        adm[SYMS[:15]] = False        # 45 of 60 survive, above build_panel's floor
-        masked = build_panel(close, turnover, horizon=63, step=21, admissible=adm)
+        close = close.copy()
+        # 45 of 60 survive, above build_panel's min_names floor.
+        close.loc[close.index[-120:], SYMS[:15]] = (
+            close.loc[close.index[-120:], SYMS[:15]] * 0.33)
+        high = close * 1.005
+        low = close * 0.995
+        masked = build_panel(close, turnover, horizon=63, step=21,
+                             high=high, low=low, admission_rules=ExitRules())
         assert not masked.empty
         for _d, g in masked.groupby("date"):
             if len(g) < 5:
@@ -492,34 +545,66 @@ class TestTheCallSitesAreWired:
     def test_deflated_collapses_the_duplication(self):
         r = self._result()
         assert len(r.excess) == 540 and len(r.excess_per_date()) == 60
-        d = r.deflated(n_trials=81)
+        d = r.deflated(n_trials=81, horizon_sessions=63, step_sessions=21)
         assert d.n_observations == 60, (
             "the DSR must run on distinct dates, not on (split, date) pairs")
+        assert d.effective_n == pytest.approx(
+            r.effective_observations(), rel=1e-9), (
+            "the overlap deduction must be the harness's own arithmetic")
 
     def test_deflated_declares_the_overlap_corrected_sample(self):
         r = self._result()
-        d = r.deflated(n_trials=81)
+        d = r.deflated(n_trials=81, horizon_sessions=63, step_sessions=21)
         assert d.effective_n < d.n_observations / 2.5, (
             f"effective_n {d.effective_n} does not carry the 63/21 overlap "
             f"inflation; the harness is not passing it")
 
-    def test_deflated_uses_the_woven_path_sharpes(self):
-        """`trial_sharpes` is Bailey & Lopez de Prado's Var[SR] -- the dispersion
-        ACROSS TRIALS. No production caller ever supplied it."""
+    def test_deflated_does_NOT_use_the_woven_path_sharpes(self):
+        """REVERSED, on measurement. This guard used to require `deflated` to
+        default `trial_sharpes` to `path_sharpes`.
+
+        `trial_sharpes` is Bailey & Lopez de Prado's Var[SR]: the dispersion of
+        Sharpe ratios ACROSS THE CONFIGURATIONS THAT WERE SEARCHED. The woven
+        paths are nine resamples of the ONE configuration that was selected, so
+        their spread measures sampling noise inside this strategy rather than
+        the spread of the alternatives it beat. It is the smaller number and
+        using it SHRINKS the multiple-testing bar -- measured on this engine,
+        0.0083 against 0.0455, which moves the answer from FAIL 0.38 to PASS
+        0.91. A defence that can be relaxed by handing it the wrong quantity is
+        not a defence.
+
+        The variance now comes from the trial registry, or the conservative
+        unit says so. `cli.py` passes `reg.recorded_scores()`.
+        """
         r = self._result()
-        d = r.deflated(n_trials=81)
-        assert "trial Sharpes" in d.sr_variance_source
-        assert "no trial Sharpes" not in d.sr_variance_source
-        expected = float(np.var(np.asarray(r.path_sharpes), ddof=1))
-        assert d.sr_variance == pytest.approx(expected, rel=1e-9)
+        d = r.deflated(n_trials=81, horizon_sessions=63, step_sessions=21)
+        assert d.sr_variance == pytest.approx(1.0), (
+            "with no registry scores the bar must be the conservative one")
+        assert "no trial" in d.interpretation
+        path_var = float(np.var(np.asarray(r.path_sharpes), ddof=1))
+        assert d.sr_variance != pytest.approx(path_var, rel=1e-6), (
+            "the woven path spread is back in the benchmark")
+        # And it is still REACHABLE, for a caller that has the real thing.
+        d2 = r.deflated(n_trials=81, horizon_sessions=63, step_sessions=21,
+                        trial_sharpes=list(np.linspace(-0.3, 0.5, 81)))
+        from prosignal.validation.metrics import SR_VAR_FROM_TRIALS
+        assert d2.sr_variance_source == SR_VAR_FROM_TRIALS
 
     def test_dropping_either_wire_raises_the_dsr(self):
         """Both corrections must push the same way, so a silent revert of either
         shows up as a more permissive number."""
         from prosignal.validation.metrics import deflated_sharpe_ratio
         r = self._result()
-        honest = r.deflated(n_trials=81).deflated_sr
-        pooled_n = deflated_sharpe_ratio(r.excess, n_trials=81).deflated_sr
+        # Var[SR] PINNED on both sides. The conservative unit fallback puts
+        # the benchmark far above any realistic per-period Sharpe, which
+        # saturates both answers at 0.0000 and makes the comparison vacuous --
+        # the guard would then pass whatever the sample-size wiring did.
+        VAR = 0.005
+        honest = deflated_sharpe_ratio(
+            r.excess_per_date(), n_trials=81, sr_variance=VAR,
+            effective_n=r.effective_observations()).deflated_sr
+        pooled_n = deflated_sharpe_ratio(r.excess, n_trials=81,
+                                         sr_variance=VAR).deflated_sr
         assert pooled_n > honest, "reverting to the pooled vector must inflate"
 
     def test_the_simulator_hold_reads_the_intraday_high(self):
@@ -549,7 +634,7 @@ class TestTheCallSitesAreWired:
             min_stop_distance_pct=2.0, max_stop_distance_pct=15.0,
             invalidation_ma_sessions=50, invalidation_buffer_atr=1.5,
             horizon_sessions=63, entry_rank=8, exit_rank=16, target_r_multiple=3.0)
-        ret = _hold(sym, 60, close, high, low, open_, ma, atr, p)
+        ret, _side = _hold(sym, 60, close, low, open_, ma, atr, p, high=high)
         assert ret is not None
         # entry 100, stop distance clipped to 2%, target = 3 x 2% = +6%
         assert ret == pytest.approx(0.06, abs=1e-9), (
@@ -557,7 +642,8 @@ class TestTheCallSitesAreWired:
             f"Reading the close instead returns 0.0 and understates every win.")
         # THE NEGATIVE ARM. A guard that cannot fail is not a guard: this is the
         # exact call the code used to make, and it must give a different answer.
-        blind = _hold(sym, 60, close, None, low, open_, ma, atr, p)
+        blind_out = _hold(sym, 60, close, low, open_, ma, atr, p, high=None)
+        blind = None if blind_out is None else blind_out[0]
         assert blind == pytest.approx(0.0, abs=1e-12), (
             "without `high` the resolver cannot see the touch; if this now "
             "agrees with the sighted call the test has stopped discriminating")
@@ -597,19 +683,22 @@ class TestTheCallSitesAreWired:
         try:
             cm.fit_predict(close, turnover, idx[-1].date(), horizon=63,
                            min_train_rows=300, high=high, low=low, open_=open_,
-                           exit_geometry=ExitRules(), score_symbols=syms)
+                           admission_rules=ExitRules(), score_symbols=syms)
         finally:
             cm.build_panel = real
 
-        assert "admissible" in seen, "build_panel was called without the argument"
-        adm = seen["admissible"]
+        assert "admission_rules" in seen, "build_panel was called without the argument"
+        adm = seen["admission_rules"]
         assert adm is not None, (
             "the training panel was built over the whole eligible universe "
             "while the live path masks to the admissible one; the model then "
             "ranks a population it was not fitted on")
-        assert adm.shape[1] == len(syms)
-        assert not bool(adm.all().all()), (
-            "the mask admits everything, so it cannot be doing anything")
+        # THE PREDICATE, not a pre-built frame. `build_panel` derives the mask
+        # itself so training and the live gate read one construction; what this
+        # guard has to pin is that the geometry reaches it.
+        from prosignal.features.exits import ExitRules as _ER
+        assert isinstance(adm, _ER)
+        assert adm.invalidation_ma_sessions > 0 and adm.atr_period_sessions > 0
 
     def test_fit_predict_masks_the_panel_to_the_admissible_population(self):
         """The end-to-end wire: a name below its own invalidation level on the
@@ -634,7 +723,7 @@ class TestTheCallSitesAreWired:
         geom = ExitRules()
         scores, model, why = cm.fit_predict(
             close, turnover, idx[-1].date(), horizon=63, min_train_rows=300,
-            high=high, low=low, open_=open_, exit_geometry=geom,
+            high=high, low=low, open_=open_, admission_rules=geom,
             score_symbols=syms)
         if scores is None:
             pytest.skip(f"the fixture did not produce a model: {why}")
@@ -1125,7 +1214,8 @@ class TestForwardTestIsBenchmarkRelative:
         from prosignal.validation.forward import register
         with tempfile.TemporaryDirectory() as d:
             reg = register(Path(d), config_version="v", engine_version="e",
-                           git_commit="c", started_on=dt.date(2026, 1, 1))
+                           git_commit="c", started_on=dt.date(2026, 1, 1),
+                           unchecked_reason="unit test: no config in scope")
         assert reg.tertiary, "there is no benchmark-relative hypothesis"
         t = reg.tertiary.upper()
         assert "EQUAL-WEIGHT" in t and "EXCESS" in t
@@ -1142,7 +1232,8 @@ class TestForwardTestIsBenchmarkRelative:
         from prosignal.validation.forward import register
         with tempfile.TemporaryDirectory() as d:
             reg = register(Path(d), config_version="v", engine_version="e",
-                           git_commit="c", started_on=dt.date(2026, 1, 1))
+                           git_commit="c", started_on=dt.date(2026, 1, 1),
+                           unchecked_reason="unit test: no config in scope")
         assert replace(reg, tertiary="anything else").fingerprint() != reg.fingerprint()
 
     def test_an_unavailable_benchmark_voids_the_window(self):
@@ -1152,7 +1243,8 @@ class TestForwardTestIsBenchmarkRelative:
         from prosignal.validation.forward import register
         with tempfile.TemporaryDirectory() as d:
             reg = register(Path(d), config_version="v", engine_version="e",
-                           git_commit="c", started_on=dt.date(2026, 1, 1))
+                           git_commit="c", started_on=dt.date(2026, 1, 1),
+                           unchecked_reason="unit test: no config in scope")
         assert any("benchmark" in i.lower() for i in reg.invalidation)
 
 
@@ -1297,8 +1389,9 @@ def test_effective_n_actually_changes_the_deflated_sharpe():
     rng = np.random.default_rng(5)
     r = list(rng.normal(0.012, 0.05, 600))
 
-    naive = deflated_sharpe_ratio(r, n_trials=50)
-    honest = deflated_sharpe_ratio(r, n_trials=50, effective_n=24.0)
+    naive = deflated_sharpe_ratio(r, n_trials=50, sr_variance=0.005)
+    honest = deflated_sharpe_ratio(r, n_trials=50, effective_n=24.0,
+                                   sr_variance=0.005)
 
     assert honest.effective_n == pytest.approx(24.0)
     assert naive.effective_n == pytest.approx(600.0)

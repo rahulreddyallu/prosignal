@@ -25,6 +25,7 @@ import pandas as pd
 
 from .config.loader import AppConfig
 from .core.calendar import TradingCalendar
+from .cadence import clock_from_config
 from .core.clock import market_today
 from .core.contracts import (
     FinalSignalOutput,
@@ -233,11 +234,19 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # what the previous run committed to. The engine holds no live position
     # state -- the ledger is the record of the open book.
     ranks = {s.ticker: s.rank for s in scores.ranked_scores}
+    # THE ENTRY CLOCK. The engine runs every session; it BUYS on a cadence. See
+    # `prosignal.cadence` for why the two are different and why the schedule is
+    # counted in sessions from a fixed anchor rather than in calendar days.
+    # Resolved here, once, and carried into the run's record so a reader can
+    # tell "the book was not buying today" from "the market offered nothing".
+    clock = clock_from_config(config, sessions, resolved)
     # `open_book` and `previous_slate` were read once, above Stage 3 -- this
     # file grows without bound and scanning it twice per run for two fields of
     # one record was waste.
     entries = stage6_entry.run(defended, frames, config, resolved,
-                               ranks=ranks, held=open_book)
+                               ranks=ranks, held=open_book,
+                               entries_open=clock.is_entry_date,
+                               entries_closed_reason=clock.blocked_reason())
     timings[stage6_entry.STAGE_NAME] = t()
 
     # ---- Stage 7 ----------------------------------------------------------
@@ -335,9 +344,18 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         slate=slate_entries,
         slate_departures=slate_departures,
         position_directives=directives,
+        # THREE REASONS THE BOOK MIGHT NOT BUY, and they are not the same. A
+        # regime halt and a market halt are conditions; the entry cadence is a
+        # schedule. Reporting the schedule through the same field is right --
+        # the field means "new entries were refused and here is why" -- but the
+        # cadence must be named as itself, because an operator seeing "no new
+        # entries" three sessions running should be able to tell a halted
+        # market from a book that simply is not due to buy until the 21st.
         new_entries_blocked=(
-            None if regime.allow_new_entries and not defense.market_halt
-            else (no_trade.reason if no_trade else None)
+            clock.blocked_reason()
+            if not clock.is_entry_date
+            else (None if regime.allow_new_entries and not defense.market_halt
+                  else (no_trade.reason if no_trade else None))
         ),
         data_quality_flags=flags,
         manifest=manifest,
@@ -659,11 +677,29 @@ def _manifest_from_store(store, config, run_id, as_of, universe) -> RawDataManif
     # delivered share were exactly average. Measured, that silently replaces 33%
     # of the top decile and costs 18% of IC while the run reports no flag at all.
     # A feed the model leans on that hardest cannot be optional.
+    # THE LIMITS COME FROM THE CONFIG, and they did not. `feeds:` declares a
+    # `max_age_sessions` for every feed and this list hardcoded four of them, so
+    # editing the config's staleness policy changed the `data status` report and
+    # nothing about whether a run was allowed to proceed. The two agreed on the
+    # shipped values -- 1/1/1/2 both places -- which is exactly why it went
+    # unnoticed: the defect was invisible until someone tried to change it.
+    #
+    # `required` stays hardcoded. It is a claim about what the MODEL leans on
+    # rather than an operational preference: delivery is required because
+    # deliv_pct carries the largest coefficient in the fit and crosssec treats
+    # it as neutral-when-missing, so an outage silently replaces 33% of the top
+    # decile and costs 18% of IC while the run reports nothing. Letting that be
+    # switched off in config would make a measurement into a preference.
+    def _max_age(feed: str, fallback: int) -> int:
+        policy = (config.params.feeds or {}).get(feed)
+        value = getattr(policy, "max_age_sessions", None)
+        return int(value) if value is not None else fallback
+
     checks = [
-        ("equity_ohlcv", store.prices.max_date(), True, 1),
-        ("index_ohlcv", store.indices.max_date(), True, 1),
-        ("india_vix", store.indices.max_date(), True, 1),
-        ("delivery_data", store.delivery.max_date(), True, 2),
+        ("equity_ohlcv", store.prices.max_date(), True, _max_age("equity_ohlcv", 1)),
+        ("index_ohlcv", store.indices.max_date(), True, _max_age("index_ohlcv", 1)),
+        ("india_vix", store.indices.max_date(), True, _max_age("india_vix", 1)),
+        ("delivery_data", store.delivery.max_date(), True, _max_age("delivery_data", 2)),
     ]
     for name, last, required, max_age in checks:
         if last is None:
