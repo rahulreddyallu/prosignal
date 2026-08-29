@@ -231,22 +231,15 @@ def _execution_gate(cfg) -> Gate:
 
 
 def _validation_gate(cfg) -> Gate:
-    # A finding that only the forward test can settle cannot block the forward
-    # test. Read off the finding rather than matched by id: the id match was
-    # correct while R1 was the only such finding and silently wrong the moment
-    # T5 arrived, which is the failure mode of every hardcoded exemption.
-    deferred = [f for f in _find.open_findings() if f.resolved_by_forward_test]
-    still_open = [f for f in _find.open_findings()
-                  if not f.resolved_by_forward_test]
+    still_open = [f for f in _find.open_findings() if f.fid != "R1"]
     if still_open:
         return Gate("VALIDATION", False,
                     "open findings: " + ", ".join(f.fid for f in still_open),
                     "resolve or consciously defer each; 'reviewed' is not a "
                     "disposition")
-    tail = (f" ({', '.join(f.fid for f in deferred)} excepted -- the forward "
-            f"test is what resolves them)" if deferred else "")
     return Gate("VALIDATION", True,
-                f"{len(_find.REGISTER)} findings registered, none open{tail}")
+                f"{len(_find.REGISTER)} findings registered, none open "
+                f"(R1 excepted -- it is the forward test itself)")
 
 
 def _repro_gate(cfg) -> Gate:

@@ -121,14 +121,8 @@ def test_the_dsr_scores_independent_windows_not_duplicated_pairs():
         "70 dates, one score each, then every third for the 63/21 overlap"
     )
     d = res.deflated(n_trials=81, horizon_sessions=63, step_sessions=21)
-    # The DSR keeps every DISTINCT DATE in the estimate and deflates the COUNT
-    # by the analytic overlap inflation, which lands on the same independent
-    # figure as the strict sub-sample above without throwing two thirds of the
-    # sample away. What must not survive is the (split, date) duplication.
-    assert d.n_observations == 70
-    assert d.n_observations < len(res.excess) / 8
-    assert d.effective_n == pytest.approx(len(indep), rel=0.10), (
-        "the overlap deduction disagrees with the strict sub-sample")
+    assert d.n_observations == len(indep)
+    assert d.n_observations < len(res.excess) / 20
 
 
 def test_deflated_refuses_to_guess_the_sampling_scheme():

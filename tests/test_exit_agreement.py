@@ -309,19 +309,10 @@ class TestTheHierarchySwitchesReachTheMeasurement:
             armed(c7.exit_hierarchy.stop_loss_breach),
             armed(c7.exit_hierarchy.target_achieved),
             armed(c7.exit_hierarchy.thesis_invalidation))
-        # THE SHIPPED SETTING, pinned so a silent revert is visible. When this
-        # test was written all three rungs were armed and honouring them changed
-        # nothing about what the engine traded, which is what made the fix safe
-        # under a frozen config. Two of them are now disarmed on measurement --
-        # the profit target cost 0.9 points of annual alpha, the thesis
-        # invalidation 14.3 -- so the same assertion now proves something
-        # stronger: the switches are not merely wired, they are wired and
-        # CARRYING a change that alters every label, every backtest and every
-        # live exit. If this line ever reads (True, True, True) again, either
-        # the config was reverted or the reader stopped honouring it, and both
-        # are worth failing on.
+        # v1 arms all three, so honouring them changes nothing about what v1
+        # trades -- which is why this could be fixed under a frozen config.
         assert (live.use_stop, live.use_target, live.use_invalidation) == (
-            True, False, False)
+            True, True, True)
 
         for field, attr in (("stop_loss_breach", "use_stop"),
                             ("target_achieved", "use_target"),

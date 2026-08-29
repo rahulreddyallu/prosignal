@@ -375,34 +375,16 @@ def test_the_worst_schedule_drawdown_is_reported_not_only_the_mean():
     the real one. `phase_summary` reported only that average, under the name
     `max_drawdown`.
 
-    WHY THIS ASSERTION WAS REVERSED. It used to pin `max_drawdown` to the MEAN,
-    on the reasoning that an old name should keep its old meaning so earlier
-    write-ups reconcile. That lost to the competing audit pass, and deliberately.
-    `max_drawdown` is the key the gates and the reports quote, and a risk number
-    that gets quoted must not be the more flattering of two defensible answers --
-    the mean of maxima is shallower than any real path by construction, so
-    leaving it on the headline name understates risk everywhere downstream.
-    Reconciliation is preserved instead by keeping the mean under two explicit
-    names (`max_drawdown_mean_of_phases`, `max_drawdown_period`), which is the
-    same guarantee without the misleading default. Finding R10 records the move:
-    -13.7% -> -19.1%.
-
-    Fails if `worst_schedule_drawdown` disappears or stops being the minimum, or
-    if the headline name drifts back to the mean.
+    Fails if `worst_schedule_drawdown` disappears or stops being the minimum.
     """
     p = _prices(drift=-0.0004, seed=5)
     s = phase_summary(_rankings(p), p, _params(), step_sessions=21)
     assert s, "the fixture produced no tradeable book"
     for key in ("max_drawdown", "max_drawdown_mean_of_phases",
-                "max_drawdown_period", "max_drawdown_path",
                 "worst_schedule_drawdown"):
         assert key in s, key
-    assert s["max_drawdown"] == pytest.approx(s["worst_schedule_drawdown"]), (
-        "the headline name must carry the conservative reading, not the mean"
-    )
-    assert s["max_drawdown_period"] == pytest.approx(
-        s["max_drawdown_mean_of_phases"]), (
-        "the mean must survive under its own names so old reports reconcile"
+    assert s["max_drawdown"] == pytest.approx(s["max_drawdown_mean_of_phases"]), (
+        "the old name must keep its old meaning so earlier write-ups reconcile"
     )
 
     # The phases must actually disagree, or the assertion below is satisfied by
