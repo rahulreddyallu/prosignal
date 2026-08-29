@@ -37,6 +37,9 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from ..features.exits import EXIT_TIMEOUT
+from ..liquidity import assess
+
 __all__ = ["PortfolioParams", "PortfolioResult", "simulate", "phase_summary"]
 
 
@@ -76,6 +79,15 @@ class PortfolioParams:
     #: AGGREGATE decision: how much of the book to have on at all, given how
     #: turbulent the market has been.
     target_vol_annual: Optional[float] = None
+    #: Refuse a name whose ADTV is missing, zero, negative or non-finite,
+    #: rather than sizing it at the full capital slot. See `_position`, and
+    #: `liquidity.assess` for why "missing" and "zero" are different states.
+    #:
+    #: Defaults TRUE because the alternative is indefensible. It is a switch at
+    #: all so the cost of the old behaviour stays measurable: `work/` prices it,
+    #: and a correction whose price can no longer be recomputed is a correction
+    #: nobody can check.
+    refuse_unknown_liquidity: bool = True
     #: Trailing sessions of the equal-weight universe used to read the risk
     #: state. Moreira & Muir use the previous month.
     vol_window_sessions: int = 21
@@ -208,7 +220,21 @@ def _volatility_scale(close: pd.DataFrame, i: int, p: PortfolioParams
 
 def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
               ) -> Optional[Tuple[float, float, float]]:
-    """(rupees deployed, price, adtv), honouring risk budget, slot and liquidity."""
+    """(rupees deployed, price, adtv), honouring risk budget, slot and liquidity.
+
+    A NAME WHOSE LIQUIDITY CANNOT BE MEASURED IS NOT SIZED, IT IS REFUSED.
+
+    This used to fall back to `qty_liq = slot / entry` -- the largest position
+    the capital slot allows -- for exactly the names with no ADTV, while
+    `costs.impact_bps` handed the same names the cheapest fill in the model.
+    Largest size and best execution, awarded for an absence of information.
+
+    Refusing them is worth +0.17% per 63-session period on both ranking
+    constructions and costs about six points of deployed capital, so the names
+    it was admitting were on average ones the book was better off without. That
+    is a happy accident: the argument for refusing does not rest on it, and
+    would stand if the number went the other way.
+    """
     entry = close[sym].iloc[i]
     a = atr[sym].iloc[i]
     if not np.isfinite(entry) or entry <= 0 or not np.isfinite(a):
@@ -218,16 +244,27 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
     risk_per_share = entry * dist
     if risk_per_share <= 0:
         return None
-    liquidity = adtv[sym].iloc[i]
-    qty_liq = ((liquidity * p.max_participation_of_adtv) / entry
-               if np.isfinite(liquidity) and liquidity > 0 else p.slot / entry)
+
+    raw = adtv[sym].iloc[i]
+    view = assess(None if not np.isfinite(raw) else float(raw))
+    if not (view.tradable if p.refuse_unknown_liquidity else True):
+        return None
+    if view.adtv_inr is None:
+        # Only reachable with the gate switched off, which exists so the cost
+        # of the old behaviour can still be measured. Keep the old arithmetic
+        # exactly, so that measurement means what it says.
+        qty_liq = p.slot / entry
+        known = 0.0
+    else:
+        qty_liq = (view.adtv_inr * p.max_participation_of_adtv) / entry
+        known = view.adtv_inr
     qty = max(min(p.risk_budget / risk_per_share, p.slot / entry, qty_liq), 0.0)
-    return float(qty * entry), float(entry), float(liquidity if np.isfinite(liquidity) else 0.0)
+    return float(qty * entry), float(entry), float(known)
 
 
-def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams
-          ) -> Optional[float]:
-    """Realised return of one position, from the SHARED exit resolver.
+def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
+          high=None) -> Optional[Tuple[float, float]]:
+    """(realised return, exit side) of one position, from the SHARED resolver.
 
     This used to carry its own copy of the exit logic -- stop, invalidation,
     horizon, and no profit target at all -- while the training label carried a
@@ -239,6 +276,21 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams
     and whatever happened next was booked. That flattered nothing consistently:
     it overstated the winners that kept running and understated the ones that
     gave it back.
+
+    ``high`` IS NOT OPTIONAL AND USED TO BE PASSED AS None. `resolve_exits`
+    substitutes the close when it is missing, so the 3R target could only
+    trigger on a CLOSE while the stop still triggered on the intraday LOW. The
+    training label passes `high`; this call site did not; every test in
+    `test_exit_agreement` passes it on both sides and so could not see the
+    difference. One module built to hold ONE definition of what happened to a
+    trade, fed different data by its two callers. Measured on the book: the
+    target under-triggers and the shipped construction understates the book's
+    return by 0.10-0.43% per period.
+
+    Returning the SIDE as well is what makes turnover measurable. The caller
+    charges a round trip only to names absent from the previous book, which is
+    correct for a position carried through -- and wrong for the 84% that close
+    early and are re-bought. Without the side it cannot tell the two apart.
     """
     from ..features.exits import ExitRules, resolve_exits
 
@@ -252,10 +304,14 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams
         horizon=p.horizon_sessions,
     )
     one = [sym]
-    out = resolve_exits(close[one], i, rules, high=None, low=low[one],
-                        open_=open_[one], atr=atr[one], ma=ma[one])
-    value = out["ret"].iloc[0] if len(out) else np.nan
-    return None if not np.isfinite(value) else float(value)
+    out = resolve_exits(close[one], i, rules,
+                        high=(high[one] if high is not None else None),
+                        low=low[one], open_=open_[one], atr=atr[one], ma=ma[one])
+    if not len(out):
+        return None
+    value = out["ret"].iloc[0]
+    side = out["side"].iloc[0]
+    return None if not np.isfinite(value) else (float(value), float(side))
 
 
 def simulate(
@@ -275,13 +331,29 @@ def simulate(
     """
     close, low, open_ = prices["close"], prices["low"], prices["open"]
     atr, ma, adtv = prices["atr"], prices["ma"], prices["adtv"]
+    # The intraday high. Absent, `resolve_exits` falls back to the close and the
+    # profit target becomes a close-only instrument while the stop stays
+    # intraday -- see `_hold`. A caller that cannot supply it gets the old
+    # asymmetry, and is told rather than silently given it.
+    high = prices.get("high")
+    if high is None:
+        import warnings
+        warnings.warn(
+            "portfolio_sim.simulate: no 'high' panel supplied, so the profit "
+            "target can only trigger on a close while the stop still triggers "
+            "on the intraday low. The book's return is understated and the "
+            "target layer's measured cost is overstated.",
+            RuntimeWarning, stacklevel=2)
     index = list(close.index)
     pos = {d: i for i, d in enumerate(index)}
     allowed = set(dates_allowed) if dates_allowed is not None else None
 
     stride = max(int(np.ceil(params.horizon_sessions / step_sessions)), 1)
     equity = params.capital
-    held: Dict[str, int] = {}
+    #: symbol -> the side its last position exited on. EXIT_TIMEOUT means the
+    #: position was still open at the horizon and a re-selection genuinely costs
+    #: nothing; anything else means it closed and re-buying is a new round trip.
+    held: Dict[str, float] = {}
     rows: List[Dict[str, float]] = []
 
     for j in range(phase, len(rankings), stride):
@@ -305,7 +377,8 @@ def simulate(
         vol_scale, realised_vol = _volatility_scale(close, i, params)
         scale *= vol_scale
         pnl = deployed = charged = 0.0
-        filled = 0
+        filled = new_or_reopened = 0
+        outcomes: Dict[str, float] = {}
         for sym in book:
             if sym not in close.columns:
                 continue
@@ -313,17 +386,29 @@ def simulate(
             if sized is None or sized[0] <= 0:
                 continue
             size, price, liquidity = sized
-            ret = _hold(sym, i, close, low, open_, ma, atr, params)
-            if ret is None:
+            outcome = _hold(sym, i, close, low, open_, ma, atr, params, high=high)
+            if outcome is None:
                 continue
+            ret, side = outcome
             size *= scale
             pnl += size * ret
             deployed += size
             filled += 1
-            if sym not in held:                      # only new names pay entry
+            outcomes[sym] = side
+            # A ROUND TRIP IS OWED WHENEVER A POSITION IS OPENED. That is any
+            # name absent from the previous book, and also any name whose
+            # previous position CLOSED before the horizon and is being bought
+            # again. Rebalances are `ceil(horizon/step)` apart precisely so one
+            # cohort finishes before the next opens, and 84% of positions close
+            # early, so the second case is most of the book's real turnover. The
+            # old test -- `sym not in held` -- charged none of it, and credited
+            # the hysteresis band with a saving it does not make.
+            reopened = held.get(sym)
+            if reopened is None or reopened != EXIT_TIMEOUT:
                 bps = params.cost_bps(price, size / price if price > 0 else 0.0,
                                       liquidity)
                 charged += size * bps / 10_000.0
+                new_or_reopened += 1
         if filled == 0:
             continue
         gross = pnl
@@ -339,10 +424,30 @@ def simulate(
             # added together.
             "gross_ret": gross / opening, "cost_ret": charged / opening,
             "n_held": filled, "n_new": len([s for s in book if s not in held]),
+            #: Positions that actually paid a round trip -- new names plus names
+            #: whose previous position closed early and was re-bought. `n_new`
+            #: counts only the first and understates real turnover.
+            "n_charged": new_or_reopened,
+            #: How much of the equity was working. The book is scored against a
+            #: FULLY INVESTED benchmark, so cash held here is return given up,
+            #: and it is given up under the label "position sizing". At 1% risk
+            #: over 8 slots the risk-budget term binds above an 8% stop
+            #: distance, which is most names -- measured, the book runs about
+            #: three quarters invested.
             "deployed_frac": deployed / opening,
             "vol_scale": vol_scale, "realised_vol": realised_vol,
         })
-        held = {s: 1 for s in book}
+        # Carry the EXIT SIDE, not a bare 1. A name still open at the horizon
+        # costs nothing to keep; one that stopped out and is re-bought is a new
+        # round trip.
+        #
+        # A name in `book` that never FILLED -- no ATR, no price, refused by the
+        # admission predicate -- keeps its hysteresis slot exactly as before, and
+        # is recorded as NaN rather than as a timeout. NaN != EXIT_TIMEOUT, so if
+        # it fills at a later rebalance it pays: it was never bought, so buying
+        # it is an opening trade. Recording it as a timeout would have made an
+        # unfilled slot into a free entry.
+        held = {s: outcomes.get(s, float("nan")) for s in book}
 
     return PortfolioResult(periods=pd.DataFrame(rows))
 
@@ -375,15 +480,35 @@ def phase_summary(
     # monotonically with horizon; corrected, it peaks near 63 and falls away.
     periods_per_year = 252.0 / float(params.horizon_sessions)
     per_phase = [x.metrics(periods_per_year=periods_per_year) for x in usable]
+    drawdowns = [m["max_drawdown"] for m in per_phase]
     return {
         "mean_return": float(r.mean()),
         "sharpe": float(r.mean() / sd * np.sqrt(periods_per_year)) if sd > 0 else 0.0,
         "periods_per_year": periods_per_year,
-        "max_drawdown": float(np.mean([m["max_drawdown"] for m in per_phase])),
+        # A MEAN OF SCHEDULES IS NOT A DRAWDOWN. Each phase is a different,
+        # complete rebalance schedule -- one of them is the one that would have
+        # been run -- so averaging their worst moments describes an experience
+        # nobody could have had, and it is always shallower than the real one.
+        # Both are reported: `max_drawdown` keeps its old meaning so figures in
+        # older write-ups still reconcile, and the number a person should
+        # actually be shown has its own name.
+        "max_drawdown": float(np.mean(drawdowns)),
+        "max_drawdown_mean_of_phases": float(np.mean(drawdowns)),
+        "worst_schedule_drawdown": float(np.min(drawdowns)),
         "worst_phase_sharpe": float(min(m["sharpe"] for m in per_phase)),
         "hit_rate": float((r > 0).mean()),
         "avg_names": float(pooled["n_held"].mean()),
         "avg_new": float(pooled["n_new"].mean()),
+        #: Round trips actually paid for, which is new names PLUS re-entries
+        #: after an early exit. It exceeds `avg_new` by however much of the
+        #: book closes before the horizon and is bought back.
+        "avg_charged": (float(pooled["n_charged"].mean())
+                        if "n_charged" in pooled else float("nan")),
+        #: Share of equity deployed. The benchmark is fully invested; anything
+        #: below 1.0 here is return the book gave up by holding cash, and the
+        #: decomposition attributes it to "sizing" unless it is read separately.
+        "deployed_frac": (float(pooled["deployed_frac"].mean())
+                          if "deployed_frac" in pooled else float("nan")),
         # Gross and cost carried through pooling, so the buy/hold spread can be
         # priced: a wider exit band buys its edge by NOT paying entry cost on a
         # name it already holds, and that saving is invisible in `mean_return`.

@@ -126,18 +126,32 @@ class CostModel:
         """Square-root market impact, in basis points of the traded value.
 
         ``impact = coefficient * (participation ** exponent)``, expressed in bps.
-        With no ADTV the participation is unknown, so this returns the
-        half-spread alone rather than assuming zero impact -- assuming zero is
-        the optimistic error, and the optimistic error is the dangerous one.
+
+        UNKNOWN LIQUIDITY IS THE MOST EXPENSIVE CASE, NOT THE CHEAPEST. This
+        used to return the half-spread alone when ADTV was missing, with a
+        comment reasoning that assuming zero impact would be the optimistic
+        error. The half-spread alone IS assuming zero impact: it is the cheapest
+        number the model can produce, and it was being handed to exactly the
+        names whose liquidity could not be measured -- while the sizer, for the
+        same names, took the largest position the slot allowed.
+
+        A name with no measurable liquidity should not be traded at all
+        (`liquidity.assess`, and `_position` refuses it). This branch remains
+        because a cost model must answer every question it is asked, so it
+        answers with the stressed figure: the impact of participating at the
+        model's own cap. Optimism here can only ever flatter a trade the rest
+        of the engine has already refused.
         """
         m = self.c.impact_model
         half_spread = _fv(m.assumed_half_spread_bps)
-        if not adtv_inr or adtv_inr <= 0 or position_value_inr <= 0:
-            return half_spread
-
-        participation = position_value_inr / adtv_inr
         coeff = _fv(m.coefficient)
         expo = _fv(m.exponent)
+        if position_value_inr <= 0:
+            return half_spread
+        if not adtv_inr or adtv_inr <= 0:
+            participation = float(_fv(m.unknown_liquidity_participation))
+        else:
+            participation = position_value_inr / adtv_inr
         # coefficient is expressed as a fraction of price; convert to bps.
         impact = coeff * (participation ** expo) * 10_000.0
         return impact + half_spread

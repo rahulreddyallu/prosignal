@@ -840,8 +840,33 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
             horizon=label_horizon, vol_window=int(lab.vol_window_sessions))
             if bool(lab.triple_barrier)
             and str(lab.barrier_source) == "sigma" else None)
+        # R9. THE POPULATION THE FIT IS ESTIMATED OVER, built here and used
+        # twice for the same reason the label geometry is: `fit_predict`
+        # consumes the object and `load_cached` compares the fingerprint it
+        # produces, so the cache check and the fit cannot disagree.
+        #
+        # A name already below its thesis-invalidation level is eligible, is
+        # scored, and CANNOT BE BOUGHT -- stage 6 refuses it. Fitting on it
+        # estimates coefficients over a population the book does not trade.
+        # The predicate is stage 7's own geometry, which is what stage 6
+        # enforces, so both halves of F5 now read one construction.
+        #
+        # Independent of the label. Tying them together is exactly how they
+        # came apart: the admission filter lived inside `resolve_exits`, and
+        # `triple_barrier: false` routed around it, so the decision half
+        # shipped and the training half did not.
+        admit_only = bool(getattr(getattr(universe, "train_on_admissible_only",
+                                          None), "value", True))
+        admission_rules = (rules_from_config(cfg, risk_cfg)
+                           if admit_only and risk_cfg is not None else None)
+        if admit_only and risk_cfg is None:
+            log.warning(
+                "train_on_admissible_only is set and stage 7 is unreachable, "
+                "so the admission predicate cannot be built; the fit falls "
+                "back to the wide population and says so",
+                extra={"as_of": as_of.isoformat()})
         label_fp = cm.label_fingerprint(
-            label_horizon, label_barriers, label_exit_rules)
+            label_horizon, label_barriers, label_exit_rules, admission_rules)
         cached = cm.load_cached(cache, as_of, refit_every,
                                 estimator=str(cfg.estimator.method),
                                 label=label_fp)
@@ -997,6 +1022,9 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
             # rather than silently inventing a stop.
             exit_rules=label_exit_rules,
             barriers=label_barriers,
+            # R9: what the book could have OPENED, which is not what the
+            # universe screen would have LISTED.
+            admission_rules=admission_rules,
             high=high, low=low, open_=open_,
             uniqueness_weighting=bool(lab.uniqueness_weighting),
             estimator=str(est.method),

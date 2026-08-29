@@ -381,8 +381,18 @@ def label_fingerprint(
     horizon: int,
     barriers: Optional["BarrierSpec"] = None,
     exit_rules: Optional["ExitRules"] = None,
+    admission_rules: Optional["ExitRules"] = None,
 ) -> Dict[str, object]:
     """What the coefficients were FITTED AGAINST, in a form two fits can compare.
+
+    R9 ADDS THE POPULATION, and it had to. The fingerprint recorded what the
+    model predicts and not the set of rows it was estimated over, so flipping
+    `universe.train_on_admissible_only` -- which changes every coefficient --
+    left a cached blob valid in every respect the loader checks. The engine
+    would have gone on scoring with wide-population coefficients for up to
+    `refit_every * 2` sessions after the correction shipped, and the run would
+    have looked normal. That is the same trap the label repair walked into,
+    one field along.
 
     `load_cached` validated three things -- the fit date, the feature-column set
     and the estimator name -- and NONE of them move when the label changes. So
@@ -405,7 +415,24 @@ def label_fingerprint(
     fp: Dict[str, object] = {
         "horizon": int(horizon),
         "triple_barrier": bool(barriers is not None or exit_rules is not None),
+        # R9. The rows the fit was estimated over, not just what it predicted.
+        # `admissible` alone would be ambiguous between "the wide panel" and
+        # "a blob written before this field existed"; `load_cached` treats a
+        # missing field as a mismatch, so both refit once and neither scores.
+        "population": ("admissible" if admission_rules is not None
+                       else "all_eligible"),
     }
+    if admission_rules is not None:
+        # The predicate itself, because two different invalidation geometries
+        # admit two different populations and produce two different fits.
+        fp["admission"] = {
+            "invalidation_ma_sessions":
+                int(admission_rules.invalidation_ma_sessions),
+            "invalidation_buffer_atr":
+                float(admission_rules.invalidation_buffer_atr),
+            "atr_period_sessions": int(admission_rules.atr_period_sessions),
+            "atr_method": str(admission_rules.atr_method),
+        }
     if exit_rules is not None:
         fp["source"] = "engine"
         fp["engine"] = {
@@ -1089,6 +1116,7 @@ def fit_predict(
     actions: Optional[pd.DataFrame] = None,
     barriers: Optional["BarrierSpec"] = None,
     exit_rules: Optional["ExitRules"] = None,
+    admission_rules: Optional["ExitRules"] = None,
     open_: Optional[pd.DataFrame] = None,
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
@@ -1113,6 +1141,20 @@ def fit_predict(
     have admitted on each date. ``score_symbols`` restricts what is ranked
     today, which is a different question: the training set has to be
     point-in-time, and today's ranking is over today's eligible universe.
+
+    ``admission_rules`` is R9 and it is a THIRD population question, separate
+    from both. `eligible` asks what the universe screen would have listed;
+    `admission_rules` asks what the BOOK could have opened on the day -- a name
+    already below its thesis-invalidation level is eligible, is scored, and
+    cannot be bought. Fitting on it estimates coefficients over a population
+    the engine does not trade.
+
+    It arrives as a parameter rather than being read from config here because
+    this module has no config, and because a research caller measuring the
+    other population deliberately is the one legitimate reason to want the
+    wide panel. `stage4_core_score` supplies it from
+    `universe.train_on_admissible_only`, and `label_fingerprint` records which
+    population was used so a cached fit from the other one is refused.
     """
     H = int(horizon if horizon is not None else HORIZON)
     A = float(alpha if alpha is not None else ALPHA)
@@ -1137,6 +1179,7 @@ def fit_predict(
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
                         delivery=delivery, eligible=eligible, sectors=sectors,
                         barriers=barriers, exit_rules=exit_rules,
+                        admission_rules=admission_rules,
                         high=(high.reindex(train_close.index) if high is not None else None),
                         low=(low.reindex(train_close.index) if low is not None else None),
                         open_=(open_.reindex(train_close.index) if open_ is not None else None))
@@ -1332,7 +1375,7 @@ def fit_predict(
     # read a second time, so the fingerprint cannot drift from the model it
     # describes. `save_cache` writes it and `load_cached` refuses a blob whose
     # label differs.
-    model.label = label_fingerprint(H, barriers, exit_rules)
+    model.label = label_fingerprint(H, barriers, exit_rules, admission_rules)
     model.regime_reachability = reach
     model.regime_multipliers_applied = multipliers_applied is not None
     model.meta_prob = model_meta_prob

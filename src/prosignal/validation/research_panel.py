@@ -37,6 +37,19 @@ __all__ = ["ResearchPanel", "build_research_panel"]
 #: engine scores -- so it cannot double as the default.
 _USE_CONFIG = object()
 
+#: Fallback for a caller with no config -- `universe.train_on_admissible_only`
+#: is the real control and ships TRUE.
+#:
+#: It briefly lived here as a code constant because adding a schema field moves
+#: `config_hash`, and `baseline-v1@127d8a314ec49aa2` was the identity the
+#: September dossier's figures were anchored to. That reasoning expired the
+#: moment v1 was closed VOID in the epoch ledger: the hash it protected is
+#: preserved in that record, and a correctness fix hidden in a module constant
+#: is exactly the class of defect this audit is about -- `holdout.sacred` was a
+#: config value nothing read, and this would have been a code value the config
+#: could not reach.
+ADMIT_ONLY_TRADEABLE = True
+
 
 @dataclass
 class ResearchPanel:
@@ -58,7 +71,9 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
                          sector_neutral: bool = True,
                          prices: Optional[Dict[str, pd.DataFrame]] = None,
                          turnover: Optional[pd.DataFrame] = None,
-                         exit_rules=_USE_CONFIG) -> ResearchPanel:
+                         exit_rules=_USE_CONFIG,
+                         admit_only_tradeable: Optional[bool] = None,
+                         ) -> ResearchPanel:
     """Build the panel the model is fitted on, from the same config it uses.
 
     ``end`` is the last session to include -- callers pass the holdout boundary
@@ -138,11 +153,21 @@ def build_research_panel(cfg, store, end, *, step: int = 21,
                         horizon=horizon, vol_window=iv(lab.vol_window_sessions))
             if bool(lab.triple_barrier) and not engine_geometry else None)
 
+    # The admission predicate is built from the config whatever the LABEL is,
+    # because the two questions are independent -- and tying them together is
+    # how they came apart. `universe.train_on_admissible_only` decides it; the
+    # keyword exists so a research caller can measure the other population
+    # deliberately, which is the only legitimate reason to want it.
+    want = (admit_only_tradeable if admit_only_tradeable is not None
+            else bool(getattr(getattr(u, "train_on_admissible_only", None),
+                              "value", ADMIT_ONLY_TRADEABLE)))
+    admission = rules_from_config(c4, p.stage7_risk) if want else None
     panel = build_panel(close, turnover, horizon=horizon, step=step,
                         delivery=delivery, eligible=eligible,
                         sectors=(sector_map if sector_neutral else None),
                         barriers=spec, exit_rules=rules,
-                        high=high, low=low, open_=open_)
+                        high=high, low=low, open_=open_,
+                        admission_rules=admission)
     try:
         actions = store.read_corporate_actions()
     except Exception:

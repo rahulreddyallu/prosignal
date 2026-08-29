@@ -63,8 +63,15 @@ class CpcvResult:
     n_paths: int
     #: Rank IC per test date, pooled across every split.
     ic: List[float] = field(default_factory=list)
-    #: Top-decile excess return per test date, pooled.
+    #: Top-decile excess return per test date, pooled. ONE ENTRY PER (SPLIT,
+    #: DATE) PAIR: with N=10, k=2 every date is tested in nine splits, so a
+    #: 70-date panel produces ~630 entries describing 70 observations. Fine for
+    #: a mean, fatal for anything that divides by the count. `deflated()` is
+    #: the one caller that does, and it reduces first.
     excess: List[float] = field(default_factory=list)
+    #: The date each entry in `excess` belongs to, in the same order. Without
+    #: it the duplication above is not recoverable downstream.
+    excess_dates: List[object] = field(default_factory=list)
     #: One Sharpe per woven path -- the distribution walk-forward cannot show.
     path_sharpes: List[float] = field(default_factory=list)
     path_ics: List[float] = field(default_factory=list)
@@ -100,9 +107,60 @@ class CpcvResult:
             "share_negative": float((a < 0).mean()),
         }
 
-    def deflated(self, n_trials: int):
-        """DSR on the pooled per-period excess, charging the trial count."""
-        return deflated_sharpe_ratio(self.excess, n_trials=n_trials)
+    def independent_excess(self, horizon_sessions: int,
+                           step_sessions: int) -> List[float]:
+        """`excess`, reduced to observations that are actually observations.
+
+        Two reductions, in order, and both are arithmetic rather than choices:
+
+        1. A date tested in nine splits appears nine times. Averaging the
+           splits' scores for a date leaves one score per date.
+        2. Panel dates are `step_sessions` apart and a label spans
+           `horizon_sessions`, so consecutive dates share most of their outcome
+           window. Taking every `ceil(horizon/step)`-th date leaves observations
+           that do not overlap at all.
+
+        On this engine's own panel that is 612 -> 68 -> 23. The Deflated Sharpe
+        divides by the count, so running it on 612 was not a stricter test than
+        running it on 23; it was a test of nothing.
+        """
+        if not self.excess:
+            return []
+        if len(self.excess_dates) != len(self.excess):
+            raise ValueError(
+                "excess and excess_dates have drifted apart "
+                f"({len(self.excess)} vs {len(self.excess_dates)}); the "
+                "duplication cannot be reduced and a DSR computed from the "
+                "pooled vector would silently pass"
+            )
+        by_date: Dict[object, List[float]] = {}
+        for d, x in zip(self.excess_dates, self.excess):
+            by_date.setdefault(d, []).append(float(x))
+        ordered = sorted(by_date)
+        stride = max(int(np.ceil(horizon_sessions / max(step_sessions, 1))), 1)
+        return [float(np.mean(by_date[d])) for d in ordered[::stride]]
+
+    def deflated(self, n_trials: int, *, horizon_sessions: int,
+                 step_sessions: int,
+                 trial_sharpes: Optional[Sequence[float]] = None):
+        """DSR on INDEPENDENT per-period excess, charging the trial count.
+
+        `horizon_sessions` and `step_sessions` are required rather than
+        defaulted: they are what makes the reduction above correct, and a
+        default would let a caller get the old pooled answer by omission.
+
+        `trial_sharpes` must be the scores of the TRIALS, from the registry --
+        not `path_sharpes`. The woven paths are nine resamples of the ONE
+        selected configuration, so their variance measures sampling noise in
+        this strategy rather than dispersion across the alternatives it was
+        chosen from. It is the smaller number, and using it shrinks the
+        multiple-testing benchmark: measured here, 0.0083 against 0.0455, which
+        moves the answer from FAIL 0.38 to 0.91. When the registry has no
+        scores the conservative unit variance is used and says so.
+        """
+        return deflated_sharpe_ratio(
+            self.independent_excess(horizon_sessions, step_sessions),
+            n_trials=n_trials, trial_sharpes=trial_sharpes)
 
 
 def _rank_ic(pred: np.ndarray, actual: np.ndarray) -> float:
@@ -225,6 +283,7 @@ def run_cpcv(
                     degenerate += 1
                     continue
                 result.excess.append(ex)
+                result.excess_dates.append(d)
                 # Weave: the k-th time a date is tested it belongs to path k.
                 pid = seen.get(hash(d), 0)
                 seen[hash(d)] = pid + 1

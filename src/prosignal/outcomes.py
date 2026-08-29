@@ -52,7 +52,8 @@ from .data.store import DataStore
 from .data.types import DATE
 from .indicators.circuit import band_state, is_untradeable
 
-__all__ = ["Outcome", "EXIT_MODEL", "resolve_pending", "load_outcomes",
+__all__ = ["Outcome", "EXIT_MODEL", "PRE_EPOCH", "resolve_pending",
+           "load_outcomes", "epochs_present", "summarise_by_epoch",
            "summarise", "calibration"]
 
 log = get_logger(__name__)
@@ -131,19 +132,75 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def load_outcomes(path: Path, *, model: Optional[str] = EXIT_MODEL) -> List[Dict[str, Any]]:
-    """Resolved outcomes for one exit model.
+def _active_epoch_id(ledger_root: Optional[Path] = None) -> str:
+    """The open epoch, or `"unversioned"`.
 
-    Defaults to the current model. Rows written under an older rule stay in the
-    file -- it is append-only and they are the record of what was believed --
-    but they are not served, because averaging them with the current ones would
-    report two strategies as one. Pass ``model=None`` to read everything.
+    Imported lazily and failing soft: outcome resolution must not stop because
+    an epoch ledger is missing. An unstamped row is honest about being
+    unstamped, which is what `PRE_EPOCH` exists to say.
+    """
+    try:
+        from .validation.epoch import active
+
+        if ledger_root is None:
+            from .config.loader import get_config
+
+            ledger_root = Path(get_config().paths.ledger)
+        e = active(Path(ledger_root))
+        return e.epoch_id if e is not None else PRE_EPOCH
+    except Exception:
+        return PRE_EPOCH
+
+
+#: Rows written before epochs existed. They are a real record of what the
+#: engine did; they are just not a record of what THIS engine does, because the
+#: universe they were produced on is not the one it now trades.
+PRE_EPOCH = "pre-epoch"
+
+
+def load_outcomes(path: Path, *, model: Optional[str] = EXIT_MODEL,
+                  epoch: Optional[str] = None,
+                  ledger_root: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Resolved outcomes for one exit model AND one research epoch.
+
+    Defaults to the current model and the open epoch. Rows written under an
+    older rule or an older epoch stay in the file -- it is append-only and they
+    are the record of what was believed -- but they are not served, because
+    averaging them with the current ones reports two strategies as one.
+
+    The exit-model partition was already here. The epoch partition is finding
+    C3/C4: the recorded history predates the population and liquidity
+    corrections and was produced on a different universe, so pooling it with
+    anything current compares two books and calls the result one.
+
+    Pass ``model=None`` and ``epoch="*"`` to read everything, which is what the
+    per-epoch report does.
     """
     rows = _read_jsonl(Path(path))
-    if model is None:
+    if model is not None:
+        # A row with no stamp predates versioning, which means stop-target-v1.
+        rows = [r for r in rows
+                if (r.get("exit_model") or "stop-target-v1") == model]
+    if epoch == "*":
         return rows
-    # A row with no stamp predates versioning, which means stop-target-v1.
-    return [r for r in rows if (r.get("exit_model") or "stop-target-v1") == model]
+    want = epoch if epoch is not None else _active_epoch_id(ledger_root)
+    return [r for r in rows if (r.get("epoch_id") or PRE_EPOCH) == want]
+
+
+def epochs_present(path: Path) -> Dict[str, int]:
+    """Every epoch the outcome record contains, and how many rows each has.
+
+    The point of surfacing this is that the answer is currently lopsided: the
+    whole operating history sits under `pre-epoch` and the current experiment
+    has none. A record that showed only the current epoch would render as an
+    empty page and read as "no trades yet" rather than as "the trades we have
+    describe a different engine".
+    """
+    counts: Dict[str, int] = {}
+    for r in _read_jsonl(Path(path)):
+        key = str(r.get("epoch_id") or PRE_EPOCH)
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def book_by_date(ledger_rows) -> Dict[dt.date, set]:
@@ -502,6 +559,15 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
         "config_version": item.get("config_version"),
         "engine_version": item.get("engine_version"),
         "exit_model": EXIT_MODEL,
+        # WHICH EXPERIMENT THIS TRADE BELONGS TO.
+        #
+        # `exit_model` already stops two exit rules being averaged as one. It
+        # does not stop two UNIVERSES being averaged as one, and that is what
+        # happened: the recorded operating history predates the population and
+        # liquidity corrections, so it describes a book drawn from a different
+        # set of names. It was not comparable to any current figure, and
+        # nothing said so -- findings C3 and C4.
+        "epoch_id": item.get("epoch_id") or _active_epoch_id(),
         # 1.0 unless a corporate action re-based the store's prices after the
         # signal. Recorded so a surprising outcome can be checked against it.
         "price_basis_factor": factor,
@@ -536,6 +602,73 @@ def summarise(outcomes: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "best": float(net.max()),
         "exit_mix": {r: sum(1 for o in rows if o.get("exit_reason") == r)
                      for r in sorted({o.get("exit_reason") for o in rows})},
+    }
+
+
+def summarise_by_epoch(outcomes: Iterable[Dict[str, Any]],
+                       *, current: Optional[str] = None,
+                       ledger_root: Optional[Path] = None) -> Dict[str, Any]:
+    """`summarise` partitioned by the epoch each trade was decided under.
+
+    C3/C4, made arithmetic. The engine's recorded operating history was
+    produced on a different universe, under a sizer that would size an
+    unmeasured name and a cost model that gave it the cheapest fill in the
+    book. Averaging those trades with anything produced after the corrections
+    reports two engines as one -- the identical failure `EXIT_MODEL` already
+    guards against for the exit rule.
+
+    The alternative that was rejected: dropping the retired rows. They are the
+    only operating record that exists, and a page that shows nothing reads as
+    "no trades yet" rather than as "the trades we have describe a different
+    engine". So they are served, LABELLED, next to the epoch that supersedes
+    them.
+
+    ``pooled`` is what a caller that ignored the partition would print, and
+    ``pooling_overstates_expectancy_by`` is the size of the error it would make
+    -- signed, so a negative value means pooling UNDER-states the current
+    epoch. Reporting the mistake next to the correct figure is what stops the
+    partition from being re-collapsed by the next person who finds the
+    per-epoch samples too small to be interesting.
+    """
+    rows = [o for o in outcomes if o.get("net_return") is not None]
+    if current is None:
+        current = _active_epoch_id(ledger_root)
+
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for o in rows:
+        buckets.setdefault(str(o.get("epoch_id") or PRE_EPOCH), []).append(o)
+
+    #: `pre-epoch` first because it is oldest; the rest by id, which begins
+    #: with the date the epoch was opened and therefore sorts chronologically.
+    def _order(k: str):
+        return (0 if k == PRE_EPOCH else 1, k)
+
+    epochs: List[Dict[str, Any]] = []
+    for key in sorted(buckets, key=_order):
+        s = summarise(buckets[key])
+        s["epoch_id"] = key
+        s["is_current"] = (key == current)
+        s["retired"] = (key != current)
+        s["note"] = ("" if key == current else
+                     "produced under a superseded epoch -- not comparable to "
+                     "the current one and not poolable with it")
+        epochs.append(s)
+
+    pooled = summarise(rows)
+    cur = next((e for e in epochs if e["is_current"]), None)
+    gap = float("nan")
+    if cur is not None and cur.get("n") and pooled.get("n"):
+        gap = float(pooled["expectancy"] - cur["expectancy"])
+
+    return {
+        "current_epoch": current,
+        "epochs": epochs,
+        # Deliberately not merged into `epochs`: a caller iterating the list
+        # and summing `n` must not pick this up as another cohort.
+        "pooled": pooled,
+        "pooling_overstates_expectancy_by": gap,
+        "spans_multiple_epochs": len(epochs) > 1,
+        "current_epoch_has_no_record": cur is None or not cur.get("n"),
     }
 
 

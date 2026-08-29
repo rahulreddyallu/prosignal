@@ -84,7 +84,8 @@ def test_the_forward_test_reports_drift_the_config_hash_cannot_see(tmp_path):
     from prosignal.validation.forward import progress, register
 
     register(tmp_path, config_version="v1", engine_version="0.1.0",
-             git_commit="deadbeef", started_on=dt.date(2026, 1, 1))
+             git_commit="deadbeef", started_on=dt.date(2026, 1, 1),
+             unchecked_reason="fixture: about fingerprint drift, not readiness")
     rows = [{"date": "2026-01-05", "config_version": "v1",
              "model_fingerprint": "aaa/8"},
             {"date": "2026-01-06", "config_version": "v1",
@@ -102,7 +103,8 @@ def test_one_fingerprint_across_the_window_is_not_drift(tmp_path):
     from prosignal.validation.forward import progress, register
 
     register(tmp_path, config_version="v1", engine_version="0.1.0",
-             git_commit="deadbeef", started_on=dt.date(2026, 1, 1))
+             git_commit="deadbeef", started_on=dt.date(2026, 1, 1),
+             unchecked_reason="fixture: about fingerprint drift, not readiness")
     rows = [{"date": "2026-01-05", "config_version": "v1",
              "model_fingerprint": "aaa/8"},
             {"date": "2026-01-06", "config_version": "v1",

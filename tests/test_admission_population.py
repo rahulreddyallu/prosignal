@@ -313,3 +313,84 @@ def test_the_pipeline_hands_the_rejection_reason_to_the_review():
     assert "eligibility=eligibility" in call, (
         "the review cannot explain a rejection it was never given"
     )
+
+
+# =============================================================================
+# The panel and the book must draw from the SAME population
+# =============================================================================
+
+
+def test_the_panel_can_be_restricted_to_what_the_book_can_open():
+    """`admission_rules` applies the live predicate whatever the LABEL is.
+
+    The mask lived inside `resolve_exits`, which `build_panel` reaches only
+    when `exit_rules` is not None -- and the shipped `triple_barrier: false`
+    makes it None. So on the shipped config the model is fitted and ranked on
+    a population the engine refuses part of, and the simulator discovers the
+    difference at fill time by leaving slots empty: 7.29 of 8 filled.
+
+    Admission and labelling are independent questions. Tying them together is
+    how they came apart, so this checks they can now be asked separately.
+    """
+    import pandas as pd
+
+    from prosignal.features.crosssec import build_panel
+
+    n, m = 500, 60
+    rng = np.random.default_rng(17)
+    idx = pd.bdate_range("2020-01-01", periods=n)
+    cols = [f"S{i:02d}" for i in range(m)]
+    close = pd.DataFrame(
+        {c: 100 * np.exp(np.cumsum(rng.normal(0.0004, 0.015, n))) for c in cols},
+        index=idx)
+    high, low = close * 1.01, close * 0.99
+    open_ = close.shift(1).bfill()
+    turnover = pd.DataFrame(5e8, index=idx, columns=cols)
+
+    common = dict(horizon=63, step=21, high=high, low=low, open_=open_,
+                  min_names=5)
+    wide = build_panel(close, turnover, **common)
+    narrow = build_panel(close, turnover, admission_rules=RULES, **common)
+
+    assert not wide.empty and not narrow.empty
+    assert len(narrow) < len(wide), (
+        "the admission mask removed nothing, so either the fixture has no name "
+        "below its invalidation level or the mask is not being applied"
+    )
+    # Every row kept must satisfy the predicate the live path applies.
+    atr = atr_panel(high, low, close, RULES.atr_period_sessions, RULES.atr_method)
+    ma = ma_panel(close, RULES.invalidation_ma_sessions)
+    for _, row in narrow.iterrows():
+        d, s = pd.Timestamp(row["date"]), row["symbol"]
+        lvl_ma, lvl_atr = ma.loc[d, s], atr.loc[d, s]
+        if not (np.isfinite(lvl_ma) and np.isfinite(lvl_atr)):
+            continue                      # unknown level: admitted, documented
+        assert bool(tradeable_at_entry(close.loc[d, s], lvl_ma, lvl_atr, RULES)), (
+            f"{s} on {d.date()} is in the panel and below its own invalidation "
+            f"level, which is a name the engine would refuse to open"
+        )
+
+
+def test_the_admission_policy_is_a_config_value_the_panel_reads():
+    """It must be reachable from `parameters.yaml`, not buried in a module.
+
+    It briefly lived as a code constant to protect
+    `baseline-v1@127d8a314ec49aa2` from a schema change. That reasoning expired
+    when v1 was closed VOID in the epoch ledger. A correctness control the
+    config cannot reach is the mirror image of `holdout.sacred`, which was a
+    config value nothing read -- both leave the operator unable to see what the
+    engine is doing from the file that is supposed to say.
+    """
+    from prosignal.config.loader import load_config
+    from prosignal.validation.research_panel import ADMIT_ONLY_TRADEABLE
+
+    cfg = load_config()
+    declared = cfg.params.universe.train_on_admissible_only
+    assert bool(declared.value) is True, (
+        "the shipped engine must fit on the population it can trade; turning "
+        "this off is a research question and opens a new epoch"
+    )
+    assert ADMIT_ONLY_TRADEABLE is True, (
+        "the module fallback must agree with the shipped config, or a caller "
+        "without a config silently trains on a different population"
+    )

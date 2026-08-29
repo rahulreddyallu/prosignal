@@ -19,10 +19,11 @@ import argparse
 import datetime as dt
 import os
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 from .config.loader import AppConfig, load_config
-from .core.errors import DataError, ProSignalError
+from .core.errors import ConfigError, DataError, ProSignalError
 from .core.logging import get_logger, setup_logging
 from .version import ENGINE_NAME, ENGINE_VERSION, SCHEMA_VERSION
 
@@ -88,6 +89,67 @@ _STATUS_STYLE = {
 def _tag(text: str) -> str:
     style = _STATUS_STYLE.get(text)
     return f"[{style}]{text}[/{style}]" if style and _console else text
+
+
+def _selection_end(cfg: AppConfig, args: argparse.Namespace, sessions):
+    """Last session a research command may read, and the holdout rule enforced.
+
+    `validation.holdout.sacred` shipped as `true` and was read by NOTHING. Eight
+    research commands each carried their own copy of
+
+        end = sessions[-1] if args.include_holdout else sessions[-reserve]
+
+    with a printed warning and no check, so the flag that names the holdout
+    untouchable was decoration and a single keystroke spent it.
+
+    Spending a holdout is a legitimate thing to do ONCE, which is what a holdout
+    is for. It is not a legitimate thing to do by accident, and it must not be
+    possible to do it invisibly. So it is refused here while `sacred` is true,
+    and the way to spend it is to set that flag to false in
+    `config/parameters.yaml` -- which moves `config_version`, which is stamped
+    on every ledger row and every registration from that moment on. The decision
+    then has a date, an author and a hash, instead of a flag on one command.
+    """
+    from .stages._cfg import iv
+
+    reserve = iv(cfg.params.validation.holdout.reserve_most_recent_sessions)
+    if not getattr(args, "include_holdout", False):
+        return sessions[-reserve]
+    if bool(getattr(cfg.params.validation.holdout, "sacred", False)):
+        raise ConfigError(
+            "--include-holdout was refused: validation.holdout.sacred is true.\n"
+            "\n"
+            "The holdout can be read exactly once and the reading is only worth "
+            "anything if nothing has been tuned against it. To spend it, set\n"
+            "\n"
+            "    validation.holdout.sacred: false\n"
+            "\n"
+            "in config/parameters.yaml. That changes config_version, which is "
+            "recorded on every ledger row and every forward-test registration "
+            "from then on, so the decision is dated and attributable rather "
+            "than a flag somebody passed on a Tuesday.",
+            config_version=str(getattr(cfg, "version", "")),
+        )
+    _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    return sessions[-1]
+
+
+def _arm_sharpe(values) -> float:
+    """Per-period Sharpe of one research arm's out-of-sample scores.
+
+    What gets stored beside a trial in the registry. Any consistent statistic
+    would do -- the DSR needs the DISPERSION across arms, not the level -- but
+    it has to be the same one for every arm or the variance is measuring the
+    mixture of statistics rather than the mixture of configurations.
+    """
+    import numpy as _np
+
+    a = _np.asarray([v for v in values if v is not None], dtype="float64")
+    a = a[_np.isfinite(a)]
+    if a.size < 2:
+        return float("nan")
+    sd = float(a.std(ddof=1))
+    return float(a.mean() / sd) if sd > 0 else float("nan")
 
 
 # =============================================================================
@@ -1112,9 +1174,7 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
         raise DataError("the local store has no price sessions.")
 
     holdout_start = sessions[-iv(val.holdout.reserve_most_recent_sessions)]
-    end = holdout_start if not args.include_holdout else sessions[-1]
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this consumes the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     u = p.universe
     sectors = store.read_sector_map()
@@ -1195,7 +1255,15 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
         _print("  Charging fewer trials than were actually looked at is exactly")
         _print("  the bias the Deflated Sharpe exists to remove.")
 
-    dsr = result.deflated(n_trials=trials)
+    # INDEPENDENT observations, and Var[SR] from the registry's recorded trial
+    # scores when it has any. This used to be `result.deflated(n_trials=trials)`
+    # on the pooled (split, date) vector with no variance estimate, which is
+    # 612 entries describing 70 dates and a fallback variance of 1/(n-1) =
+    # 0.0016. That combination returned 1.0000 PASS for any positive result at
+    # any trial count: the defence against multiple testing could not fail.
+    dsr = result.deflated(n_trials=trials, horizon_sessions=horizon,
+                          step_sessions=21,
+                          trial_sharpes=reg.recorded_scores())
     t_bar = fv(val.significance.t_stat_bar)
     pbo_bar = float(val.search_budget.max_acceptable_pbo)
     paths = np.asarray(result.path_sharpes, dtype="float64")
@@ -1203,14 +1271,20 @@ def cmd_research_cpcv(cfg: AppConfig, args: argparse.Namespace) -> int:
     ex = np.asarray(result.excess, dtype="float64")
     ex = ex[np.isfinite(ex)]
     if ex.size:
+        n_dates = len(set(result.excess_dates))
         _print(f"  pooled top-decile excess {ex.mean():+.2%} per "
-               f"{horizon}-session period, over {ex.size:,} scored test dates")
+               f"{horizon}-session period, over {ex.size:,} scored "
+               f"(split, date) pairs covering {n_dates} distinct dates")
     else:
         # Printing "+nan%" here read as a number. It is the absence of one.
         _print("  pooled top-decile excess: NOT MEASURABLE -- no test date "
                "produced a top decile to measure")
-    _print(f"  Deflated Sharpe {dsr.deflated_sr:.3f} charging {trials} trials -- "
+    _print(f"  Deflated Sharpe {dsr.deflated_sr:.3f} charging {trials} trials, "
+           f"on {dsr.n_observations} independent {horizon}-session windows -- "
            f"{'PASS' if dsr.passes else 'FAIL'}")
+    _print(f"    Var[SR] {dsr.sr_variance:.4f} ({dsr.sr_variance_source}); "
+           f"expected max under the null {dsr.benchmark_sr:+.3f} against an "
+           f"observed {dsr.observed_sr:+.3f}")
     worst = float(paths.min()) if paths.size else float("nan")
     _print(f"  worst of {paths.size} paths: Sharpe {worst:+.2f}; "
            f"{spread.get('share_negative', float('nan')):.0%} of paths below zero")
@@ -1415,10 +1489,7 @@ def cmd_research_factors(cfg: AppConfig, args: argparse.Namespace) -> int:
     sessions = store.price_sessions()
     if not sessions:
         raise DataError("the local store has no price sessions.")
-    end = (sessions[-1] if args.include_holdout
-           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     _rule("Building the panel")
     # The SHARED builder -- same label, same universe screen, same coverage
@@ -1585,10 +1656,7 @@ def cmd_research_estimator(cfg: AppConfig, args: argparse.Namespace) -> int:
     sessions = store.price_sessions()
     if not sessions:
         raise DataError("the local store has no price sessions.")
-    end = (sessions[-1] if args.include_holdout
-           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     _rule("Building the panel")
     rp = build_research_panel(cfg, store, end)
@@ -1672,8 +1740,14 @@ def cmd_research_estimator(cfg: AppConfig, args: argparse.Namespace) -> int:
 
     # Every arm above was compared and could have been chosen. That is the
     # definition of a trial, and the DSR charges for it whether or not it won.
+    # The SCORE goes in with the label. The DSR needs the trial count and the
+    # trial DISPERSION; the registry supplied the first and nothing supplied the
+    # second, so Var[SR] had to be assumed -- and the answer is more sensitive
+    # to that assumption than to anything else it is given.
+    _arms = sorted(per.keys())
     TrialRegistry(registry_path(cfg.paths.curated)).record(
-        "research estimator", sorted(per.keys()))
+        "research estimator", _arms,
+        scores=[_arm_sharpe([c for _, _, c in per[a]]) for a in _arms])
 
     if "equal weight 1/N" in per:
         base = {d: b for d, b, _ in per["equal weight 1/N"]}
@@ -1763,10 +1837,7 @@ def cmd_research_spread(cfg: AppConfig, args: argparse.Namespace) -> int:
     sessions = store.price_sessions()
     if not sessions:
         raise DataError("the local store has no price sessions.")
-    end = (sessions[-1] if args.include_holdout
-           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     _rule("Building panels")
     panels = _portfolio_inputs(cfg, store, sessions, None, end)
@@ -1837,7 +1908,8 @@ def cmd_research_spread(cfg: AppConfig, args: argparse.Namespace) -> int:
 
     TrialRegistry(registry_path(cfg.paths.curated)).record(
         "research spread",
-        [f"entry={r['entry']},exit={r['exit']}" for r in rows])
+        [f"entry={r['entry']},exit={r['exit']}" for r in rows],
+        scores=[r.get("sharpe") for r in rows])
 
     frame = pd.DataFrame(rows)
     if any(e > base.max_positions for e in args.entries):
@@ -1930,10 +2002,7 @@ def cmd_research_metalabel(cfg: AppConfig, args: argparse.Namespace) -> int:
     sessions = store.price_sessions()
     if not sessions:
         raise DataError("the local store has no price sessions.")
-    end = (sessions[-1] if args.include_holdout
-           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     _rule("Building the panel")
     rp = build_research_panel(cfg, store, end)
@@ -2117,10 +2186,7 @@ def cmd_research_volscale(cfg: AppConfig, args: argparse.Namespace) -> int:
     sessions = store.price_sessions()
     if not sessions:
         raise DataError("the local store has no price sessions.")
-    end = (sessions[-1] if args.include_holdout
-           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     _rule("Building panels")
     panels = _portfolio_inputs(cfg, store, sessions, None, end)
@@ -2180,6 +2246,9 @@ def cmd_research_volscale(cfg: AppConfig, args: argparse.Namespace) -> int:
            f"{r0.mean() / r0.std(ddof=1) * np.sqrt(ppy):>+9.2f}"
            f"{'--':>10}{'--':>8}{1.0:>11.2f}")
     best_sharpe, best_name = r0.mean() / r0.std(ddof=1) * np.sqrt(ppy), "OFF"
+    # (label, score) per arm, so the registry records what each one scored
+    # rather than only that it was looked at.
+    _vol_arms = [("off", float(best_sharpe))]
     for target in args.targets:
         on = periods(replace(base, target_vol_annual=float(target)))
         keys = sorted(set(off) & set(on))
@@ -2190,13 +2259,15 @@ def cmd_research_volscale(cfg: AppConfig, args: argparse.Namespace) -> int:
         d = a - b
         scale = np.array([on[k][1] for k in keys])
         sharpe = a.mean() / a.std(ddof=1) * np.sqrt(ppy)
+        _vol_arms.append((f"target={target:.2f}", float(sharpe)))
         if sharpe > best_sharpe:
             best_sharpe, best_name = sharpe, f"{target:.0%}"
         _print(f"  {target:>8.0%}{len(a):>5}{a.mean():>+11.2%}{a.std(ddof=1):>9.2%}"
                f"{sharpe:>+9.2f}{d.mean():>+10.2%}"
                f"{d.mean() / newey_west_se(d, 2):>+8.2f}{scale.mean():>11.2f}")
     TrialRegistry(registry_path(cfg.paths.curated)).record(
-        "research volscale", [f"target={t:.2f}" for t in args.targets] + ["off"])
+        "research volscale", [lbl for lbl, _ in _vol_arms],
+        scores=[sc for _, sc in _vol_arms])
 
     vols = np.array([v[2] for v in off.values() if np.isfinite(v[2])])
     _print()
@@ -2241,10 +2312,7 @@ def cmd_research_decay(cfg: AppConfig, args: argparse.Namespace) -> int:
     sessions = store.price_sessions()
     if not sessions:
         raise DataError("the local store has no price sessions.")
-    end = (sessions[-1] if args.include_holdout
-           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     _rule("Building the panel")
     rp = build_research_panel(cfg, store, end)
@@ -2335,14 +2403,26 @@ def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
 
         from . import __version__
         from .validation.forward import register
+        from .validation.readiness import RestartRefused
         commit = subprocess.run(["git", "rev-parse", "HEAD"],
                                 capture_output=True, text=True).stdout.strip()
         try:
             opened = register(cfg.paths.ledger, config_version=cfg.version,
                               engine_version=__version__, git_commit=commit,
-                              overwrite=bool(args.restart))
+                              overwrite=bool(args.restart), cfg=cfg)
         except FileExistsError as exc:
             _print(str(exc))
+            return 1
+        except RestartRefused as exc:
+            _rule("Restart refused")
+            for r in exc.reasons:
+                _print(f"  - {r}")
+            _print()
+            _print("  The window this would replace is void because the engine "
+                   "changed under it. Opening a new one before the engine "
+                   "stops changing repeats that, and costs another eighteen "
+                   "months to find out.")
+            _print("  `prosignal research readiness` shows all eight gates.")
             return 1
         _print(f"Forward test registered {opened.started_on}, fingerprint "
                f"{opened.fingerprint()}.")
@@ -2428,10 +2508,7 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     sessions = store.price_sessions()
     if not sessions:
         raise DataError("the local store has no price sessions.")
-    end = (sessions[-1] if args.include_holdout
-           else sessions[-iv(val.holdout.reserve_most_recent_sessions)])
-    if args.include_holdout:
-        _print(_tag("HOLDOUT INCLUDED -- this spends the one honest test"))
+    end = _selection_end(cfg, args, sessions)
 
     u = p.universe
     sectors = store.read_sector_map()
@@ -2577,6 +2654,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     purge = data_sub.add_parser("purge-cache", help="delete cached HTTP payloads")
     purge.set_defaults(func=cmd_data_purge_cache)
+
+    man_p = data_sub.add_parser(
+        "manifest",
+        help="content hash of the curated store, so a result can name its "
+             "inputs without the data going into Git")
+    man_p.add_argument("--write", action="store_true",
+                       help="rebuild the manifest from the store as it is now")
+    man_p.add_argument("--verify", action="store_true",
+                       help="check the store still matches the manifest")
+    man_p.add_argument("--quick", action="store_true",
+                       help="size and mtime only; skips the content hash")
+    man_p.set_defaults(func=cmd_data_manifest)
 
     # -- analyse ------------------------------------------------------------
     analyse_p = sub.add_parser("analyse", help="run individual pipeline stages")
@@ -2752,6 +2841,50 @@ def build_parser() -> argparse.ArgumentParser:
                              "one honest test")
     port_p.set_defaults(func=cmd_research_portfolio)
 
+    ep_p = research_sub.add_parser(
+        "epoch",
+        help="which engine produced a result -- code, config, data, features, "
+             "universe policy and execution model as one identity")
+    ep_sub = ep_p.add_subparsers(dest="epoch_action")
+    ep_p.set_defaults(func=cmd_research_epoch, epoch_action="status")
+    ep_sub.add_parser("status", help="the open epoch and any drift from it")
+    ep_sub.add_parser("list", help="every epoch ever opened")
+    ep_open = ep_sub.add_parser("open", help="open a new epoch")
+    ep_open.add_argument("--label", required=True,
+                         help="what this epoch is, in a few words")
+    ep_open.add_argument("--note", default="",
+                         help="why it was opened; what changed")
+    ep_open.add_argument("--force", action="store_true",
+                         help="open while another is still OPEN. Two open "
+                              "epochs means two answers to 'which engine "
+                              "produced this'")
+    ep_close = ep_sub.add_parser("close", help="retire an epoch, with a reason")
+    ep_close.add_argument("epoch_id")
+    ep_close.add_argument("--reason", required=True,
+                          help="why. A close with no reason is a deletion")
+    ep_close.add_argument("--status", default="SUPERSEDED",
+                          choices=["SUPERSEDED", "VOID"])
+    ep_close.add_argument("--superseded-by", default="",
+                          dest="superseded_by")
+
+    find_p = research_sub.add_parser(
+        "findings",
+        help="the defect register: category, disposition, regression test and "
+             "restart consequence for each finding")
+    find_p.add_argument("--id", dest="fid", help="one finding, in full")
+    find_p.set_defaults(func=cmd_research_findings)
+
+    ready_p = research_sub.add_parser(
+        "readiness",
+        help="the eight READY gates -- data, universe, features, model, "
+             "execution, validation, reproducibility, forward test")
+    ready_p.set_defaults(func=cmd_research_readiness)
+
+    rec_p = research_sub.add_parser(
+        "record",
+        help="the operating record, partitioned by the engine that produced it")
+    rec_p.set_defaults(func=cmd_research_record)
+
     return parser
 
 
@@ -2846,6 +2979,310 @@ def main(argv: Optional[List[str]] = None) -> int:
     except KeyboardInterrupt:  # pragma: no cover
         _print("\ninterrupted")
         return 130
+
+
+
+# =============================================================================
+# Provenance: the data a result came from, and the engine that produced it
+# =============================================================================
+
+
+def cmd_data_manifest(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Describe the curated store precisely enough to reconstruct it.
+
+    D1. Not a substitute for backing the data up -- a substitute for putting a
+    quarter of a gigabyte of market data into Git in order to be able to say
+    which quarter of a gigabyte a figure was computed from. The manifest
+    commits; the data does not.
+
+    The digest is over content only -- path, size, sha256, row count, date
+    range, schema -- and never over mtime, so re-downloading an identical file
+    does not invent a new dataset. It is recomputed on load and never trusted
+    from the file it was read out of.
+    """
+    from .data.manifest import build, load, verify, write
+
+    root = Path(cfg.paths.curated)
+    if getattr(args, "write", False):
+        man = build(root)
+        path = write(man, root)
+        _rule("Manifest written")
+        _print(f"  {path}")
+        _print(f"  {man.summary()}")
+        _print(f"  digest {man.digest}")
+        _print()
+        _print("  Commit this file. A result that names this digest can be "
+               "checked against the store it claims to describe; one that "
+               "names nothing cannot be reproduced, only re-run.")
+        return 0
+
+    man = load(root)
+    if man is None:
+        _rule("No manifest")
+        _print(f"  {root} is not described by a manifest.")
+        _print("  `prosignal data manifest --write` writes one.")
+        return 1
+
+    _rule("Data manifest")
+    _table("store", ["field", "value"], [
+        ["root", str(root)],
+        ["digest", man.digest],
+        ["built", man.built_at],
+        ["contents", man.summary()],
+    ])
+
+    if getattr(args, "verify", False):
+        ok, drift = verify(root, quick=bool(getattr(args, "quick", False)))
+        _print()
+        if ok:
+            _print("  VERIFIED -- every file matches the manifest.")
+            return 0
+        _print(f"  DRIFTED -- {len(drift)} discrepancies:")
+        for d in drift[: int(getattr(args, "limit", 20) or 20)]:
+            _print(f"    {d.path}: {d.what}")
+        if len(drift) > 20:
+            _print(f"    ... and {len(drift) - 20} more")
+        _print()
+        _print("  The store is not the one this manifest describes, so no "
+               "figure computed against the manifest is a figure about this "
+               "data. Re-ingest, or re-manifest and open a new epoch.")
+        return 1
+    return 0
+
+
+def cmd_research_epoch(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """The research epoch: which engine produced a result.
+
+    D2. `config_version` identified a run and does not cover the code, the
+    data, the universe policy, the feature schema or the execution model, so
+    two materially different engines could produce results labelled the same.
+    An epoch fixes all eight at once. Any material change opens a new one --
+    and therefore a new out-of-sample question, because a result carried across
+    a change of engine is an in-sample result wearing a date.
+    """
+    from .validation.epoch import (STATUS_OPEN, active, close_epoch,
+                                   current_identity, drifted_from, load_all,
+                                   open_epoch)
+
+    root = Path(cfg.paths.ledger)
+    action = getattr(args, "epoch_action", "status")
+
+    if action == "open":
+        try:
+            ep = open_epoch(root, cfg, label=args.label, note=args.note or "",
+                            allow_while_open=bool(args.force))
+        except Exception as exc:
+            _print(str(exc))
+            return 1
+        _rule("Epoch opened")
+        _print(f"  {ep.summary()}")
+        _print(f"  fingerprint {ep.ident().fingerprint()}")
+        _print()
+        _print("  Every outcome resolved from here carries this id. Results "
+               "from earlier epochs are kept and labelled, never pooled.")
+        return 0
+
+    if action == "close":
+        try:
+            ep = close_epoch(root, args.epoch_id, reason=args.reason,
+                             status=args.status,
+                             superseded_by=getattr(args, "superseded_by", "") or "")
+        except Exception as exc:
+            _print(str(exc))
+            return 1
+        _rule("Epoch closed")
+        _print(f"  {ep.summary()}")
+        return 0
+
+    if action == "list":
+        eps = load_all(root)
+        if not eps:
+            _print("No epoch has ever been opened.")
+            return 1
+        _rule("Research epochs")
+        _table("ledger", ["id", "label", "opened", "status", "fingerprint"],
+               [[e.epoch_id, e.label, e.opened_on, e.status,
+                 e.ident().fingerprint()] for e in eps])
+        return 0
+
+    # status
+    ep, diffs = drifted_from(root, cfg)
+    now = current_identity(cfg)
+    _rule("Research epoch")
+    if ep is None:
+        _print("  No epoch is open.")
+        _print("  Nothing produced now can be attributed to a described "
+               "engine, which is the condition D2 exists to end.")
+    else:
+        _print(f"  {ep.summary()}")
+        _print(f"  fingerprint {ep.ident().fingerprint()}")
+    _print()
+    _table("this tree", ["field", "value"], [
+        ["code", now.code_sha + (" (DIRTY)" if now.code_dirty else "")],
+        ["scoring path", now.model_sources_sha],
+        ["config", now.config_version],
+        ["data", now.data_manifest_sha],
+        ["features", now.feature_schema_sha],
+        ["universe policy", now.universe_policy],
+        ["execution model", now.execution_model],
+        ["fingerprint", now.fingerprint()],
+    ])
+    if diffs:
+        _print()
+        _print("  DRIFTED from the open epoch:")
+        for d in diffs:
+            _print(f"    {d}")
+        _print()
+        _print("  This is reported, not acted on. Whether a change is material "
+               "enough to open a new epoch is a judgement, and one made in the "
+               "open beats one made by a rule that guessed.")
+    elif ep is not None:
+        _print()
+        _print("  The tree matches the open epoch exactly.")
+    return 0 if (ep is not None and not diffs) else 1
+
+
+def cmd_research_findings(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """The defect register, classified. `reviewed` is not a status here.
+
+    Each entry carries its root cause, location, fix, the regression test that
+    goes red when the fix is reverted, the before/after, and three consequence
+    flags: whether coefficients moved, whether published history moved, and
+    whether the forward test must restart. A finding claimed FIXED with no
+    regression test raises on import.
+    """
+    from .validation.findings import (REGISTER, Status, by_id, categorised,
+                                      open_findings, restart_blockers)
+
+    one = getattr(args, "fid", None)
+    if one:
+        f = by_id(one)
+        if f is None:
+            _print(f"no finding {one!r}")
+            return 1
+        _rule(f"{f.fid} -- {f.title}")
+        _table("disposition", ["field", "value"], [
+            ["category", f.category.value],
+            ["severity", f.severity],
+            ["status", f.status.value],
+            ["location", f.location],
+            ["regression test", f.regression_test or "(none)"],
+            ["moves coefficients", "yes" if f.moves_coefficients else "no"],
+            ["moves history", "yes" if f.moves_history else "no"],
+            ["forces restart", "yes" if f.forces_restart else "no"],
+        ])
+        for head, body in (("root cause", f.root_cause), ("fix", f.fix),
+                           ("before / after", f.before_after),
+                           ("notes", f.notes)):
+            if body:
+                _print()
+                _print(f"  {head.upper()}")
+                _print(f"    {body}")
+        return 0
+
+    _rule("Defect register")
+    for cat, group in categorised().items():
+        _print(f"\n  {cat}")
+        for f in group:
+            _print(f"    {f.describe()}")
+
+    still_open = open_findings()
+    blockers = restart_blockers()
+    _print()
+    _table("summary", ["field", "value"], [
+        ["registered", str(len(REGISTER))],
+        ["open", ", ".join(f.fid for f in still_open) or "none"],
+        ["restart-blocking", ", ".join(f.fid for f in blockers)],
+        ["move coefficients",
+         ", ".join(f.fid for f in REGISTER if f.moves_coefficients) or "none"],
+    ])
+    _print()
+    _print("  `prosignal research findings --id R9` for one in full.")
+    return 0 if not still_open else 1
+
+
+def cmd_research_readiness(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """READY as eight gates, not as a green test suite.
+
+    A green suite says the code does what its tests say. It said so while the
+    model was fitted on a population the book cannot buy (R9), while an
+    unmeasured name got the cheapest fill in the model (R13), while no result
+    could name the data it came from (D1), and while the window measuring all
+    of it was void (R1). The gates below are the things a green suite does not
+    check.
+    """
+    from .validation.readiness import assess, restart_refusals
+
+    r = assess(cfg)
+    _rule("Readiness")
+    for g in r.gates:
+        _print("  " + g.line())
+    _print()
+    _print(f"  {r.verdict()}")
+
+    if r.failed:
+        _print()
+        _print("  WHAT EACH ONE NEEDS")
+        for g in r.failed:
+            if g.remedy:
+                _print(f"    {g.name:<16} {g.remedy}")
+
+    refusals = restart_refusals(cfg)
+    _print()
+    if refusals:
+        _print("  The forward test cannot restart yet:")
+        for x in refusals:
+            _print(f"    - {x}")
+    else:
+        _print("  The forward test MAY be restarted: every precondition holds.")
+        _print("  `prosignal research forward --restart` opens the window.")
+    return 0 if r.ready else 1
+
+
+def cmd_research_record(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """The operating record, partitioned by the engine that produced it.
+
+    C3/C4. Trades decided before the population and liquidity corrections were
+    produced by a different engine on a different universe. They are the only
+    operating record that exists, so they are shown -- labelled, beside the
+    epoch that supersedes them, and never averaged into it. What pooling would
+    have claimed is printed too, because a partition whose cost is invisible
+    gets re-collapsed by the next person who finds the per-epoch samples small.
+    """
+    from . import outcomes as _out
+
+    path = Path(cfg.paths.ledger) / "outcomes.jsonl"
+    if not path.is_file():
+        _print(f"No outcome record at {path}.")
+        return 1
+    rows = _out.load_outcomes(path, epoch="*")
+    part = _out.summarise_by_epoch(rows, ledger_root=Path(cfg.paths.ledger))
+
+    _rule("Operating record by research epoch")
+    _table("epochs", ["epoch", "n", "win rate", "expectancy", "t", "status"],
+           [[e["epoch_id"],
+             str(e.get("n", 0)),
+             f"{e['win_rate']:.0%}" if e.get("n") else "--",
+             f"{e['expectancy']:+.2%}" if e.get("n") else "--",
+             f"{e['expectancy_t']:+.2f}" if e.get("n") else "--",
+             "CURRENT" if e["is_current"] else "retired"]
+            for e in part["epochs"]])
+
+    if part["spans_multiple_epochs"]:
+        pooled, gap = part["pooled"], part["pooling_overstates_expectancy_by"]
+        _print()
+        _print(f"  Pooled across every epoch: n={pooled['n']}, "
+               f"expectancy {pooled['expectancy']:+.2%}. That figure describes "
+               f"no engine.")
+        if gap == gap:                                    # not NaN
+            _print(f"  Pooling would misstate the current epoch's expectancy "
+                   f"by {gap:+.2%}.")
+    if part["current_epoch_has_no_record"]:
+        _print()
+        _print("  The current epoch has no resolved trades. That is an EMPTY "
+               "forward record, not a bad one -- and it is the honest state "
+               "for an engine whose universe and execution model just changed.")
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

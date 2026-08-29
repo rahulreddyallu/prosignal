@@ -540,6 +540,13 @@ class RiskPlan(_Contract):
     #: liquidity dries up. None when either window is unavailable.
     liquidity_ratio_recent: Optional[float] = None
     liquidity_warning: Optional[str] = None
+    #: KNOWN_VALID | KNOWN_STALE | MISSING | INVALID -- `liquidity.assess`.
+    #:
+    #: Carried on the plan because it decides whether there is a position at
+    #: all. An unmeasurable ADTV used to fall through to the full capital slot,
+    #: so the state was invisible AND consequential; a card that shows a size
+    #: without showing what liquidity it was sized against cannot be checked.
+    liquidity_state: Optional[str] = None
 
     notes: List[str] = Field(default_factory=list)
 

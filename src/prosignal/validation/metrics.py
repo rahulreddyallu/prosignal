@@ -192,6 +192,34 @@ def expected_max_sharpe(n_trials: int, sr_variance: float) -> float:
     return sqrt(sr_variance) * term
 
 
+#: What `sr_variance` was in the end. The DSR is more sensitive to this than to
+#: anything else it is given -- on this engine's own evidence, moving it between
+#: two defensible estimates moved the answer from 0.38 to 0.91 -- so a result
+#: that does not say where it came from cannot be read.
+SR_VAR_FROM_TRIALS = "trials"
+SR_VAR_SUPPLIED = "supplied"
+SR_VAR_UNIT = "unit_conservative"
+SR_VAR_UNDERCOVERED = "unit_undercovered_trials"
+
+#: Share of the CHARGED trials that must carry a recorded score before their
+#: variance is used as Var[SR].
+#:
+#: Bailey & Lopez de Prado's expected maximum assumes Var[SR] is the dispersion
+#: across the configurations that were searched. A registry holding scores for
+#: some of them estimates that dispersion from whichever arms happened to be
+#: scored -- and those are systematically the most SIMILAR ones, because a
+#: command that sweeps eighteen buy/hold bands records eighteen near-identical
+#: results while the genuinely different ideas were compared once and moved on
+#: from. Measured here: 18 scored arms out of 87 charged gave Var[SR] 0.00178,
+#: an expected-maximum bar of 0.105, and a comfortable PASS -- lower than the
+#: unit fallback by a factor of 560 and lower than the truth by an unknown one.
+#:
+#: Under-covered scores are therefore INFORMATIVE, not authoritative: they are
+#: reported, and the bar is set from the conservative variance until enough of
+#: the search has been priced for its spread to mean anything.
+MIN_TRIAL_SCORE_COVERAGE = 0.5
+
+
 @dataclass
 class DsrResult:
     observed_sr: float
@@ -203,6 +231,16 @@ class DsrResult:
     kurtosis: float
     passes: bool
     interpretation: str
+    #: Cross-sectional variance of trial Sharpes used to build the benchmark,
+    #: and where it came from. Carried on the result because the number is
+    #: load-bearing and was previously invisible.
+    sr_variance: float = 1.0
+    sr_variance_source: str = SR_VAR_UNIT
+    #: What the recorded trial scores actually said, whether or not it was
+    #: used. Reported so an under-covered registry is visible as a number
+    #: rather than as an absence.
+    sr_variance_measured: float = float("nan")
+    trials_scored: int = 0
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -215,6 +253,10 @@ class DsrResult:
             "kurtosis": self.kurtosis,
             "passes": self.passes,
             "interpretation": self.interpretation,
+            "sr_variance": self.sr_variance,
+            "sr_variance_source": self.sr_variance_source,
+            "sr_variance_measured": self.sr_variance_measured,
+            "trials_scored": self.trials_scored,
         }
 
 
@@ -223,20 +265,37 @@ def deflated_sharpe_ratio(
     n_trials: int,
     trial_sharpes: Optional[Sequence[float]] = None,
     confidence: float = 0.95,
+    sr_variance: Optional[float] = None,
 ) -> DsrResult:
     """Deflate an observed Sharpe by the multiple-testing and non-normality penalties.
 
     Parameters
     ----------
     returns:
-        Per-period returns of the SELECTED configuration.
+        Per-period returns of the SELECTED configuration. They must be
+        INDEPENDENT observations. Feeding a vector that counts each period
+        several times -- the pooled (split, test-date) excess a CPCV run
+        produces, for instance -- inflates `n` and collapses the fallback
+        variance, and the result passes whatever the strategy did.
     n_trials:
         Honest count of configurations tried -- from the research ledger, not
         from memory. Understating it inflates the result.
     trial_sharpes:
-        Sharpes of all trials, used to estimate their cross-sectional variance.
-        Falls back to a conservative unit variance when unavailable, which
-        makes the benchmark harder to clear rather than easier.
+        Sharpes of the TRIALS that were searched over, used to estimate their
+        cross-sectional variance. Not the Sharpes of resampled paths of the one
+        selected configuration: those measure sampling noise in a single
+        strategy, not dispersion across the alternatives, and they are smaller,
+        so using them shrinks the benchmark and flatters the result.
+    sr_variance:
+        Supply Var[SR] directly when it is known from outside the trial list.
+
+    The fallback when neither is available is a **true unit variance**, which is
+    what this docstring has always promised. It used to be `1/(n-1)`: at the 639
+    pooled observations a CPCV run produced, that is 1.6e-3, an expected-maximum
+    benchmark of 0.099, and a Deflated Sharpe of 1.0000 for any positive result
+    at any trial count. The defence against multiple testing was insensitive to
+    multiple testing. A unit variance is severe, and it is severe in the
+    direction a defence is supposed to fail.
     """
     obs = np.asarray(list(returns), dtype="float64")
     obs = obs[np.isfinite(obs)]
@@ -259,29 +318,58 @@ def deflated_sharpe_ratio(
     observed = sharpe_ratio(arr)
     skew, kurt = _moments(arr)
 
-    if trial_sharpes is not None and len(list(trial_sharpes)) > 1:
-        sr_var = float(np.var(np.asarray(list(trial_sharpes), dtype="float64"), ddof=1))
+    scored = list(trial_sharpes) if trial_sharpes is not None else []
+    measured_var = (float(np.var(np.asarray(scored, dtype="float64"), ddof=1))
+                    if len(scored) > 1 else float("nan"))
+    covered = len(scored) / max(int(n_trials), 1)
+
+    if sr_variance is not None:
+        sr_var, source = float(sr_variance), SR_VAR_SUPPLIED
+    elif len(scored) > 1 and covered >= MIN_TRIAL_SCORE_COVERAGE:
+        sr_var, source = measured_var, SR_VAR_FROM_TRIALS
+    elif len(scored) > 1:
+        # Scores exist but for too few of the charged trials to describe the
+        # search. See MIN_TRIAL_SCORE_COVERAGE.
+        sr_var, source = 1.0, SR_VAR_UNDERCOVERED
     else:
-        # Without the trial distribution the honest move is a conservative
-        # assumption, not an optimistic one.
-        sr_var = 1.0 / max(n - 1, 1)
+        # A true unit variance, not 1/(n-1). See the docstring.
+        sr_var, source = 1.0, SR_VAR_UNIT
+    if not np.isfinite(sr_var) or sr_var < 0:
+        sr_var, source = 1.0, SR_VAR_UNIT
 
     benchmark = expected_max_sharpe(n_trials, sr_var)
     dsr = probabilistic_sharpe_ratio(arr, benchmark_sr=benchmark, observed_sr=observed)
     passes = dsr >= confidence
 
+    provenance = {
+        SR_VAR_FROM_TRIALS: (
+            f"Var[SR] {sr_var:.4f} from {len(scored)} recorded trial scores, "
+            f"{covered:.0%} of those charged"),
+        SR_VAR_SUPPLIED: f"Var[SR] {sr_var:.4f} supplied by the caller",
+        SR_VAR_UNDERCOVERED: (
+            f"Var[SR] assumed 1.0: only {len(scored)} of {n_trials} charged "
+            f"trials carry a score ({covered:.0%}, below the "
+            f"{MIN_TRIAL_SCORE_COVERAGE:.0%} needed), and their measured "
+            f"{measured_var:.5f} describes the arms that happened to be "
+            f"recorded rather than the search"),
+        SR_VAR_UNIT: ("Var[SR] assumed 1.0 -- no trial carries a recorded "
+                      "score, so the benchmark is the conservative one"),
+    }[source]
+
     if passes:
         interpretation = (
             f"After charging for {n_trials} trial(s) and for skew/kurtosis, the "
             f"probability the true Sharpe exceeds what the best of {n_trials} "
-            f"lucky configurations would produce is {dsr:.1%}."
+            f"lucky configurations would produce is {dsr:.1%} "
+            f"({n} independent observations; {provenance})."
         )
     else:
         interpretation = (
             f"DSR {dsr:.1%} is below the {confidence:.0%} bar. Given {n_trials} "
-            f"trial(s), an observed Sharpe of {observed:.3f} is not "
-            f"distinguishable from the best of that many coin flips. Simplify "
-            f"the model or gather more data -- do not search further."
+            f"trial(s), an observed Sharpe of {observed:.3f} over {n} "
+            f"independent observations is not distinguishable from the best of "
+            f"that many coin flips ({provenance}). Simplify the model or gather "
+            f"more data -- do not search further."
         )
 
     return DsrResult(
@@ -294,6 +382,10 @@ def deflated_sharpe_ratio(
         kurtosis=kurt,
         passes=passes,
         interpretation=interpretation,
+        sr_variance=sr_var,
+        sr_variance_source=source,
+        sr_variance_measured=measured_var,
+        trials_scored=len(scored),
     )
 
 
