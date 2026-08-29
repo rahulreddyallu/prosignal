@@ -38,7 +38,14 @@ order-routing code and no broker connection.
 > multiple-testing problem the Deflated Sharpe exists to charge for, and would
 > buy a nicer number at the cost of the one clean test left. The
 > **pre-registered forward test** is the designed path to an out-of-sample
-> answer and has been re-registered against this configuration.
+> answer, and it has **not** been re-registered. `data/ledger/forward_test.json`
+> still names `baseline-v1@a30a8d4847080ddc` while the engine runs
+> `baseline-v2@9ffe2b1b65e17832`; `prosignal research forward` reports the
+> window INVALID on three counts (the config changed after registration, the
+> pre-registration file no longer matches its hash, and the registration
+> carries no benchmark-relative hypothesis). Until it is re-registered the
+> observations are being recorded but are not evidence. The Settings drawer
+> says so on the screen.
 
 ---
 

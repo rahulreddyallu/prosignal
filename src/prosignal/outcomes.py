@@ -163,12 +163,11 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def _active_epoch_id(ledger_root: Optional[Path] = None) -> str:
-    """The open epoch, or `"unversioned"`.
+def _active_epoch(ledger_root: Optional[Path] = None):
+    """The open epoch object, or None.
 
     Imported lazily and failing soft: outcome resolution must not stop because
-    an epoch ledger is missing. An unstamped row is honest about being
-    unstamped, which is what `PRE_EPOCH` exists to say.
+    an epoch ledger is missing.
     """
     try:
         from .validation.epoch import active
@@ -177,10 +176,55 @@ def _active_epoch_id(ledger_root: Optional[Path] = None) -> str:
             from .config.loader import get_config
 
             ledger_root = Path(get_config().paths.ledger)
-        e = active(Path(ledger_root))
-        return e.epoch_id if e is not None else PRE_EPOCH
+        return active(Path(ledger_root))
     except Exception:
+        return None
+
+
+def _active_epoch_id(ledger_root: Optional[Path] = None) -> str:
+    """The open epoch's id, or `PRE_EPOCH`."""
+    e = _active_epoch(ledger_root)
+    return e.epoch_id if e is not None else PRE_EPOCH
+
+
+def _epoch_for_trade(item: Dict[str, Any],
+                     ledger_root: Optional[Path] = None) -> str:
+    """Which experiment DECIDED this trade -- not which one was open when it
+    was resolved.
+
+    Resolution runs on read and re-resolves the whole file, so stamping the
+    currently-open epoch labelled every historical trade with today's epoch.
+    Measured on this store: 128 outcomes carried the open baseline-v2 epoch id
+    while every one of them recorded `config_version: baseline-v1@...`, a
+    configuration whose epoch is closed VOID. Any page that partitioned on the
+    stamp -- which is the entire point of the stamp -- was therefore served
+    void-epoch trades as the live record, and the partition that exists to stop
+    two engines being reported as one was reporting exactly that.
+
+    A trade belongs to the open epoch only if the configuration that produced
+    it IS the open epoch's configuration. Anything else is `PRE_EPOCH`: it is a
+    real record of what the engine did, and it is not a record of what this
+    engine does.
+
+    A CONSEQUENCE WORTH KNOWING. While the running config has drifted from the
+    one the open epoch recorded, trades this engine produces today are stamped
+    `PRE_EPOCH` too -- correctly, because the registered epoch does not describe
+    the engine that made them. Re-opening the epoch against the current config
+    is what starts stamping them. Nothing on the History page depends on this:
+    it scopes on `config_version` directly, so the live record is right either
+    way, and the drift is reported by /admin/forward and shown in Settings.
+    """
+    stamped = item.get("epoch_id")
+    if stamped:
+        return str(stamped)
+    epoch = _active_epoch(ledger_root)
+    if epoch is None:
         return PRE_EPOCH
+    decided_under = str(item.get("config_version") or "")
+    want = str((epoch.identity or {}).get("config_version") or "")
+    if decided_under and want and decided_under == want:
+        return epoch.epoch_id
+    return PRE_EPOCH
 
 
 #: Rows written before epochs existed. They are a real record of what the
@@ -626,7 +670,7 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
         # liquidity corrections, so it describes a book drawn from a different
         # set of names. It was not comparable to any current figure, and
         # nothing said so -- findings C3 and C4.
-        "epoch_id": item.get("epoch_id") or _active_epoch_id(),
+        "epoch_id": _epoch_for_trade(item),
         # 1.0 unless a corporate action re-based the store's prices after the
         # signal. Recorded so a surprising outcome can be checked against it.
         "price_basis_factor": factor,

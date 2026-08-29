@@ -186,9 +186,10 @@ def _what_would_change(
                 f"which is already the softest part of the case."
             )
         exits = card.get("exits") or []
-        level = _first_level(exits)
-        if level:
-            parts.append(f"The stated invalidation level is {level}.")
+        named = _first_level(exits)
+        if named:
+            reason, level = named
+            parts.append(f"Below that, the {reason} sits at {level}.")
         return " ".join(parts)
 
     gap = rank - entry_rank
@@ -234,12 +235,37 @@ def _signed(cat: Category) -> float:
     return sum(s.oriented_sd for s in cat.signals) / len(cat.signals)
 
 
-def _first_level(exits: Sequence[str]) -> Optional[str]:
+#: How an armed exit rung's machine name reads in a sentence.
+_RUNG_NAMES = {
+    "stop_loss_breach": "disaster stop",
+    "thesis_invalidation": "invalidation level",
+    "target_achieved": "profit target",
+    "trailing_stop": "trailing stop",
+}
+
+
+def _first_level(exits: Sequence[str]) -> Optional[tuple]:
+    """The first ARMED exit that carries a price, and what that price is called.
+
+    This used to return the bare number and the caller called it "the stated
+    invalidation level" unconditionally. That was accidentally right only while
+    thesis invalidation was rung 1: with the invalidation, the target and the
+    trailing stop all disarmed, the first priced rung is the disaster stop, and
+    the sentence began naming the stop as an invalidation level -- a different
+    number under a name the engine no longer uses. The rung is read from the
+    line rather than assumed from its position.
+    """
     for entry in exits:
         text = str(entry)
-        if "Rs" in text:
-            start = text.find("(Rs")
-            end = text.find(")", start)
-            if start != -1 and end != -1:
-                return text[start + 1:end]
+        if "Rs" not in text:
+            continue
+        start = text.find("(Rs")
+        end = text.find(")", start)
+        if start == -1 or end == -1:
+            continue
+        level = text[start + 1:end]
+        # "3. stop_loss_breach (Rs 466.45) -- ..." -> "stop_loss_breach"
+        head = text[:start].strip()
+        rung = head.split(".", 1)[-1].strip() if "." in head else head
+        return _RUNG_NAMES.get(rung, rung.replace("_", " ")), level
     return None

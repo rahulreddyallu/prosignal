@@ -785,6 +785,16 @@ class FinalSignalOutput(_Contract):
     #: Set when the regime or a defence halt refused NEW entries. The book is
     #: unaffected -- what closes a position is the Stage 6 exit band.
     new_entries_blocked: Optional[str] = None
+    #: THE ENTRY CLOCK, on every run rather than only on the runs it blocks.
+    #:
+    #: `new_entries_blocked` carries the cadence's refusal, which means the
+    #: schedule is recorded only on the twenty sessions out of twenty-one when
+    #: it says no. On the session it says yes it recorded nothing at all, so
+    #: no reader of a payload could tell "today is a buying session" from "this
+    #: engine has no schedule" -- and the screen, which has only the payload,
+    #: could never show the clock. Keys: cadence_sessions, is_entry_date,
+    #: sessions_since_anchor, next_entry_date, sessions_until_next.
+    entry_clock: Dict[str, Any] = Field(default_factory=dict)
     #: What happens to held names the run produced no card for -- suspended,
     #: dropped from the universe, or delisted. Without this a position left the
     #: book by omission and no exit was ever recorded.

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config.loader import AppConfig, load_config
@@ -377,6 +377,9 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             sectors=sectors,
             entry_rank=int(admission.entry_rank.value),
             exit_rank=int(admission.exit_rank.value),
+            slots=int(admission.entry_rank.value),
+            horizon_sessions=_horizon_sessions(cfg),
+            entry_clock=_resolved_entry_clock(cfg, job.result),
         )
 
     def _ledger_rows():
@@ -765,7 +768,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         return {
             "view": build_view(payload, company_names=names, sectors=sectors,
                                entry_rank=int(admission.entry_rank.value),
-                               exit_rank=int(admission.exit_rank.value)),
+                               exit_rank=int(admission.exit_rank.value),
+                               slots=int(admission.entry_rank.value),
+                               horizon_sessions=_horizon_sessions(cfg),
+                               entry_clock=_resolved_entry_clock(cfg, payload)),
             "run_id": payload.get("run_id"),
             "as_of_date": payload.get("as_of_date"),
             "generated_at": payload.get("generated_at"),
@@ -1201,7 +1207,11 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
 
     @app.get("/performance")
     def performance_report(period: str = "all") -> Dict[str, Any]:
-        key = period + "@" + _ledger_fingerprint()
+        # The config is part of the key because the payload is now SCOPED by
+        # it. Keyed on the ledger alone, editing parameters.yaml left the page
+        # serving the previous configuration's partition until a ledger write
+        # happened to evict it.
+        key = period + "@" + _ledger_fingerprint() + "@" + str(cfg.version or "")
         if _perf_cache["key"] == key and _perf_cache["value"] is not None:
             return _perf_cache["value"]
         """Did following the shortlist beat not following it?
@@ -1228,6 +1238,41 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         # such problem. Scoping it by default meant that turning the daily
         # run on opened a period and instantly emptied a history of 136
         # closed trades -- the isolation was real and the screen was wrong.
+        # PARTITION TO THE EPOCH THAT DECIDED THE TRADES.
+        #
+        # `_resolved_rows` deliberately serves every epoch -- the per-name
+        # history and the open-position list are a record of what the engine
+        # DID, and scoping those would erase a name's past the moment an epoch
+        # opens. Its own comment says the STATISTICS are what must not be
+        # pooled. They were pooled anyway: this endpoint took every row, and
+        # the History page's headline was the sum of 97 trades decided by
+        # baseline-v1, an epoch closed VOID, presented as this engine's record.
+        #
+        # `epoch.excluded_closed` carries what was left out, so an empty page
+        # says "no position has closed under this configuration yet" rather
+        # than "nothing has ever happened".
+        #
+        # THE RUNNING CONFIGURATION IS THE SCOPE, not the epoch's recorded one.
+        # The two have drifted -- the epoch was opened at
+        # baseline-v2@189efe9f49cb39ce and the engine now runs
+        # baseline-v2@9ffe2b1b65e17832 -- and scoping on the epoch's hash would
+        # exclude the runs this engine is producing right now, which is the
+        # opposite of the intent. The drift is not hidden: /admin/forward
+        # reports it and the Settings drawer shows it, because a window whose
+        # configuration moved is not one experiment.
+        from . import outcomes as _oc
+        active_epoch = _oc._active_epoch(led)
+        epoch_id = active_epoch.epoch_id if active_epoch is not None else None
+        live_cfg = str(cfg.version or "")
+        all_rows = rows
+        if live_cfg:
+            rows = [r for r in rows
+                    if str(r.get("config_version") or "") == live_cfg]
+        elif epoch_id:
+            rows = [r for r in rows if str(r.get("epoch_id") or "") == epoch_id]
+        closed = lambda xs: sum(1 for r in xs if r.get("net_return") is not None)
+        excluded = closed(all_rows) - closed(rows)
+
         from . import measurement as _m
         state = _measurement_state()
         window = None
@@ -1288,8 +1333,25 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             },
             "configurations": sorted({str(r.get("config_version") or "")
                                       for r in rows if r.get("config_version")}),
+            # Which experiment this page is reporting, and what it is not.
+            "epoch": {
+                "id": epoch_id,
+                "label": getattr(active_epoch, "label", None),
+                "opened_on": getattr(active_epoch, "opened_on", None),
+                "config_version": str(cfg.version or ""),
+                "registered_config": str((getattr(active_epoch, "identity", None)
+                                          or {}).get("config_version") or ""),
+                "excluded_closed": excluded,
+            },
             # Kept apart from every figure above: a mark is not an outcome.
-            "open": _op,
+            #
+            # Scoped to the live configuration for the same reason the closed
+            # figures are. `_op` is built over every ledger row, so it carried
+            # 38 marks of which all but the newest were positions opened by
+            # baseline-v1 -- signals the current engine never issued and would
+            # not issue, shown under "still open" as though it were holding
+            # them.
+            "open": _scope_open(_op, live_cfg),
         }
         _perf_cache["key"], _perf_cache["value"] = key, payload
         return payload
@@ -1402,8 +1464,33 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 
         @app.get("/")
-        def index() -> FileResponse:
-            return FileResponse(str(_STATIC / "index.html"))
+        def index(request: Request):
+            """The shell, served so an update is never one refresh behind.
+
+            `FileResponse` sets `etag` and `last-modified` and NO
+            `Cache-Control`. With no directive a browser is free to apply
+            heuristic freshness -- typically a fraction of the age of the
+            document -- and reuse its copy without asking the server at all.
+            The whole application is this one file, so that is a deploy the
+            operator cannot see: the markup, the styles and the script are all
+            the old ones, the API underneath is new, and reloading does not
+            necessarily help because the reload is served from cache too.
+
+            `no-cache` does not mean "do not store". It means "revalidate
+            before use", so the ETag still does its job: unchanged, the browser
+            gets a 304 and reuses its copy; changed, it gets the new file on the
+            first load rather than whenever the heuristic happens to expire.
+            """
+            path = _STATIC / "index.html"
+            tag = _shell_etag(path)
+            headers = {"Cache-Control": "no-cache, must-revalidate", "ETag": tag}
+            # Starlette's FileResponse SENDS an ETag and never READS one, so
+            # "revalidate every time" would mean re-sending 150 KB on every
+            # load. Answering the conditional here keeps the guarantee and
+            # makes it cost one round trip with an empty body.
+            if request.headers.get("if-none-match", "") == tag:
+                return Response(status_code=304, headers=headers)
+            return FileResponse(str(path), headers=headers)
 
     @app.on_event("startup")
     def _warm_on_start() -> None:
@@ -1434,6 +1521,111 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         threading.Thread(target=_run, name="prosignal-warm", daemon=True).start()
 
     return app
+
+
+#: (mtime, size) -> etag, so the hash is computed once per edit rather than
+#: once per request.
+_SHELL_ETAG: Dict[Any, str] = {}
+
+
+def _shell_etag(path: Path) -> str:
+    """A strong ETag over the shell's CONTENTS.
+
+    Content-addressed rather than derived from mtime, because a redeploy that
+    rewrites an identical file should not invalidate every cached copy, and a
+    file restored from backup with an older mtime must not look unchanged.
+    """
+    import hashlib
+
+    try:
+        st = path.stat()
+    except OSError:
+        return ""
+    key = (st.st_mtime_ns, st.st_size)
+    tag = _SHELL_ETAG.get(key)
+    if tag is None:
+        tag = '"' + hashlib.sha256(path.read_bytes()).hexdigest()[:32] + '"'
+        _SHELL_ETAG.clear()
+        _SHELL_ETAG[key] = tag
+    return tag
+
+
+def _resolved_entry_clock(cfg, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The entry clock for a payload, recomputed when the payload predates it.
+
+    The clock is a pure function of (exchange calendar, anchor, cadence) -- that
+    is the reason `cadence` counts sessions rather than days -- so resolving it
+    at read time for an older run reconstructs exactly what that run would have
+    recorded. Nothing is invented; the alternative was re-running the pipeline
+    and writing a second ledger row for a date that already had one.
+
+    Returns the recorded clock untouched whenever the run carries it.
+    """
+    recorded = dict(payload.get("entry_clock") or {})
+    if recorded:
+        return recorded
+    as_of = payload.get("as_of_date")
+    if not as_of:
+        return {}
+    try:
+        import datetime as _dt
+
+        from .cadence import clock_from_config
+        from .data.store import DataStore
+        from .pipeline import _clock_record
+
+        when = _dt.date.fromisoformat(str(as_of)[:10])
+        store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+        sessions = [d if isinstance(d, _dt.date) else _dt.date.fromisoformat(str(d)[:10])
+                    for d in store.price_sessions()]
+        if not sessions:
+            return {}
+        return _clock_record(clock_from_config(cfg, sessions, when), sessions, when)
+    except Exception as exc:  # a missing clock must not cost the whole screen
+        log.warning("could not resolve the entry clock for this run",
+                    extra={"as_of": str(as_of), "error": str(exc)})
+        return {}
+
+
+def _scope_open(op: Dict[str, Any], config_version: str) -> Dict[str, Any]:
+    """Open marks decided under one configuration.
+
+    Falls back to the whole set when the rows carry no `config_version`, so a
+    store written before the field existed still shows its open book rather
+    than an empty one.
+    """
+    if not op or not config_version:
+        return op
+    rows = list(op.get("rows") or op.get("positions") or [])
+    if not rows or not any(r.get("config_version") for r in rows):
+        return op
+    kept = [r for r in rows if str(r.get("config_version") or "") == config_version]
+    out = dict(op)
+    key = "rows" if "rows" in op else "positions"
+    out[key] = kept
+    out["n"] = len(kept)
+    # RECOMPUTED, not carried over. Replacing the rows and keeping `up` and
+    # `avg_unrealised` from the unfiltered set reported one book's summary
+    # above another book's list -- n: 0 beside "18 above entry".
+    marks = [r.get("unrealised") for r in kept
+             if isinstance(r.get("unrealised"), (int, float))]
+    out["up"] = sum(1 for m in marks if m > 0)
+    out["avg_unrealised"] = (sum(marks) / len(marks)) if marks else None
+    return out
+
+
+def _horizon_sessions(cfg) -> Optional[int]:
+    """The holding limit, which is now an exit rather than a backstop.
+
+    With the target and the invalidation disarmed, 39% of positions run to this
+    limit and they are the ones that pay, so it is the number a card should
+    quote for how long a position is meant to be held.
+    """
+    from .stages._cfg import iv
+    try:
+        return int(iv(cfg.params.stage7_risk.holding_period.max_holding_sessions))
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def _rss_mb() -> Optional[float]:

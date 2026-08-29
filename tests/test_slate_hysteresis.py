@@ -121,7 +121,7 @@ def test_without_a_previous_screen_the_slate_is_the_plain_top_n():
     """A first run has nothing to carry, and that is the correct state rather
     than an error."""
     today = [card(f"N{i}", i) for i in range(1, 8)]
-    s = select_slate(today, [], held_slate=None, exit_rank=16)
+    s = select_slate(today, [], slots=5, held_slate=None, exit_rank=16)
     assert [p["ticker"] for p in s.picks] == ["N1", "N2", "N3", "N4", "N5"]
     assert s.carried_count == 0 and s.departures == []
 

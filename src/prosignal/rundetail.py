@@ -175,6 +175,7 @@ def shape(run) -> Dict[str, Any]:
         "slate": [e.model_dump(mode="json") for e in o.slate],
         "slate_departures": list(o.slate_departures),
         "new_entries_blocked": o.new_entries_blocked,
+        "entry_clock": dict(o.entry_clock or {}),
         "position_directives": list(o.position_directives),
         "data_quality_flags": o.data_quality_flags,
         "stage_timings_ms": o.stage_timings_ms,

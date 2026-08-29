@@ -460,6 +460,11 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
             want.setdefault(str(tk), []).append({
                 "run_id": rid,
                 "date": key[1],
+                # WHICH ENGINE OPENED IT. Carried so a caller can scope the
+                # open book the same way it scopes the closed one; without it
+                # the "still open" list pooled every configuration the ledger
+                # has ever run and there was no field to filter on.
+                "config_version": row.get("config_version"),
             })
     if not want:
         return {"n": 0, "positions": []}
@@ -506,6 +511,7 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
                 "last_date": str(pd.Timestamp(last_dt).date()),
                 "unrealised": last_px / entry - 1.0,
                 "sessions_held": held,
+                "config_version": it.get("config_version"),
                 "sessions_left": max_hold - held,
                 "path": path if len(path) > 1 else [],
             })
@@ -568,6 +574,12 @@ def calls_for(ticker: str, outcomes: Sequence[Dict[str, Any]], store: Any = None
         "sessions_held": o.get("sessions_held"),
         "net_return": o.get("net_return"),
         "exit_reason": o.get("exit_reason"),
+        # WHICH ENGINE MADE THE CALL. A name's own history is served across
+        # every epoch on purpose -- scoping it would erase the name's past the
+        # moment an epoch opens -- but "served" and "unlabelled" are different
+        # things, and a -37.5% total from a superseded configuration reads as
+        # this engine's record when nothing says otherwise.
+        "config_version": o.get("config_version"),
     } for o in mine]
 
     total = float(sum(float(c["net_return"] or 0.0) for c in calls)) if calls else None
