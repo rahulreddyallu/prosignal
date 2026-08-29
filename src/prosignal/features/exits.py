@@ -173,6 +173,18 @@ def tradeable_at_entry(close, ma, atr, rules: ExitRules):
     roughly a fifth, and no harness could see it: restricting an
     already-restricted panel finds 1.8% left to remove.
 
+    DELIBERATELY NOT GATED ON `rules.use_invalidation`. That flag says whether
+    breaching the level CLOSES a position, and it now ships false: measured
+    alone on the production configuration, the invalidation exit cost 15.6
+    points of per-trade win probability and 14.3 points of annual alpha. Using
+    the same level to refuse an ENTRY is a different question with a different
+    answer -- it costs nothing, because a name at the bottom of its own trend is
+    not one this book wants to open -- and it is the population the model is
+    fitted on. Gating this on the exit switch would have silently widened the
+    training population at the moment the exit was turned off, which is the
+    exact class of coupling that put the fit and the book on different
+    populations in the first place.
+
     Returns a boolean aligned to whatever was passed -- a Series for one bar,
     a frame for a panel. NaN inputs read as NOT tradeable, because an unknown
     invalidation level is not a cleared one.

@@ -239,6 +239,14 @@ def card(rec) -> Dict[str, Any]:
         "model_rank": rec.model_rank,
         "risk_category": rec.position_risk_category.value if rec.position_risk_category else None,
         "holding_period": rec.expected_holding_period,
+        # THE PLAN, serialised with the card. The History page has to be able to
+        # show what a trade was issued AS -- its cadence, its planned hold and
+        # the expectation stamped on it -- because that is the only thing a
+        # resolved outcome can be scored against besides the market. Reading it
+        # from today's config instead would describe a strategy the trade was
+        # never part of.
+        "trade_plan": (rec.trade_plan.model_dump(mode="json")
+                       if rec.trade_plan else None),
         "why": rec.why_this_signal_exists,
         "against": rec.false_signal_flagged,
         "cleared": rec.false_signal_cleared,

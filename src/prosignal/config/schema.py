@@ -50,6 +50,24 @@ class ParamStatus(str, Enum):
     """Provenance of a parameter value. See parameters.yaml header."""
 
     UNVALIDATED = "UNVALIDATED"
+    #: A THIRD THING, between hypothesis and promotion, and it exists because
+    #: the two-state ladder forced a lie in both directions.
+    #:
+    #: A value chosen from a 4,877-configuration trade-level measurement with a
+    #: six-year walk-forward, a stationary block bootstrap and a PBO estimate is
+    #: not UNVALIDATED -- calling it that puts it beside numbers nobody has ever
+    #: looked at, and the honest warning on every output stops meaning anything.
+    #: It is also emphatically not VALIDATED: this file reserves that for a CPCV
+    #: run that clears the Deflated Sharpe, and the shipped configuration does
+    #: not clear it (DSR 0.028 against the conservative trial count).
+    #:
+    #: MEASURED means: there is a recorded experiment behind this number, the
+    #: experiment is named in the note beside it, and it has NOT cleared the
+    #: promotion bar. It stays a research hypothesis for every purpose the
+    #: engine cares about -- the unvalidated-parameter warning still fires, the
+    #: search budget still counts it -- and it tells a reader that changing it
+    #: means arguing with evidence rather than with a placeholder.
+    MEASURED = "MEASURED"
     VALIDATED = "VALIDATED"
     STATUTORY = "STATUTORY"
     STRUCTURAL = "STRUCTURAL"
@@ -57,8 +75,13 @@ class ParamStatus(str, Enum):
 
     @property
     def is_research_hypothesis(self) -> bool:
-        """True when this value still needs CPCV before it can be trusted."""
-        return self is ParamStatus.UNVALIDATED
+        """True when this value still needs CPCV before it can be trusted.
+
+        MEASURED is included deliberately. Evidence short of the promotion bar
+        is still evidence short of the promotion bar, and the whole point of
+        the tier is that it does not buy silence.
+        """
+        return self in (ParamStatus.UNVALIDATED, ParamStatus.MEASURED)
 
 
 class OptimizationTier(str, Enum):
@@ -95,6 +118,7 @@ class OptimizationTier(str, Enum):
 #: deliberately promoted into the search, never swept in by default.
 _DEFAULT_TIER_BY_STATUS = {
     ParamStatus.UNVALIDATED: OptimizationTier.B_SENSITIVITY,
+    ParamStatus.MEASURED: OptimizationTier.B_SENSITIVITY,
     ParamStatus.VALIDATED: OptimizationTier.B_SENSITIVITY,
     ParamStatus.STATUTORY: OptimizationTier.C_FIXED,
     ParamStatus.STRUCTURAL: OptimizationTier.C_FIXED,
@@ -1024,7 +1048,46 @@ class DecayMonitorConfig(_Base):
     post_publication_haircut: float = Field(0.58, ge=0.0, lt=1.0)
 
 
+class RankingConfig(_Base):
+    """What orders the book.
+
+    Separated from the estimator on purpose. The estimator answers "what are
+    these themes worth?", which the engine still asks and still records; this
+    answers "what do we buy?", which turned out to be a different question with
+    a different answer. Keeping them as one setting is what let a scorer that
+    fails at the second keep doing it on the strength of doing the first.
+
+    Measured over 4,877 trade-level configurations on a rebuilt point-in-time
+    panel, scored against an investable equal-weight benchmark of the same
+    eligible universe:
+
+        signal                         configs   median alpha   share positive
+        mom_6_1_r (sector-neutral)         960        +7.0%          98.1%
+        1/N over the seven families        960        +3.0%          84.9%
+        composite refitted on RETURN       960        -4.7%           6.2%
+        fitted composite as shipped        144           --           0.0%
+
+    The mechanism is in `parameters.yaml` beside the setting: the composite is
+    fitted against a cross-sectional RANK, the cross-section is strongly
+    right-skewed, and a book of eight names out of seven hundred lives entirely
+    in the tail a rank target is indifferent to. Its rank IC is positive
+    (+0.0338 at H=63) while its top-decile excess is negative (-0.35%, t -0.28).
+    """
+
+    #: measured_factor | fitted_composite | family_average.
+    source: str = Field("measured_factor",
+                        pattern="^(measured_factor|fitted_composite|family_average)$")
+    #: The column to rank on when `source` is not `fitted_composite`. Must be a
+    #: ranked feature column (`_r`) or a family column (`_f`) the model builds;
+    #: Stage 4 refuses a name it cannot find rather than falling back silently,
+    #: because a silent fallback here restores the scorer this setting exists
+    #: to retire.
+    column: str = "mom_6_1_r"
+    note: Optional[str] = None
+
+
 class Stage4Config(_Base):
+    ranking: RankingConfig = Field(default_factory=RankingConfig)
     weighting_mode: TS
     standardisation: TS
     winsorize_pct: TF
@@ -1208,6 +1271,18 @@ class AdmissionConfig(_Base):
 
     entry_rank: TI
     exit_rank: TI
+    #: Sessions between entry opportunities. The engine runs EVERY session --
+    #: the disaster floor, the open book and outcome resolution all need it --
+    #: but new positions open only on a cadence date. A daily entry clock and a
+    #: 21-session entry clock are different strategies and only one of them was
+    #: measured; 1 restores the daily behaviour.
+    entry_cadence_sessions: TI = Field(default_factory=lambda: Tunable[int](
+        value=1, status=ParamStatus.OPERATIONAL))
+    #: The session on or after this date is cadence date zero. Counted in
+    #: SESSIONS against the exchange calendar rather than in calendar days, so a
+    #: holiday shifts nothing and the schedule is reproducible on any machine.
+    entry_cadence_anchor: TS = Field(default_factory=lambda: Tunable[str](
+        value="2026-09-01", status=ParamStatus.OPERATIONAL))
     #: Refuse an entry on a name already below its thesis-invalidation level.
     #: This is the population the model is fitted on -- `resolve_exits` gives
     #: such a name a NaN label and `build_panel` drops the row -- so with this
@@ -1222,6 +1297,21 @@ class AdmissionConfig(_Base):
                 "equal bands are no hysteresis at all and a name on the boundary "
                 "pays a round trip at every rebalance"
             )
+        if int(self.entry_cadence_sessions.value) < 1:
+            raise ValueError(
+                "stage6_entry.admission.entry_cadence_sessions must be at least "
+                "1; a cadence of zero would mean the book can never open"
+            )
+        try:
+            dt.date.fromisoformat(str(self.entry_cadence_anchor.value))
+        except ValueError as exc:
+            raise ValueError(
+                f"stage6_entry.admission.entry_cadence_anchor must be an "
+                f"ISO date (YYYY-MM-DD); got "
+                f"{self.entry_cadence_anchor.value!r}. The anchor decides which "
+                f"sessions are entry dates, so an unparseable one would silently "
+                f"re-phase every entry in the recorded history."
+            ) from exc
         return self
 
 
@@ -1345,6 +1435,19 @@ class TargetsConfig(_Base):
 
 
 class ThesisInvalidationConfig(_Base):
+    #: Whether the level CLOSES a position. False ships: measured alone on the
+    #: production configuration it cost 15.6 points of per-trade win probability
+    #: and 14.3 points of annual alpha. The level is still computed, still shown
+    #: as exit condition #1 on the card, and still the ADMISSION predicate -- a
+    #: name already below it is not bought, which is a different and cheaper use
+    #: of the same number and the one the training panel depends on.
+    #:
+    #: Duplicated by `exit_hierarchy.thesis_invalidation` on purpose, and they
+    #: must agree: the hierarchy switch is where an operator turns a rung off,
+    #: and this one is where the RULE says whether it is an exit at all. The
+    #: validator below refuses a configuration where one says exit and the other
+    #: says not, because a disagreement there is silent and decides trades.
+    enabled_as_exit: bool = False
     momentum_rank_exit_percentile: TF
     structure_ma_sessions: TI
     structure_buffer_atr: TF
@@ -1368,8 +1471,13 @@ class HoldingPeriodConfig(_Base):
 
     @model_validator(mode="after")
     def _check(self) -> "HoldingPeriodConfig":
+        # `<` rather than `<=`, because 0 is now a legitimate minimum: the
+        # 15-session floor was inert on a 21-session entry clock and saying so
+        # in the file is better than implying a rule the engine does not run.
         if self.min_holding_sessions.value >= self.max_holding_sessions.value:
             raise ValueError("holding_period.min must be < max")
+        if self.min_holding_sessions.value < 0:
+            raise ValueError("holding_period.min_holding_sessions cannot be negative")
         return self
 
 
@@ -1395,6 +1503,41 @@ class Stage7Config(_Base):
     exit_hierarchy: ExitHierarchyConfig
     volatility_scaling: VolatilityScalingConfig = Field(
         default_factory=VolatilityScalingConfig)
+
+    @model_validator(mode="after")
+    def _exits_agree(self) -> "Stage7Config":
+        """Two switches control one rule; they must not disagree.
+
+        `thesis_invalidation.enabled_as_exit` says whether the RULE is an exit.
+        `exit_hierarchy.thesis_invalidation` is the rung an operator turns off.
+        Both were true when only one was ever read, so an operator could switch
+        off a rung and have it keep firing -- or the reverse. A disagreement
+        here is silent and decides trades, which is the definition of a setting
+        that has to be checked at load rather than at the point of use.
+
+        The same pairing applies to the trailing stop, which has an `enabled`
+        flag of its own next to a hierarchy rung.
+        """
+        if bool(self.thesis_invalidation.enabled_as_exit) != bool(
+                self.exit_hierarchy.thesis_invalidation):
+            raise ValueError(
+                f"stage7_risk.thesis_invalidation.enabled_as_exit "
+                f"({self.thesis_invalidation.enabled_as_exit}) and "
+                f"stage7_risk.exit_hierarchy.thesis_invalidation "
+                f"({self.exit_hierarchy.thesis_invalidation}) disagree. They "
+                f"control the same exit and the engine reads both, so one of "
+                f"them would be silently ignored. Set them the same."
+            )
+        if bool(self.trailing_stop.enabled) != bool(
+                self.exit_hierarchy.trailing_stop):
+            raise ValueError(
+                f"stage7_risk.trailing_stop.enabled "
+                f"({self.trailing_stop.enabled}) and "
+                f"stage7_risk.exit_hierarchy.trailing_stop "
+                f"({self.exit_hierarchy.trailing_stop}) disagree. They control "
+                f"the same exit. Set them the same."
+            )
+        return self
 
 
 # =============================================================================
@@ -1654,6 +1797,93 @@ def _validate_horizon_alignment(params) -> None:
         )
 
 
+class CostScenarioExpectancy(_Base):
+    """One cost scenario's realised frequencies. A ROW, not a setting."""
+
+    name: str
+    cost_bps: float
+    p_win: float = Field(ge=0.0, le=1.0)
+    p_beat: float = Field(ge=0.0, le=1.0)
+    mean_net_pct: float
+    median_net_pct: float
+
+
+class ExpectancyConfig(_Base):
+    """What a trade from the shipped configuration has historically done.
+
+    Recorded in the config rather than computed at run time on purpose. These
+    are the results of a study that took twenty minutes of compute over eight
+    years of panel data; recomputing them on every run would be absurd, and
+    recomputing them on LIVE data as it arrives would be worse -- the figures
+    would drift with the very record they are supposed to be scored against,
+    and calibration would become impossible by construction.
+
+    So they are frozen, dated, and named. When the study is re-run, this block
+    is rewritten and `measured_on` moves, which is a visible, reviewable event.
+
+    NOT A FORECAST. Every field is a frequency over the study's 258 trades. The
+    engine estimates no per-name edge and this block must never be read as one;
+    `TradePlan.caveat` carries that sentence onto every card that quotes it.
+    """
+
+    enabled: bool = True
+    #: The study these came from. Free text, but it has to identify a run.
+    study: str
+    measured_on: dt.date
+    sample_trades: int = Field(ge=1)
+    sample_period: str
+    assumed_cost_bps: float = Field(ge=0.0)
+    probability_of_profit: float = Field(ge=0.0, le=1.0)
+    probability_of_beating_benchmark: float = Field(ge=0.0, le=1.0)
+    expected_return_pct: float
+    median_return_pct: float
+    expected_excess_pct: float
+    median_excess_pct: float
+    expected_hold_sessions: float = Field(gt=0.0)
+    by_cost: List[CostScenarioExpectancy] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> "ExpectancyConfig":
+        if self.by_cost:
+            names = [v.name for v in self.by_cost]
+            if len(set(names)) != len(names):
+                raise ValueError(
+                    f"expectancy.by_cost has duplicate scenario names {names}; "
+                    f"a reader looking one up would get whichever came last."
+                )
+            match = [v for v in self.by_cost
+                     if abs(float(v.cost_bps) - float(self.assumed_cost_bps)) < 1e-9]
+            if not match:
+                raise ValueError(
+                    f"expectancy.assumed_cost_bps ({self.assumed_cost_bps}) "
+                    f"matches none of the by_cost scenarios "
+                    f"({[(v.name, v.cost_bps) for v in self.by_cost]}). The "
+                    f"headline figures would then be net of a cost the scenario "
+                    f"table does not contain, and nobody could tell which."
+                )
+            row = match[0]
+            if abs(float(row.p_win) - float(self.probability_of_profit)) > 5e-4:
+                raise ValueError(
+                    f"expectancy.probability_of_profit "
+                    f"({self.probability_of_profit}) disagrees with the "
+                    f"{row.name!r} row of by_cost ({row.p_win}) at the same "
+                    f"cost. The headline and the table came from one study and "
+                    f"cannot disagree; one of them was edited by hand."
+                )
+        # The mean of a right-skewed distribution sits above its median, and
+        # these two came from the same 258 trades. If they cross, the block was
+        # edited by hand and one of them is stale -- which is precisely the
+        # failure this whole section exists to make impossible.
+        if self.median_return_pct > self.expected_return_pct:
+            raise ValueError(
+                f"expectancy.median_return_pct ({self.median_return_pct}) is "
+                f"above expected_return_pct ({self.expected_return_pct}). The "
+                f"trade distribution is right-skewed, so the mean is above the "
+                f"median; these two cannot have come from the same study."
+            )
+        return self
+
+
 class RootConfig(_Base):
     """The fully validated contents of config/parameters.yaml."""
 
@@ -1673,6 +1903,7 @@ class RootConfig(_Base):
     stage7_risk: Stage7Config
     stage8_final_signal: Stage8Config
     costs: CostsConfig
+    expectancy: ExpectancyConfig
     ledger: LedgerConfig
     validation: ValidationConfig
     api: ApiConfig

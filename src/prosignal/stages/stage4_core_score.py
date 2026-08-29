@@ -71,6 +71,90 @@ log = get_logger(__name__)
 
 
 
+class RankingUnavailable(PipelineError):
+    """The configured ranking column is not in the live feature frame.
+
+    Deliberately fatal. The alternative -- fall back to the fitted composite --
+    restores exactly the scorer `stage4_core_score.ranking` exists to retire,
+    and it would do so silently, on a run that looks completely normal. A run
+    that cannot rank the way it is configured to rank has not produced a
+    ranking; it has produced a different strategy wearing the same name.
+    """
+
+    def __init__(self, message: str, **context) -> None:
+        super().__init__(stage=STAGE_NAME, message=message, **context)
+
+
+def _apply_ranking_policy(composite_raw, model_features, cfg, notes):
+    """Return the series the book is ordered by, and say which one it is.
+
+    `composite_raw` arrives holding whatever ranked upstream -- the fitted
+    model's scores when it covered enough names, the hand-weighted composite
+    otherwise. Under `fitted_composite` that is left alone and this is a no-op.
+
+    Under `measured_factor` the ranking becomes one already-ranked column and
+    the composite continues to be computed, recorded, attributed on the card and
+    monitored by `research decay`. That separation is the point: the fitted
+    coefficients remain the engine's running measurement of what each theme is
+    worth, and a future window that finds the composite ordering its own top
+    decile positively is what would send the ranking back to it.
+    """
+    source = str(getattr(cfg.ranking, "source", "fitted_composite"))
+    if source == "fitted_composite":
+        return composite_raw, "fitted_composite"
+
+    column = str(cfg.ranking.column)
+    if model_features is None or column not in getattr(model_features, "columns", []):
+        available = (", ".join(sorted(getattr(model_features, "columns", [])))
+                     if model_features is not None else "no feature frame")
+        raise RankingUnavailable(
+            f"stage4_core_score.ranking.source is {source!r} and asks for "
+            f"{column!r}, which the live feature frame does not have "
+            f"({available}). Falling back to the fitted composite would restore "
+            f"the scorer this setting retires -- measured at negative alpha in "
+            f"every one of its 144 trade-level configurations -- so the run "
+            f"stops instead. Fix the column name or set ranking.source to "
+            f"fitted_composite to accept that scorer explicitly."
+        )
+    # KEYED BY SYMBOL, not by position. `features_for_date` ends with
+    # `.reset_index(drop=True)`, so the live feature frame carries a RangeIndex
+    # and keeps the ticker in a `symbol` COLUMN -- which is why the first
+    # version of this reindexed a symbol-indexed composite against 0..451 and
+    # matched nothing. It failed loudly, which is the only reason it is a
+    # two-line fix rather than a book ranked by whatever survived the join.
+    ranked = model_features[column]
+    if "symbol" in getattr(model_features, "columns", []):
+        ranked = pd.Series(ranked.to_numpy(),
+                           index=model_features["symbol"].astype(str),
+                           name=column)
+    ranked = ranked[~ranked.index.duplicated(keep="last")].dropna()
+    if ranked.empty:
+        raise RankingUnavailable(
+            f"the ranking column {column!r} is present but empty for every "
+            f"scoreable name, so there is nothing to order the book by."
+        )
+    covered = ranked.reindex(composite_raw.index).dropna()
+    floor = max(int(0.6 * len(composite_raw)), 20)
+    if len(covered) < floor:
+        raise RankingUnavailable(
+            f"the ranking column {column!r} covers {len(covered)} of "
+            f"{len(composite_raw)} scoreable names, under the {floor} floor. A "
+            f"ranking built on a minority of the universe is a ranking of that "
+            f"minority, and the names it cannot see would be dropped without "
+            f"ever being compared."
+        )
+    notes.append(
+        f"Book ordered by {column} ({source}), not by the fitted composite. "
+        f"The composite is still fitted, recorded and shown -- it explains the "
+        f"themes behind a name -- but it does not choose. Measured over 4,877 "
+        f"trade-level configurations against an equal-weight benchmark of the "
+        f"same eligible universe, this column returned positive alpha in 98.1% "
+        f"of its 960 configurations while the fitted composite returned "
+        f"negative alpha in all 144 of its own."
+    )
+    return covered, source
+
+
 def _win_probability(model) -> Optional[Dict[str, float]]:
     """P(target before stop) per ticker, or None when the veto is inert.
 
@@ -369,6 +453,13 @@ def run(
             )
     else:
         notes.append(f"Cross-sectional model unavailable: {model_unavailable}")
+
+    # WHAT ORDERS THE BOOK, applied last so that everything above -- the
+    # hand-weighted composite, the fitted model, the regime diagnosis and every
+    # note explaining them -- still happens and is still recorded. Only the
+    # series the order is taken from changes.
+    composite_raw, ranking_source = _apply_ranking_policy(
+        composite_raw, model_features, cfg, notes)
 
     composite_unit = rank_to_unit_interval(composite_raw)
     percentile = composite_unit * 100.0
@@ -840,8 +931,33 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
             horizon=label_horizon, vol_window=int(lab.vol_window_sessions))
             if bool(lab.triple_barrier)
             and str(lab.barrier_source) == "sigma" else None)
+        # R9. THE POPULATION THE FIT IS ESTIMATED OVER, built here and used
+        # twice for the same reason the label geometry is: `fit_predict`
+        # consumes the object and `load_cached` compares the fingerprint it
+        # produces, so the cache check and the fit cannot disagree.
+        #
+        # A name already below its thesis-invalidation level is eligible, is
+        # scored, and CANNOT BE BOUGHT -- stage 6 refuses it. Fitting on it
+        # estimates coefficients over a population the book does not trade.
+        # The predicate is stage 7's own geometry, which is what stage 6
+        # enforces, so both halves of F5 now read one construction.
+        #
+        # Independent of the label. Tying them together is exactly how they
+        # came apart: the admission filter lived inside `resolve_exits`, and
+        # `triple_barrier: false` routed around it, so the decision half
+        # shipped and the training half did not.
+        admit_only = bool(getattr(getattr(universe, "train_on_admissible_only",
+                                          None), "value", True))
+        admission_rules = (rules_from_config(cfg, risk_cfg)
+                           if admit_only and risk_cfg is not None else None)
+        if admit_only and risk_cfg is None:
+            log.warning(
+                "train_on_admissible_only is set and stage 7 is unreachable, "
+                "so the admission predicate cannot be built; the fit falls "
+                "back to the wide population and says so",
+                extra={"as_of": as_of.isoformat()})
         label_fp = cm.label_fingerprint(
-            label_horizon, label_barriers, label_exit_rules)
+            label_horizon, label_barriers, label_exit_rules, admission_rules)
         cached = cm.load_cached(cache, as_of, refit_every,
                                 estimator=str(cfg.estimator.method),
                                 label=label_fp)
@@ -989,8 +1105,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                       delivery=delivery, sectors=sector_map,
                                       actions=actions,
                                       high=high, low=low,
-                                      exit_geometry=(rules_from_config(cfg, risk_cfg)
-                                                     if risk_cfg is not None else None))
+                                      admission_rules=admission_rules)
             if feats is None:
                 return None, None, "no symbol had a complete feature set today", None, None
             return (cm.score_with(cached, feats, multipliers), cached, None,
@@ -1027,10 +1142,9 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
             # rather than silently inventing a stop.
             exit_rules=label_exit_rules,
             barriers=label_barriers,
-            # The engine's own geometry, ALWAYS -- it decides the admissible
-            # population, which does not depend on the label.
-            exit_geometry=(rules_from_config(cfg, risk_cfg)
-                           if risk_cfg is not None else None),
+            # R9: what the book could have OPENED, which is not what the
+            # universe screen would have LISTED.
+            admission_rules=admission_rules,
             high=high, low=low, open_=open_,
             uniqueness_weighting=bool(lab.uniqueness_weighting),
             estimator=str(est.method),
@@ -1083,8 +1197,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                               sectors=sector_map,
                                               actions=actions,
                                               high=high, low=low,
-                                              exit_geometry=(rules_from_config(cfg, risk_cfg)
-                                                             if risk_cfg is not None else None))
+                                              admission_rules=admission_rules)
                     if feats is not None:
                         return (cm.score_with(held, feats, multipliers), held,
                                 None, feats, verdict)
@@ -1133,8 +1246,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                          delivery=delivery, sectors=sector_map,
                                          actions=actions,
                                          high=high, low=low,
-                                         exit_geometry=(rules_from_config(cfg, risk_cfg)
-                                                        if risk_cfg is not None else None))
+                                         admission_rules=admission_rules)
                 return scores, model, reason, live, superseded
             # THE SAME KEYWORD SET AS EVERY OTHER PATH. This branch -- the
             # ACCEPTED refit, the common case on a refit day -- dropped
@@ -1152,8 +1264,7 @@ def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
                                      delivery=delivery, sectors=sector_map,
                                      actions=actions,
                                      high=high, low=low,
-                                     exit_geometry=(rules_from_config(cfg, risk_cfg)
-                                                    if risk_cfg is not None else None))
+                                     admission_rules=admission_rules)
         else:
             live = None
         return scores, model, reason, live, None

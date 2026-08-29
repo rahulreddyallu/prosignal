@@ -68,6 +68,15 @@ class PortfolioParams:
     #: t2_r_multiple). The simulator had NO target, so it measured a strategy
     #: that never takes profit while Stage 7 emits a target exit at 3R.
     target_r_multiple: float = 3.0
+    #: WHICH EXITS ARE ARMED, from `exit_hierarchy`. These were absent, so the
+    #: simulator always took profit at 3R and always sold on invalidation --
+    #: which was harmless while both rungs were armed and became a measurement
+    #: of a strategy the engine does not run the moment they were disarmed. The
+    #: defaults are True so an existing caller that does not pass them measures
+    #: what it used to; every shipped caller passes them.
+    use_stop: bool = True
+    use_target: bool = True
+    use_invalidation: bool = True
 
     # -- portfolio-level volatility scaling (Moreira & Muir 2017) -----------
     #: Annualised volatility the BOOK is scaled toward. `None` disables the
@@ -320,9 +329,9 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
     return float(qty * entry), float(entry), float(known)
 
 
-def _hold(sym: str, i: int, close, high, low, open_, ma, atr, p: PortfolioParams
-          ) -> Optional[float]:
-    """Realised return of one position, from the SHARED exit resolver.
+def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
+          high=None) -> Optional[Tuple[float, float]]:
+    """(realised return, exit side) of one position, from the SHARED resolver.
 
     This used to carry its own copy of the exit logic -- stop, invalidation,
     horizon, and no profit target at all -- while the training label carried a
@@ -360,19 +369,19 @@ def _hold(sym: str, i: int, close, high, low, open_, ma, atr, p: PortfolioParams
         invalidation_ma_sessions=p.invalidation_ma_sessions,
         invalidation_buffer_atr=p.invalidation_buffer_atr,
         horizon=p.horizon_sessions,
+        use_stop=p.use_stop,
+        use_target=p.use_target,
+        use_invalidation=p.use_invalidation,
     )
     one = [sym]
-    # `high` IS PASSED. Without it `resolve_exits` cannot see an intraday touch
-    # of the profit target, so the simulator took profit only when a CLOSE
-    # cleared 3R while the same resolver, given highs, took it intraday. The
-    # label and the book were therefore resolving the same position under two
-    # different rules, and the book's was the more optimistic of the two: a name
-    # that spiked through the target and closed below it was carried on to the
-    # horizon and whatever it did next was booked as the strategy's.
-    out = resolve_exits(close[one], i, rules, high=(None if high is None else high[one]),
+    out = resolve_exits(close[one], i, rules,
+                        high=(high[one] if high is not None else None),
                         low=low[one], open_=open_[one], atr=atr[one], ma=ma[one])
-    value = out["ret"].iloc[0] if len(out) else np.nan
-    return None if not np.isfinite(value) else float(value)
+    if not len(out):
+        return None
+    value = out["ret"].iloc[0]
+    side = out["side"].iloc[0]
+    return None if not np.isfinite(value) else (float(value), float(side))
 
 
 def simulate(
@@ -400,6 +409,19 @@ def simulate(
     #: positive result for eleven months while the universe it selects from
     #: returned +5.27% over the same windows.
     bench = prices.get("benchmark")
+    # The intraday high. Absent, `resolve_exits` falls back to the close and the
+    # profit target becomes a close-only instrument while the stop stays
+    # intraday -- see `_hold`. A caller that cannot supply it gets the old
+    # asymmetry, and is told rather than silently given it.
+    high = prices.get("high")
+    if high is None:
+        import warnings
+        warnings.warn(
+            "portfolio_sim.simulate: no 'high' panel supplied, so the profit "
+            "target can only trigger on a close while the stop still triggers "
+            "on the intraday low. The book's return is understated and the "
+            "target layer's measured cost is overstated.",
+            RuntimeWarning, stacklevel=2)
     index = list(close.index)
     pos = {d: i for i, d in enumerate(index)}
     allowed = set(dates_allowed) if dates_allowed is not None else None
@@ -442,8 +464,8 @@ def simulate(
             if sized is None or sized[0] <= 0:
                 continue
             size, price, liquidity = sized
-            ret = _hold(sym, i, close, high, low, open_, ma, atr, params)
-            if ret is None:
+            outcome = _hold(sym, i, close, low, open_, ma, atr, params, high=high)
+            if outcome is None:
                 continue
             ret, side = outcome
             size *= scale
@@ -595,12 +617,26 @@ def phase_summary(
         "mean_return": float(r.mean()),
         "sharpe": float(r.mean() / sd * np.sqrt(periods_per_year)) if sd > 0 else 0.0,
         "periods_per_year": periods_per_year,
-        # THE PATH figure. The mean of per-phase drawdowns is kept alongside
-        # under its own name rather than deleted, because the old reports quote
-        # it and a reader needs to be able to reconcile them.
-        "max_drawdown_period": float(np.mean([m["max_drawdown"] for m in per_phase])),
-        "max_drawdown_path": _path_drawdown(usable),
+        # A MEAN OF SCHEDULES IS NOT A DRAWDOWN. Each phase is a different,
+        # complete rebalance schedule -- one of them is the one that would have
+        # been run -- so averaging their worst moments describes an experience
+        # nobody could have had, and it is always shallower than the real one.
+        #
+        # WHICH ONE GETS THE HEADLINE NAME. Two audit passes disagreed here: one
+        # kept `max_drawdown` on the mean so older write-ups reconciled, the
+        # other moved it to the worst schedule. Both were left in the dict and
+        # the later key silently won. Resolved on the rule used everywhere else
+        # in this merge -- when two passes disagree, take the reading that
+        # cannot flatter the result. `max_drawdown` is what gates and reports
+        # quote, and a risk number that is quoted must not be the optimistic of
+        # two defensible answers. The mean is not deleted; it keeps its own
+        # names so an old report can still be reconciled against a new one.
+        # Finding R10 records the move: -13.7% -> -19.1%.
         "max_drawdown": _path_drawdown(usable),
+        "max_drawdown_path": _path_drawdown(usable),
+        "worst_schedule_drawdown": float(np.min(drawdowns)),
+        "max_drawdown_mean_of_phases": float(np.mean(drawdowns)),
+        "max_drawdown_period": float(np.mean(drawdowns)),
         "worst_phase_sharpe": float(min(m["sharpe"] for m in per_phase)),
         "hit_rate": float((r > 0).mean()),
         "avg_names": float(pooled["n_held"].mean()),

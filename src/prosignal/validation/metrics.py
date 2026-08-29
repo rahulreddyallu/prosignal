@@ -172,6 +172,13 @@ def probabilistic_sharpe_ratio(
     if n < 3:
         return 0.0
     n_eff = float(n) if effective_n is None else float(min(effective_n, n))
+    # WHETHER THE CALLER DECLARED ITS INDEPENDENCE. The null approximation
+    # 1/(n_eff-1) is the right stand-in for Var[SR] only when n_eff is the
+    # INDEPENDENT count; handed the raw length of an overlapping series it is
+    # the defect that produced a DSR of 1.000 at 100,000 trials. A caller that
+    # does not say gets the conservative unit instead of a number derived from
+    # a count it has not vouched for.
+    declared_independence = effective_n is not None
     if n_eff < 3:
         return 0.0
     sr = sharpe_ratio(arr) if observed_sr is None else float(observed_sr)
@@ -247,11 +254,16 @@ class DsrResult:
     #: the entries repeat or overlap. Reported because a DSR read without it
     #: cannot be checked.
     effective_n: float = 0.0
-    #: Var[SR] fed to the false-strategy benchmark, and where it came from.
-    #: These were invisible, which is how a fallback that contradicted its own
-    #: docstring survived for months.
-    sr_variance: float = float("nan")
-    sr_variance_source: str = ""
+    #: Cross-sectional variance of trial Sharpes used to build the benchmark,
+    #: and where it came from. Carried on the result because the number is
+    #: load-bearing and was previously invisible.
+    sr_variance: float = 1.0
+    sr_variance_source: str = SR_VAR_UNIT
+    #: What the recorded trial scores actually said, whether or not it was
+    #: used. Reported so an under-covered registry is visible as a number
+    #: rather than as an absence.
+    sr_variance_measured: float = float("nan")
+    trials_scored: int = 0
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -280,6 +292,7 @@ def deflated_sharpe_ratio(
     trial_sharpes: Optional[Sequence[float]] = None,
     confidence: float = 0.95,
     effective_n: Optional[float] = None,
+    sr_variance: Optional[float] = None,
 ) -> DsrResult:
     """Deflate an observed Sharpe by the multiple-testing and non-normality penalties.
 
@@ -295,14 +308,20 @@ def deflated_sharpe_ratio(
         Honest count of configurations tried -- from the research ledger, not
         from memory. Understating it inflates the result.
     trial_sharpes:
-        Sharpes of the trials actually run. Bailey & Lopez de Prado's ``Var[SR]``
-        is the CROSS-SECTIONAL dispersion of Sharpe ratios ACROSS TRIALS -- not
-        the sampling variance of one estimate -- so this is the right input and
-        it is used whenever it is supplied.
+        Sharpes of the TRIALS that were searched over, used to estimate their
+        cross-sectional variance. Bailey & Lopez de Prado's ``Var[SR]`` is the
+        dispersion of Sharpe ratios ACROSS TRIALS -- not the sampling variance
+        of one estimate, and NOT the spread of resampled paths of the single
+        selected configuration. Those paths measure noise in one strategy, they
+        are smaller, and using them shrinks the benchmark: measured on this
+        engine, 0.0083 against 0.0455, which moves the answer from FAIL 0.38 to
+        PASS 0.91.
+    sr_variance:
+        Supply Var[SR] directly when it is known from outside the trial list.
     effective_n:
         How many INDEPENDENT observations ``returns`` actually carries. Both the
-        PSR's ``sqrt(n-1)`` term and the null-variance fallback below scale with
-        it, so passing the raw length of a series whose entries repeat or overlap
+        PSR's ``sqrt(n-1)`` term and the null fallback below scale with it, so
+        passing the raw length of a series whose entries repeat or overlap
         inflates the result by the square root of the duplication.
 
     THE FAILURE THIS SIGNATURE EXISTS TO PREVENT. `CpcvResult.deflated` used to
@@ -322,6 +341,21 @@ def deflated_sharpe_ratio(
         n = 71 distinct panel dates                             DSR 0.4649  fail
         n = 23 independent 63-session windows                   DSR 0.1477  fail
         n = 23 windows AND sr_var from the woven path Sharpes   DSR 0.3130  fail
+
+    THE VARIANCE LADDER, in order of preference:
+
+      1. ``sr_variance`` supplied by the caller;
+      2. the dispersion of recorded trial scores, when at least
+         ``MIN_TRIAL_SCORE_COVERAGE`` of the CHARGED trials carry one;
+      3. a true unit variance -- NOT ``1/(n - 1)``.
+
+    ``effective_n`` deliberately does not reach step 3. The null approximation
+    ``1/(n_eff - 1)`` is defensible arithmetic on a declared independent count,
+    but wiring it to ``effective_n`` would make that argument do two opposing
+    jobs at once -- shrinking the PSR's ``sqrt(n-1)`` term while shrinking the
+    benchmark -- and the two can cancel, which is how an overlap correction
+    stops reaching the statistic. ``effective_n`` therefore moves the answer in
+    ONE direction. A caller with a defensible variance passes ``sr_variance``.
     """
     obs = np.asarray(list(returns), dtype="float64")
     obs = obs[np.isfinite(obs)]
@@ -337,6 +371,13 @@ def deflated_sharpe_ratio(
     # The sample size the INFERENCE runs on. Never larger than what was passed:
     # a caller cannot manufacture independence it does not have.
     n_eff = float(n) if effective_n is None else float(min(effective_n, n))
+    # WHETHER THE CALLER DECLARED ITS INDEPENDENCE. The null approximation
+    # 1/(n_eff-1) is the right stand-in for Var[SR] only when n_eff is the
+    # INDEPENDENT count; handed the raw length of an overlapping series it is
+    # the defect that produced a DSR of 1.000 at 100,000 trials. A caller that
+    # does not say gets the conservative unit instead of a number derived from
+    # a count it has not vouched for.
+    declared_independence = effective_n is not None
     if n < 3 or n_eff < 3:
         return DsrResult(
             0.0, 0.0, 0.0, n_trials, n, 0.0, 3.0, False,
@@ -349,19 +390,33 @@ def deflated_sharpe_ratio(
     observed = sharpe_ratio(arr)
     skew, kurt = _moments(arr)
 
-    supplied = list(trial_sharpes) if trial_sharpes is not None else []
-    if len(supplied) > 1:
-        sr_var = float(np.var(np.asarray(supplied, dtype="float64"), ddof=1))
-        var_source = f"observed dispersion of {len(supplied)} trial Sharpes"
+    scored = list(trial_sharpes) if trial_sharpes is not None else []
+    measured_var = (float(np.var(np.asarray(scored, dtype="float64"), ddof=1))
+                    if len(scored) > 1 else float("nan"))
+    covered = len(scored) / max(int(n_trials), 1)
+
+    if sr_variance is not None:
+        sr_var, source = float(sr_variance), SR_VAR_SUPPLIED
+    elif len(scored) > 1 and covered >= MIN_TRIAL_SCORE_COVERAGE:
+        sr_var, source = measured_var, SR_VAR_FROM_TRIALS
+    elif len(scored) > 1:
+        # Scores exist but for too few of the charged trials to describe the
+        # search. Under-coverage is EVIDENCE that the search was wider than
+        # what was recorded, so the bar must not fall below the conservative
+        # unit. See MIN_TRIAL_SCORE_COVERAGE.
+        sr_var, source = 1.0, SR_VAR_UNDERCOVERED
     else:
-        # No trial distribution. Under the null that every trial has a true
-        # Sharpe of zero and each is estimated from n_eff independent
-        # observations, the ESTIMATED Sharpes are distributed with variance
-        # ~1/n_eff. That is a defensible stand-in and it is the reason the
-        # effective count matters here as much as it does in the PSR term.
-        sr_var = 1.0 / max(n_eff - 1.0, 1.0)
-        var_source = (f"null approximation 1/(n_eff-1) on {n_eff:.1f} effective "
-                      f"observations; no trial Sharpes were supplied")
+        # A TRUE unit variance, and `effective_n` deliberately does not reach
+        # it. The null approximation 1/(n_eff-1) is defensible arithmetic, but
+        # wiring it to `effective_n` makes that argument do two opposing jobs:
+        # declaring fewer independent observations would shrink the PSR's
+        # sqrt(n-1) term (lowering the DSR) while simultaneously shrinking
+        # Var[SR] (raising it), and the two can cancel. `effective_n` therefore
+        # moves the statistic in ONE direction only. A caller that wants the
+        # null approximation passes it as `sr_variance` and says so.
+        sr_var, source = 1.0, SR_VAR_UNIT
+    if not np.isfinite(sr_var) or sr_var <= 0:
+        sr_var, source = 1.0, SR_VAR_UNIT
 
     benchmark = expected_max_sharpe(n_trials, sr_var)
     dsr = probabilistic_sharpe_ratio(arr, benchmark_sr=benchmark,
@@ -371,18 +426,35 @@ def deflated_sharpe_ratio(
     dup = "" if n_eff >= n else (
         f" The series carries {n} values but only {n_eff:.1f} independent "
         f"observations, and the inference uses the latter.")
+    provenance = {
+        SR_VAR_FROM_TRIALS: (
+            f"Var[SR] {sr_var:.4g} from {len(scored)} recorded trial scores, "
+            f"{covered:.0%} of those charged"),
+        SR_VAR_SUPPLIED: f"Var[SR] {sr_var:.4g} supplied by the caller",
+        SR_VAR_UNDERCOVERED: (
+            f"Var[SR] assumed 1.0: only {len(scored)} of {n_trials} charged "
+            f"trials carry a score ({covered:.0%}, below the "
+            f"{MIN_TRIAL_SCORE_COVERAGE:.0%} needed), and their measured "
+            f"{measured_var:.5g} describes the arms that happened to be "
+            f"recorded rather than the search"),
+        SR_VAR_UNIT: ("Var[SR] assumed 1.0 -- no trial Sharpes were supplied, "
+                      "so the benchmark is the conservative one"),
+    }[source]
+
     if passes:
         interpretation = (
             f"After charging for {n_trials} trial(s) and for skew/kurtosis, the "
             f"probability the true Sharpe exceeds what the best of {n_trials} "
-            f"lucky configurations would produce is {dsr:.1%}.{dup}"
+            f"lucky configurations would produce is {dsr:.1%} "
+            f"({n_eff:.1f} independent observations; {provenance}).{dup}"
         )
     else:
         interpretation = (
             f"DSR {dsr:.1%} is below the {confidence:.0%} bar. Given {n_trials} "
-            f"trial(s), an observed Sharpe of {observed:.3f} is not "
-            f"distinguishable from the best of that many coin flips. Simplify "
-            f"the model or gather more data -- do not search further.{dup}"
+            f"trial(s), an observed Sharpe of {observed:.3f} over "
+            f"{n_eff:.1f} independent observations is not distinguishable from "
+            f"the best of that many coin flips ({provenance}). Simplify the "
+            f"model or gather more data -- do not search further.{dup}"
         )
 
     return DsrResult(
@@ -397,7 +469,9 @@ def deflated_sharpe_ratio(
         interpretation=interpretation,
         effective_n=n_eff,
         sr_variance=sr_var,
-        sr_variance_source=var_source,
+        sr_variance_source=source,
+        sr_variance_measured=measured_var,
+        trials_scored=len(scored),
     )
 
 

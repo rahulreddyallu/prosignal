@@ -78,7 +78,15 @@ class TestOneDefinition:
                                atr=atr, ma=ma)
         compared = 0
         for sym in SY:
-            ref = _hold(sym, 200, close, high, low, open_, ma, atr, params)
+            # `high=high`, because that is what the simulator now passes. It
+            # used to pass None, and `resolve_exits` substitutes the CLOSE when
+            # the high is missing -- so the target became a close-only
+            # instrument while the stop stayed intraday. This test already
+            # compared the two paths correctly; it could not SEE the difference
+            # because the fixture below never produced a bar that traded
+            # through the target and closed under it. The assertion at the end
+            # is what closes that gap.
+            ref = _hold(sym, 200, close, low, open_, ma, atr, params, high=high)
             got = shared.loc[sym, "ret"]
             if ref is None and not np.isfinite(got):
                 continue

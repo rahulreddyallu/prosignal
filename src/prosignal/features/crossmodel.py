@@ -382,8 +382,18 @@ def label_fingerprint(
     horizon: int,
     barriers: Optional["BarrierSpec"] = None,
     exit_rules: Optional["ExitRules"] = None,
+    admission_rules: Optional["ExitRules"] = None,
 ) -> Dict[str, object]:
     """What the coefficients were FITTED AGAINST, in a form two fits can compare.
+
+    R9 ADDS THE POPULATION, and it had to. The fingerprint recorded what the
+    model predicts and not the set of rows it was estimated over, so flipping
+    `universe.train_on_admissible_only` -- which changes every coefficient --
+    left a cached blob valid in every respect the loader checks. The engine
+    would have gone on scoring with wide-population coefficients for up to
+    `refit_every * 2` sessions after the correction shipped, and the run would
+    have looked normal. That is the same trap the label repair walked into,
+    one field along.
 
     `load_cached` validated three things -- the fit date, the feature-column set
     and the estimator name -- and NONE of them move when the label changes. So
@@ -406,7 +416,24 @@ def label_fingerprint(
     fp: Dict[str, object] = {
         "horizon": int(horizon),
         "triple_barrier": bool(barriers is not None or exit_rules is not None),
+        # R9. The rows the fit was estimated over, not just what it predicted.
+        # `admissible` alone would be ambiguous between "the wide panel" and
+        # "a blob written before this field existed"; `load_cached` treats a
+        # missing field as a mismatch, so both refit once and neither scores.
+        "population": ("admissible" if admission_rules is not None
+                       else "all_eligible"),
     }
+    if admission_rules is not None:
+        # The predicate itself, because two different invalidation geometries
+        # admit two different populations and produce two different fits.
+        fp["admission"] = {
+            "invalidation_ma_sessions":
+                int(admission_rules.invalidation_ma_sessions),
+            "invalidation_buffer_atr":
+                float(admission_rules.invalidation_buffer_atr),
+            "atr_period_sessions": int(admission_rules.atr_period_sessions),
+            "atr_method": str(admission_rules.atr_method),
+        }
     if exit_rules is not None:
         fp["source"] = "engine"
         fp["engine"] = {
@@ -1154,12 +1181,7 @@ def fit_predict(
     actions: Optional[pd.DataFrame] = None,
     barriers: Optional["BarrierSpec"] = None,
     exit_rules: Optional["ExitRules"] = None,
-    #: The engine's exit geometry, used for the ADMISSIBILITY predicate. Kept
-    #: separate from `exit_rules` because that one selects the LABEL: the
-    #: population the engine can open from does not change when the label does,
-    #: and coupling them is what let the barrier repair silently remove the
-    #: predicate from training while Stage 6 went on enforcing it.
-    exit_geometry: Optional["ExitRules"] = None,
+    admission_rules: Optional["ExitRules"] = None,
     open_: Optional[pd.DataFrame] = None,
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
@@ -1241,12 +1263,15 @@ def fit_predict(
     # not why the change is made. It is made because ranking a population 23% of
     # which cannot be bought is incoherent, and the measurement establishes that
     # coherence costs nothing.
-    admissible = _admissible_frame(train_close, tr_high, tr_low, exit_geometry)
+    # `build_panel` derives the mask itself from `admission_rules`, so the
+    # predicate has ONE implementation and the fingerprint above records which
+    # population it produced. Passing a pre-built frame instead is what let the
+    # two halves drift.
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
                         delivery=delivery, eligible=eligible, sectors=sectors,
                         barriers=barriers, exit_rules=exit_rules,
-                        high=tr_high, low=tr_low, open_=tr_open,
-                        admissible=admissible)
+                        admission_rules=admission_rules,
+                        high=tr_high, low=tr_low, open_=tr_open)
     features: List[str] = []
     dropped: Dict[str, float] = {}
     member_features: List[str] = []
@@ -1320,11 +1345,11 @@ def fit_predict(
     # The SAME predicate the panel was masked with, for the decision date. Ranks
     # are then taken over the population Stage 6 will admit from.
     live_adm = None
-    if exit_geometry is not None and high is not None and low is not None:
+    if admission_rules is not None and high is not None and low is not None:
         _a = _admissible_frame(live_hist,
                                high.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
                                low.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
-                               exit_geometry)
+                               admission_rules)
         if _a is not None and len(_a):
             live_adm = _a.iloc[-1]
     # THE DECISION DATE, not four sessions before it. `build_panel` is a
@@ -1453,7 +1478,7 @@ def fit_predict(
     # read a second time, so the fingerprint cannot drift from the model it
     # describes. `save_cache` writes it and `load_cached` refuses a blob whose
     # label differs.
-    model.label = label_fingerprint(H, barriers, exit_rules)
+    model.label = label_fingerprint(H, barriers, exit_rules, admission_rules)
     model.regime_reachability = reach
     model.regime_multipliers_applied = multipliers_applied is not None
     model.meta_prob = model_meta_prob
@@ -1485,13 +1510,13 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
                    actions: Optional[pd.DataFrame] = None,
                    high: Optional[pd.DataFrame] = None,
                    low: Optional[pd.DataFrame] = None,
-                   exit_geometry: Optional["ExitRules"] = None):
+                   admission_rules: Optional["ExitRules"] = None):
     """Features for the decision date only.
 
     The cheap path: one date rather than a full training panel, so a cached
     model scores today without the large historical read.
 
-    ``high``, ``low`` and ``exit_geometry`` are here for the ADMISSIBLE MASK,
+    ``high``, ``low`` and ``admission_rules`` are here for the ADMISSIBLE MASK,
     and they are not optional in spirit. `model_refit_every_sessions` is 21, so
     `fit_predict` -- where the mask was first wired -- runs on one session in
     twenty-one and every other day arrives here. Without them this path ranks
@@ -1511,11 +1536,11 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
     # the model was NOT fitted on. Fixing the rare path and leaving the common
     # one is worse than not fixing it, because the two then disagree.
     live_adm = None
-    if exit_geometry is not None and high is not None and low is not None:
+    if admission_rules is not None and high is not None and low is not None:
         _a = _admissible_frame(hist,
                                high.reindex(hist.index).reindex(columns=hist.columns),
                                low.reindex(hist.index).reindex(columns=hist.columns),
-                               exit_geometry)
+                               admission_rules)
         if _a is not None and len(_a):
             live_adm = _a.iloc[-1]
     # The LAST row of `hist`, which is `as_of`. Routing this through

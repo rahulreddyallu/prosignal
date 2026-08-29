@@ -97,7 +97,38 @@ log = get_logger(__name__)
 #:                   whether a trade reached 1.5R before its stop is real
 #:                   information about the trade -- it is just not the moment
 #:                   the position ends.
-EXIT_MODEL = "target-t2-v4"
+#:   band-time-v5    THE TARGET AND THE INVALIDATION STOP BEING EXITS, and the
+#:                   stop moves from a trading rule to a disaster floor.
+#:
+#:                   Measured on the production configuration, each exit removed
+#:                   alone so the case does not rest on a bundle. 258-385 trades,
+#:                   7.5 years, net of 40 bps, against the equal-weight eligible
+#:                   universe:
+#:
+#:                     arm                              p_win   alpha   ShExc
+#:                     floor only (SHIPPED)             0.578  +20.3%   1.12
+#:                     + 3R profit target               0.578  +19.4%   1.08
+#:                     + 1.5R profit target             0.571  +15.7%   0.93
+#:                     + MA50 - 1.5 ATR invalidation    0.422   +6.0%   0.32
+#:                     v4 geometry 2.5 ATR / 3R / 1.5   0.384   +3.1%   0.15
+#:
+#:                   Two thirds of the return comes from the 39% of positions
+#:                   that reach the time limit: those win 69% of the time and
+#:                   average +16.1% net, against +3.3% for the ones that leave on
+#:                   the rank band. Every rule removed here was a rule that sold
+#:                   part of that population early.
+#:
+#:                   THE VERSION BUMP IS THE POINT. A v4 row and a v5 row are two
+#:                   different strategies and `load_outcomes` serves one model at
+#:                   a time, so the History page cannot average a trade that was
+#:                   sold at 3R against one that was held to the limit. The old
+#:                   rows are kept and stay readable under their own model.
+#:
+#:                   `touched_t1` and a new `touched_t2` remain as MILESTONES.
+#:                   Whether a trade reached 1.5R or 3R before it ended is real
+#:                   information about the trade; it is just no longer the moment
+#:                   the position ends.
+EXIT_MODEL = "band-time-v5"
 
 
 class Outcome(dict):
@@ -267,7 +298,12 @@ def _pending(ledger_rows, resolved_keys, resolved_calls=frozenset()) -> List[Dic
             call = (ticker, str(row.get("date") or "")[:10])
             if call in resolved_calls or call in seen:
                 continue
-            if rec.get("stop") is None or rec.get("target_1") is None:
+            # A STOP IS REQUIRED; A TARGET IS NOT, since v5 does not exit on
+            # one. Requiring `target_1` here would silently drop every row
+            # issued by a build that stopped computing targets, and dropping a
+            # pending trade makes it invisible rather than open -- the record
+            # would simply have fewer trades in it, with nothing to say why.
+            if rec.get("stop") is None:
                 continue
             seen.add(call)
             out.append({"run_id": run_id, "date": row.get("date"), "rec": rec,
@@ -311,6 +347,14 @@ def resolve_pending(
     as_of = as_of or sessions[-1]
     max_hold = int(config.params.stage7_risk.holding_period.max_holding_sessions.value)
     costs = CostModel(config)
+    # ONE READER for which exits are armed. `rules_from_config` is what the
+    # label geometry, the portfolio simulator and Stage 7 all consult, so the
+    # record scores a trade under the same rules the engine traded it under.
+    # Reading the hierarchy separately here is how the four different
+    # definitions of "how did this trade end" got into this codebase.
+    from .features.exits import rules_from_config
+    rules = rules_from_config(config.params.stage4_core_score,
+                              config.params.stage7_risk)
 
     book = book_by_date(ledger_rows)
     tickers = sorted({p["rec"]["ticker"] for p in pending})
@@ -327,7 +371,7 @@ def resolve_pending(
     with outcomes_path.open("a", encoding="utf-8") as fh:
         for item in pending:
             res = _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
-                               book)
+                               book, rules=rules)
             if res is _REFUSED:
                 refused += 1
                 continue
@@ -414,7 +458,8 @@ def _basis_factor(rec, frame, signal_date) -> Optional[float]:
 
 
 def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
-                 book: Optional[Dict[dt.date, set]] = None) -> Optional[Dict[str, Any]]:
+                 book: Optional[Dict[dt.date, set]] = None,
+                 rules=None) -> Optional[Dict[str, Any]]:
     rec = item["rec"]
     ticker = rec["ticker"]
     frame = by_symbol.get(ticker)
@@ -439,7 +484,12 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
         # unscoreable, and collapsing the two would report a shrinking sample
         # as patience.
         return _REFUSED
-    stop, t1 = float(rec["stop"]) * factor, float(rec["target_1"]) * factor
+    # ARMED, from the one reader. `use_target` false means the target levels
+    # are milestones and nothing more; the position runs to the rank band, the
+    # time limit or the floor.
+    use_target = bool(getattr(rules, "use_target", True)) if rules is not None else True
+    stop = float(rec["stop"]) * factor
+    t1 = float(rec["target_1"]) * factor if rec.get("target_1") else None
     t2 = float(rec["target_2"]) * factor if rec.get("target_2") else t1
     walk = future.iloc[1:].head(max_hold)
 
@@ -448,6 +498,7 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
     held = 0
     mae = mfe = 0.0
     touched_t1 = False
+    touched_t2 = False
     book = book or {}
     # The last session whose close the engine had already acted on when this
     # bar opened. The book exit is decided at a close and fills at the next
@@ -472,11 +523,18 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
                 unfilled_stop_sessions += 1
             continue
 
-        if high >= t1:
+        if t1 is not None and high >= t1:
             # A MILESTONE, not an exit. See EXIT_MODEL target-t2-v4: booking
             # here measured worse than holding to T2 under both label
             # geometries, and it is not the target the model is fitted against.
             touched_t1 = True
+        if t2 is not None and high >= t2:
+            # Under v5 this is a milestone too. Recorded because "did it ever
+            # reach 3R" is a real fact about the trade and the only way to
+            # measure, later and from the record, what booking there WOULD have
+            # cost -- which is the comparison that put the target exit here in
+            # the first place.
+            touched_t2 = True
 
         if low <= stop:
             # A gap-down opens below the stop, so the fill is the open, not the
@@ -485,7 +543,7 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
             bar_open = float(bar["open"]) if "open" in bar else float("nan")
             exit_price = min(bar_open, stop) if np.isfinite(bar_open) else stop
             reason = "stop_gap" if exit_price < stop else "stop"
-        elif high >= t2:
+        elif use_target and t2 is not None and high >= t2:
             exit_price, reason = t2, "target"
         if exit_price is not None:
             exit_date = bar[DATE].date()
@@ -554,6 +612,7 @@ def _resolve_one(item, by_symbol, max_hold, costs, config, as_of,
         # Whether the trade reached T1 before it ended. Real information
         # about the trade, recorded rather than acted on -- see EXIT_MODEL.
         "touched_t1": touched_t1,
+        "touched_t2": touched_t2,
         "composite_score": rec.get("composite_score"),
         "percentile": rec.get("percentile"),
         "config_version": item.get("config_version"),

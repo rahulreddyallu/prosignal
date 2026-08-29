@@ -184,6 +184,11 @@ def build_plan(
         risk_category=category,
         risk_category_inputs={**size_inputs, "composite_score": round(composite_score, 4),
                               "relative_volatility": round(rel_vol, 3) if rel_vol else 0.0},
+        position_size_shares=int(qty),
+        position_value_inr=round(float(qty) * float(reference_price), 2) if qty else 0.0,
+        risk_at_stop_inr=(round(float(qty) * (float(reference_price) - float(stop_price)), 2)
+                          if qty and stop_price is not None
+                          and reference_price > stop_price else None),
         expected_holding_sessions=(hold_lo, hold_hi),
         expected_holding_weeks=(max(hold_lo // 5, 1), max(hold_hi // 5, 1)),
         exit_conditions=exits,
@@ -322,7 +327,20 @@ def _position_size(price, risk_per_share, adtv, category, params, costs
 
 
 def _exit_hierarchy(cfg, stop, invalidation, t1, t2) -> List[ExitCondition]:
-    """Ordered. Thesis invalidation outranks the stop deliberately."""
+    """Ordered. Thesis invalidation outranks the stop deliberately.
+
+    `priority` is a STABLE IDENTIFIER of the rung, not a position in the list.
+    Four rungs now ship disarmed, so the returned list starts at 2 and has gaps,
+    and that is the correct behaviour: the config promises the switches can
+    disable a rung and never reorder one, and renumbering on the fly would make
+    rung 1 mean "invalidation" on one config and "the stop" on another -- so two
+    runs could not be compared, and a recorded outcome could not say which rule
+    it was scored under.
+
+    The CARD renumbers for display, because a reader looking at "2., 3., 5., 8."
+    reasonably wonders what happened to 1, 4, 6 and 7. Stage 8 enumerates the
+    positions it prints and names the disarmed rungs explicitly underneath.
+    """
     h = cfg.exit_hierarchy
     out: List[ExitCondition] = []
     spec = [
@@ -338,7 +356,13 @@ def _exit_hierarchy(cfg, stop, invalidation, t1, t2) -> List[ExitCondition]:
         (h.trailing_stop, ExitReason.TRAILING_STOP, 6, "trailing stop hit", None),
         (h.target_achieved, ExitReason.TARGET_ACHIEVED, 7, "target reached", t2),
         (h.time_expiration, ExitReason.TIME_EXPIRATION, 8,
-         "maximum holding period reached -- a backstop, never the primary exit", None),
+         # NO LONGER A BACKSTOP, and the description had to stop saying so.
+         # With the target and the invalidation disarmed, 39% of positions reach
+         # this limit; they win 69% of the time and average +16.1% net against
+         # +3.3% for the ones released by the rank band. It is where the return
+         # comes from, and a card calling it a last resort would tell a holder
+         # the opposite of what the measurement says.
+         "maximum holding period reached -- the exit most winners take", None),
     ]
     for enabled, reason, prio, desc, level in spec:
         if bv(enabled):

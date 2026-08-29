@@ -70,6 +70,7 @@ __all__ = [
     "EntryReport",
     "ExitCondition",
     "RiskPlan",
+    "TradePlan",
     "Recommendation",
     "ClosestCandidate",
     "NoTradeReport",
@@ -483,6 +484,12 @@ class EntryDecision(_Contract):
 class EntryReport(_Contract):
     as_of_date: dt.date
     decisions: Dict[str, EntryDecision] = Field(default_factory=dict)
+    #: Was the book allowed to OPEN a position on this session? Carried on the
+    #: report rather than re-derived downstream, because Stage 8 has to tell
+    #: "nothing qualified" from "the book was not buying today" and the only
+    #: other way to know is to parse a reason string.
+    entries_open: bool = True
+    entries_closed_reason: Optional[str] = None
 
     def triggered(self) -> List[str]:
         return [t for t, d in self.decisions.items() if d.status is EntryStatus.TRIGGERED]
@@ -528,6 +535,22 @@ class RiskPlan(_Contract):
     risk_category: RiskCategory = RiskCategory.MINIMUM
     risk_category_inputs: Dict[str, float] = Field(default_factory=dict)
 
+    #: The size, structurally. It was computed on every plan and reached the
+    #: card only inside a formatted note string -- so nothing downstream could
+    #: read it: not the trade plan that has to state what is at risk, not the
+    #: ledger, not a reconciliation against a broker statement. A number that
+    #: exists only inside prose is a number the engine cannot check itself
+    #: against.
+    position_size_shares: Optional[int] = None
+    position_value_inr: Optional[float] = None
+    #: Entry price minus stop price, times the size. What the position loses if
+    #: the disaster floor fills exactly at the stop -- and "exactly" is doing
+    #: work, because a floor eight ATRs out is reached by a name in collapse and
+    #: a name in collapse gaps through it. Measured on the nine study trades
+    #: that hit the floor, the realised loss averaged -31.0% against a stop
+    #: placed at most 35% away. This is the optimistic end of what a stop costs.
+    risk_at_stop_inr: Optional[float] = None
+
     expected_holding_sessions: Tuple[int, int] = (0, 0)
     expected_holding_weeks: Tuple[int, int] = (0, 0)
 
@@ -556,6 +579,79 @@ class RiskPlan(_Contract):
 # =============================================================================
 
 
+class TradePlan(_Contract):
+    """What this trade IS, recorded at the moment it is issued.
+
+    The engine could always say what it liked and, months later, what happened.
+    It could not say what it EXPECTED, so nothing could ever be scored against
+    its own forecast: a run that produced eight names and a run that produced
+    eight names with a stated 58% win probability and a 42-session hold left
+    identical records. Calibration needs the second one.
+
+    Every field here is either a rule the engine is about to follow (cadence,
+    planned hold, stop, target) or a measured frequency from the study named in
+    `basis` -- never a forecast for THIS name. There is no per-name edge
+    estimate in this engine and inventing one on the card would be the most
+    dangerous number it prints. `expected_return_pct` is the mean outcome of the
+    258 trades this configuration took in the study, and `probability_of_profit`
+    is how many of them ended positive. They describe the population the trade
+    is drawn from. That is the honest claim and it is the one worth recording,
+    because it is falsifiable: after fifty live trades the realised rates can be
+    compared against these and the difference is evidence.
+    """
+
+    #: Sessions between entry opportunities -- the cron's own clock.
+    cadence_sessions: int
+    #: Sessions this position is planned to be held at most. The time backstop.
+    planned_hold_sessions: int
+    #: MEDIAN sessions actually held in the study. Differs from the plan because
+    #: most positions leave on the rank band well before the backstop.
+    expected_hold_sessions: Optional[float] = None
+    #: Mean net return per trade in the study, after `assumed_cost_bps`.
+    expected_return_pct: Optional[float] = None
+    #: Median, stated beside the mean because the distribution is right-skewed
+    #: and quoting only the mean would describe a typical trade that does not
+    #: exist. In the study the mean was +7.1% and the median +3.7%.
+    median_return_pct: Optional[float] = None
+    #: Mean return in EXCESS of the equal-weight eligible universe over the same
+    #: holding window. The mean return above is not an edge; this is.
+    expected_excess_pct: Optional[float] = None
+    #: And its median, for the same reason the median return is carried: the
+    #: mean excess is +3.74% and the median is +0.69%, so the typical trade
+    #: barely beats the market and a minority of them carry the result. Quoting
+    #: the mean alone would describe an edge that most trades do not have.
+    median_excess_pct: Optional[float] = None
+    #: Share of study trades that ended net positive.
+    probability_of_profit: Optional[float] = None
+    #: Share that beat the benchmark over their own holding window. Lower than
+    #: `probability_of_profit`, and the gap is the point: most of these trades
+    #: make money because the market does, and only about half add anything.
+    probability_of_beating_benchmark: Optional[float] = None
+    #: Round-trip cost the two figures above were computed net of.
+    assumed_cost_bps: Optional[float] = None
+    #: The same frequencies at every cost scenario, so the card can state what
+    #: happens if execution is worse than assumed rather than leaving the reader
+    #: to wonder. Cost is the one input certain to be worse live, and on this
+    #: configuration the edge survives it: at 120 bps the win rate is still
+    #: 55.0% and the mean +6.29%. Keyed by scenario name, each entry carrying
+    #: cost_bps, p_win, p_beat, mean_net_pct and median_net_pct.
+    cost_sensitivity: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    #: What the position risks, in rupees and as a share of the book, if the
+    #: disaster floor fills exactly at the stop.
+    risk_at_stop_inr: Optional[float] = None
+    risk_at_stop_pct_of_book: Optional[float] = None
+    #: The study these frequencies come from, so a reader can go and check it,
+    #: and so a stale plan is visible as stale.
+    basis: Optional[str] = None
+    basis_trades: Optional[int] = None
+    basis_period: Optional[str] = None
+    #: Never absent. The frequencies above are a population, not a promise.
+    caveat: str = (
+        "These are frequencies from a historical study of this configuration, "
+        "not a forecast for this name. The engine estimates no per-name edge."
+    )
+
+
 class Recommendation(_Contract):
     """The full recommendation card. Mirrors the master prompt output schema.
 
@@ -571,6 +667,10 @@ class Recommendation(_Contract):
     signal_strength_band: StrengthBand
     regime_compatibility: RegimeCompatibility
     expected_holding_period: str
+    #: What this trade is and what the configuration it belongs to has done
+    #: historically. Optional because a watchlist name on a run with no risk
+    #: plan has no trade to describe -- not because it is decoration.
+    trade_plan: Optional[TradePlan] = None
 
     entry_zone: Optional[Tuple[float, float]] = None
     invalidation_level: Optional[float] = None

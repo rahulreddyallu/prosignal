@@ -103,7 +103,11 @@ def test_config_hash_changes_when_a_value_changes(tmp_project, baseline_yaml):
     write_config(tmp_project, changed)
     a = load_config(project_root=tmp_project, use_cache=False)
 
-    changed["stage7_risk"]["stop_loss"]["atr_multiple"]["value"] = 2.0
+    # Inside the declared search_range, which the loader enforces separately.
+    # This test is about the HASH responding to a change, so it must pick a
+    # value the loader accepts; 2.0 used to qualify and stopped when the stop
+    # became a disaster floor with a range of [3.0, 12.0].
+    changed["stage7_risk"]["stop_loss"]["atr_multiple"]["value"] = 7.0
     write_config(tmp_project, changed)
     b = load_config(project_root=tmp_project, use_cache=False)
 
@@ -258,9 +262,22 @@ def test_transparency_report_counts_match(cfg):
 
 
 def test_tunable_lookup_by_path(cfg):
+    """The LOOKUP is under test, not the value it happens to find.
+
+    This pinned UNVALIDATED and [1.5, 3.5], which made it fail the moment the
+    stop became a measured disaster floor with a range of [3.0, 12.0] -- a
+    correct change breaking a test that was never about the stop. Rewritten to
+    assert the shape the lookup must return and to check the round trip against
+    the loaded config, so it tracks the file instead of a snapshot of it.
+    """
     entry = cfg.tunable("stage7_risk.stop_loss.atr_multiple")
-    assert entry["status"] == "UNVALIDATED"
-    assert entry["search_range"] == [1.5, 3.5]
+    live = cfg.params.stage7_risk.stop_loss.atr_multiple
+    assert entry["status"] == live.status.value
+    assert entry["value"] == pytest.approx(float(live.value))
+    lo, hi = entry["search_range"]
+    assert lo <= float(live.value) <= hi, (
+        "the loader enforces this at load time; if the lookup can report a "
+        "value outside its own range, the two disagree about what they read")
     with pytest.raises(ConfigError):
         cfg.tunable("no.such.parameter")
 

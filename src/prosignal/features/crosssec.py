@@ -617,7 +617,7 @@ def build_panel(
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
     open_: Optional[pd.DataFrame] = None,
-    admissible: Optional[pd.DataFrame] = None,
+    admission_rules: Optional["ExitRules"] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
@@ -716,19 +716,32 @@ def build_panel(
         if eligible is not None:
             # Point-in-time: only the names the screen admitted on THIS date.
             feats = feats[eligible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
-        if admissible is not None:
-            # THE POPULATION THE ENGINE CAN ACTUALLY BUY FROM. Stage 6 refuses a
-            # name already below its own invalidation level -- it satisfies its
-            # first exit condition at the moment it is opened. While the label
-            # was a triple barrier, `resolve_exits` applied the same predicate
-            # and training and admission agreed. Turning the barrier off removed
-            # it from training and left the live gate standing, so the model
-            # began ranking a population 23.3% of which it could never buy, and
-            # 1.55 of its top eight were refused on 72% of dates.
+        if admission_rules is not None and adm_atr is not None:
+            # THE POPULATION THE BOOK CAN ACTUALLY OPEN.
             #
-            # Ranks are taken AFTER this mask, so a rank means the same thing in
-            # training and at the decision.
-            feats = feats[admissible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
+            # `tradeable_at_entry` is applied by stage 3 and by stage 6 on the
+            # live path, and inside `resolve_exits` on the label path. The
+            # label path is reached only when `exit_rules` is not None, which
+            # under the shipped `triple_barrier: false` it is not -- so the
+            # model is fitted and ranked on a population roughly a fifth larger
+            # than the one the engine will trade, and the simulator discovers
+            # the difference at fill time by leaving slots empty. Measured on
+            # the shipped book: 7.29 of 8 slots filled.
+            #
+            # Passing `admission_rules` applies the same predicate to the panel
+            # WHATEVER the label is, which is the only way the two populations
+            # can be made to agree while the label stays the horizon return.
+            am = tradeable_at_entry(close.iloc[i], adm_ma.iloc[i],
+                                    adm_atr.iloc[i], admission_rules)
+            # An UNKNOWN level cannot exclude a row from the panel -- the older
+            # bars have no 50-session average yet and dropping them would
+            # shorten it for everyone. Live admission is stricter and refuses
+            # the unknown; this is the one asymmetry that remains, and it runs
+            # in the direction of a larger training panel rather than a
+            # flattered result.
+            known = adm_ma.iloc[i].notna() & adm_atr.iloc[i].notna()
+            am = (am | ~known).reindex(feats.index).fillna(True).to_numpy()
+            feats = feats[am]
         feats = feats[np.isfinite(feats["label"]) & feats["label"].abs().lt(1.0)]
         required = [c for c in FEATURES if c not in NEUTRAL_WHEN_MISSING]
         feats = feats.dropna(subset=required, thresh=int(len(required) * 0.7))

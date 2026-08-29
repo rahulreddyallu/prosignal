@@ -142,6 +142,26 @@ class _PartitionedTable:
     #: frame. As `category` they cost almost nothing.
     _CATEGORICAL = (SYMBOL, "series", "isin", "source", "index_name")
 
+    @staticmethod
+    def _wants_category(series: pd.Series) -> bool:
+        """True for a string column that is not yet categorical.
+
+        The test used to be ``dtype == object``, which was correct only while
+        pandas returned parquet strings as object arrays. Pandas 3 returns them
+        as the dedicated string dtype, so that test silently stopped matching:
+        no column was ever converted, the 681 MB of string columns this class
+        exists to compress came back, and -- worse than the memory -- the cached
+        slice stopped agreeing with a fresh read about categories, which is what
+        `groupby(observed=False)` iterates. A dtype check that fails OPEN like
+        that is the dangerous kind: nothing raises, the numbers just drift.
+        Matching on "is it a string" instead of "is it object" holds under both
+        pandas 2 and 3.
+        """
+        dtype = series.dtype
+        if isinstance(dtype, pd.CategoricalDtype):
+            return False
+        return dtype == object or pd.api.types.is_string_dtype(dtype)
+
     def read(
         self,
         start: Optional[dt.date] = None,
@@ -204,7 +224,7 @@ class _PartitionedTable:
             if wanted is not None and symbol_column in chunk.columns:
                 chunk = chunk[chunk[symbol_column].isin(wanted)]
             for col in self._CATEGORICAL:
-                if col in chunk.columns and chunk[col].dtype == object:
+                if col in chunk.columns and self._wants_category(chunk[col]):
                     chunk[col] = chunk[col].astype("category")
             frames.append(chunk)
             # Trim between year-files. Measured: decoding five year-files to a
@@ -220,7 +240,7 @@ class _PartitionedTable:
         # Concatenating categoricals with different category sets yields object
         # again, which silently undoes the saving. Re-apply once.
         for col in self._CATEGORICAL:
-            if col in out.columns and out[col].dtype == object:
+            if col in out.columns and self._wants_category(out[col]):
                 out[col] = out[col].astype("category")
         if start is not None:
             out = out[out[DATE] >= pd.Timestamp(start)]

@@ -58,12 +58,23 @@ def run(
     as_of: dt.date,
     ranks: Optional[Dict[str, int]] = None,
     held: Optional[Sequence[str]] = None,
+    entries_open: bool = True,
+    entries_closed_reason: Optional[str] = None,
 ) -> EntryReport:
     """Decide which ranked candidates are admitted today.
 
     ``ranks`` maps ticker to its Stage 4 rank in the eligible universe.
     ``held`` is the previous run's book, which the exit band needs; an empty or
     absent book is the correct first-run state, not an error.
+
+    ``entries_open`` is the entry clock (see `prosignal.cadence`). When it is
+    false, a name that is NOT already held cannot be admitted however good its
+    rank -- and the reason says so rather than reporting a rank failure, because
+    "the market offered nothing" and "the book was not buying today" are
+    different facts and the second one must not disguise itself as the first.
+    HELD names are evaluated exactly as they always were: the rank band, the
+    disaster floor and the time limit run on every session, and a closed entry
+    clock must never keep a position open that the band would have released.
     """
     p = config.params
     cfg = p.stage6_entry
@@ -81,19 +92,39 @@ def run(
                 reason="insufficient history to evaluate an entry",
             )
             continue
-        decisions[sym] = _evaluate(
+        decision = _evaluate(
             sym, frame, cfg, p,
             rank=(ranks or {}).get(sym),
             entry_rank=entry_rank, exit_rank=exit_rank,
             is_held=sym in open_book,
         )
+        if (not entries_open and sym not in open_book
+                and decision.status is EntryStatus.TRIGGERED):
+            # Demoted to WATCHLIST rather than NOT_TRIGGERED: the name passed
+            # every test the engine applies and the only thing standing between
+            # it and the book is the calendar. That is what a watchlist is for,
+            # and recording it as a failure would make the funnel lie about how
+            # many candidates the ranking actually produced.
+            decision = decision.model_copy(update={
+                "status": EntryStatus.WATCHLIST,
+                "reason": (entries_closed_reason
+                           or "new entries are closed on this session"),
+                "notes": list(decision.notes) + [
+                    "Admitted on rank and held back by the entry cadence. It "
+                    "will be bought on the next entry date if it is still "
+                    "inside the band."],
+            })
+        decisions[sym] = decision
 
     log.info(
         "stage 6 complete",
         extra={"triggered": sum(1 for d in decisions.values() if d.status is EntryStatus.TRIGGERED),
                "watchlist": sum(1 for d in decisions.values() if d.status is EntryStatus.WATCHLIST)},
     )
-    return EntryReport(as_of_date=as_of, decisions=decisions)
+    return EntryReport(as_of_date=as_of, decisions=decisions,
+                       entries_open=bool(entries_open),
+                       entries_closed_reason=(None if entries_open
+                                              else entries_closed_reason))
 
 
 def _evaluate(sym, frame, cfg, params, rank=None, entry_rank=8,

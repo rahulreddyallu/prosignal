@@ -816,6 +816,12 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
            + (f" ({r.breadth_pct_above_ma:.0f}%)" if r.breadth_pct_above_ma is not None else ""))
     _print(f"  new entries allowed: {'YES' if r.allow_new_entries else 'NO'}   "
            f"compatibility: {r.compatibility().value}")
+    # THE ENTRY CLOCK, said plainly. Without this line a run on a non-cadence
+    # session shows a full watchlist and no buys, which reads exactly like a
+    # market that offered nothing -- and an operator seeing that three sessions
+    # running would reasonably conclude the engine had stopped working.
+    if o.new_entries_blocked:
+        _print(f"  ENTRIES CLOSED: {o.new_entries_blocked}")
 
     _rule("Funnel")
     _table("Candidates surviving each gate", ["gate", "count"],
@@ -857,6 +863,42 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
         ]
         _table("Trade", ["field", "value"], rows)
 
+        # WHAT THIS TRADE IS, and what its KIND has done. Printed as its own
+        # block so nobody mistakes a population frequency for a per-name
+        # forecast: the caveat is on the last line and it is not optional.
+        tp = rec.trade_plan
+        if tp is not None:
+            plan_rows = [
+                ["entry cadence", f"every {tp.cadence_sessions} sessions"],
+                ["planned hold", f"up to {tp.planned_hold_sessions} sessions"],
+            ]
+            if tp.expected_hold_sessions is not None:
+                plan_rows.append(["typical hold (study)",
+                                  f"{tp.expected_hold_sessions:.0f} sessions (median)"])
+            if tp.probability_of_profit is not None:
+                plan_rows += [
+                    ["P(net profit), study", f"{tp.probability_of_profit:.1%}"],
+                    ["P(beats the universe)",
+                     f"{tp.probability_of_beating_benchmark:.1%}"],
+                    ["mean return, study",
+                     f"{tp.expected_return_pct:+.2f}%  (median "
+                     f"{tp.median_return_pct:+.2f}%)"],
+                    ["mean EXCESS, study", f"{tp.expected_excess_pct:+.2f}%"],
+                    ["net of", f"{tp.assumed_cost_bps:.0f} bps round trip"],
+                ]
+            if tp.risk_at_stop_inr is not None:
+                plan_rows.append([
+                    "risk at the floor",
+                    f"{_money(tp.risk_at_stop_inr)}"
+                    + (f"  ({tp.risk_at_stop_pct_of_book:.2f}% of the book)"
+                       if tp.risk_at_stop_pct_of_book is not None else "")])
+            if tp.basis:
+                plan_rows.append(["basis", f"{tp.basis}, {tp.basis_trades} trades, "
+                                           f"{tp.basis_period}"])
+            _table("Plan and what this configuration has done",
+                   ["field", "value"], plan_rows)
+            _print(f"  {tp.caveat}")
+
         if rec.cost_note:
             _print(f"  cost: {rec.cost_note}")
 
@@ -883,7 +925,13 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
         if rec.sell_conditions:
             _print()
             _print("[bold]EXIT HIERARCHY[/bold]" if _console else "EXIT HIERARCHY")
-            for line in rec.sell_conditions[:4]:
+            # The last line is the "NOT an exit" disclosure and it must not be
+            # truncated away: someone holding a position needs to know that
+            # reaching the target does not sell it. Slicing to four was fine
+            # while every rung was armed and the list was a simple ordering.
+            head = [c for c in rec.sell_conditions if not c.startswith("NOT an exit")]
+            tail = [c for c in rec.sell_conditions if c.startswith("NOT an exit")]
+            for line in head[:5] + tail:
                 _print(f"  {line}")
 
     _print()
@@ -1511,6 +1559,20 @@ def _portfolio_params(cfg: AppConfig):
         horizon_sessions=iv(cfg.params.stage4_core_score.model_horizon_sessions),
         entry_rank=iv(c6.admission.entry_rank),
         exit_rank=iv(c6.admission.exit_rank),
+        target_r_multiple=fv(c7.targets.t2_r_multiple),
+        # THE ARMING SWITCHES, which this did not pass. `PortfolioParams`
+        # defaulted `target_r_multiple` to 3.0 and had no notion of a disarmed
+        # rung, so `research portfolio` measured a book that takes profit at 3R
+        # and sells on invalidation -- neither of which the engine now does.
+        # Harmless while every rung was armed; a measurement of a different
+        # strategy the moment two were not.
+        use_stop=bool(getattr(c7.exit_hierarchy.stop_loss_breach, "value",
+                              c7.exit_hierarchy.stop_loss_breach)),
+        use_target=bool(getattr(c7.exit_hierarchy.target_achieved, "value",
+                                c7.exit_hierarchy.target_achieved)),
+        use_invalidation=bool(getattr(c7.exit_hierarchy.thesis_invalidation,
+                                      "value",
+                                      c7.exit_hierarchy.thesis_invalidation)),
         # None when disabled, so the overlay is genuinely absent rather than
         # present at a neutral setting -- a scale of exactly 1.0 still clips,
         # still reads the window, and still has to be reasoned about.
