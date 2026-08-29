@@ -158,3 +158,67 @@ def test_attribution_gives_the_card_its_four_columns():
     assert list(tab.columns) == ["FACTOR", "VALUE", "Z", "WEIGHT", "CONTRIB", "FAMILY"]
     assert len(tab) == len(v2.V2_FACTORS)
     assert tab["CONTRIB"].abs().is_monotonic_decreasing
+
+
+# =============================================================================
+# the reproducibility gate
+# =============================================================================
+def test_the_dirty_tree_check_ignores_the_files_the_epoch_itself_writes(tmp_path):
+    """The gate has to be satisfiable, or it gets routed around.
+
+    `open_production_epoch.sh` re-manifests the store and appends the epoch row
+    BEFORE the reproducibility gate is checked, so a blanket
+    `git status --porcelain` was always non-empty and the forward-test restart
+    was always refused -- on a tree whose code was committed and clean.
+    """
+    import subprocess
+
+    from prosignal.validation import epoch as E
+
+    root = tmp_path / "repo"
+    (root / "data" / "ledger").mkdir(parents=True)
+    (root / "data" / "curated").mkdir(parents=True)
+    (root / "src").mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    (root / "src" / "a.py").write_text("x = 1\n")
+    (root / "data" / "ledger" / "epochs.jsonl").write_text("{}\n")
+    (root / "data" / "curated" / "MANIFEST.json").write_text("{}\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)
+    assert E._dirty(root) is False
+
+    # provenance moves -> NOT a code change
+    (root / "data" / "ledger" / "epochs.jsonl").write_text('{"a":1}\n')
+    (root / "data" / "curated" / "MANIFEST.json").write_text('{"built_at":"now"}\n')
+    st = E._status(root)
+    assert st["provenance_uncommitted"] and not st["code_dirty"]
+    assert E._dirty(root) is False
+
+    # code moves -> it is a code change, and still is with provenance dirty too
+    (root / "src" / "a.py").write_text("x = 2\n")
+    assert E._dirty(root) is True
+    assert E._status(root)["code_paths"] == ["src/a.py"]
+
+
+def test_the_feature_fingerprint_covers_what_actually_ranks():
+    """Hashing only `crosssec.FEATURES` would let the shipped v2 factor set
+    change without the epoch fingerprint noticing."""
+    from prosignal.features import v2 as v2mod
+    from prosignal.validation import epoch as E
+
+    before = E._feature_schema_sha()
+    original = v2mod.V2_FACTORS
+    try:
+        v2mod.V2_FACTORS = original[:-1]
+        assert E._feature_schema_sha() != before
+        v2mod.V2_FACTORS = tuple(
+            [original[0].__class__(original[0].name, -original[0].sign,
+                                   original[0].weight, original[0].lookback,
+                                   original[0].family, original[0].note)]
+            + list(original[1:]))
+        assert E._feature_schema_sha() != before, "a flipped SIGN must change it"
+    finally:
+        v2mod.V2_FACTORS = original
+    assert E._feature_schema_sha() == before

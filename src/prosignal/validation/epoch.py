@@ -83,22 +83,53 @@ def _git_sha(root: Path) -> str:
         return "unversioned"
 
 
+#: Tracked paths the epoch machinery WRITES WHILE OPENING AN EPOCH. They are
+#: provenance, not code, and counting them made the reproducibility gate
+#: unsatisfiable by construction: `open_production_epoch.sh` re-manifests the
+#: store (step 3) and appends the epoch row (step 4) before the gate is checked
+#: (step 5), so the tree was always dirty and the forward-test restart was
+#: always refused -- on a tree whose CODE was committed and clean. A gate that
+#: can never pass is a gate somebody eventually routes around, which is worse
+#: than not having one.
+#:
+#: `MANIFEST.json` in particular carries a `built_at` timestamp, so re-running
+#: the same command on unchanged data produces a diff every time.
+_PROVENANCE_PATHS = ("data/ledger/", "data/curated/MANIFEST.json")
+
+
 def _dirty(root: Path) -> Optional[bool]:
-    """Whether the working tree has uncommitted changes, or None if unknown.
+    """Whether the working tree has uncommitted CODE changes, or None if unknown.
 
     An epoch opened from a dirty tree names a commit that does not contain the
     code that ran. That is not automatically wrong -- it is how research is
     done -- but it must be recorded, because `code_sha` otherwise reads as a
     promise it cannot keep.
+
+    Provenance files the epoch machinery writes as part of opening are excluded
+    (see `_PROVENANCE_PATHS`); `provenance_uncommitted` reports them separately
+    so nothing is hidden, it is just not confused with a code change.
     """
+    d = _status(root)
+    return None if d is None else d["code_dirty"]
+
+
+def _status(root: Path) -> Optional[dict]:
+    """Split `git status --porcelain` into code changes and provenance writes."""
     try:
         out = subprocess.run(["git", "status", "--porcelain"], cwd=str(root),
                              capture_output=True, text=True, timeout=10)
         if out.returncode != 0:
             return None
-        return bool(out.stdout.strip())
     except (OSError, subprocess.SubprocessError):
         return None
+    code, prov = [], []
+    for line in out.stdout.splitlines():
+        path = line[3:].strip().strip('"')
+        if "->" in path:                      # a rename: judge the destination
+            path = path.split("->")[-1].strip().strip('"')
+        (prov if path.startswith(_PROVENANCE_PATHS) else code).append(path)
+    return {"code_dirty": bool(code), "code_paths": code,
+            "provenance_uncommitted": bool(prov), "provenance_paths": prov}
 
 
 def _feature_schema_sha() -> str:
@@ -112,8 +143,16 @@ def _feature_schema_sha() -> str:
         from ..features import crossmodel as cm
 
         families = getattr(cm, "FAMILIES", None) or getattr(cm, "THEMES", None) or {}
+        # WHAT ACTUALLY RANKS THE BOOK belongs in the fingerprint. Under
+        # `ranking.source: v2_composite` that is `features/v2.py` -- its factor
+        # names, signs, weights and lookbacks -- and hashing only `crosssec`
+        # would let the shipped factor set change without the epoch noticing,
+        # which is the one thing this hash exists to prevent.
+        from ..features.v2 import V2_FACTORS
+
         payload = {
             "features": {k: v[0] for k, v in sorted(FEATURES.items())},
+            "v2": [[f.name, f.sign, f.weight, f.lookback] for f in V2_FACTORS],
             "neutral_when_missing": sorted(NEUTRAL_WHEN_MISSING),
             "families": {k: sorted(v) for k, v in sorted(
                 (families or {}).items())} if isinstance(families, dict) else str(families),
