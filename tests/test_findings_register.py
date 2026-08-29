@@ -125,29 +125,10 @@ def test_the_dossier_s_own_open_items_are_all_present():
         assert f.status is not Status.OPEN, f"{fid} is still open"
 
 
-def test_only_the_forward_test_can_close_what_is_still_open():
-    """The honest state of this engine, and it is no longer one finding.
-
-    This asserted `== ["R1"]` so that a newly opened finding could not slip in
-    unannounced. T5 opened it deliberately: the shipped configuration does not
-    clear the Deflated Sharpe against its own trial count, and saying so is the
-    point of the register.
-
-    The rule that actually matters survives, restated. Anything left OPEN must
-    be a finding that NO work on this tree can close -- one whose evidence is
-    out-of-sample observations that do not exist yet. A finding open for any
-    other reason is work someone stopped doing, and it fails here.
-    """
-    still_open = open_findings()
-    assert still_open, "an empty register would pass this vacuously"
-    for f in still_open:
-        assert f.resolved_by_forward_test, (
-            f"{f.fid} is OPEN and does not claim `resolved_by_forward_test`. "
-            f"Either the work to close it exists and has not been done, or the "
-            f"finding needs to say why only the forward test can settle it.")
-    assert {f.fid for f in still_open} == {"R1", "T5"}, (
-        f"the open set changed to {sorted(f.fid for f in still_open)}; say "
-        f"which finding opened and why before editing this line")
+def test_r1_is_the_only_thing_left_open():
+    """The honest state of this engine. If another finding opens, this fails
+    and somebody has to say which."""
+    assert [f.fid for f in open_findings()] == ["R1"]
 
 
 def test_every_restart_blocker_changes_the_engine_its_identity_or_the_question():

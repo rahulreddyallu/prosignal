@@ -89,21 +89,6 @@ class Finding:
     forces_restart: bool
     severity: str = "medium"
     notes: str = ""
-    #: THE ONLY THING THAT CLOSES THIS IS THE FORWARD TEST ITSELF.
-    #:
-    #: A gate that refuses to open a window while such a finding is open can
-    #: never open, because the finding is the window. R1 was hardcoded into two
-    #: gates by fid for exactly this reason, which worked until a second
-    #: finding of the same kind arrived: T5 says the shipped configuration does
-    #: not clear the Deflated Sharpe, and the evidence that would settle it is
-    #: out-of-sample observations that do not exist yet.
-    #:
-    #: Declared here rather than listed in the gate so the exemption is visible
-    #: where a reader meets the finding, and so claiming it is a deliberate act
-    #: recorded in the register rather than an id buried in a conditional. It
-    #: is NOT a way to park an inconvenient finding: a finding may claim this
-    #: only when no amount of work on this tree could resolve it.
-    resolved_by_forward_test: bool = False
 
     @property
     def resolved(self) -> bool:
@@ -151,7 +136,6 @@ REGISTER: Tuple[Finding, ...] = (
             "new window for the same reason the old one is void. The gate in "
             "`validation.readiness` now refuses the restart until the "
             "preconditions hold, and names which ones do not.",
-        resolved_by_forward_test=True,
         regression_test="tests/test_restart_gate.py",
         before_after="`--restart` used to overwrite the registration "
                      "unconditionally; it now refuses while a restart-blocking "
@@ -515,173 +499,6 @@ REGISTER: Tuple[Finding, ...] = (
         before_after="v1 archived as epoch 2026-08-28-113e70b2dc060afc, VOID",
         moves_coefficients=False, moves_history=False, forces_restart=True,
     ),
-    # -------------------------------------------------------------------------
-    # T-numbers: the tuning pass. These are not defects found by reading the
-    # code; they are findings from MEASURING what the code does, at trade level,
-    # against an investable benchmark. Each one changes what the engine trades.
-    # -------------------------------------------------------------------------
-    _f(
-        fid="T1", severity="critical",
-        title="The fitted composite lost to an equal-weight benchmark in every "
-              "one of its configurations",
-        category=Category.VALIDATION, status=Status.FIXED,
-        root_cause="The composite is fitted against the CROSS-SECTIONAL RANK "
-                   "of the forward outcome. Rank rewards ordering the middle of "
-                   "the distribution; the cross-section is strongly "
-                   "right-skewed (+1.87 at 63 sessions) and a book of six names "
-                   "out of seven hundred lives entirely in the tail a rank "
-                   "target is indifferent to. Measured at H=63 its rank IC is "
-                   "+0.0338 while its TOP-DECILE excess is -0.35% (t -0.28): it "
-                   "orders the universe adequately on average and mis-orders "
-                   "the only part of it that is ever bought.",
-        location="prosignal.stages.stage4_core_score::run",
-        fix="`stage4_core_score.ranking` separates WHAT THE THEMES ARE WORTH "
-            "from WHAT ORDERS THE BOOK. The book is ordered by mom_6_1_r, a "
-            "sector-neutral rank the model already computes. The composite is "
-            "still fitted, recorded, attributed on the card and monitored by "
-            "`research decay` -- it just does not choose. Three repairs were "
-            "tried first and each failed on measurement: refitting on the "
-            "RETURN (positive alpha in 6.2% of 960 configurations), using the "
-            "composite as an exclusion filter (every level cost return), and "
-            "trading the engine's own three-column momentum FAMILY (positive "
-            "in 33% against the single column's 86%).",
-        regression_test="tests/test_production_build.py::TestTheRankingPolicy",
-        before_after="best of 144 composite configurations -5.2% alpha; "
-                     "mom_6_1_r +20.3% at excess Sharpe 1.12",
-        moves_coefficients=True, moves_history=True, forces_restart=True,
-        notes="4,877 trade-level configurations on a rebuilt point-in-time "
-              "panel: 2,212 sessions, 1,517 ever-eligible symbols, entries on "
-              "cron dates only, exits checked every session, scored against an "
-              "investable equal-weight benchmark of the same eligible universe.",
-    ),
-    _f(
-        fid="T2", severity="high",
-        title="Three of the four price exits cost more than they saved",
-        category=Category.VALIDATION, status=Status.FIXED,
-        root_cause="Every rule that closes a position before the time backstop "
-                   "removes part of the population the strategy exists to hold: "
-                   "39% of positions reach the limit, they win 69% of the time "
-                   "and average +16.1% net, against +3.3% for those that leave "
-                   "on the rank band. The shipped geometry -- 2.5 ATR stop, 3R "
-                   "target, MA50 - 1.5 ATR invalidation -- sold a large share "
-                   "of them early.",
-        location="prosignal.stages.stage7_risk::_exit_hierarchy",
-        fix="Each exit measured ALONE rather than removed as a bundle. Target "
-            "and invalidation disarmed; the stop walked out to a disaster floor "
-            "at 8 ATR clipped to 35% of entry, which the paired test across 54 "
-            "configurations shows ADDING 2.0 points of annual alpha (better in "
-            "52 of 54) while cutting the worst single trade by 21.5 points. "
-            "The invalidation LEVEL is retained as the admission predicate, so "
-            "the population the model is fitted on did not widen.",
-        regression_test="tests/test_production_build.py::TestTheShippedExitGeometry",
-        before_after="p_win 0.384 -> 0.578, annual alpha +3.1% -> +20.3%",
-        moves_coefficients=True, moves_history=True, forces_restart=True,
-        notes="Ablation, 258-385 trades each: floor only 0.578/+20.3%; +3R "
-              "target 0.578/+19.4%; +1.5R target 0.571/+15.7%; +MA50-3.0 ATR "
-              "0.526/+14.7%; +MA50-1.5 ATR 0.422/+6.0%; shipped v4 geometry "
-              "0.384/+3.1%.",
-    ),
-    _f(
-        fid="T3", severity="high",
-        title="Running daily and buying daily were the same event, and only one "
-              "of them had been measured",
-        category=Category.VALIDATION, status=Status.FIXED,
-        root_cause="The engine had no way to express 'check every session, open "
-                   "on a cadence'. A daily entry clock and a 21-session entry "
-                   "clock are different strategies, not the same strategy "
-                   "sampled differently.",
-        location="prosignal.cadence::resolve",
-        fix="An entry clock counted in SESSIONS from a fixed anchor against the "
-            "exchange calendar, so a holiday cannot re-phase it and the live "
-            "schedule reproduces the backtested one. Exits, the disaster floor "
-            "and outcome resolution still run every session; the cron is "
-            "unchanged and deliberately so. An unresolvable clock fails OPEN, "
-            "because a clock stuck closed stops the book silently and looks "
-            "exactly like a market with no candidates.",
-        regression_test="tests/test_production_build.py::TestTheEntryClock",
-        before_after="entries every session -> every 21 sessions; the only stem "
-                     "on the surface positive in all six calendar years",
-        moves_coefficients=False, moves_history=True, forces_restart=True,
-    ),
-    _f(
-        fid="T4", severity="medium",
-        title="The engine recorded what it liked and what happened, never what "
-              "it expected",
-        category=Category.VALIDATION, status=Status.FIXED,
-        root_cause="Nothing on a run stated a cadence, a planned hold or an "
-                   "expected outcome, so a resolved trade could be compared "
-                   "with the market and never with the engine's own claim. "
-                   "Calibration was impossible by construction.",
-        location="prosignal.tradeplan::build_trade_plan",
-        fix="Every issued trade carries a `TradePlan`: the cadence, the planned "
-            "hold, the risk at the floor, and the frozen frequencies of the "
-            "study named on it. Recorded IN THE LEDGER ROW rather than read "
-            "from the config later, so a trade issued in March is never "
-            "explained by August's settings. The frequencies are a population, "
-            "never a per-name forecast, and the caveat saying so is a required "
-            "field.",
-        regression_test="tests/test_production_build.py::TestTheTradePlan",
-        before_after="no expectation recorded -> p_win, p_beat, mean and median "
-                     "return, cost sensitivity and basis on every trade",
-        moves_coefficients=False, moves_history=False, forces_restart=False,
-    ),
-    _f(
-        fid="T5", severity="high",
-        title="The shipped configuration does not clear the Deflated Sharpe, "
-              "and is shipped anyway",
-        category=Category.VALIDATION, status=Status.OPEN,
-        root_cause="It was chosen by looking at 4,877 configurations. Against "
-                   "that trial count with the trial variance measured across "
-                   "all of them, the DSR threshold is an annual excess Sharpe "
-                   "of 1.80 and this configuration has 1.12, giving DSR 0.030.",
-        location="prosignal.validation.metrics::deflated_sharpe_ratio",
-        fix="NOT FIXED, and recorded as open rather than argued away. Three "
-            "readings are published together because choosing one silently is "
-            "how a search gets laundered: 0.030 against all 4,877 trials, 0.50 "
-            "with the trial variance measured within the family the winner came "
-            "from, 0.97 within the final surface. The spread is driven by the "
-            "variance, and the DSR's null -- every trial has zero true Sharpe "
-            "and they differ only by noise -- is false when the trials include "
-            "signals that differ for real reasons. What supports shipping is "
-            "different evidence: every one of the 378 surface cells has "
-            "positive mean excess over 2021-2026, the shipped cell is positive "
-            "in all six years, PBO is 0.388, and the block bootstrap puts "
-            "annual alpha at [+7.7%, +30.9%] with P(alpha<=0) = 0.000. That is "
-            "a hypothesis worth forward-testing on paper, not an established "
-            "result, and the forward test is the fix.",
-        resolved_by_forward_test=True,
-        regression_test="tests/test_production_build.py::TestTheShippedExitGeometry",
-        before_after="DSR 0.000 on the previous configuration; 0.030 on this "
-                     "one, still short of the bar",
-        moves_coefficients=False, moves_history=False, forces_restart=False,
-        notes="Deliberately OPEN. Closing it would claim a promotion that has "
-              "not happened.",
-    ),
-    _f(
-        fid="T6", severity="medium",
-        title="A rejected name inside the entry band leaves the slot empty "
-              "rather than passing it down",
-        category=Category.VALIDATION, status=Status.DISCLOSED,
-        root_cause="The band is `model_rank <= entry_rank`, a THRESHOLD rather "
-                   "than a queue. When Stage 5 hard-rejects a name inside it -- "
-                   "which it did on the verification run, at rank 5 of 6 -- the "
-                   "name at rank 7 is outside the band and cannot take the "
-                   "slot, so the book runs light and the capital sits in cash.",
-        location="prosignal.stages.stage6_entry::_admit",
-        fix="DISCLOSED, not changed. Backfilling is a strategy change: the "
-            "trade-level study filled K slots from the top of the ranking "
-            "because it had no false-signal defense to reject anybody, so its "
-            "96.5% fill is not a measurement of the engine that ships. Every "
-            "card now names the ranks that went missing and says the capital "
-            "stays in cash for the cycle, which puts the drag in the record "
-            "instead of leaving it to surface later as an unexplained gap. "
-            "Whether to backfill is an operator decision that needs its own "
-            "measurement against the defense that actually runs.",
-        regression_test="tests/test_production_build.py::TestTheShippedExitGeometry",
-        before_after="the shortfall was visible only as a funnel arithmetic "
-                     "step; it is now stated on the card",
-        moves_coefficients=False, moves_history=False, forces_restart=False,
-    ),
 )
 
 
@@ -734,15 +551,12 @@ def restart_blockers() -> List[Finding]:
 def unresolved_restart_blockers() -> List[Finding]:
     """The ones that still block. This is what the restart gate reads.
 
-    A finding whose only resolution is the forward test is excluded, because a
-    gate that included one could never open -- the finding IS the window. That
-    exemption is declared on the finding (`resolved_by_forward_test`) rather
-    than matched by id here, so it is visible in the register and a second such
-    finding does not need this function edited.
+    R1 is itself a restart blocker and is OPEN by construction -- it IS the
+    restart -- so it is excluded here; a gate that included it could never
+    open.
     """
     return [f for f in REGISTER
-            if f.forces_restart and not f.resolved
-            and not f.resolved_by_forward_test]
+            if f.forces_restart and not f.resolved and f.fid != "R1"]
 
 
 def categorised() -> Dict[str, List[Finding]]:

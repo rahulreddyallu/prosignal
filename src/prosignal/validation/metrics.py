@@ -279,6 +279,8 @@ class DsrResult:
             "kurtosis": self.kurtosis,
             "passes": self.passes,
             "interpretation": self.interpretation,
+            "sr_variance": self.sr_variance,
+            "sr_variance_source": self.sr_variance_source,
             "sr_variance_measured": self.sr_variance_measured,
             "trials_scored": self.trials_scored,
         }
