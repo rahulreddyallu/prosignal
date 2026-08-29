@@ -21,7 +21,8 @@ from .exits import ExitRules, atr_panel, ma_panel, tradeable_at_entry
 from .labels import (BarrierSpec, average_uniqueness, engine_barrier,
                      triple_barrier)
 
-__all__ = ["FEATURES", "build_panel", "cross_sectional_rank",
+__all__ = ["FEATURES", "build_panel", "features_for_date",
+           "cross_sectional_rank",
            "liquidity_mask", "sector_neutral_rank", "MIN_SECTOR_NAMES",
            "BarrierSpec"]
 
@@ -185,11 +186,51 @@ def _features_at(
         # rather than vanishing, so the column is always present for the model.
         if bvar > 1e-12:
             beta_m = win.mul(bc, axis=0).mean() / bvar
-            resid = win.sub(np.outer(b, beta_m.to_numpy()), fill_value=np.nan)
+            # THE REGRESSION HAS AN INTERCEPT. It did not: the residual was
+            # `r - beta*b` with `b` in raw form, so its mean over the window is
+            # the name's own alpha and every subsequent sum accumulates 231
+            # copies of it. What was called "residual momentum" was therefore
+            # raw momentum with a beta-times-market term removed -- the name's
+            # drift, which is the component the construction exists to strip,
+            # survived in full.
+            #
+            # With an intercept, eps = (r - rbar) - beta*(b - bbar), which is
+            # the textbook OLS residual and is mean-zero over the estimation
+            # window by construction. The estimation window (756 sessions) is
+            # deliberately longer than the momentum window (231), exactly as in
+            # the cited paper, so the sub-window sum is not forced to zero.
+            #
+            # A CONSEQUENCE WORTH STATING. With an intercept, a name whose
+            # residual drifts at a constant rate across the whole estimation
+            # window has that drift absorbed into alpha and scores zero. The
+            # factor prices RECENT residual out-performance against the name's
+            # own long-run norm, which is what the paper intends and what the
+            # no-intercept version could not express.
+            resid = (win.sub(win.mean(axis=0), axis=1)
+                        .sub(np.outer(bc, beta_m.to_numpy())))
             resid.columns = win.columns
             # 252 to 21 sessions back, off the tail, whatever the window holds.
             mom_win = resid.tail(252)
-            out["resid_mom"] = mom_win.iloc[:-21].sum(axis=0)
+            formation = mom_win.iloc[:-21]
+            # STANDARDISED BY THE RESIDUAL'S OWN DISPERSION over the same
+            # formation window. Blitz, Huij & Martens (2011) divide the
+            # cumulative residual by the standard deviation of the residual
+            # returns over that period; omitting it left the factor scaling
+            # with volatility, which pulled it into the lottery block it is
+            # supposed to be orthogonal to.
+            f_sd = formation.std(ddof=1)
+            # A name that is EXACTLY a linear function of the market has no
+            # residual to accumulate and no dispersion to divide by: the
+            # standardised factor is 0/0 and its honest value is undefined, not
+            # a large number produced by float noise. The test is dimensionless
+            # -- residual dispersion as a fraction of the name's own -- so it
+            # catches numerical degeneracy without imposing a scale. Real names
+            # sit around R^2 = 0.3; only an exact multiple of the index reaches
+            # this branch.
+            raw_sd = win.tail(252).iloc[:-21].std(ddof=1)
+            degenerate = ~(f_sd > 1e-10 * raw_sd.abs())
+            out["resid_mom"] = (formation.sum(axis=0)
+                                / f_sd.mask(degenerate | (f_sd == 0.0)))
 
             # -- the rest of the residual block ---------------------------
             # One regression, four factors. Everything below is a moment of the
@@ -278,6 +319,12 @@ def cross_sectional_rank(s: pd.Series) -> pd.Series:
     return (r - 0.5) * 2.0
 
 
+#: Distinguishes "the caller has no adjustment factors" from "the caller forgot
+#: to pass them". The price floor is a look-ahead trap when it is applied to a
+#: back-adjusted series, and a silent default is how it stayed one.
+NO_ADJUSTMENT = object()
+
+
 def liquidity_mask(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -287,6 +334,7 @@ def liquidity_mask(
     max_names: int,
     min_history_sessions: int,
     min_price_inr: float,
+    adj_factor: object = NO_ADJUSTMENT,
 ) -> pd.DataFrame:
     """Which names the liquidity screen would have admitted on each date.
 
@@ -320,9 +368,36 @@ def liquidity_mask(
     # here would apply a stricter screen to training than to the decision.
     adtv = turnover.rolling(int(lookback_sessions), min_periods=1).median()
     listed = close.notna().cummax().cumsum()
+
+    # THE PRICE FLOOR IS A TRADEABILITY TEST AND MUST READ THE QUOTED PRICE.
+    # `close` is back-adjusted on every store read, so a name that traded at
+    # Rs 200 in 2019 and later split 1:20 reads Rs 10 on that 2019 date and
+    # fails a floor it comfortably cleared at the time. Membership in a past
+    # universe then depends on a corporate action nobody had announced yet.
+    #
+    # Measured against the raw bhavcopy close over 3,848,322 (date, symbol)
+    # cells: 58,411 excluded that the raw series admits, across 165 symbols, and
+    # ZERO in the other direction. 4,905 of them clear every other floor, so the
+    # universe genuinely grows -- ADANIPOWER, BEL, CANBK, ASHOKLEY among them.
+    # The bias runs one way and removes names that later split.
+    #
+    # `adj_factor` multiplies PRE-ex-date prices (0.5 for a 1:1 bonus), so the
+    # quoted price is the adjusted one divided by it.
+    price = close
+    if adj_factor is not NO_ADJUSTMENT and adj_factor is not None:
+        fac = adj_factor.reindex(index=close.index, columns=close.columns)
+        # A MISSING FACTOR LEAVES THE PRICE ALONE. Dividing by NaN delists the
+        # name outright: a factor frame missing one column excluded that symbol
+        # on every date, and scattered NaN cells -- which is what a pivot over a
+        # sparse store produces -- excluded it on exactly those dates. That is a
+        # worse error than the one being fixed, and it runs the same direction:
+        # names vanish from the past for a data reason.
+        # `universe.resolve_liquidity_pit` already did this with `.fillna(last)`;
+        # the two paths now agree.
+        price = close.divide(fac.where(fac > 0)).fillna(close)
     ok = (
         (adtv >= float(min_adtv_inr))
-        & (close >= float(min_price_inr))
+        & (price >= float(min_price_inr))
         & (listed >= int(min_history_sessions))
     )
     # The cap is a ranking, so it has to be applied per date rather than
@@ -349,24 +424,184 @@ def sector_neutral_rank(
     screen cheap or fast, which is not what any of these factors claim to
     measure.
 
-    A sector under ``MIN_SECTOR_NAMES`` is not ranked within -- three names give
-    ranks of -1, 0 and +1 whatever the values were -- and falls back to the
-    universe rank. A name with no sector does the same, which is common here:
-    the point-in-time universe reaches past any index constituent file, so
-    sectors are genuinely absent for part of it.
+    EVERY NAME IS RANKED WITHIN A GROUP. A sector under ``MIN_SECTOR_NAMES`` is
+    not ranked within -- three names give ranks of -1, 0 and +1 whatever the
+    values were -- and neither is a name with no sector at all, which is common
+    here: the point-in-time universe reaches past any index constituent file, so
+    sectors are genuinely absent for part of it. Those names form ONE RESIDUAL
+    GROUP, `UNCLASSIFIED`, and are ranked within that.
+
+    WHY, AND WHAT THIS REPLACES. The fallback used to be the UNIVERSE rank, so
+    a single column carried two different quantities: "where you sit among your
+    peers" for a sectored name and "where you sit in the whole market" for the
+    rest. Measured on the shipped panel, 58.0% of rows carried a sector label
+    and a median 46.0% of names per date were ranked within one -- so roughly
+    half of every cross-section was on the other scale. A within-sector rank of
+    +0.9 in a fourteen-name sector can belong to a name that is unremarkable
+    market-wide; a universe rank of +0.9 cannot. Both were averaged into the
+    same family aggregate and handed to the same regression, whose design
+    column was therefore not one variable. On the last panel date 49% of the
+    top `mom_f` decile came from the 45% of names that were NOT within-sector
+    ranked.
+
+    A residual group is heterogeneous, and that is a real cost. It is a smaller
+    one than mixing two normalisations: the column now means one thing
+    everywhere, and the heterogeneity is visible in the group's name rather
+    than hidden in a fallback branch. The universe rank survives only where the
+    residual group is itself too small to rank within, which on this universe
+    means it barely exists.
+
+    Not done: dropping unsectored names, which discards 42% of the universe and
+    selects on which names a vendor file happens to cover; nor lowering
+    ``MIN_SECTOR_NAMES``, which buys coverage with noise dressed as neutrality.
     """
     universe = cross_sectional_rank(values)
     if sectors is None:
         return universe
     sectors = sectors.reindex(values.index)
     out = universe.copy()
+    residual = []
     for name, idx in values.groupby(sectors, observed=True).groups.items():
-        if name is None or str(name) in ("", "Unknown"):
-            continue
-        if len(idx) < MIN_SECTOR_NAMES:
+        if name is None or str(name) in ("", "Unknown") or len(idx) < MIN_SECTOR_NAMES:
+            residual.extend(list(idx))
             continue
         out.loc[idx] = cross_sectional_rank(values.loc[idx])
+    # Names the grouping dropped entirely -- a NaN sector is not a group key.
+    missing = values.index.difference(
+        pd.Index([i for name, idx in values.groupby(sectors, observed=True).groups.items()
+                  for i in idx]))
+    residual.extend(list(missing))
+    if residual:
+        resid = pd.Index(residual).unique()
+        if len(resid) >= MIN_SECTOR_NAMES:
+            out.loc[resid] = cross_sectional_rank(values.loc[resid])
+        # else: too few to rank within, and they keep the universe rank. This
+        # is the one surviving mixed case and it is bounded by 11 names.
     return out
+
+
+def sector_rank_coverage(sectors: pd.Series) -> Dict[str, float]:
+    """How much of a cross-section is ranked within a REAL sector.
+
+    The 58% figure that opened this finding was only discoverable by
+    instrumenting the code from outside. A property that decides what a whole
+    feature column means should be readable from the inside.
+    """
+    s = sectors.dropna()
+    n = int(len(sectors))
+    if n == 0:
+        return {"n": 0, "within_sector": 0.0, "unclassified": 0.0, "n_sectors": 0}
+    counts = s[~s.astype(str).isin(("", "Unknown"))].value_counts()
+    real = counts[counts >= MIN_SECTOR_NAMES]
+    within = int(real.sum())
+    return {
+        "n": n,
+        "within_sector": within / n,
+        "unclassified": (n - within) / n,
+        "n_sectors": int(len(real)),
+    }
+
+#: How much history the LIVE feature row reads. `resid_reversal` standardises by
+#: the trailing residual dispersion over REVERSAL_STD_WINDOW where it exists, so
+#: a live row built off MIN_LOOKBACK sessions computes a different statistic from
+#: the training rows it is scored against. Ranking is cross-sectional and absorbs
+#: most of that, but "most" is not "all" and the fix costs one wider read.
+LIVE_HISTORY_SESSIONS = max(MIN_LOOKBACK, REVERSAL_STD_WINDOW) + 1
+
+
+def features_for_date(
+    close: pd.DataFrame,
+    turnover: pd.DataFrame,
+    delivery: Optional[pd.DataFrame] = None,
+    sectors: Optional[Dict[str, str]] = None,
+    min_names: int = 40,
+    eligible: Optional[pd.Series] = None,
+    admissible: Optional[pd.Series] = None,
+) -> pd.DataFrame:
+    """The feature row for the LAST session in ``close``. One date, no label.
+
+    WHY THIS EXISTS. Both live scoring paths used to reach the decision date
+    through `build_panel`:
+
+        live_hist = hist.tail(MIN_LOOKBACK + 5)              # 279 rows
+        live      = build_panel(live_hist, horizon=1, step=21)
+
+    `build_panel` is a TRAINING panel builder. Its loop is
+
+        for i in range(MIN_LOOKBACK, len(dates) - horizon, step)
+
+    and the `- horizon` bound exists to guarantee every row has a label. On a
+    279-row frame with horizon=1 and step=21 the only reachable i is 274, which
+    is FOUR ROWS BEFORE THE END -- and at any horizon >= 1 the bound makes the
+    last row structurally unreachable. Verified live: a run as_of 2026-08-25
+    scored features dated 2026-08-19.
+
+    Measured over 88 panel dates, the cost of that staleness was small
+    statistically (rank IC +0.0751 -> +0.0730, top-decile excess +0.98% ->
+    +0.83%, both inside the noise band) and large operationally: only 64% of the
+    top eight names agreed with the top eight the same model produces on the
+    decision date. Roughly three names on every card were four sessions old,
+    priced at today's close with today's ATR stop attached.
+
+    A decision row wants no label, no stride and no forward bound, so it does not
+    go through a builder that has all three. The ranking columns are built by the
+    SAME `_features_at` and the SAME `sector_neutral_rank` the panel uses, so
+    training and inference cannot drift apart in definition.
+
+    ``eligible`` is the screen for THIS date, as a boolean Series over symbols.
+    ``admissible`` narrows the ROWS further -- to the names Stage 6 can open --
+    without narrowing the BENCHMARK. The two are deliberately separate: in
+    `build_panel` the equal-weight market is `close.where(eligible)`, computed
+    before the admissibility mask, so folding both into one argument here would
+    measure beta and residual momentum against a different market live than in
+    training. That mismatch was introduced while fixing the population and caught
+    by re-reading the fix against the builder it has to match.
+    """
+    if close.empty or len(close.index) == 0:
+        return pd.DataFrame()
+    i = len(close.index) - 1
+    if i < MIN_LOOKBACK:
+        return pd.DataFrame()
+
+    # THE MARKET, from the eligible universe only -- exactly as `build_panel`
+    # forms it. Never narrowed by `admissible`.
+    #
+    # Broadcast to a frame rather than passing the Series to `where(axis=1)`:
+    # that overload raises on a column-indexed condition, which made the
+    # eligible-benchmark path a latent crash.
+    if eligible is None:
+        bench_src = close
+    else:
+        col_ok = eligible.reindex(close.columns).fillna(False).to_numpy(dtype=bool)
+        bench_src = close.where(pd.DataFrame(
+            np.broadcast_to(col_ok, close.shape),
+            index=close.index, columns=close.columns))
+    bench = bench_src.mean(axis=1).pct_change(fill_method=None).to_numpy("float64")
+
+    feats = _features_at(close, turnover, i, bench[: i + 1], delivery=delivery)
+    if eligible is not None:
+        feats = feats[eligible.reindex(feats.index).fillna(False).to_numpy()]
+    if admissible is not None:
+        feats = feats[admissible.reindex(feats.index).fillna(False).to_numpy()]
+    # The SAME completeness rule the panel applies. No label filter: a name is
+    # not excluded from today's ranking because a past session did not print.
+    required = [c for c in FEATURES if c not in NEUTRAL_WHEN_MISSING]
+    feats = feats.dropna(subset=required, thresh=int(len(required) * 0.7))
+    if len(feats) < min_names:
+        return pd.DataFrame()
+
+    feats = feats.copy()
+    feats["date"] = close.index[i]
+    feats["symbol"] = feats.index
+    if sectors is not None:
+        feats["sector"] = feats.index.map(sectors)
+    has_sector = "sector" in feats.columns and feats["sector"].notna().any()
+    for f in FEATURES:
+        r = (sector_neutral_rank(feats[f], feats["sector"]) if has_sector
+             else cross_sectional_rank(feats[f]))
+        feats[f + "_r"] = r.fillna(0.0) if f in NEUTRAL_WHEN_MISSING else r
+    return feats.reset_index(drop=True)
+
 
 def build_panel(
     close: pd.DataFrame,
@@ -382,7 +617,7 @@ def build_panel(
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
     open_: Optional[pd.DataFrame] = None,
-    admission_rules: Optional["ExitRules"] = None,
+    admissible: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """Assemble the panel. One row per (date, symbol).
 
@@ -481,32 +716,19 @@ def build_panel(
         if eligible is not None:
             # Point-in-time: only the names the screen admitted on THIS date.
             feats = feats[eligible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
-        if admission_rules is not None and adm_atr is not None:
-            # THE POPULATION THE BOOK CAN ACTUALLY OPEN.
+        if admissible is not None:
+            # THE POPULATION THE ENGINE CAN ACTUALLY BUY FROM. Stage 6 refuses a
+            # name already below its own invalidation level -- it satisfies its
+            # first exit condition at the moment it is opened. While the label
+            # was a triple barrier, `resolve_exits` applied the same predicate
+            # and training and admission agreed. Turning the barrier off removed
+            # it from training and left the live gate standing, so the model
+            # began ranking a population 23.3% of which it could never buy, and
+            # 1.55 of its top eight were refused on 72% of dates.
             #
-            # `tradeable_at_entry` is applied by stage 3 and by stage 6 on the
-            # live path, and inside `resolve_exits` on the label path. The
-            # label path is reached only when `exit_rules` is not None, which
-            # under the shipped `triple_barrier: false` it is not -- so the
-            # model is fitted and ranked on a population roughly a fifth larger
-            # than the one the engine will trade, and the simulator discovers
-            # the difference at fill time by leaving slots empty. Measured on
-            # the shipped book: 7.29 of 8 slots filled.
-            #
-            # Passing `admission_rules` applies the same predicate to the panel
-            # WHATEVER the label is, which is the only way the two populations
-            # can be made to agree while the label stays the horizon return.
-            am = tradeable_at_entry(close.iloc[i], adm_ma.iloc[i],
-                                    adm_atr.iloc[i], admission_rules)
-            # An UNKNOWN level cannot exclude a row from the panel -- the older
-            # bars have no 50-session average yet and dropping them would
-            # shorten it for everyone. Live admission is stricter and refuses
-            # the unknown; this is the one asymmetry that remains, and it runs
-            # in the direction of a larger training panel rather than a
-            # flattered result.
-            known = adm_ma.iloc[i].notna() & adm_atr.iloc[i].notna()
-            am = (am | ~known).reindex(feats.index).fillna(True).to_numpy()
-            feats = feats[am]
+            # Ranks are taken AFTER this mask, so a rank means the same thing in
+            # training and at the decision.
+            feats = feats[admissible.iloc[i].reindex(feats.index).fillna(False).to_numpy()]
         feats = feats[np.isfinite(feats["label"]) & feats["label"].abs().lt(1.0)]
         required = [c for c in FEATURES if c not in NEUTRAL_WHEN_MISSING]
         feats = feats.dropna(subset=required, thresh=int(len(required) * 0.7))
@@ -521,12 +743,13 @@ def build_panel(
         return pd.DataFrame()
     panel = pd.concat(rows, ignore_index=True)
     del rows
-    # float32 across the feature block. Ranks and returns carry nowhere near
-    # seven significant figures, and the panel is the largest object the signal
-    # path allocates.
-    for c in panel.columns:
-        if panel[c].dtype == "float64" and c != "label":
-            panel[c] = panel[c].astype("float32")
+    # The float32 cast that used to sit here has moved BELOW THE RANKING. It
+    # ran before the ranks were computed, so training ranks were taken on
+    # float32 values while `features_for_date` -- the live path -- takes them on
+    # float64. Near-ties therefore ordered differently in training and at the
+    # decision, inside the function whose docstring promises the two "cannot
+    # drift apart in definition". Ranking is exactly where a lost significant
+    # figure changes an answer rather than rounding it.
     # How much of its own span each label holds alone. Consecutive rows share
     # most of their outcome window, so an unweighted fit counts one market
     # shock once per overlapping row.
@@ -559,4 +782,12 @@ def build_panel(
         # A neutral rank is 0.0 by construction, so a name with no delivery
         # print contributes nothing to the score instead of being discarded.
         panel[f + "_r"] = r.fillna(0.0) if f in NEUTRAL_WHEN_MISSING else r
+
+    # float32 across the feature block, AFTER ranking. Ranks and returns carry
+    # nowhere near seven significant figures and the panel is the largest
+    # object the signal path allocates, so the memory argument is unchanged --
+    # only the ordering of the cast relative to the ranking has moved.
+    for c in panel.columns:
+        if panel[c].dtype == "float64" and c != "label":
+            panel[c] = panel[c].astype("float32")
     return panel

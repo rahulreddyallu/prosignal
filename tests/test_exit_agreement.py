@@ -50,7 +50,13 @@ def _rules(**kw):
 class TestOneDefinition:
     def test_the_simulator_and_the_label_agree_exactly(self):
         """The proof. `_hold` is the per-symbol adapter onto the same resolver
-        the label uses, so any divergence is a divergence with itself."""
+        the label uses, so any divergence is a divergence with itself.
+
+        `high` is passed. It used to be None inside `_hold`, which made the
+        TARGET touch test read the close while the stop read the intraday low --
+        an asymmetry inside the module whose entire purpose is that there be one
+        definition. This test passed anyway because the fixture rarely reached a
+        target; it now exercises the path that hid the divergence."""
         from prosignal.validation.portfolio_sim import PortfolioParams, _hold
 
         close, high, low, open_ = _prices()
@@ -72,15 +78,7 @@ class TestOneDefinition:
                                atr=atr, ma=ma)
         compared = 0
         for sym in SY:
-            # `high=high`, because that is what the simulator now passes. It
-            # used to pass None, and `resolve_exits` substitutes the CLOSE when
-            # the high is missing -- so the target became a close-only
-            # instrument while the stop stayed intraday. This test already
-            # compared the two paths correctly; it could not SEE the difference
-            # because the fixture below never produced a bar that traded
-            # through the target and closed under it. The assertion at the end
-            # is what closes that gap.
-            ref = _hold(sym, 200, close, low, open_, ma, atr, params, high=high)
+            ref = _hold(sym, 200, close, high, low, open_, ma, atr, params)
             got = shared.loc[sym, "ret"]
             if ref is None and not np.isfinite(got):
                 continue

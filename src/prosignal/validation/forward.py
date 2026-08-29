@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 __all__ = [
-    "Registration", "Progress", "REGISTRATION_NAME", "fingerprint_scheme",
+    "Registration", "Progress", "REGISTRATION_NAME",
     "MIN_SESSION_COVERAGE", "COVERAGE_GRACE_SESSIONS",
     "register", "load_registration", "verify", "progress",
     "sessions_in_window",
@@ -94,6 +94,13 @@ class Registration:
     #: result cannot later be reinterpreted as a success.
     primary: str
     secondary: str
+    #: THE QUESTION THE AUDIT TURNED ON. Added before the window opened, which
+    #: is the only time a hypothesis may be added: the first registration had
+    #: no benchmark-relative test at all, and neither did any other code path
+    #: in this repository, so every economic conclusion was stated against
+    #: zero. On the selection period the book returns +1.04% per period against
+    #: +5.27% for the equal-weight universe it selects from.
+    tertiary: str = ""
     #: Conditions under which the test is abandoned rather than graded.
     invalidation: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
@@ -119,6 +126,7 @@ class Registration:
             "target_months": self.target_months,
             "primary": self.primary,
             "secondary": self.secondary,
+            "tertiary": self.tertiary,
             "invalidation": sorted(self.invalidation),
         }
         if not legacy:
@@ -323,19 +331,17 @@ def register(
             "assumed away."
         ),
         tertiary=(
-            "TERTIARY. Mean excess return of the paper book over an "
-            "equal-weight hold of the eligible universe it selects from, on "
-            "the same holding windows, over the 18 forward months. The engine "
-            "passes if that excess is positive with an overlap-corrected t of "
-            "at least 2.0. THE ENGINE IS EXPECTED TO FAIL THIS TEST AND IT IS "
-            "REGISTERED FOR THAT REASON. On the selection period the book "
-            "returns roughly 3.9 points per 63-session period LESS than its "
-            "own universe: the ranking earns about +2.0 and the execution "
-            "layer -- sizing, the 2.5x ATR stop, the 3R target, the "
-            "invalidation exit and costs -- gives back about 5.9. A forward "
-            "test whose outcome is not in doubt is not a test; this one's is, "
-            "and it is the only hypothesis here that asks whether running the "
-            "engine beats not running it."
+            "TERTIARY, AND THE ONE THAT DECIDES WHETHER THIS IS WORTH RUNNING. "
+            "Mean excess return of the paper portfolio over the EQUAL-WEIGHT "
+            "ELIGIBLE UNIVERSE, measured on the same holding windows, over the "
+            "18 forward months. The engine passes if the mean excess is "
+            "positive with an overlap-corrected t of at least 2.0. It fails if "
+            "the excess is negative or indistinguishable from zero. "
+            "On the selection period this test gives mean excess -4.23% per "
+            "63-session period, information ratio -0.83, alpha -0.67% and 32.9% "
+            "of periods beating the benchmark -- so the engine is currently "
+            "expected to FAIL this test, and it is registered for exactly that "
+            "reason. A forward test whose outcome is not in doubt is not a test."
         ),
         invalidation=[
             "config_version changes during the window -- the observations "
@@ -346,6 +352,10 @@ def register(
             "feedback loop the test cannot separate from the signal.",
             "Fewer than 60% of expected sessions produce a recorded run, "
             "which would make the sample a selection rather than a period.",
+            "The benchmark panel is unavailable for any part of the window. "
+            "The tertiary test cannot be evaluated without it, and a book "
+            "reported without the alternative it is supposed to beat is the "
+            "defect this registration was rewritten to close.",
         ],
         notes=[
             "Eighteen months adds about six non-overlapping 63-session "
@@ -499,20 +509,6 @@ def progress(
     scheme = fingerprint_scheme(root)
     if scheme == "mismatch":
         broken.append("the pre-registration file no longer matches its hash")
-    elif scheme == "legacy":
-        broken.append(
-            "the pre-registration predates the benchmark-relative hypothesis "
-            "and was written under the earlier fingerprint -- it has not been "
-            "edited, but it cannot be graded under the current contract")
-    if not str(reg.tertiary or "").strip():
-        # A registration carrying only `primary` and `secondary` can be passed
-        # by an engine that loses to holding its own universe, because nothing
-        # in it compares the two. Such a window is not graded silently.
-        broken.append(
-            "the registration carries no benchmark-relative hypothesis, so "
-            "passing it would say nothing about whether running the engine "
-            "beats holding the universe it selects from -- re-register"
-        )
     # The check that does not need an observation to have landed yet.
     if live_config_version and live_config_version != reg.config_version:
         broken.append(

@@ -156,8 +156,66 @@ class PortfolioResult:
                 float(self.periods["cost_ret"].sum() / self.periods["gross_ret"].sum())
                 if "gross_ret" in self.periods
                 and float(self.periods["gross_ret"].sum()) > 0 else float("nan")),
+            **self._benchmark_block(periods_per_year),
         }
 
+    def _benchmark_block(self, periods_per_year: float) -> Dict[str, float]:
+        """What the book earned ABOVE the alternative, or nothing if unknown.
+
+        A Sharpe ratio answers "was this better than cash". It does not answer
+        "was this better than owning the universe equal-weighted", and for a
+        long-only book selected from that universe the second question is the
+        one that decides whether the ranking is worth running. It is reported
+        here rather than by the caller so that a summary cannot omit it by not
+        computing it.
+
+        The fields are ABSENT, not nan, when no benchmark was supplied.
+        `benchmarked` says which case this is. A nan in a metrics dict gets
+        formatted, averaged and quietly dropped; a missing key does not, and a
+        reader who sees `benchmarked: False` knows the comparison was never
+        made rather than that it came out flat.
+        """
+        if "bench_ret" not in self.periods:
+            return {"benchmarked": False}
+        b = self.periods["bench_ret"].to_numpy(dtype="float64")
+        r = self.periods["ret"].to_numpy(dtype="float64")
+        ok = np.isfinite(b) & np.isfinite(r)
+        if int(ok.sum()) < 3:
+            return {"benchmarked": False}
+        return _benchmark_stats(r[ok], b[ok], periods_per_year)
+
+
+def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float
+                     ) -> Dict[str, float]:
+    """The single definition of every benchmark-relative figure.
+
+    One function, used by `PortfolioResult.metrics` and by `phase_summary`, so
+    a per-phase number and a pooled number cannot come to mean different
+    things. That divergence is how the repository ended up with three
+    incompatible CPCV results.
+
+    `information_ratio` is mean excess over the standard deviation of excess,
+    annualised. `beta_to_benchmark` and `alpha_per_period` come from the same
+    regression, so a book that is only long beta shows it.
+    """
+    ex = r - b
+    sd_ex = float(ex.std(ddof=1))
+    sd_b = float(b.std(ddof=1))
+    var_b = float(b.var(ddof=1))
+    beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
+    alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
+    return {
+        "benchmarked": True,
+        "bench_mean_return": float(b.mean()),
+        "bench_sharpe": (float(b.mean() / sd_b * np.sqrt(periods_per_year))
+                         if sd_b > 0 else float("nan")),
+        "mean_excess": float(ex.mean()),
+        "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
+                              if sd_ex > 0 else float("nan")),
+        "excess_hit_rate": float((ex > 0).mean()),
+        "beta_to_benchmark": beta,
+        "alpha_per_period": alpha,
+    }
 
 
 def _volatility_scale(close: pd.DataFrame, i: int, p: PortfolioParams
@@ -262,9 +320,9 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
     return float(qty * entry), float(entry), float(known)
 
 
-def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
-          high=None) -> Optional[Tuple[float, float]]:
-    """(realised return, exit side) of one position, from the SHARED resolver.
+def _hold(sym: str, i: int, close, high, low, open_, ma, atr, p: PortfolioParams
+          ) -> Optional[float]:
+    """Realised return of one position, from the SHARED exit resolver.
 
     This used to carry its own copy of the exit logic -- stop, invalidation,
     horizon, and no profit target at all -- while the training label carried a
@@ -304,14 +362,17 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
         horizon=p.horizon_sessions,
     )
     one = [sym]
-    out = resolve_exits(close[one], i, rules,
-                        high=(high[one] if high is not None else None),
+    # `high` IS PASSED. Without it `resolve_exits` cannot see an intraday touch
+    # of the profit target, so the simulator took profit only when a CLOSE
+    # cleared 3R while the same resolver, given highs, took it intraday. The
+    # label and the book were therefore resolving the same position under two
+    # different rules, and the book's was the more optimistic of the two: a name
+    # that spiked through the target and closed below it was carried on to the
+    # horizon and whatever it did next was booked as the strategy's.
+    out = resolve_exits(close[one], i, rules, high=(None if high is None else high[one]),
                         low=low[one], open_=open_[one], atr=atr[one], ma=ma[one])
-    if not len(out):
-        return None
-    value = out["ret"].iloc[0]
-    side = out["side"].iloc[0]
-    return None if not np.isfinite(value) else (float(value), float(side))
+    value = out["ret"].iloc[0] if len(out) else np.nan
+    return None if not np.isfinite(value) else float(value)
 
 
 def simulate(
@@ -331,19 +392,14 @@ def simulate(
     """
     close, low, open_ = prices["close"], prices["low"], prices["open"]
     atr, ma, adtv = prices["atr"], prices["ma"], prices["adtv"]
-    # The intraday high. Absent, `resolve_exits` falls back to the close and the
-    # profit target becomes a close-only instrument while the stop stays
-    # intraday -- see `_hold`. A caller that cannot supply it gets the old
-    # asymmetry, and is told rather than silently given it.
     high = prices.get("high")
-    if high is None:
-        import warnings
-        warnings.warn(
-            "portfolio_sim.simulate: no 'high' panel supplied, so the profit "
-            "target can only trigger on a close while the stop still triggers "
-            "on the intraday low. The book's return is understated and the "
-            "target layer's measured cost is overstated.",
-            RuntimeWarning, stacklevel=2)
+    #: THE ALTERNATIVE. A per-period return series for the equal-weight eligible
+    #: universe over the SAME holding window, so every figure this simulator
+    #: produces can be read against what doing nothing clever would have paid.
+    #: Its absence is why a book returning +1.59% per period was reported as a
+    #: positive result for eleven months while the universe it selects from
+    #: returned +5.27% over the same windows.
+    bench = prices.get("benchmark")
     index = list(close.index)
     pos = {d: i for i, d in enumerate(index)}
     allowed = set(dates_allowed) if dates_allowed is not None else None
@@ -386,8 +442,8 @@ def simulate(
             if sized is None or sized[0] <= 0:
                 continue
             size, price, liquidity = sized
-            outcome = _hold(sym, i, close, low, open_, ma, atr, params, high=high)
-            if outcome is None:
+            ret = _hold(sym, i, close, high, low, open_, ma, atr, params)
+            if ret is None:
                 continue
             ret, side = outcome
             size *= scale
@@ -415,8 +471,21 @@ def simulate(
         pnl -= charged
         opening = equity
         equity += pnl
+        # The benchmark over the SAME window: entry at i, exit at the horizon,
+        # equal-weight across whatever the universe held. Computed here rather
+        # than annualised afterwards so it lines up period for period.
+        bench_ret = float("nan")
+        if bench is not None:
+            j_exit = min(i + params.horizon_sessions, len(index) - 1)
+            try:
+                b0 = float(bench.iloc[i]); b1 = float(bench.iloc[j_exit])
+                if np.isfinite(b0) and np.isfinite(b1) and b0 > 0:
+                    bench_ret = b1 / b0 - 1.0
+            except Exception:
+                bench_ret = float("nan")
         rows.append({
             "date": date, "ret": pnl / opening, "equity": equity,
+            "bench_ret": bench_ret, "excess_ret": (pnl / opening) - bench_ret,
             # The cost drag, kept separately. Netting it into `ret` and
             # discarding the parts makes the buy/hold spread unmeasurable: a
             # wider exit band earns its keep by NOT paying entry cost on a name
@@ -452,6 +521,47 @@ def simulate(
     return PortfolioResult(periods=pd.DataFrame(rows))
 
 
+def _path_drawdown(usable: Sequence["PortfolioResult"]) -> float:
+    """Worst peak-to-trough on any ONE schedule -- not the average of them.
+
+    `phase_summary` used to report the MEAN of the per-phase drawdowns. A phase
+    is one rebalance offset and an investor runs exactly one of them, so the
+    mean describes a book nobody holds and always a milder one than the schedule
+    that got unlucky: -18.6% averaged, against -21.7% on the worst of the three.
+    Schedule choice is not a diversifiable risk here; it is a coin the investor
+    flips once.
+
+    WHY NOT CONCATENATE THE PHASES. The obvious alternative -- pool every period
+    across phases, sort by date, compound -- is wrong, and wrong in the
+    dangerous direction. The phases PARTITION the rebalance dates rather than
+    running alongside each other, so each date appears in exactly one of them
+    and the pooled series is 70 non-overlapping 63-session holds compounded
+    end to end: about 17.5 years of compounding laid over a 6-year sample. It
+    returns -35.4% here.
+
+    That construction was checked against the thing it cannot be wrong about.
+    Run it on the BENCHMARK returns from the same frame and it reports a -62.4%
+    drawdown for the equal-weight Indian universe over 2019-2025, which did not
+    happen -- the COVID trough was roughly -38%. A drawdown definition that
+    fabricates 24 points of benchmark loss fabricates them for the book too.
+
+    So: the worst single schedule. Conservative between the two defensible
+    readings, and it is a number an investor could actually have lived through.
+    """
+    worst = float("nan")
+    for x in usable:
+        if x.empty:
+            continue
+        r = x.periods["ret"].to_numpy(dtype="float64")
+        r = r[np.isfinite(r)]
+        if r.size < 2:
+            continue
+        equity = np.cumprod(1.0 + r)
+        d = float((equity / np.maximum.accumulate(equity) - 1.0).min())
+        worst = d if not np.isfinite(worst) else min(worst, d)
+    return worst
+
+
 def phase_summary(
     rankings: Sequence[Tuple[pd.Timestamp, pd.Series]],
     prices: Dict[str, pd.DataFrame],
@@ -485,16 +595,12 @@ def phase_summary(
         "mean_return": float(r.mean()),
         "sharpe": float(r.mean() / sd * np.sqrt(periods_per_year)) if sd > 0 else 0.0,
         "periods_per_year": periods_per_year,
-        # A MEAN OF SCHEDULES IS NOT A DRAWDOWN. Each phase is a different,
-        # complete rebalance schedule -- one of them is the one that would have
-        # been run -- so averaging their worst moments describes an experience
-        # nobody could have had, and it is always shallower than the real one.
-        # Both are reported: `max_drawdown` keeps its old meaning so figures in
-        # older write-ups still reconcile, and the number a person should
-        # actually be shown has its own name.
-        "max_drawdown": float(np.mean(drawdowns)),
-        "max_drawdown_mean_of_phases": float(np.mean(drawdowns)),
-        "worst_schedule_drawdown": float(np.min(drawdowns)),
+        # THE PATH figure. The mean of per-phase drawdowns is kept alongside
+        # under its own name rather than deleted, because the old reports quote
+        # it and a reader needs to be able to reconcile them.
+        "max_drawdown_period": float(np.mean([m["max_drawdown"] for m in per_phase])),
+        "max_drawdown_path": _path_drawdown(usable),
+        "max_drawdown": _path_drawdown(usable),
         "worst_phase_sharpe": float(min(m["sharpe"] for m in per_phase)),
         "hit_rate": float((r > 0).mean()),
         "avg_names": float(pooled["n_held"].mean()),
@@ -522,4 +628,20 @@ def phase_summary(
             else float("nan")),
         "n_periods": int(len(r)),
         "n_phases": len(usable),
+        # The alternative, pooled the same way the book is. Absent only when no
+        # benchmark panel was supplied.
+        **({"benchmarked": False} if "bench_ret" not in pooled
+           else _pooled_benchmark(pooled, periods_per_year)),
     }
+
+
+def _pooled_benchmark(pooled: pd.DataFrame, periods_per_year: float
+                      ) -> Dict[str, float]:
+    """Benchmark-relative figures over the pooled phases, through the SAME
+    `_benchmark_stats` a single phase uses."""
+    b = pooled["bench_ret"].to_numpy(dtype="float64")
+    r = pooled["ret"].to_numpy(dtype="float64")
+    ok = np.isfinite(b) & np.isfinite(r)
+    if int(ok.sum()) < 3:
+        return {"benchmarked": False}
+    return _benchmark_stats(r[ok], b[ok], periods_per_year)

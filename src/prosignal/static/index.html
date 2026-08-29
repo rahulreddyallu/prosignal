@@ -1983,7 +1983,19 @@ function renderChrome(v) {
    today's -- that is the difference between stale and wrong. */
 function isCurrent(v) {
   if (!v || !v.as_of) return false;
-  if (!state.latestSession) return true;   // nothing to compare against
+  // UNKNOWN IS NOT CURRENT. This returned true -- "nothing to compare
+  // against" -- so whenever /ready could not report a latest session (an empty
+  // or still-building store, a failed check, a response that never arrived),
+  // the freshness test passed by default and a result from any past date
+  // rendered under today's heading with no staleness prompt at all. The
+  // indicator switched itself off in precisely the state where the store is
+  // most likely to be behind.
+  //
+  // The conservative direction is the correct one here: falling back to "not
+  // current" shows "Last ranked <date>" and a scan button, which is truthful
+  // when the comparison cannot be made. Falling back to "current" asserts
+  // something nobody checked.
+  if (!state.latestSession) return false;
   return String(v.as_of) === String(state.latestSession);
 }
 

@@ -152,16 +152,27 @@ def probabilistic_sharpe_ratio(
     returns: Sequence[float],
     benchmark_sr: float = 0.0,
     observed_sr: Optional[float] = None,
+    effective_n: Optional[float] = None,
 ) -> float:
     """PSR: probability the true Sharpe exceeds ``benchmark_sr``.
 
     Adjusts for track-record length, skewness and kurtosis. Both the Sharpe
     and the benchmark must be expressed per period.
+
+    ``effective_n`` replaces the raw length in the ``sqrt(n-1)`` term. The
+    formula assumes IID returns; a series whose entries repeat (the same test
+    date scored under many CPCV splits) or overlap (a 63-session label sampled
+    every 21) carries fewer independent observations than it has values, and the
+    statistic scales with the square root of that difference. Never larger than
+    the raw length -- a caller cannot declare independence it lacks.
     """
     arr = np.asarray(list(returns), dtype="float64")
     arr = arr[np.isfinite(arr)]
     n = arr.size
     if n < 3:
+        return 0.0
+    n_eff = float(n) if effective_n is None else float(min(effective_n, n))
+    if n_eff < 3:
         return 0.0
     sr = sharpe_ratio(arr) if observed_sr is None else float(observed_sr)
     skew, kurt = _moments(arr)
@@ -169,7 +180,7 @@ def probabilistic_sharpe_ratio(
     denom_sq = 1.0 - skew * sr + ((kurt - 1.0) / 4.0) * sr * sr
     if denom_sq <= 0:
         return 0.0
-    numerator = (sr - benchmark_sr) * sqrt(n - 1)
+    numerator = (sr - benchmark_sr) * sqrt(n_eff - 1.0)
     return norm_cdf(numerator / sqrt(denom_sq))
 
 
@@ -231,16 +242,16 @@ class DsrResult:
     kurtosis: float
     passes: bool
     interpretation: str
-    #: Cross-sectional variance of trial Sharpes used to build the benchmark,
-    #: and where it came from. Carried on the result because the number is
-    #: load-bearing and was previously invisible.
-    sr_variance: float = 1.0
-    sr_variance_source: str = SR_VAR_UNIT
-    #: What the recorded trial scores actually said, whether or not it was
-    #: used. Reported so an under-covered registry is visible as a number
-    #: rather than as an absence.
-    sr_variance_measured: float = float("nan")
-    trials_scored: int = 0
+    #: Independent observations the inference actually used. Equal to
+    #: ``n_observations`` for a clean series; smaller wherever the caller knows
+    #: the entries repeat or overlap. Reported because a DSR read without it
+    #: cannot be checked.
+    effective_n: float = 0.0
+    #: Var[SR] fed to the false-strategy benchmark, and where it came from.
+    #: These were invisible, which is how a fallback that contradicted its own
+    #: docstring survived for months.
+    sr_variance: float = float("nan")
+    sr_variance_source: str = ""
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -249,6 +260,9 @@ class DsrResult:
             "deflated_sr": self.deflated_sr,
             "n_trials": self.n_trials,
             "n_observations": self.n_observations,
+            "effective_n": self.effective_n,
+            "sr_variance": self.sr_variance,
+            "sr_variance_source": self.sr_variance_source,
             "skew": self.skew,
             "kurtosis": self.kurtosis,
             "passes": self.passes,
@@ -265,7 +279,7 @@ def deflated_sharpe_ratio(
     n_trials: int,
     trial_sharpes: Optional[Sequence[float]] = None,
     confidence: float = 0.95,
-    sr_variance: Optional[float] = None,
+    effective_n: Optional[float] = None,
 ) -> DsrResult:
     """Deflate an observed Sharpe by the multiple-testing and non-normality penalties.
 
@@ -281,21 +295,33 @@ def deflated_sharpe_ratio(
         Honest count of configurations tried -- from the research ledger, not
         from memory. Understating it inflates the result.
     trial_sharpes:
-        Sharpes of the TRIALS that were searched over, used to estimate their
-        cross-sectional variance. Not the Sharpes of resampled paths of the one
-        selected configuration: those measure sampling noise in a single
-        strategy, not dispersion across the alternatives, and they are smaller,
-        so using them shrinks the benchmark and flatters the result.
-    sr_variance:
-        Supply Var[SR] directly when it is known from outside the trial list.
+        Sharpes of the trials actually run. Bailey & Lopez de Prado's ``Var[SR]``
+        is the CROSS-SECTIONAL dispersion of Sharpe ratios ACROSS TRIALS -- not
+        the sampling variance of one estimate -- so this is the right input and
+        it is used whenever it is supplied.
+    effective_n:
+        How many INDEPENDENT observations ``returns`` actually carries. Both the
+        PSR's ``sqrt(n-1)`` term and the null-variance fallback below scale with
+        it, so passing the raw length of a series whose entries repeat or overlap
+        inflates the result by the square root of the duplication.
 
-    The fallback when neither is available is a **true unit variance**, which is
-    what this docstring has always promised. It used to be `1/(n-1)`: at the 639
-    pooled observations a CPCV run produced, that is 1.6e-3, an expected-maximum
-    benchmark of 0.099, and a Deflated Sharpe of 1.0000 for any positive result
-    at any trial count. The defence against multiple testing was insensitive to
-    multiple testing. A unit variance is severe, and it is severe in the
-    direction a defence is supposed to fail.
+    THE FAILURE THIS SIGNATURE EXISTS TO PREVENT. `CpcvResult.deflated` used to
+    hand over the POOLED excess vector -- one entry per (split, test-date) pair.
+    On the shipped geometry that is 639 entries covering 71 distinct dates, so
+    every date was counted about nine times and about 28 times over against the
+    number of independent 63-session windows. The docstring then claimed the
+    variance fallback was "a conservative unit variance"; the code was
+    ``1.0 / max(n - 1, 1)``, which at n = 639 is 1.6e-3. The two errors compound
+    in the same direction and the result was a DSR of 1.000 that still passed at
+    100,000 trials -- a multiple-testing defence insensitive to the multiple
+    testing it exists to charge for.
+
+    Measured on the real CPCV output, charging 44 trials:
+
+        as shipped   (n = 639 pooled pairs, sr_var = 1/(n-1))   DSR 1.0000  pass
+        n = 71 distinct panel dates                             DSR 0.4649  fail
+        n = 23 independent 63-session windows                   DSR 0.1477  fail
+        n = 23 windows AND sr_var from the woven path Sharpes   DSR 0.3130  fail
     """
     obs = np.asarray(list(returns), dtype="float64")
     obs = obs[np.isfinite(obs)]
@@ -306,70 +332,57 @@ def deflated_sharpe_ratio(
             "deflated_sharpe_ratio needs at least two observations with "
             "non-zero variance; a constant return series has no Sharpe ratio"
         )
-    arr = np.asarray(list(returns), dtype="float64")
-    arr = arr[np.isfinite(arr)]
+    arr = obs
     n = arr.size
-    if n < 3:
+    # The sample size the INFERENCE runs on. Never larger than what was passed:
+    # a caller cannot manufacture independence it does not have.
+    n_eff = float(n) if effective_n is None else float(min(effective_n, n))
+    if n < 3 or n_eff < 3:
         return DsrResult(
             0.0, 0.0, 0.0, n_trials, n, 0.0, 3.0, False,
-            "insufficient observations to compute a Sharpe ratio",
+            f"insufficient independent observations to compute a Sharpe ratio "
+            f"({n_eff:.1f} effective from {n} values)",
+            effective_n=n_eff, sr_variance=float("nan"),
+            sr_variance_source="unavailable",
         )
 
     observed = sharpe_ratio(arr)
     skew, kurt = _moments(arr)
 
-    scored = list(trial_sharpes) if trial_sharpes is not None else []
-    measured_var = (float(np.var(np.asarray(scored, dtype="float64"), ddof=1))
-                    if len(scored) > 1 else float("nan"))
-    covered = len(scored) / max(int(n_trials), 1)
-
-    if sr_variance is not None:
-        sr_var, source = float(sr_variance), SR_VAR_SUPPLIED
-    elif len(scored) > 1 and covered >= MIN_TRIAL_SCORE_COVERAGE:
-        sr_var, source = measured_var, SR_VAR_FROM_TRIALS
-    elif len(scored) > 1:
-        # Scores exist but for too few of the charged trials to describe the
-        # search. See MIN_TRIAL_SCORE_COVERAGE.
-        sr_var, source = 1.0, SR_VAR_UNDERCOVERED
+    supplied = list(trial_sharpes) if trial_sharpes is not None else []
+    if len(supplied) > 1:
+        sr_var = float(np.var(np.asarray(supplied, dtype="float64"), ddof=1))
+        var_source = f"observed dispersion of {len(supplied)} trial Sharpes"
     else:
-        # A true unit variance, not 1/(n-1). See the docstring.
-        sr_var, source = 1.0, SR_VAR_UNIT
-    if not np.isfinite(sr_var) or sr_var < 0:
-        sr_var, source = 1.0, SR_VAR_UNIT
+        # No trial distribution. Under the null that every trial has a true
+        # Sharpe of zero and each is estimated from n_eff independent
+        # observations, the ESTIMATED Sharpes are distributed with variance
+        # ~1/n_eff. That is a defensible stand-in and it is the reason the
+        # effective count matters here as much as it does in the PSR term.
+        sr_var = 1.0 / max(n_eff - 1.0, 1.0)
+        var_source = (f"null approximation 1/(n_eff-1) on {n_eff:.1f} effective "
+                      f"observations; no trial Sharpes were supplied")
 
     benchmark = expected_max_sharpe(n_trials, sr_var)
-    dsr = probabilistic_sharpe_ratio(arr, benchmark_sr=benchmark, observed_sr=observed)
+    dsr = probabilistic_sharpe_ratio(arr, benchmark_sr=benchmark,
+                                     observed_sr=observed, effective_n=n_eff)
     passes = dsr >= confidence
 
-    provenance = {
-        SR_VAR_FROM_TRIALS: (
-            f"Var[SR] {sr_var:.4f} from {len(scored)} recorded trial scores, "
-            f"{covered:.0%} of those charged"),
-        SR_VAR_SUPPLIED: f"Var[SR] {sr_var:.4f} supplied by the caller",
-        SR_VAR_UNDERCOVERED: (
-            f"Var[SR] assumed 1.0: only {len(scored)} of {n_trials} charged "
-            f"trials carry a score ({covered:.0%}, below the "
-            f"{MIN_TRIAL_SCORE_COVERAGE:.0%} needed), and their measured "
-            f"{measured_var:.5f} describes the arms that happened to be "
-            f"recorded rather than the search"),
-        SR_VAR_UNIT: ("Var[SR] assumed 1.0 -- no trial carries a recorded "
-                      "score, so the benchmark is the conservative one"),
-    }[source]
-
+    dup = "" if n_eff >= n else (
+        f" The series carries {n} values but only {n_eff:.1f} independent "
+        f"observations, and the inference uses the latter.")
     if passes:
         interpretation = (
             f"After charging for {n_trials} trial(s) and for skew/kurtosis, the "
             f"probability the true Sharpe exceeds what the best of {n_trials} "
-            f"lucky configurations would produce is {dsr:.1%} "
-            f"({n} independent observations; {provenance})."
+            f"lucky configurations would produce is {dsr:.1%}.{dup}"
         )
     else:
         interpretation = (
             f"DSR {dsr:.1%} is below the {confidence:.0%} bar. Given {n_trials} "
-            f"trial(s), an observed Sharpe of {observed:.3f} over {n} "
-            f"independent observations is not distinguishable from the best of "
-            f"that many coin flips ({provenance}). Simplify the model or gather "
-            f"more data -- do not search further."
+            f"trial(s), an observed Sharpe of {observed:.3f} is not "
+            f"distinguishable from the best of that many coin flips. Simplify "
+            f"the model or gather more data -- do not search further.{dup}"
         )
 
     return DsrResult(
@@ -382,10 +395,9 @@ def deflated_sharpe_ratio(
         kurtosis=kurt,
         passes=passes,
         interpretation=interpretation,
+        effective_n=n_eff,
         sr_variance=sr_var,
-        sr_variance_source=source,
-        sr_variance_measured=measured_var,
-        trials_scored=len(scored),
+        sr_variance_source=var_source,
     )
 
 

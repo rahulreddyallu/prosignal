@@ -133,6 +133,15 @@ class FMResult:
     n_dates: int = 0
     nw_lags: int = 0
     skipped_dates: int = 0
+    #: Cross-sections that actually MEASURED each theme. Equal to `n_dates` for
+    #: a theme present throughout; smaller for one that was constant on some
+    #: dates, where its slope is not identified and is recorded as missing
+    #: rather than as a measured zero.
+    n_dates_by_feature: Dict[str, int] = field(default_factory=dict)
+    #: Which column weighted the cross-sectional fits, or None for unweighted.
+    #: Recorded so a result cannot be compared against one estimated another
+    #: way without the difference being visible.
+    weight_col: Optional[str] = None
 
     def significant(self, threshold: float = 2.0) -> List[str]:
         return [f for f in self.features if abs(self.t_stat.get(f, 0.0)) >= threshold]
@@ -146,13 +155,39 @@ class FMResult:
                f"Newey-West {self.nw_lags} lags: {parts}"
 
 
-def newey_west_se(series: np.ndarray, lags: int) -> float:
+def newey_west_se(series: np.ndarray, lags: int,
+                  horizon_sessions: Optional[int] = None,
+                  step_sessions: Optional[int] = None) -> float:
     """Standard error of the MEAN of an autocorrelated series.
 
     Bartlett kernel, per Newey & West (1987). With overlapping labels the slope
     series is positively autocorrelated, so the naive s/sqrt(T) understates the
     true sampling error -- consecutive slopes are partly the same observation
     seen twice.
+
+    THE ESTIMATE IS NOT ENOUGH HERE, AND THIS MODULE USED TO PRETEND IT WAS.
+    When the sampling scheme is known, the inflation it induces is arithmetic
+    rather than something to estimate: an h-session label sampled every s has
+    rho_k = (m-k)/m for k < m = h/s, before any real serial dependence.
+    `validation.significance.analytic_vif` derives it and documents that the
+    estimated version recovers only 1.74 where the arithmetic gives 3.00 at
+    small n -- and every REPORTED figure in this repository already uses the
+    analytic one.
+
+    The gate that decides which themes are traded did not. Measured on the
+    shipped 83-date slope series the estimator recovered 1.44 to 1.99 against an
+    analytic 2.97, and the difference decides a theme:
+
+        theme         lambda   NW2 t   analytic t   gate at |t| >= 2
+        mom_f        +0.0764   +4.12       +3.27    keep -> keep
+        delivery_f   +0.0474   +4.77       +3.34    keep -> keep
+        lottery_f    -0.0455   -2.26       -1.72    keep -> KILL
+        skew_f       -0.0190   -1.84       -1.46    kill -> KILL
+
+    Passing ``horizon_sessions`` and ``step_sessions`` takes the LARGER of the
+    two inflations -- a series with real serial dependence on top of the
+    scheme's own overlap deserves the bigger penalty, and the arithmetic floor
+    stops a short sample from estimating the penalty away.
     """
     x = np.asarray(series, dtype="float64")
     x = x[np.isfinite(x)]
@@ -161,6 +196,8 @@ def newey_west_se(series: np.ndarray, lags: int) -> float:
         return float("nan")
     d = x - x.mean()
     gamma0 = float(d @ d) / t
+    if gamma0 <= 0:
+        return 0.0
     total = gamma0
     for lag in range(1, min(lags, t - 1) + 1):
         cov = float(d[lag:] @ d[:-lag]) / t
@@ -170,22 +207,84 @@ def newey_west_se(series: np.ndarray, lags: int) -> float:
     # returning a nan and silently dropping the theme from inference.
     if total <= 0:
         total = gamma0
-    return math.sqrt(total / t)
+    vif = total / gamma0
+    if horizon_sessions and step_sessions:
+        from ..validation.significance import analytic_vif
+        vif = max(vif, analytic_vif(int(horizon_sessions), int(step_sessions), t))
+    return math.sqrt(gamma0 * vif / t)
 
 
-def _ols_slopes(x: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
-    """One cross-sectional regression with an intercept. None if degenerate."""
+def _ols_slopes(x: np.ndarray, y: np.ndarray,
+                w: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
+    """One cross-sectional regression with an intercept. None if degenerate.
+
+    A feature with NO CROSS-SECTIONAL VARIATION on this date comes back `nan`,
+    not zero. `lstsq` on a rank-deficient design returns the minimum-norm
+    solution, which sets the coefficient on a constant column to exactly 0.0 --
+    silently, and indistinguishably from a theme that was measured and found
+    flat. Averaged over dates, those zeros attenuate the mean AND suppress the
+    dispersion the standard error is built from, so a theme that was dark for
+    part of the sample reads as better measured than it was.
+
+    Not hypothetical: `deliv_pct` begins in 2019 and `delivery_f` is
+    neutral-when-missing, so it was identically zero for every name on five of
+    eighty-three cross-sections. Those five entered its mean and its
+    Newey-West standard error as measurements, and removing them moved
+    `lottery_f` from t -2.26 to t -1.83, across the |t| >= 2 gate that decides
+    which themes are traded.
+
+    The predicate is exact zero variance, which is the only case where the
+    coefficient is not identified. Nothing here is thresholded.
+    """
     n, p = x.shape
     if n <= p + 1:
         return None
+    if w is not None:
+        # THE EFFECTIVE ROW COUNT, not the raw one. Weights are applied after
+        # this guard, so a fit with 60 rows and 4 features but non-zero weight
+        # on only 3 of them passed a check it should have failed: `lstsq`
+        # returns the minimum-norm solution of an underdetermined system, every
+        # coefficient is finite, and four fabricated slopes enter the average.
+        # The same three rows passed unweighted are correctly refused.
+        ww0 = np.asarray(w, dtype="float64")
+        if int(np.sum(np.isfinite(ww0) & (ww0 > 0))) <= p + 1:
+            return None
     design = np.column_stack([np.ones(n), x])
+    if w is not None:
+        # WLS as a rescaled OLS: minimising sum(w_i r_i^2) is least squares on
+        # sqrt(w)-scaled rows. Uniform weights reproduce the unweighted fit
+        # exactly, and a zero weight removes a row exactly -- both asserted.
+        ww = np.asarray(w, dtype="float64")
+        ww = np.where(np.isfinite(ww) & (ww > 0), ww, 0.0)
+        if ww.sum() <= 0:
+            return None
+        rt = np.sqrt(ww)[:, None]
+        design = design * rt
+        y = np.asarray(y, dtype="float64") * rt[:, 0]
     try:
         beta, *_ = np.linalg.lstsq(design, y, rcond=None)
     except np.linalg.LinAlgError:
         return None
     if not np.isfinite(beta).all():
         return None
-    return beta[1:]
+    out = beta[1:].astype("float64", copy=True)
+    # A constant column is orthogonal to every other column of the design, so
+    # blanking it does not disturb its neighbours' slopes. Asserted by
+    # `TestDeadCrossSectionsAreNotMeasurements`, not assumed.
+    # Variation is judged on the rows that CARRY WEIGHT. A column varying only
+    # across rows the fit gives zero weight is not identified by that fit.
+    # Judged on the SANITISED weights the fit actually used. Testing the raw
+    # `w` here let a column that varies only at an inf-weight row -- sanitised
+    # to zero above, so contributing nothing -- be judged live, and its slope of
+    # -3.3e-17 entered the average as a measurement. That is the "dead
+    # cross-section is not a measurement of zero" failure, reintroduced inside
+    # the fix for it.
+    live = slice(None) if w is None else (
+        np.asarray(w, dtype="float64") > 0) & np.isfinite(np.asarray(w, dtype="float64"))
+    xv = x[live] if w is not None else x
+    dead = (np.nanmax(xv, axis=0) == np.nanmin(xv, axis=0)) if len(xv) else np.ones(p, bool)
+    out[dead] = np.nan
+    return out
 
 
 def fama_macbeth(
@@ -197,6 +296,7 @@ def fama_macbeth(
     nw_lags: Optional[int] = None,
     window: Optional[int] = None,
     min_cross_section: int = MIN_CROSS_SECTION,
+    weight_col: Optional[str] = None,
 ) -> Optional[FMResult]:
     """Estimate theme coefficients date by date, then average the slopes.
 
@@ -211,7 +311,11 @@ def fama_macbeth(
     if not cols or target not in panel.columns or "date" not in panel.columns:
         return None
 
-    frame = panel[["date", target] + cols].dropna()
+    keep_cols = ["date", target] + cols
+    use_w = bool(weight_col) and weight_col in panel.columns
+    if use_w:
+        keep_cols = keep_cols + [weight_col]
+    frame = panel[keep_cols].dropna()
     if frame.empty:
         return None
     dates = sorted(frame["date"].unique())
@@ -226,9 +330,11 @@ def fama_macbeth(
         if len(group) < min_cross_section:
             skipped += 1
             continue
-        beta = _ols_slopes(group[cols].to_numpy("float64"),
-                           group[target].to_numpy("float64"))
-        if beta is None:
+        beta = _ols_slopes(
+            group[cols].to_numpy("float64"),
+            group[target].to_numpy("float64"),
+            w=(group[weight_col].to_numpy("float64") if use_w else None))
+        if beta is None or not np.isfinite(beta).any():
             skipped += 1
             continue
         rows.append(beta)
@@ -242,11 +348,26 @@ def fama_macbeth(
     lags = int(nw_lags) if nw_lags is not None else max(0, math.ceil(horizon / max(step, 1)) - 1)
 
     result = FMResult(features=list(cols), slopes=slopes, n_dates=len(slopes),
-                      nw_lags=lags, skipped_dates=skipped)
+                      nw_lags=lags, skipped_dates=skipped,
+                      weight_col=(weight_col if use_w else None))
     for c in cols:
+        # PER FEATURE. A theme is averaged over the cross-sections that
+        # measured it, not over every date in the panel. `n_dates` is the
+        # panel's; `n_dates_by_feature[c]` is this theme's, and where they
+        # differ the difference is visible rather than folded into the mean.
         s = slopes[c].to_numpy("float64")
+        s = s[np.isfinite(s)]
+        result.n_dates_by_feature[c] = int(s.size)
+        if s.size < 3:
+            result.lam[c] = 0.0
+            result.se[c] = float("nan")
+            result.t_stat[c] = float("nan")
+            continue
         mean = float(np.nanmean(s))
-        se = newey_west_se(s, lags)
+        # The sampling scheme is passed, so the standard error carries the
+        # analytic overlap inflation as a floor rather than trusting what a
+        # short slope series can estimate. See `newey_west_se`.
+        se = newey_west_se(s, lags, horizon_sessions=horizon, step_sessions=step)
         result.lam[c] = mean
         result.se[c] = se
         result.t_stat[c] = float(mean / se) if se and np.isfinite(se) and se > 0 else float("nan")
@@ -523,6 +644,91 @@ def gated_shrink(
             out[col] *= (t * t) / (t * t + c)
     return out
 
+
+def selection_corrected_t(t_obs: float, floor: float) -> float:
+    """The |t| a theme would have had if it had not been chosen for being large.
+
+    THE BIAS THIS REMOVES. `gated_shrink` keeps themes with |t| >= floor and
+    reports their lambda, so selection and estimation run on the same sample and
+    the surviving coefficient is conditioned on its own significance.
+
+    THE CONDITIONING IS ONE-SIDED, and getting that wrong is the whole game. A
+    surviving theme is not merely "large in absolute value" -- it survived WITH
+    A KNOWN SIGN, and that sign is what the engine trades. Conditioning on
+    t_hat >= f (given the observed sign) rather than on |t_hat| >= f gives
+
+        E[t_hat | t_hat >= f] = m + phi(f - m) / (1 - Phi(f - m))
+
+    the inverse Mills ratio. The two-sided version of this function was wrong in
+    a way that mattered: at a TRUE EFFECT OF ZERO the two-sided expression is
+    0 by symmetry, so its inversion reported a theme with no effect at all --
+    one that scraped the gate on noise -- as a genuine +1.0 sigma effect.
+    Measured over a million draws at m = 0, floor 2.0: E[t | t >= +2] = 2.373,
+    and the two-sided correction returned +0.99 for it. It should return 0.
+
+    Found by an adversarial re-audit of this remediation, which also found that
+    the pre-committed simulation criterion could not see the error because it
+    averaged over BOTH tails, where the negative survivors' corrections cancel
+    the positive ones, and because its grid omitted m = 0 -- the only value that
+    matters for a false-discovery correction.
+
+    CLAMPED AT ZERO. As t_obs approaches the floor the implied m diverges to
+    minus infinity: a theme that exactly hits the threshold carries no evidence
+    of an effect beyond the selection itself. Reporting a NEGATIVE true effect
+    for a theme selected for being positive would be an artefact of the
+    estimator rather than a statement about the world, so the estimate is
+    floored at zero and zero is read as "indistinguishable from selection".
+    """
+    t = float(t_obs)
+    f = abs(float(floor))
+    if not np.isfinite(t):
+        return float("nan")
+    sign = 1.0 if t >= 0 else -1.0
+    a = abs(t)
+    if f <= 0 or a < f:
+        # Nothing was selected, so nothing is conditioned.
+        return t
+
+    def selected_mean(m: float) -> float:
+        """E[t_hat | t_hat >= f] for a true effect m, same sign convention."""
+        z = f - m
+        # 1 - Phi(z), computed as erfc to stay accurate in the far tail.
+        tail = 0.5 * math.erfc(z / math.sqrt(2.0))
+        phi = math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+        if tail <= 1e-300:
+            return m          # selection is certain; no conditioning left
+        return m + phi / tail
+
+    # Monotone increasing in m, with selected_mean(m) -> f as m -> -inf. An
+    # observation at or below the pure-selection expectation implies no effect.
+    if a <= selected_mean(0.0):
+        return 0.0
+    lo, hi = 0.0, max(a, f) + 20.0
+    for _ in range(300):
+        mid = 0.5 * (lo + hi)
+        if selected_mean(mid) < a:
+            lo = mid
+        else:
+            hi = mid
+    return sign * 0.5 * (lo + hi)
+
+
+def selection_corrected(result: "FMResult", floor: float) -> Dict[str, float]:
+    """Bias-corrected lambda for every theme the floor would keep.
+
+    Returns lambda, not t: the correction is applied in t units and multiplied
+    back by the theme's own standard error, so a precisely measured theme loses
+    less in absolute terms than a badly measured one.
+    """
+    out: Dict[str, float] = {}
+    for c in result.features:
+        t = result.t_stat.get(c, float("nan"))
+        se = result.se.get(c, float("nan"))
+        if not (np.isfinite(t) and np.isfinite(se)):
+            out[c] = float("nan")
+            continue
+        out[c] = float(selection_corrected_t(float(t), floor) * float(se))
+    return out
 
 def is_degenerate(lam: Mapping[str, float], tol: float = 1e-12) -> bool:
     """True when no theme carries weight, so the score would be flat."""

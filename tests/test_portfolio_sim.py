@@ -128,8 +128,7 @@ def test_a_gap_through_the_stop_fills_at_the_open_not_the_stop():
     close.iloc[i + 1, close.columns.get_loc("S00")] = gap
     low.iloc[i + 1, low.columns.get_loc("S00")] = gap
     open_.iloc[i + 1, open_.columns.get_loc("S00")] = gap
-    ret, side = _hold("S00", i, close, low, open_, p["ma"], p["atr"], _params(),
-                      high=p["high"])
+    ret = _hold("S00", i, close, p["high"], low, open_, p["ma"], p["atr"], _params())
     assert ret == pytest.approx(gap / entry - 1.0, abs=1e-9)
     assert ret < -0.15, "a gap must not be recorded as a clean stop fill"
     assert side == EXIT_STOP
@@ -195,10 +194,8 @@ def test_the_invalidation_level_exits_before_the_horizon():
     # 0.0 the level sits exactly on the moving average, and any name below its
     # MA on the decision date is not a candidate -- Stage 6 would never trigger
     # it -- so it correctly yields no label rather than a day-one loss.
-    a = _hold("S00", 200, p["close"], p["low"], p["open"], p["ma"], p["atr"], tight,
-              high=p["high"])
-    b = _hold("S00", 200, p["close"], p["low"], p["open"], p["ma"], p["atr"], loose,
-              high=p["high"])
+    a = _hold("S00", 200, p["close"], p["high"], p["low"], p["open"], p["ma"], p["atr"], tight)
+    b = _hold("S00", 200, p["close"], p["high"], p["low"], p["open"], p["ma"], p["atr"], loose)
     assert a is not None and b is not None
     assert a != b or True   # they may coincide; the contract is that both resolve
 

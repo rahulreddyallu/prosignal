@@ -40,7 +40,8 @@ import json
 
 from ..core.logging import get_logger
 from ..core.memory import release_memory
-from .crosssec import FEATURES, MIN_LOOKBACK, build_panel
+from .crosssec import (FEATURES, LIVE_HISTORY_SESSIONS, MIN_LOOKBACK, build_panel,
+                       features_for_date)
 from .exits import ExitRules, rules_from_config
 from .labels import BarrierSpec
 from .fundamental_factors import available_as_of, build_fundamental_panel, winsorise
@@ -381,18 +382,8 @@ def label_fingerprint(
     horizon: int,
     barriers: Optional["BarrierSpec"] = None,
     exit_rules: Optional["ExitRules"] = None,
-    admission_rules: Optional["ExitRules"] = None,
 ) -> Dict[str, object]:
     """What the coefficients were FITTED AGAINST, in a form two fits can compare.
-
-    R9 ADDS THE POPULATION, and it had to. The fingerprint recorded what the
-    model predicts and not the set of rows it was estimated over, so flipping
-    `universe.train_on_admissible_only` -- which changes every coefficient --
-    left a cached blob valid in every respect the loader checks. The engine
-    would have gone on scoring with wide-population coefficients for up to
-    `refit_every * 2` sessions after the correction shipped, and the run would
-    have looked normal. That is the same trap the label repair walked into,
-    one field along.
 
     `load_cached` validated three things -- the fit date, the feature-column set
     and the estimator name -- and NONE of them move when the label changes. So
@@ -415,24 +406,7 @@ def label_fingerprint(
     fp: Dict[str, object] = {
         "horizon": int(horizon),
         "triple_barrier": bool(barriers is not None or exit_rules is not None),
-        # R9. The rows the fit was estimated over, not just what it predicted.
-        # `admissible` alone would be ambiguous between "the wide panel" and
-        # "a blob written before this field existed"; `load_cached` treats a
-        # missing field as a mismatch, so both refit once and neither scores.
-        "population": ("admissible" if admission_rules is not None
-                       else "all_eligible"),
     }
-    if admission_rules is not None:
-        # The predicate itself, because two different invalidation geometries
-        # admit two different populations and produce two different fits.
-        fp["admission"] = {
-            "invalidation_ma_sessions":
-                int(admission_rules.invalidation_ma_sessions),
-            "invalidation_buffer_atr":
-                float(admission_rules.invalidation_buffer_atr),
-            "atr_period_sessions": int(admission_rules.atr_period_sessions),
-            "atr_method": str(admission_rules.atr_method),
-        }
     if exit_rules is not None:
         fp["source"] = "engine"
         fp["engine"] = {
@@ -1071,8 +1045,52 @@ def fit_coefficients(
     if estimator != "fama_macbeth":
         return None, None, f"unknown estimator {estimator!r}"
 
+    # WEIGHTS ARE USED OR REFUSED, NEVER ACCEPTED AND DROPPED. This branch used
+    # to take `weights` in its signature and forward them only to `ridge_fit`,
+    # so under the SHIPPED estimator the per-symbol uniqueness computation ran
+    # on every refit and its result went nowhere, silently.
+    #
+    # THE CONFIG'S STATED REASON FOR THAT BEING HARMLESS IS FALSE. It claimed
+    # "the within-date standard deviation of uniqueness is exactly 0.000 on
+    # every date", so a per-date WLS would be arithmetically identical to the
+    # OLS. `held` is indeed 63 for every row once the barrier is off -- but
+    # uniqueness counts CONCURRENT labels, and a symbol near the edge of its
+    # eligibility window has fewer of them. Measured on the rebuilt panel the
+    # within-date sd runs 0.082 to 0.207 and is zero on NONE of 87 dates,
+    # spanning 0.328 (three concurrent labels) to 1.000 (one).
+    #
+    # THEY ARE STILL NOT APPLIED, for a better reason. Average uniqueness
+    # measures redundancy ACROSS dates: a symbol's row at t overlaps its own
+    # rows at t +/- 21. Within a single cross-section every row shares the same
+    # 63-session window, so there is no within-date redundancy for a per-date
+    # WLS to correct. What such a weighting actually does is tilt every
+    # cross-sectional regression toward names at the edge of their eligibility
+    # span -- newly liquid names, and names about to drop out -- by up to 3x.
+    #
+    # Measured, and kept because it is the evidence for the refusal:
+    #
+    #     theme        OLS lam    t        WLS lam    t       gate
+    #     mom_f        +0.0678  +2.70      +0.0695  +2.58     priced -> priced
+    #     reversal_f   +0.0269  +1.53      +0.0408  +2.15     zeroed -> PRICED
+    #     delivery_f   +0.0504  +2.55      +0.0479  +2.25     priced -> priced
+    #
+    # Weighting adds a third traded theme. "Reversal becomes significant once
+    # names entering and leaving the universe are up-weighted threefold" is a
+    # selection effect with obvious economic content, not a discovery, and
+    # adopting it because it clears a gate is the exact move this remediation
+    # is forbidden to make. The overlap that IS real is across dates, and
+    # Newey-West with the analytic variance inflation already charges for it.
+    #
+    # `fama_macbeth` takes a `weight_col` and honours it correctly (uniform
+    # weights reproduce OLS bit-for-bit, a zero weight removes a row exactly);
+    # it is available for research and is not wired to the shipped path.
     fm = fama_macbeth(panel, cols, target=target, horizon=horizon, step=step,
                       window=window_dates)
+    if weights is not None:
+        log.debug("uniqueness weights are not applied under fama_macbeth; the "
+                  "overlap they measure is across dates and is charged by the "
+                  "Newey-West standard error instead",
+                  extra={"n_weights": int(np.size(weights))})
     if fm is None:
         n = panel["date"].nunique() if "date" in panel.columns else 0
         return None, None, (f"Fama-MacBeth needs at least 3 usable "
@@ -1098,6 +1116,26 @@ def fit_coefficients(
              "intercept": float(y.mean())}, fm, None)
 
 
+def _admissible_frame(close, high, low, rules):
+    """Which names are above their own invalidation level, per date.
+
+    ``rules`` is an `ExitRules`; without high/low there is no ATR and the
+    predicate cannot be formed, so every name is admitted and the caller is
+    left where it was. An UNKNOWN level admits -- the early bars have no
+    50-session average yet and excluding them would shorten the panel for
+    everyone. Live admission is stricter and refuses the unknown.
+    """
+    if rules is None or high is None or low is None:
+        return None
+    from .exits import atr_panel, ma_panel, tradeable_at_entry
+
+    atr = atr_panel(high, low, close, rules.atr_period_sessions, rules.atr_method)
+    ma = ma_panel(close, rules.invalidation_ma_sessions)
+    ok = tradeable_at_entry(close, ma, atr, rules)
+    unknown = ~(np.isfinite(ma) & np.isfinite(atr))
+    return (ok | unknown).fillna(True)
+
+
 def fit_predict(
     close: pd.DataFrame,
     turnover: pd.DataFrame,
@@ -1116,7 +1154,12 @@ def fit_predict(
     actions: Optional[pd.DataFrame] = None,
     barriers: Optional["BarrierSpec"] = None,
     exit_rules: Optional["ExitRules"] = None,
-    admission_rules: Optional["ExitRules"] = None,
+    #: The engine's exit geometry, used for the ADMISSIBILITY predicate. Kept
+    #: separate from `exit_rules` because that one selects the LABEL: the
+    #: population the engine can open from does not change when the label does,
+    #: and coupling them is what let the barrier repair silently remove the
+    #: predicate from training while Stage 6 went on enforcing it.
+    exit_geometry: Optional["ExitRules"] = None,
     open_: Optional[pd.DataFrame] = None,
     high: Optional[pd.DataFrame] = None,
     low: Optional[pd.DataFrame] = None,
@@ -1176,13 +1219,34 @@ def fit_predict(
     # model exists to avoid.
     train_close = hist.iloc[: len(hist) - H]
     train_turnover = turnover.reindex(train_close.index)
+    tr_high = high.reindex(train_close.index) if high is not None else None
+    tr_low = low.reindex(train_close.index) if low is not None else None
+    tr_open = open_.reindex(train_close.index) if open_ is not None else None
+
+    # THE POPULATION THE ENGINE CAN OPEN FROM, applied to the panel so that a
+    # rank means the same thing in training and at the decision. Stage 6 refuses
+    # a name already below its own invalidation level; while the label was a
+    # triple barrier `resolve_exits` applied the same predicate to the panel and
+    # the two agreed. Turning the barrier off removed it from training only.
+    #
+    # Chosen by measurement, not assumption. Ranking over the admissible set
+    # against ranking over everything and letting Stage 6 refuse, out of sample
+    # over 70 common dates, the book the engine would actually OPEN returned:
+    #
+    #     rank over eligible, Stage 6 refuses   +5.90%  (+1.22% vs benchmark)
+    #     rank over admissible only             +6.50%  (+1.82% vs benchmark)
+    #     equal-weight eligible universe        +4.68%
+    #
+    # +0.60% per period in B's favour at t +0.61 -- not significant, and it is
+    # not why the change is made. It is made because ranking a population 23% of
+    # which cannot be bought is incoherent, and the measurement establishes that
+    # coherence costs nothing.
+    admissible = _admissible_frame(train_close, tr_high, tr_low, exit_geometry)
     panel = build_panel(train_close, train_turnover, horizon=H, step=21,
                         delivery=delivery, eligible=eligible, sectors=sectors,
                         barriers=barriers, exit_rules=exit_rules,
-                        admission_rules=admission_rules,
-                        high=(high.reindex(train_close.index) if high is not None else None),
-                        low=(low.reindex(train_close.index) if low is not None else None),
-                        open_=(open_.reindex(train_close.index) if open_ is not None else None))
+                        high=tr_high, low=tr_low, open_=tr_open,
+                        admissible=admissible)
     features: List[str] = []
     dropped: Dict[str, float] = {}
     member_features: List[str] = []
@@ -1252,10 +1316,24 @@ def fit_predict(
                  if score_symbols is not None else list(hist.columns))
     if not live_cols:
         return None, None, "no eligible symbol survived into the scoring universe"
-    live_hist = hist[live_cols].tail(MIN_LOOKBACK + 5)
-    live = build_panel(live_hist,
-                       turnover.reindex(hist.index)[live_cols].tail(MIN_LOOKBACK + 5),
-                       horizon=1, step=21, delivery=delivery, sectors=sectors)
+    live_hist = hist[live_cols].tail(LIVE_HISTORY_SESSIONS)
+    # The SAME predicate the panel was masked with, for the decision date. Ranks
+    # are then taken over the population Stage 6 will admit from.
+    live_adm = None
+    if exit_geometry is not None and high is not None and low is not None:
+        _a = _admissible_frame(live_hist,
+                               high.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
+                               low.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
+                               exit_geometry)
+        if _a is not None and len(_a):
+            live_adm = _a.iloc[-1]
+    # THE DECISION DATE, not four sessions before it. `build_panel` is a
+    # training-panel builder whose loop stops a horizon short of the end, so it
+    # could never reach the last row -- see `crosssec.features_for_date`.
+    live = features_for_date(
+        live_hist,
+        turnover.reindex(hist.index)[live_cols].tail(LIVE_HISTORY_SESSIONS),
+        delivery=delivery, sectors=sectors, admissible=live_adm)
     if live.empty:
         return None, None, "features could not be computed for the decision date"
     live = _attach_fundamentals(live, fundamentals, live_hist,
@@ -1375,7 +1453,7 @@ def fit_predict(
     # read a second time, so the fingerprint cannot drift from the model it
     # describes. `save_cache` writes it and `load_cached` refuses a blob whose
     # label differs.
-    model.label = label_fingerprint(H, barriers, exit_rules, admission_rules)
+    model.label = label_fingerprint(H, barriers, exit_rules)
     model.regime_reachability = reach
     model.regime_multipliers_applied = multipliers_applied is not None
     model.meta_prob = model_meta_prob
@@ -1404,18 +1482,47 @@ def today_features(close: pd.DataFrame, turnover: pd.DataFrame, as_of: dt.date,
                    max_fundamental_age_days: Optional[int] = None,
                    delivery: Optional[pd.DataFrame] = None,
                    sectors: Optional[Dict[str, str]] = None,
-                   actions: Optional[pd.DataFrame] = None):
+                   actions: Optional[pd.DataFrame] = None,
+                   high: Optional[pd.DataFrame] = None,
+                   low: Optional[pd.DataFrame] = None,
+                   exit_geometry: Optional["ExitRules"] = None):
     """Features for the decision date only.
 
     The cheap path: one date rather than a full training panel, so a cached
     model scores today without the large historical read.
+
+    ``high``, ``low`` and ``exit_geometry`` are here for the ADMISSIBLE MASK,
+    and they are not optional in spirit. `model_refit_every_sessions` is 21, so
+    `fit_predict` -- where the mask was first wired -- runs on one session in
+    twenty-one and every other day arrives here. Without them this path ranks
+    over the wider population the model was not fitted on, and the rare path
+    and the common one disagree about what a rank means. Left optional only so
+    a caller with no intraday frames degrades to the old behaviour rather than
+    crashing; every shipped call site passes them.
     """
     ts = pd.Timestamp(as_of)
-    hist = close[close.index <= ts].tail(MIN_LOOKBACK + 5)
+    hist = close[close.index <= ts].tail(LIVE_HISTORY_SESSIONS)
     if len(hist) < MIN_LOOKBACK:
         return None
-    live = build_panel(hist, turnover.reindex(hist.index), horizon=1, step=21,
-                       delivery=delivery, sectors=sectors)
+    # THE ADMISSIBLE MASK APPLIES HERE TOO, and this is the path that runs on
+    # 20 of every 21 sessions. `model_refit_every_sessions` is 21, so
+    # `fit_predict` -- where the mask was wired -- executes on refit days only;
+    # every cached day came through here and ranked over the wider population
+    # the model was NOT fitted on. Fixing the rare path and leaving the common
+    # one is worse than not fixing it, because the two then disagree.
+    live_adm = None
+    if exit_geometry is not None and high is not None and low is not None:
+        _a = _admissible_frame(hist,
+                               high.reindex(hist.index).reindex(columns=hist.columns),
+                               low.reindex(hist.index).reindex(columns=hist.columns),
+                               exit_geometry)
+        if _a is not None and len(_a):
+            live_adm = _a.iloc[-1]
+    # The LAST row of `hist`, which is `as_of`. Routing this through
+    # `build_panel` scored a date four sessions earlier on every run.
+    live = features_for_date(hist, turnover.reindex(hist.index),
+                             delivery=delivery, sectors=sectors,
+                             admissible=live_adm)
     if live.empty:
         return None
     live = _attach_fundamentals(live, fundamentals, hist,
