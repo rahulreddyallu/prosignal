@@ -955,20 +955,61 @@ stage4_core_score:
   # WHAT WOULD REVERSE THIS. `research estimator` showing the composite's
   # top-decile excess positive with t >= 2 on a window that does not overlap
   # the one above. That is the same bar this change had to clear.
+  # -------------------------------------------------------------------------
+  # WHAT ORDERS THE BOOK  --  v2, deployed 2026-08-29
+  # -------------------------------------------------------------------------
+  # The single measured column below (`mom_6_1_r`) was the previous answer and
+  # is retained as `column` so the comparison can be re-run rather than argued
+  # about. It is no longer what ranks.
+  #
+  # v2 is ten factors, each carried at equal weight with the sign its training
+  # window measured, over sector-neutral cross-sectional ranks. The set was
+  # chosen by screening 69 candidates against a PLACEBO-ALIGNMENT null -- the
+  # factor cross-section from date t scored against the label cross-section
+  # from t+k for k of at least a year, which carries the same persistence and
+  # the same overlap inflation as the real statistic and none of the signal.
+  # That null is strict: it rejected `resid_mom`, `mom_12_1`, `beta_120`,
+  # `amihud`, `log_adtv` and `idio_vol`, every one of which has a large naive
+  # t-statistic and a placebo distribution just as large.
+  #
+  # WHAT THE SEALED HOLDOUT SAID, run once, blind, on 2025-03-06 to 2026-08-17:
+  #
+  #   rank IC                        +0.045   (t 2.59, 65 dates)
+  #   quintile spread / 42 sessions  +1.65%   (t 2.56)
+  #   both against a 200-draw shuffled-score null      p = 0.00
+  #   ten-name book, net of costs    +17.7% a year vs +15.3% benchmark
+  #   excess                         +2.4% a year, information ratio -0.19
+  #   top-ten excess / 42 sessions   -1.39%   (t -2.16)
+  #
+  # READ BOTH LINES. The RANKING generalised: IC and quintile spread held their
+  # training magnitude and sit far outside the null. The ten-name BOOK did not:
+  # its excess is inside noise, and the extreme top of the ranking was negative
+  # over the holdout. A permuted-label power test run before the holdout
+  # predicted exactly this -- a ten-name book's annual excess carries about
+  # +/-12 points of pure noise, so the +22.5% the validation window showed was
+  # mostly luck sitting on a real but much smaller edge. Nothing was re-tuned
+  # after the holdout number was seen; see CHANGELOG.md.
   ranking:
-    #: measured_factor -- rank on `column`, which is a sector-neutral rank
-    #: already, and use the fitted composite for attribution only.
-    #: fitted_composite -- the previous behaviour, kept so the comparison can
-    #: be re-run rather than argued about.
+    #: v2_composite   -- the shipped scorer, `features/v2.py`.
+    #: measured_factor -- rank on `column`, a sector-neutral rank already.
+    #: fitted_composite -- the pre-v1 behaviour, kept for comparison.
     #: family_average -- rank on a `_f` family column.
-    source: "measured_factor"
+    source: "v2_composite"
     column: "mom_6_1_r"
+    v2_min_factors:
+      value: 7
+      status: MEASURED
+      note: >-
+        Seven of ten. A name ranked on four of the model is not comparable with
+        one ranked on all of it, and median-filling the gap ranks it by a number
+        nobody computed for it.
     note: >-
-      Jegadeesh & Titman (1993) construction, skipping the most recent 21
-      sessions to avoid short-term reversal (Jegadeesh 1990). Sector-neutral
-      within any sector holding at least 12 eligible names, universe-wide
-      otherwise. This is the same column the composite already computes; only
-      its weight changes, from fitted to one.
+      Ten equal-weighted sign-oriented sector-neutral factor ranks. The factor
+      definitions, signs and weights live in `src/prosignal/features/v2.py`
+      rather than here: they are what a sealed holdout measured, and a number
+      that can be edited in a config file is a number that can drift away from
+      the thing that was tested. `column` still names the v1 answer so the
+      comparison stays runnable.
 
   # DEFAULT IS EQUAL WEIGHT. The research program predicts equal-weighting wins
   # or ties against rank-IC weighting out-of-sample (Experiment #4), because

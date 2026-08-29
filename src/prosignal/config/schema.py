@@ -1074,9 +1074,18 @@ class RankingConfig(_Base):
     (+0.0338 at H=63) while its top-decile excess is negative (-0.35%, t -0.28).
     """
 
-    #: measured_factor | fitted_composite | family_average.
+    #: v2_composite | measured_factor | fitted_composite | family_average.
     source: str = Field("measured_factor",
-                        pattern="^(measured_factor|fitted_composite|family_average)$")
+                        pattern="^(v2_composite|measured_factor|fitted_composite"
+                                "|family_average)$")
+    #: v2_composite only: how many of the ten v2 factors a name must have before
+    #: it is scored at all. A name ranked on four of ten is not comparable with
+    #: one ranked on ten, and median-filling the gap ranks it by a number nobody
+    #: computed for it.
+    v2_min_factors: TI = Field(default_factory=lambda: Tunable[int](
+        value=7, status="MEASURED",
+        note="Seven of ten. Below it a name is ranked on a minority of the "
+             "model and is not comparable with one ranked on all of it."))
     #: The column to rank on when `source` is not `fitted_composite`. Must be a
     #: ranked feature column (`_r`) or a family column (`_f`) the model builds;
     #: Stage 4 refuses a name it cannot find rather than falling back silently,

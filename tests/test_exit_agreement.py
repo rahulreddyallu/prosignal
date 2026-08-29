@@ -309,10 +309,18 @@ class TestTheHierarchySwitchesReachTheMeasurement:
             armed(c7.exit_hierarchy.stop_loss_breach),
             armed(c7.exit_hierarchy.target_achieved),
             armed(c7.exit_hierarchy.thesis_invalidation))
-        # v1 arms all three, so honouring them changes nothing about what v1
-        # trades -- which is why this could be fixed under a frozen config.
+        # WHAT THE SHIPPED CONFIG ACTUALLY ARMS. This used to assert
+        # (True, True, True) with the note "v1 arms all three". It no longer
+        # does, and that is a decision rather than a regression: the 3R target
+        # and the thesis-invalidation exit were each measured alone against
+        # this configuration and each COST return -- invalidation by 15.6 points
+        # of per-trade win probability -- so `exit_hierarchy` switches them off
+        # and `parameters.yaml` carries the ablation beside them. The assertion
+        # is pinned to the config's own values above; this line records the
+        # state those values are currently in, so a silent flip of either switch
+        # still fails here.
         assert (live.use_stop, live.use_target, live.use_invalidation) == (
-            True, True, True)
+            True, False, False)
 
         for field, attr in (("stop_loss_breach", "use_stop"),
                             ("target_achieved", "use_target"),

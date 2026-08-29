@@ -632,7 +632,23 @@ def phase_summary(
         # two defensible answers. The mean is not deleted; it keeps its own
         # names so an old report can still be reconciled against a new one.
         # Finding R10 records the move: -13.7% -> -19.1%.
-        "max_drawdown": _path_drawdown(usable),
+        # THREE DRAWDOWNS, THREE NAMES, ONE MEANING EACH.
+        #
+        # `max_drawdown` is the MEAN ACROSS PHASE OFFSETS, which is what every
+        # earlier write-up in this repository quotes under that name. It was
+        # briefly rebound to the pooled-path figure, which is a better number
+        # and a worse name: it silently changed what published results referred
+        # to, which is the defect `test_the_worst_schedule_drawdown_is_reported`
+        # exists to catch. The pooled figure keeps its own key below.
+        #
+        # `worst_schedule_drawdown` is the headline. Each phase offset is a
+        # COMPLETE rebalance schedule and one of them is the one that would
+        # actually have been run, so the worst of them is an experience someone
+        # could have had; the mean is not.
+        "max_drawdown": float(np.mean(drawdowns)),
+        #: Drawdown of the phase-pooled equity path -- the average investor
+        #: across offsets rather than any single schedule.
+        "pooled_path_drawdown": _path_drawdown(usable),
         "max_drawdown_path": _path_drawdown(usable),
         "worst_schedule_drawdown": float(np.min(drawdowns)),
         "max_drawdown_mean_of_phases": float(np.mean(drawdowns)),

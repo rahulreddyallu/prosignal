@@ -121,8 +121,20 @@ def test_the_dsr_scores_independent_windows_not_duplicated_pairs():
         "70 dates, one score each, then every third for the 63/21 overlap"
     )
     d = res.deflated(n_trials=81, horizon_sessions=63, step_sessions=21)
-    assert d.n_observations == len(indep)
-    assert d.n_observations < len(res.excess) / 20
+    # WHICH REDUCTION `deflated` USES, and why this assertion changed. It keeps
+    # every distinct DATE in the estimate (70 of them, after the (split, date)
+    # duplication that inflated 630 -> 70 is removed) and deflates only the
+    # COUNT by the analytic overlap inflation. `independent_excess` is the
+    # strict alternative -- sub-sample every ceil(h/s)-th date -- and it lands
+    # on the same effective count while throwing two thirds of the sample out
+    # of the MEAN for nothing. This used to assert `n_observations == 24`,
+    # which pinned the API to the strict view; it now asserts the property that
+    # actually matters, that the sqrt(n-1) term is charged for the overlap.
+    assert d.n_observations == 70, "the (split, date) duplication must be gone"
+    assert d.effective_n == pytest.approx(len(indep), abs=1.0), (
+        "the effective count must agree with the strict sub-sample"
+    )
+    assert d.effective_n < len(res.excess) / 20
 
 
 def test_deflated_refuses_to_guess_the_sampling_scheme():

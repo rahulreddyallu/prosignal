@@ -239,10 +239,47 @@ class TestTheRankingPolicy:
         with pytest.raises(RankingUnavailable):
             _apply_ranking_policy(composite, f, self._Cfg(), [])
 
-    def test_the_shipped_config_asks_for_the_measured_column(self, cfg):
+    def test_the_shipped_config_asks_for_the_v2_composite(self, cfg):
+        """What actually orders the book, as of the 2026-08-29 deploy.
+
+        This asserted `measured_factor` / `mom_6_1_r`, which was the previous
+        answer. `column` is deliberately still set to `mom_6_1_r` so the
+        comparison against the single-column ranking stays runnable, and this
+        test now pins BOTH: the source that ranks, and the retained comparator.
+        """
         r = cfg.params.stage4_core_score.ranking
-        assert r.source == "measured_factor"
+        assert r.source == "v2_composite"
         assert r.column == "mom_6_1_r"
+        assert int(r.v2_min_factors.value) == 7
+
+    def test_the_v2_composite_ranks_and_refuses_to_fall_back(self):
+        """The failure mode that matters is not that the v2 block breaks -- it
+        is that it breaks QUIETLY back to a scorer the holdout never measured."""
+        n = 80
+        idx = [f"T{i}" for i in range(n)]
+        composite = pd.Series(np.zeros(n), index=idx)
+        scored = pd.DataFrame({"score": np.linspace(-1, 1, n)}, index=idx)
+        notes = []
+        out, source = _apply_ranking_policy(
+            composite, None, self._Cfg("v2_composite"), notes, v2_scored=scored)
+        assert source == "v2_composite"
+        assert out.idxmax() == f"T{n - 1}" and out.idxmin() == "T0"
+        assert notes and "v2 composite" in notes[0]
+
+        with pytest.raises(Exception) as exc:
+            _apply_ranking_policy(composite, None, self._Cfg("v2_composite"),
+                                  [], v2_scored=None)
+        assert "v2" in str(exc.value)
+
+    def test_the_v2_composite_refuses_a_minority_of_the_universe(self):
+        n = 100
+        idx = [f"T{i}" for i in range(n)]
+        composite = pd.Series(np.zeros(n), index=idx)
+        thin = pd.DataFrame({"score": np.linspace(-1, 1, 30)}, index=idx[:30])
+        with pytest.raises(Exception) as exc:
+            _apply_ranking_policy(composite, None, self._Cfg("v2_composite"),
+                                  [], v2_scored=thin)
+        assert "minority" in str(exc.value)
 
 
 # =============================================================================

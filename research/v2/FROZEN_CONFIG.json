@@ -1,0 +1,136 @@
+{
+ "name": "prosignal-v2",
+ "label_horizon_sessions": 42,
+ "signal_step_sessions": 5,
+ "execution": {
+  "fill": "next_session_vwap",
+  "note": "signal on the close of t, filled at the VWAP of t+1"
+ },
+ "universe": {
+  "source": "liquidity_pit",
+  "min_adtv_inr": 50000000.0,
+  "adtv_lookback_sessions": 60,
+  "min_price_inr": 20.0,
+  "min_history_sessions": 300,
+  "max_names": 750
+ },
+ "factors": [
+  {
+   "name": "ret_kurt_126",
+   "sign": -1,
+   "train_ic": -0.035731628692273136,
+   "weight": 0.1
+  },
+  {
+   "name": "voladj_mom_12_1",
+   "sign": 1,
+   "train_ic": 0.059168432725656334,
+   "weight": 0.1
+  },
+  {
+   "name": "mom_consist_126",
+   "sign": 1,
+   "train_ic": 0.03287787702501468,
+   "weight": 0.1
+  },
+  {
+   "name": "intraday_mom_126",
+   "sign": 1,
+   "train_ic": 0.0356296369010845,
+   "weight": 0.1
+  },
+  {
+   "name": "prox_52w",
+   "sign": 1,
+   "train_ic": 0.053891137086147546,
+   "weight": 0.1
+  },
+  {
+   "name": "voladj_mom_6_1",
+   "sign": 1,
+   "train_ic": 0.03873649898433239,
+   "weight": 0.1
+  },
+  {
+   "name": "deliv_z_21",
+   "sign": 1,
+   "train_ic": 0.024609175739881622,
+   "weight": 0.1
+  },
+  {
+   "name": "prox_52w_now",
+   "sign": 1,
+   "train_ic": 0.049188711342294106,
+   "weight": 0.1
+  },
+  {
+   "name": "mom_3_1",
+   "sign": 1,
+   "train_ic": 0.029234100874238906,
+   "weight": 0.1
+  },
+  {
+   "name": "volume_shock_5",
+   "sign": 1,
+   "train_ic": 0.012308020438695255,
+   "weight": 0.1
+  }
+ ],
+ "ranking": {
+  "method": "sector_neutral_cross_sectional_rank",
+  "range": [
+   -1,
+   1
+  ],
+  "min_sector_names": 12,
+  "fallback": "single residual group per date"
+ },
+ "combination": {
+  "method": "sign_oriented_equal_weight",
+  "note": "the only fitted parameter is each factor's sign, and it was identical in all 8 walk-forward folds"
+ },
+ "book": {
+  "slots": 10,
+  "entry_rank": 15,
+  "exit_rank": 25,
+  "rebalance_every_signal_dates": 1,
+  "signal_date_stride_sessions": 5,
+  "max_per_sector": 3,
+  "weighting": "equal",
+  "cash_rate": 0.0
+ },
+ "entry_gate": {
+  "mode": "none",
+  "computed_and_reported": true,
+  "measured": "market-timing gates (ma200, vol_calm, breadth) cost 8-13pp of annual excess on 2020-2024 validation and did not reduce max drawdown; the gate is computed and flagged, not applied"
+ },
+ "no_trade": {
+  "structural": "a slot with no admissible name holds cash at 0%",
+  "drawdown_circuit_breaker": {
+   "threshold": -0.15,
+   "action": "flag"
+  }
+ },
+ "costs": {
+  "model": "CostModel (delivery segment), square-root impact",
+  "round_trip_bps_at_1.25L": {
+   "adtv_20cr": 87,
+   "adtv_5cr": 137
+  }
+ },
+ "validation": {
+  "window": "2020-01-31 .. 2024-10-25",
+  "folds": 8,
+  "purge_sessions": 42,
+  "embargo_sessions": 21,
+  "excess_ann": 0.225,
+  "ir": 1.149,
+  "sharpe": 1.707,
+  "maxdd": -0.38,
+  "median_hold_sessions": 20,
+  "quintile_spread_per_period": 0.0185,
+  "quintile_t": 6.05,
+  "permuted_label_null_p_quintile": 0.0
+ },
+ "config_sha256": "9717e1ba6fcae443c58fb9aefc99fcb739856ba1c5f2d5e60c3585380854a1b7"
+}

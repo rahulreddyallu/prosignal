@@ -557,7 +557,17 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
     # that the coefficients did not choose.
     rank_cfg = (getattr(config.params.stage4_core_score, "ranking", None)
                 if config is not None else None)
-    if rank_cfg is not None and str(rank_cfg.source) != "fitted_composite":
+    source = str(rank_cfg.source) if rank_cfg is not None else "fitted_composite"
+    if source == "v2_composite":
+        why.append(
+            f"Ranked #{score.rank} of {scores.universe_size} eligible names by the "
+            f"v2 composite -- ten equal-weighted sector-neutral factor ranks, "
+            f"listed below with what each contributed. On a sealed 17-month "
+            f"holdout this ranking's quintile spread was +1.65% per 42 sessions "
+            f"(t 2.56); the top ten names were NOT better than the ranking as a "
+            f"whole over that window, so read the position as a shortlist, not "
+            f"as an ordering you can trust between #1 and #10.")
+    elif rank_cfg is not None and source != "fitted_composite":
         why.append(
             f"Ranked #{score.rank} of the eligible universe by {rank_cfg.column} "
             f"-- sector-neutral 6-1 momentum, the single column that orders this "
@@ -603,6 +613,35 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 f"them past its significance floor on their own training window, "
                 f"so they were set to zero rather than given a weight the data "
                 f"did not support."
+            )
+    elif source == "v2_composite":
+        # THIS NAME'S OWN RANK PER FACTOR, not the composite percentile. The
+        # first version printed `score.percentile` on every line, so all ten
+        # factors read "98th" whatever they measured -- a table that looks like
+        # an attribution and carries none.
+        #
+        # And the raw value is printed WITHOUT a percent sign. Four of the ten
+        # are ratios or moments (a vol-adjusted return, a kurtosis, a delivery
+        # z-score); "+3363.09%" is a vol-adjusted return of 33.6 misread as a
+        # percentage, which is the kind of number a reader either dismisses or,
+        # worse, believes.
+        ranked = sorted((f for f in score.factors.values()
+                         if f.contribution is not None),
+                        key=lambda f: -abs(f.contribution))
+        for f in ranked:
+            pct = (f.standardised + 1.0) / 2.0 * 100.0 if f.standardised is not None else None
+            pos = f"{pct:.0f}th pct" if pct is not None else "unranked"
+            why.append(
+                f"{f.name}: {pos} in its sector, weight {f.weight:+.2f}, "
+                f"contributes {f.contribution:+.4f} to a composite of "
+                f"{score.composite_raw:+.4f} ({f.citation})"
+            )
+        missing = [f.name for f in score.factors.values() if not f.available]
+        if missing:
+            why.append(
+                f"Ranked neutral for want of an input: {', '.join(sorted(missing))}. "
+                f"The remaining weights renormalise, so this name is scored on "
+                f"{len(score.factors) - len(missing)} of {len(score.factors)} factors."
             )
     else:
         for fname, f in score.factors.items():

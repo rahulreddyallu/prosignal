@@ -203,6 +203,12 @@ def card(rec) -> Dict[str, Any]:
                 "raw": f.raw_value,
                 "standardised": f.standardised,
                 "weight": f.weight,
+                # THE FOURTH COLUMN OF THE PER-STOCK TABLE. `standardised x
+                # weight` is not always the term that was used -- the v2
+                # composite renormalises its weights over the factors a name
+                # actually has -- so the contribution is serialised rather than
+                # left for the client to multiply and get subtly wrong.
+                "contribution": getattr(f, "contribution", None),
                 "available": f.available,
                 # What the theme is made of. One coefficient is fitted per
                 # theme over the average of its members' ranks, so "lottery

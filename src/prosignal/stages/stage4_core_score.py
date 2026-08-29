@@ -43,6 +43,7 @@ from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
 from ..features.crosssec import liquidity_mask
+from ..features import v2 as v2feat
 from ..features.exits import rules_from_config
 from ..features.labels import BarrierSpec
 from ..features.refit_gate import RefitVerdict, review_refit
@@ -85,7 +86,7 @@ class RankingUnavailable(PipelineError):
         super().__init__(stage=STAGE_NAME, message=message, **context)
 
 
-def _apply_ranking_policy(composite_raw, model_features, cfg, notes):
+def _apply_ranking_policy(composite_raw, model_features, cfg, notes, v2_scored=None):
     """Return the series the book is ordered by, and say which one it is.
 
     `composite_raw` arrives holding whatever ranked upstream -- the fitted
@@ -102,6 +103,41 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes):
     source = str(getattr(cfg.ranking, "source", "fitted_composite"))
     if source == "fitted_composite":
         return composite_raw, "fitted_composite"
+
+    if source == "v2_composite":
+        # THE SHIPPED SCORER. Ten equal-weighted, sign-oriented sector-neutral
+        # factor ranks (`features/v2.py`). Selected on 2018-11 to 2024-10 and
+        # evaluated ONCE, blind, on a sealed 2025-03 to 2026-08 holdout; the
+        # number that earned the deploy is in CHANGELOG.md and in
+        # `research/V2_SEARCH.md`, including the part of it that did not work.
+        if v2_scored is None or "score" not in getattr(v2_scored, "columns", []):
+            raise RankingUnavailable(
+                "stage4_core_score.ranking.source is 'v2_composite' and the v2 "
+                "block did not build, so there is no ranking to take. Falling "
+                "back to another scorer would issue signals from a model that "
+                "was not the one measured on the holdout."
+            )
+        ranked = v2_scored["score"].dropna()
+        covered = ranked.reindex(composite_raw.index).dropna()
+        floor = max(int(0.6 * len(composite_raw)), 20)
+        if len(covered) < floor:
+            raise RankingUnavailable(
+                f"the v2 composite covers {len(covered)} of "
+                f"{len(composite_raw)} scoreable names, under the {floor} "
+                f"floor. A ranking built on a minority of the universe is a "
+                f"ranking of that minority."
+            )
+        notes.append(
+            "Book ordered by the v2 composite: ten equal-weighted, "
+            "sign-oriented sector-neutral factor ranks. Sealed-holdout "
+            "2025-03-06 to 2026-08-17, evaluated once: rank IC +0.045 (t 2.59), "
+            "quintile spread +1.65% per 42 sessions (t 2.56), both outside a "
+            "200-draw shuffled null; book excess over the equal-weight "
+            "eligible universe +2.4% a year net of costs, which is inside "
+            "noise. The ranking is evidenced; a ten-name book's annual excess "
+            "is not."
+        )
+        return covered, source
 
     column = str(cfg.ranking.column)
     if model_features is None or column not in getattr(model_features, "columns", []):
@@ -153,6 +189,60 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes):
         f"negative alpha in all 144 of its own."
     )
     return covered, source
+
+
+def build_v2_block(store, calendar, symbols, as_of, sectors, cfg):
+    """The v2 score for ``as_of``: raw factor values and the ranked/weighted frame.
+
+    Reads only sessions at or before ``as_of``. The window is
+    ``v2.MIN_LOOKBACK_SESSIONS`` plus slack, which is what the search measured
+    each factor over -- a shorter read silently changes the statistic, which is
+    why the length comes from the factor spec rather than from a config number
+    somebody can shorten.
+    """
+    need = v2feat.MIN_LOOKBACK_SESSIONS + 15
+    window = calendar.trailing_window(as_of, need)
+    start = window[0] if window else calendar.first
+    px = store.read_prices(symbols=symbols, start=start, end=as_of)
+    if px is None or px.empty:
+        return None, None, "no prices in the v2 lookback window"
+    px = px.copy()
+    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
+
+    def piv(col):
+        if col not in px.columns:
+            return None
+        return px.pivot_table(index=DATE, columns=SYMBOL, values=col,
+                              aggfunc="last", observed=True).sort_index()
+
+    close, open_, turnover = piv("close"), piv("open"), piv("turnover")
+    if close is None or turnover is None or close.empty:
+        return None, None, "the store served no close/turnover for the v2 window"
+
+    # DELIVERY COMES FROM ITS OWN TABLE. `prices.deliv_pct` is a write-time
+    # column that is empty for the whole store -- reading it here would make
+    # `deliv_z_21` silently neutral for every name on every run, which is a
+    # factor quietly deleted rather than a factor reported missing.
+    deliv = None
+    try:
+        dl = store.read_delivery(symbols=symbols, start=start, end=as_of)
+        if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
+            dl = dl.copy()
+            dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
+            deliv = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
+                                   aggfunc="last", observed=True).sort_index()
+            deliv = deliv.reindex(index=close.index)
+    except Exception as exc:
+        log.warning("delivery unavailable for the v2 block; deliv_z_21 ranks "
+                    "neutral", extra={"error": str(exc)})
+
+    raw = v2feat.factor_frame(close, turnover, open_, deliv)
+    if raw.empty:
+        return None, None, "the v2 factor frame came back empty"
+    raw = raw.reindex([s for s in symbols if s in raw.index])
+    scored = v2feat.score_frame(raw, sectors,
+                                min_factors=int(iv(cfg.ranking.v2_min_factors)))
+    return raw, scored, None
 
 
 def _win_probability(model) -> Optional[Dict[str, float]]:
@@ -458,8 +548,15 @@ def run(
     # hand-weighted composite, the fitted model, the regime diagnosis and every
     # note explaining them -- still happens and is still recorded. Only the
     # series the order is taken from changes.
+    v2_raw = v2_scored = None
+    if str(getattr(cfg.ranking, "source", "")) == "v2_composite":
+        v2_raw, v2_scored, v2_err = build_v2_block(
+            store, calendar, symbols, as_of, sectors, cfg)
+        if v2_err:
+            notes.append(f"v2 block unavailable: {v2_err}")
+
     composite_raw, ranking_source = _apply_ranking_policy(
-        composite_raw, model_features, cfg, notes)
+        composite_raw, model_features, cfg, notes, v2_scored=v2_scored)
 
     composite_unit = rank_to_unit_interval(composite_raw)
     percentile = composite_unit * 100.0
@@ -468,7 +565,28 @@ def run(
     scores: List[StockScore] = []
     for rank, sym in enumerate(order.index, start=1):
         factors = {}
-        if model_contrib is not None and sym in model_contrib.index:
+        if ranking_source == "v2_composite" and v2_scored is not None \
+                and sym in v2_scored.index:
+            # THE CARD EXPLAINS THE NUMBER IT PRINTS. These terms sum to the
+            # composite by construction: contribution = rank x sign x weight,
+            # renormalised over the factors this name actually has.
+            for f in sorted(v2feat.V2_FACTORS,
+                            key=lambda x: abs(_f(v2_scored.at[sym, x.name + "_contrib"]) or 0.0),
+                            reverse=True):
+                z = _f(v2_scored.at[sym, f.name + "_r"])
+                factors[f.name] = FactorScore(
+                    name=f.name,
+                    raw_value=(_f(v2_raw.at[sym, f.name])
+                               if v2_raw is not None and sym in v2_raw.index else None),
+                    standardised=z,
+                    weight=round(f.sign * f.weight, 5),
+                    contribution=_f(v2_scored.at[sym, f.name + "_contrib"]),
+                    available=bool(v2_raw is not None and sym in v2_raw.index
+                                   and pd.notna(v2_raw.at[sym, f.name])),
+                    evidence_tier="v2",
+                    citation=f.note,
+                )
+        elif model_contrib is not None and sym in model_contrib.index:
             # Attribution from the fit: contribution = coefficient x z-score,
             # and the terms sum back to the score. Ordered by absolute size, so
             # the card leads with what actually moved this name.

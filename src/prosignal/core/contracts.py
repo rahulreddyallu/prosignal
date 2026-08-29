@@ -311,6 +311,11 @@ class FactorScore(_Contract):
     raw_value: Optional[float] = None
     standardised: Optional[float] = None
     weight: float = 0.0
+    #: standardised x weight -- the signed amount this factor moved THIS name's
+    #: composite. Carried explicitly rather than left for the reader to
+    #: multiply, because the renormalisation over available factors means the
+    #: product of the two printed numbers is not always the term that was used.
+    contribution: Optional[float] = None
     available: bool = True
     horizon_note: Optional[str] = None
     evidence_tier: Optional[str] = None

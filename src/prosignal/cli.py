@@ -2420,6 +2420,84 @@ def cmd_research_volscale(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_research_v2(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Live health of the shipped v2 scorer, and the quarterly re-check.
+
+    `--monitor` reports the rolling per-factor information coefficient against
+    each factor's shipped sign, and the book's drawdown against the flag. It
+    changes nothing: a monitor that switches a factor off changes the model
+    without a decision being taken, and the next person to read the config sees
+    a model that is not the one running.
+
+    `--recheck` applies the FROZEN configuration to the most recent
+    `--holdout-months` of signal dates, once, and says whether the ranking is
+    still doing what the holdout that earned the deploy said it did.
+    """
+    import json
+
+    from .data.store import DataStore
+    from .validation import v2_panel as vp
+    from . import v2_monitor as vm
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = sessions[-1]
+    start = None
+    if args.years:
+        start = end - dt.timedelta(days=int(365.25 * float(args.years)))
+
+    _rule("Building the v2 panel")
+    panel = vp.build_v2_panel(store, start=start, end=end)
+    if panel.empty:
+        _print("the panel came back empty; nothing to report")
+        return 1
+    _print(f"{len(panel):,} rows over {panel['date'].nunique()} signal dates "
+         f"({panel['date'].min().date()} to {panel['date'].max().date()})")
+
+    label = f"y{vp.LABEL_HORIZON_SESSIONS}"
+    scored = panel.dropna(subset=[label])
+
+    if args.monitor or not args.recheck:
+        _rule("Rolling factor IC, oriented by the shipped sign")
+        ic_frame = vm.rolling_factor_ic(scored, label)
+        health = vm.review_factors(ic_frame, window=int(args.window))
+        _print(f"{'factor':22s} {'sign':>4s} {'n':>4s} {'IC':>9s} {'t':>7s}  state")
+        for h in health:
+            ic = "     n/a" if h.ic_mean is None else f"{h.ic_mean:+9.4f}"
+            t = "    n/a" if h.ic_t is None else f"{h.ic_t:+7.2f}"
+            state = "INVERTED" if h.inverted else ("no verdict" if h.ic_mean is None
+                                                   else "ok")
+            _print(f"{h.name:22s} {h.shipped_sign:+4d} {h.n_periods:4d} {ic} {t}  {state}")
+        flagged = [h for h in health if h.inverted]
+        if flagged:
+            _print("")
+            for h in flagged:
+                _print(f"  FLAG {h.name}: {h.note}")
+        else:
+            _print("\nNo factor is flagged. This is not evidence the edge is "
+                 "intact -- the test only fires on inversion, not on decay.")
+
+    if args.recheck:
+        _rule(f"Quarterly re-check -- last {args.holdout_months} months, applied once")
+        res = vp.recheck(scored, holdout_months=int(args.holdout_months), label=label)
+        _print(f"window        {res.holdout_start} to {res.as_of} "
+             f"({res.holdout_dates} signal dates)")
+        _print(f"rank IC       {res.ic:+.4f}  (t {res.ic_t:+.2f})   "
+             f"deploy earned {res.reference['ic']:+.4f} (t {res.reference['ic_t']:.2f})")
+        _print(f"quintile      {res.spread:+.4f}  (t {res.spread_t:+.2f})   "
+             f"deploy earned {res.reference['spread']:+.4f} "
+             f"(t {res.reference['spread_t']:.2f})")
+        _print(f"shuffled null p = {res.null_p_spread:.3f}")
+        _print("")
+        _print(f"VERDICT  {res.verdict}")
+        _print(f"  {res.note}")
+        if args.json:
+            _print(json.dumps(res.to_dict(), indent=1, default=str))
+    return 0
+
+
 def cmd_research_decay(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Is a theme still working, or did it used to work?
 
@@ -2943,6 +3021,23 @@ def build_parser() -> argparse.ArgumentParser:
     vol_p.add_argument("--include-holdout", action="store_true",
                        help="spend the reserved holdout; normally left alone")
     vol_p.set_defaults(func=cmd_research_volscale)
+
+    v2_p = research_sub.add_parser(
+        "v2", help="health of the shipped v2 scorer, and the quarterly re-check")
+    v2_p.add_argument("--monitor", action="store_true",
+                      help="rolling per-factor IC against each shipped sign (default)")
+    v2_p.add_argument("--recheck", action="store_true",
+                      help="apply the frozen configuration to the most recent "
+                           "months, once, under the same holdout discipline that "
+                           "earned the deploy")
+    v2_p.add_argument("--holdout-months", type=int, default=3,
+                      help="length of the re-check window (default 3)")
+    v2_p.add_argument("--window", type=int, default=52,
+                      help="rolling window, in signal dates, for the factor IC")
+    v2_p.add_argument("--years", type=float, default=3.0,
+                      help="how much history to build the panel over")
+    v2_p.add_argument("--json", action="store_true", help="also print the raw verdict")
+    v2_p.set_defaults(func=cmd_research_v2)
 
     decay_p = research_sub.add_parser(
         "decay", help="evaluate the pre-committed kill criterion per theme")
