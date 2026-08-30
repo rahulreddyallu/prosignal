@@ -1351,7 +1351,13 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             # baseline-v1 -- signals the current engine never issued and would
             # not issue, shown under "still open" as though it were holding
             # them.
-            "open": _scope_open(_op, live_cfg),
+            # `_scope_open` keeps only marks issued by the configuration
+            # running NOW, which is right -- a position the current engine
+            # never issued is not its book. But dropping them silently made
+            # History read "nothing here" the day after any config change,
+            # with six BUYs visible on Today and no way to connect the two.
+            # The count that was dropped, and why, travels with the payload.
+            "open": _with_excluded(_scope_open(_op, live_cfg), _op),
         }
         _perf_cache["key"], _perf_cache["value"] = key, payload
         return payload
@@ -1585,6 +1591,23 @@ def _resolved_entry_clock(cfg, payload: Dict[str, Any]) -> Dict[str, Any]:
         log.warning("could not resolve the entry clock for this run",
                     extra={"as_of": str(as_of), "error": str(exc)})
         return {}
+
+
+def _with_excluded(scoped: Dict[str, Any], full: Dict[str, Any]) -> Dict[str, Any]:
+    """How many open marks the configuration scope removed.
+
+    An empty page is a legitimate answer and an unexplained one is not: after a
+    configuration change every open mark belongs to the previous engine, the
+    list correctly empties, and the reader has just seen a shortlist of six.
+    """
+    if not scoped:
+        return scoped
+    key = "rows" if "rows" in (full or {}) else "positions"
+    before = len(list((full or {}).get(key) or []))
+    after = int(scoped.get("n") or 0)
+    out = dict(scoped)
+    out["excluded_open"] = max(before - after, 0)
+    return out
 
 
 def _scope_open(op: Dict[str, Any], config_version: str) -> Dict[str, Any]:

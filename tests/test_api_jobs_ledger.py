@@ -386,7 +386,7 @@ def test_ui_states_are_all_reachable(client):
         "Building the market data",        # store short of the model's bar
         "Nothing met the bar today",       # the designed common outcome
         "could not be completed",          # failure must not imply a trade
-        "Checks that could not run",       # NOT_TESTABLE is not a pass
+        "Not tested",       # NOT_TESTABLE is not a pass
         "What would move this to Buy",     # the watchlist is actionable
     ):
         assert marker in text, f"no markup for the {marker!r} state"

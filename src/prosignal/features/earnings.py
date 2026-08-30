@@ -139,23 +139,13 @@ def risk_note(symbol: str, until: Optional[int], since: Optional[int],
     if until is not None and until <= int(near):
         when = "today" if until == 0 else f"in {until} session{'s' if until != 1 else ''}"
         return (
-            f"{symbol} is scheduled to report {when}. Within "
-            f"{r['window_days']} days of an announcement this store's names "
-            f"carry {r['sd_ratio']:.1f}x their usual daily volatility and "
-            f"{r['p_gap_below_5pct_ratio']:.1f}x the chance of an overnight gap "
-            f"worse than -5% ({r['p_gap_below_5pct']:.2%} against "
-            f"{r['p_gap_below_5pct_baseline']:.2%}). THE STOP IS A LEVEL, NOT A "
-            f"FILL: a gap opens through it and the position closes wherever the "
-            f"market reopens, so the risk figure on this card is a floor on the "
-            f"loss, not a cap. Nothing has been blocked -- whether to hold "
-            f"through an earnings print is your decision, and this engine has "
-            f"never been tested on one.")
+            f"Reports {when}. Earnings windows carry "
+            f"{r['p_gap_below_5pct_ratio']:.0f}x the usual chance of an "
+            f"overnight gap past -5%. A gap opens through the stop, so the "
+            f"risk shown is a floor, not a cap.")
     if until is None:
-        tail = (f"; it last reported {since} days ago" if since is not None
-                else "; no announcement history for it either")
-        return (
-            f"No confirmed earnings date on file for {symbol}{tail}. The forward "
-            f"calendar is NSE board-meeting notices and covers under a quarter "
-            f"of the universe, so this means UNKNOWN, not clear -- the name may "
-            f"still report inside the hold.")
+        # NOT SHOWN ON THE CARD, and it should not be: three names in four have
+        # no scheduled date, so a line about it would appear on almost every
+        # card and say nothing actionable. Returned for anything that wants it.
+        return None
     return None
