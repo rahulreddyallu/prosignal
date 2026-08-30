@@ -76,38 +76,24 @@ def test_an_absent_feed_returns_unknown_for_everything_and_never_raises():
 
 # ----------------------------------------------------------------- the note
 def test_a_near_announcement_warns_and_names_the_tail_not_just_the_vol():
-    """The window is barely more volatile on a TYPICAL day -- 0.59% against
-    0.39% median gap. What matters is that it is ~5x more likely to produce the
-    one move a stop cannot protect against, so the note must lead with the tail
-    probability rather than a volatility multiple."""
+    """The window is barely worse on a TYPICAL day -- 0.59% against 0.39%
+    median gap. What matters is that it is ~5x more likely to produce the one
+    move a stop cannot protect against, so the line leads with the tail."""
     note = E.risk_note("AAA", 2, 80)
-    assert note and "report in 2 sessions" in note
-    assert "4.9x" in note and "-5%" in note
-    assert "LEVEL, NOT A FILL" in note
-    assert "floor on the loss, not a cap" in note
+    assert note and "Reports in 2 sessions" in note
+    assert "5x" in note and "-5%" in note
+    assert "gap opens through the stop" in note
+    assert "floor, not a cap" in note
+    assert len(note) < 260, "this sits on a card; it has to stay one glance"
 
 
-def test_the_note_says_it_blocked_nothing():
-    """Gating entries on earnings would change a traded number, and both sealed
-    windows are spent. The disclosure must not read as a gate."""
-    note = E.risk_note("AAA", 1, 80)
-    assert "Nothing has been blocked" in note
-    assert "your decision" in note
-    assert "never been tested on one" in note
-
-
-def test_a_missing_date_reads_as_unknown_and_never_as_clear():
-    """The forward calendar covers under a quarter of the universe. 'No date'
-    is the commonest case and the dangerous one to misread."""
-    note = E.risk_note("AAA", None, 40)
-    assert "UNKNOWN, not clear" in note
-    assert "last reported 40 days ago" in note
-    assert "may still report inside the hold" in note
-
-
-def test_a_name_with_no_history_at_all_says_so():
-    note = E.risk_note("AAA", None, None)
-    assert "no announcement history for it either" in note
+def test_a_missing_date_says_nothing_at_all():
+    """Three names in four have no scheduled date. A line saying so would
+    appear on almost every card and carry nothing to act on -- that is the
+    definition of the noise this panel is being cleared of. The panel and the
+    card both simply omit it."""
+    assert E.risk_note("AAA", None, 40) is None
+    assert E.risk_note("AAA", None, None) is None
 
 
 def test_a_distant_announcement_says_nothing():

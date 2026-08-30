@@ -100,7 +100,7 @@ def test_the_view_is_json_serialisable():
     "Nothing met the bar today",      # the designed common outcome
     "No recommendation was produced", # withheld on bad data
     "could not be completed",         # a failed run must not imply a trade
-    "Checks that could not run",      # NOT_TESTABLE is not a pass
+    "Not tested",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the near misses stay actionable
     # "No results yet" was the empty History page. It is now "The record opens
     # here", because the page is scoped to the running configuration and the
@@ -294,81 +294,79 @@ def test_the_card_carries_no_verdict_words_at_all():
 
 
 def test_the_arithmetic_is_in_the_panel_and_covers_every_factor():
-    """A quant needs z, the fitted coefficient and their product against the
-    model's own identifier. Four of seventeen on the card answered neither
-    audience -- too much for a glance, too little to check. It is all in the
-    panel, and the panel is what "View analysis" opens."""
+    """The panel must show BOTH halves of each theme -- where the name sits and
+    what that added -- and the factors underneath.
+
+    `z` is rendered as a percentile rather than a raw standard deviation: the
+    themes are ranks in [-1, 1], and "99" is a thing a reader can place while
+    "+0.98 sd" is a thing they have to convert."""
     html = _html()
     panel = html[html.index("function panelHTML"):]
     panel = panel[:panel.index("\nfunction ", 20)]
-    assert "r.z.toFixed" in panel, "the standardised loading"
-    assert "r.coefficient.toFixed" in panel, "the fitted coefficient"
-    assert "r.contribution.toFixed" in panel, "their product"
-    # The theme's LABEL leads and its column key follows it. `esc(r.factor)`
-    # alone put <code>mom</code> and <code>delivery</code> in the heading of a
-    # block whose summary table two sections above calls the same things
-    # "Medium-term momentum" and "Delivery-backed participation" -- the same
-    # theme under two names in one panel. The key is still rendered, beside the
-    # members it belongs to, so a quant can still cross-reference it.
-    assert "r.label || r.factor" in panel, "the theme's label, with its key kept"
-    assert "esc(m.name)" in panel, "the model's own identifier, on the members"
-    assert "rows.map(" in panel, "every theme, not a top slice"
-    vm = UI.parents[1] / "presentation" / "viewmodel.py"
-    assert "top: Optional[int] = None" in vm.read_text(encoding="utf-8"), \
-        "the payload must carry every factor for that table to exist"
+    assert "(r.z + 1) / 2 * 100" in panel, "the percentile"
+    assert "r.contribution.toFixed" in panel, "what it added"
+    assert "r.members" in panel, "and the factors it is made of"
 
 
 def test_the_advanced_section_does_not_repeat_the_summary():
-    """It rendered `rows` twice -- the same five themes the table above already
-    showed, with two more columns. The reader who opened it for the detail got
-    the summary again.
-
-    What is actually underneath is the MEMBERS: one coefficient is fitted per
-    theme over the average of its members' ranks, so "lottery -1.81 sd" is a
-    summary of four separate measurements and the panel never said which one
-    moved."""
+    """It rendered the same theme rows the table above already showed, with two
+    more columns. The reader who opened it for the detail got the summary
+    again. What is underneath is the FACTORS -- and they now live in their own
+    drawer, counted on its label, while `Advanced` holds only what the card
+    does not say anywhere else."""
     html = _html()
     panel = html[html.index("function panelHTML"):]
     panel = panel[:panel.index("\nfunction ", 20)]
-    adv = panel[panel.index("const advanced"):]
-    assert "r.members" in panel, "the advanced section must show the members"
-    # The wording has changed twice; what must not change is that the summary
-    # COUNTS the measurements and names the themes they sit under, so a reader
-    # can tell a five-row summary from the twenty rows underneath it.
-    assert "members +" in adv and "rows.length" in adv, (
-        "the summary must say how many measurements sit behind how many themes"
-    )
-    # The old duplicate: a second full table built from `rows` with z/coef/
-    # contrib columns. The theme header carries those now, one line each.
-    assert adv.count("rows.map(") == 0, (
-        "the advanced section must not rebuild the drivers table"
+    assert "nFac +" in panel, "the factor drawer must count what it holds"
+    assert "'>Advanced</summary>" in panel or "<summary>Advanced</summary>" in panel
+    assert panel.count("themes.map(") == 2, (
+        "one pass for the summary table, one for the factors -- not a third"
     )
 
 
-def test_the_panel_leads_with_the_model_that_ordered_the_book():
-    """THE BUG THIS PINS. `factors` carries the v3 themes that ORDER the book
-    and the fitted 26-factor themes that only watch it, in one flat dict. The
-    panel rendered all eleven rows under one heading -- "the fitted model's
-    separate reading" -- and summed their members together, which is how a
-    22-factor model came to advertise "12 measured factors" on its own
-    analysis screen.
+def test_the_panel_shows_only_the_model_that_ordered_the_book():
+    """THE BUG THIS PINS, and then the judgement that followed it.
 
-    Two models, two sections, and the one that decides comes first."""
+    `factors` carries the v3 themes that ORDER the book and the fitted
+    26-factor themes that only watch it, in one flat dict. The panel rendered
+    all eleven rows under one heading and summed their members -- which is how
+    a 22-factor model advertised "12 measured factors" on its own screen.
+
+    The fitted model is now off the card entirely. It orders nothing, gates
+    nothing and sizes nothing, so on a per-name card it was six rows of
+    "0.0000" under a heading explaining that they did not matter. It is still
+    fitted and still monitored; `research estimator` is where a diagnostic is
+    read."""
     html = _html()
     panel = html[html.index("function panelHTML"):]
     panel = panel[:panel.index("\nfunction ", 20)]
 
     assert "p.themes" in panel, "the panel must read the v3 themes"
-    assert "p.model_reading" in panel, "and the secondary model separately"
-    assert "What ordered this name" in panel
-    assert "chose nothing" in panel, "the secondary model must be labelled as such"
-
-    # Order matters: what decided is above what only watched.
-    ret = panel[panel.rindex("return key + lead"):]
-    assert ret.index("themeTable") < ret.index("drivers"), (
-        "the composite that ordered the book must render above the model that "
-        "did not"
+    assert "What ordered it" in panel
+    assert "p.model_reading" not in panel, (
+        "the fitted model is off the card -- it chose nothing about this name"
     )
+    assert "% weight" in panel, "the theme weight is shown, as a weight"
+    # Comments explain the removal; the RENDERED markup must not carry it.
+    code = re.sub(r"/\*.*?\*/", "", panel, flags=re.S)
+    code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+    for gone in ("separate reading", "chose nothing", "model_reading",
+                 "significance floor"):
+        assert gone not in code, f"still rendering the fitted model: {gone!r}"
+
+
+def test_the_panel_says_little_and_shows_numbers():
+    """The owner's standard, and it is the right one: a panel that explains its
+    own percentile convention in two paragraphs is longer than the table it is
+    explaining. Every caption here is one line."""
+    html = _html()
+    panel = html[html.index("function panelHTML"):]
+    panel = panel[:panel.index("\nfunction ", 20)]
+    for gone in ("Weights renormalise over the themes",
+                 "sums to the composite even when",
+                 "One coefficient is fitted per theme",
+                 "recorded and monitored"):
+        assert gone not in panel, f"still carrying the long form: {gone!r}"
 
 
 def test_the_panel_never_recomputes_a_contribution():
@@ -385,18 +383,14 @@ def test_the_panel_never_recomputes_a_contribution():
     assert "r.z*r.coefficient" not in theme_block.replace(" ", "")
 
 
-def test_the_shortlist_says_why_it_has_no_return_column():
-    """People keep looking for a % return column. The reason it is absent is
-    that the engine estimates no per-name return -- the only return figures it
-    has are population base rates identical on every row. Leaving that as a
-    hole invites the reader to assume the number was omitted by accident."""
+def test_the_shortlist_carries_no_return_column_and_no_block_explaining_it():
+    """There is no per-name return estimate, so there is no column. A block
+    stating that once for the list was tried and removed: a figure identical on
+    every row answers a question nobody is asking while sitting above the six
+    that differ. History reports what the book did as positions close."""
     html = _html()
-    assert "function expectancyHTML" in html
-    block = html[html.index("function expectancyHTML"):]
-    block = block[:block.index("\nfunction ", 20)]
-    assert "identical on every name above" in block
-    assert "not a forecast" in block
-    assert "no return column" in block
+    assert "function expectancyHTML" not in html
+    assert "identical on every name above" not in html
 
 
 def test_the_hold_shown_is_not_a_bare_policy_constant():
@@ -469,9 +463,13 @@ def test_the_run_still_records_what_it_could_not_check():
     # on the run payload and in the ledger, and a check that could not run
     # still surfaces per name in the analysis panel -- which is the place it
     # actually bears on a decision.
-    assert "Checks that could not run" in html
+    assert "Not tested" in html
     assert "not_testable" in html
-    assert "rests on partial evidence" in html
+    # The sentence that followed it ("...so this name rests on partial
+    # evidence") was cut with the rest of the panel's prose: the heading and
+    # the named checks say it, and a panel that explains its own headings is
+    # the thing being trimmed. What must survive is that the checks are LISTED.
+    assert "nt.join" in html, "the failed checks must still be named per name"
 
 
 def test_a_completed_scan_invalidates_the_cached_history():
@@ -782,7 +780,7 @@ def test_rebuilding_and_clearing_are_both_reachable_and_say_what_they_keep():
     html = _html()
     assert "/admin/reset/market-data" in html
     assert 'id="rebuild"' in html and 'id="wipe"' in html
-    assert "Clears the History page" in html
+    assert "Restarts History" in html
     assert "Your results are" in html
 
 

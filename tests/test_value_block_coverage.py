@@ -221,8 +221,15 @@ def test_the_panel_says_score_and_contributions_are_different_units():
     import pathlib
 
     page = pathlib.Path("src/prosignal/static/index.html").read_text()
-    assert "percentile of today's universe" in page
-    assert "not to Score" in page
+    # The caption moved and shortened with the rest of the panel's prose; what
+    # it has to keep saying is that Score is a POSITION, not a probability.
+    assert "not a probability" in page
+    assert "eligible universe" in page
+    # The old caption spelled out that contributions sum to the prediction and
+    # not to Score. The contributions ARE the score now -- v3's theme
+    # contributions sum to the composite by construction -- so the sentence
+    # that reconciled two units describes a mismatch that no longer exists.
+    assert "sums to the score" in page.lower()
 
 
 def test_the_score_is_a_percentile_of_the_days_universe():
