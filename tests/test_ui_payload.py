@@ -106,7 +106,7 @@ def test_the_view_is_json_serialisable():
     # open positions are marked to the latest close and to the index over the
     # same days, so this state means the engine has issued nothing at all.
     "No calls yet",
-    "superseded configuration",       # and what is being left out, in one line
+    "are not counted",                # and what is being left out, in one line
     "New market data",       # store moved on, results did not
     "What this configuration has done",  # history is scoped, and says so
     # "Not followed yet" belonged to `outcomeRow`, which was removed: nothing
@@ -876,7 +876,7 @@ def test_an_empty_history_explains_itself():
     # listed from the second session rather than waiting for a close.
     assert "No calls yet" in html
     assert "marked to the latest close" in html
-    assert "superseded configuration" in html, \
+    assert "decided by an earlier configuration" in html, \
         "an empty page must say what it excluded, or it reads as broken"
     assert "open or closed" in html or "marked to the latest close" in html
     assert "target or a stop" not in html, \
@@ -1101,7 +1101,8 @@ def test_open_calls_are_shown_not_just_counted():
     # so a source-position comparison reads the order backwards.
     view = html[html.index("function viewHistory"):]
     view = view[:view.index("\nfunction ", 20)]
-    ret = re.search(r"return reg \+ chart \+ ([^;]+);", view)
+    ret = re.search(r"return '<div class=\"stack\">' \+ reg \+ chart \+ ([^;]+);",
+                    view, re.S)
     assert ret, "viewHistory must end in one composed return"
     order = ret.group(1)
     assert order.index("openHTML(open)") < order.index("closed"), \
@@ -1111,7 +1112,10 @@ def test_open_calls_are_shown_not_just_counted():
 def test_an_open_mark_is_never_presented_as_a_result():
     html = _html()
     body = html[html.index("function openHTML"):html.index("function viewHistory")]
-    assert "Not results" in body
+    assert "not counted above" in body, (
+        "a mark is what a position happens to be worth today; the page has to "
+        "say it is outside the realised figures"
+    )
 
 
 def test_the_interface_script_actually_parses():
@@ -1157,7 +1161,7 @@ def test_an_open_call_is_shown_against_the_index_over_the_same_days():
     fn = fn[:fn.index("\nfunction ", 20)]
     assert "r.benchmark" in fn, "each call needs the index over its own window"
     assert "avg_excess" in fn, "and the headline is the excess, not the raw mark"
-    assert "kept out of every figure above" in fn, (
+    assert "not counted above" in fn, (
         "a mark must never be pooled into the realised statistics"
     )
 
@@ -1198,3 +1202,43 @@ def test_a_call_issued_today_is_shown_rather_than_dropped():
     assert "\\u2014" in fn or "—" in fn, (
         "a pending call shows a dash, never a 0.0% that would be counted"
     )
+
+
+def test_the_headline_shows_whether_the_number_can_be_believed():
+    """The server has computed an overlap-corrected Newey-West t, the naive
+    one and the effective sample size since v1. The page rendered none of it
+    -- a percentage in 28px type and a win rate, which is how a record of four
+    trades reads as a property of the engine. On a real deployment: 4 closed
+    calls, effective n 1.71, corrected t -0.05."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    assert "h.significance" in view, "the verdict has to be read to be shown"
+    assert "distinguishable from zero" in view
+    assert "effective_n" in view, (
+        "positions held together are not independent observations, and the "
+        "count that says so is the point"
+    )
+    assert "naive_t" in view, "the size of the overlap correction stays visible"
+
+
+def test_the_headline_does_not_wait_for_an_equity_curve():
+    """It was gated on `curve.length > 1`, so the young record -- the one
+    where the sample-size warning matters most -- showed no summary at all."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    head = view[view.index("const head ="):view.index("const chart = head")]
+    assert "nClosed" in head.split("?")[0], "the headline keys on closed calls"
+    assert "curve" in head, "the curve is drawn INSIDE it when there is one"
+
+
+def test_a_ratio_is_never_printed_without_its_count():
+    """67% is three trades or two thousand and the page said the same thing
+    either way."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    fn = view[view.index("const ratio ="):]
+    fn = fn[:fn.index(";", fn.index("'</div>'"))]
+    assert "' of '" in fn, "the count is rendered beside the percentage"

@@ -788,6 +788,28 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .fwd.void { border-left: 3px solid var(--neg); }
 .fwd.void b { color: var(--neg); }
 .fwd.off { border-left: 3px solid var(--line); }
+
+/* EVEN SPACING, from one rule. Every block on History used to bring its own
+   margin and the page read as a pile rather than a column. */
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
+/* Two classes each, so they outrank a bare `.stack > *` reset -- which is
+   why one gap stayed 58px while every other one was 16px. */
+.stack > *, .stack > .col.open, .stack > .cols, .stack > .fwd {
+  margin-top: 0; margin-bottom: 0; }
+
+/* The verdict line under the headline. It is the sentence that stops a mean
+   over four trades reading as a property of the engine. */
+.sig { font-size: 12.5px; line-height: 1.55; margin: var(--sp-2) 0 0;
+       padding-top: var(--sp-2); border-top: 1px solid var(--line); }
+.sig.ok { color: var(--ink-2); }
+/* Deliberately NOT var(--neg). Red is what a losing return is printed in,
+   and "not distinguishable from zero" is a statement about the evidence, not
+   about the money. Sharing the colour made the two read as one thing. */
+.sig.warn { color: var(--ink); font-weight: 500; }
+.sig.warn::before { content: ""; display: inline-block; width: 6px;
+  height: 6px; border-radius: 50%; background: var(--ink-3);
+  margin-right: 7px; vertical-align: middle; }
+
 .nr-dim { opacity: .55; }
 .dim-h { border-top: 1px dashed var(--line); padding-top: var(--sp-3);
          margin-top: var(--sp-3); }
@@ -2672,10 +2694,8 @@ function openHTML(op) {
   if (!mine.length && older.length) {
     return '<div class="col open">' +
         '<div class="col-h"><span>Open calls</span><b>\u2014</b></div>' +
-        '<div class="col-s">All ' + older.length + ' open call' +
-          (older.length === 1 ? "" : "s") + ' below were issued by an earlier ' +
-          'configuration, so none is this engine\u2019s record. Calls made ' +
-          'from here are counted.</div>' +
+        '<div class="col-s">All ' + older.length + ' from an earlier ' +
+          'configuration \u00b7 not this engine\u2019s record</div>' +
         '<div class="col-b">' + older.map((r) => row(r, true)).join("") + '</div>' +
       '</div>';
   }
@@ -2710,9 +2730,7 @@ function openHTML(op) {
 
   return '<div class="col open">' +
       '<div class="col-h"><span>Open calls</span><b>' + head + '</b></div>' +
-      '<div class="col-s">' + sub + '. Not results \u2014 they can reverse ' +
-        'before they close, and they are kept out of every figure above. A ' +
-        'name re-signalled while still held stays one call.</div>' +
+      '<div class="col-s">' + sub + ' \u00b7 not counted above</div>' +
       '<div class="col-b">' + live.map((r) => row(r, false)).join("") + '</div>' +
       olderBlock +
     '</div>';
@@ -2757,10 +2775,12 @@ function viewHistory(v) {
   /* One line, not a section. What is excluded and why -- so an empty page
      reads as "nothing has closed under this configuration" rather than as a
      page that is broken. */
+  /* Not a section. One line, so that 128 closed calls do not disappear
+     without a word -- they belong to an engine that is not running. */
   const excluded = ep.excluded_closed
-    ? '<p class="fine">' + ep.excluded_closed + ' earlier ' +
-      (ep.excluded_closed === 1 ? 'position was' : 'positions were') +
-      ' decided by a superseded configuration and are not counted here.</p>'
+    ? '<p class="fine">' + ep.excluded_closed + ' closed ' +
+      (ep.excluded_closed === 1 ? 'call was' : 'calls were') +
+      ' decided by an earlier configuration and are not counted.</p>'
     : "";
 
   /* THE PAGE OPENS ON THE FIRST CALL, not the first CLOSE. It waited for a
@@ -2803,39 +2823,68 @@ function viewHistory(v) {
   const reg = fwd.registered
     ? (fwd.config_matches
         ? '<div class="fwd ok"><div><b>' + fwd.sessions_elapsed + ' of ' +
-          fwd.sessions_target + ' sessions</b><span>Running against a fixed ' +
-          'configuration since ' + esc(String(fwd.started_on)) + '. The pass ' +
-          'mark was set before the data arrived.</span></div></div>'
+          fwd.sessions_target + ' sessions</b><span>Fixed configuration ' +
+          'since ' + esc(String(fwd.started_on)) +
+          '</span></div></div>'
         : '<div class="fwd void"><div><b>Not a fixed record</b><span>The ' +
-          'configuration changed after this window opened, so what is below ' +
-          'mixes two engines.</span></div>' +
+          'configuration changed after this window opened.</span></div>' +
           '<button class="btn ghost xs" id="fwd">Restart</button></div>')
-    : '<div class="fwd off"><div><b>Nothing is pre-committed</b><span>These ' +
-      'numbers can be restarted whenever they turn. Fixing the start date and ' +
-      'the pass mark first is what makes a live record evidence rather than a ' +
-      'scoreboard.</span></div>' +
+    : '<div class="fwd off"><div><b>Nothing is pre-committed</b><span>A record ' +
+      'you can restart is not evidence. Fix the start date and the pass ' +
+      'mark first.</span></div>' +
       '<button class="btn ghost xs" id="fwd">Register</button></div>';
 
-  /* THE CURVE FIRST. It was below a per-ticker wall of text, which is the
-     wrong way round: the question this page answers is what the engine did,
-     and the two lists underneath are how it did it. */
-  const chart = (perf.curve && perf.curve.length > 1)
+  /* WHAT THE NUMBER IS WORTH, beside the number.
+     The server has always computed an overlap-corrected Newey-West t,
+     the uncorrected one, and the effective sample size once the overlap
+     between simultaneously-held positions is taken out. None of it reached
+     this page. What reached this page was a percentage in 28px type and a
+     win rate, which is how a record of four trades reads as a property of
+     the engine.
+     Positions held at the same time are not independent observations, so
+     twelve closed calls can carry an effective n near three. The correction
+     is what says so. */
+  const sig = h.significance || {};
+  const tv = sig.t;
+  const eff = sig.effective_n;
+  const verdict = (tv == null)
+    ? (nClosed < 2 ? "one closed call cannot be told from chance"
+                   : "too few closed calls to test")
+    : (Math.abs(tv) >= 2
+        ? "distinguishable from zero (t " + tv.toFixed(2) + ")"
+        : "NOT distinguishable from zero (t " + tv.toFixed(2) + ")");
+  const effLine = (eff != null && nClosed > 1)
+    ? " \u00b7 " + nClosed + " closed, worth ~" + eff.toFixed(1) + " independent"
+    : (nClosed ? " \u00b7 " + nClosed + " closed" : "");
+
+  /* A ratio without its count is a claim without evidence. 67% is three
+     trades or two thousand and the page said the same thing either way. */
+  const ratio = (v, n, label) => v == null ? "" :
+    '<div class="chart-k"><b>' + Math.round(v * 100) + '%</b>' +
+    '<span>' + (n ? Math.round(v * n) + ' of ' + n + ' ' : "") +
+    label + '</span></div>';
+
+  const head = nClosed
     ? '<div class="box chart">' +
         '<div class="chart-h">' +
           '<div><div class="chart-v">' + signed(h.avg_excess) + '</div>' +
-            '<div class="chart-s">average per position vs the index \u00b7 ' +
-            nClosed + ' closed' +
-            (nOpen ? " \u00b7 " + nOpen + " open" : "") + '</div></div>' +
-          (h.win_rate != null
-            ? '<div class="chart-k"><b>' + Math.round(h.win_rate * 100) + '%</b>' +
-              '<span>paid off</span></div>' : "") +
-          (h.beat_rate != null
-            ? '<div class="chart-k"><b>' + Math.round(h.beat_rate * 100) + '%</b>' +
-              '<span>beat the index</span></div>' : "") +
+            '<div class="chart-s">average per position vs the index' +
+            effLine + '</div></div>' +
+          ratio(h.win_rate, nClosed, "paid off") +
+          ratio(h.beat_rate, h.benchmark_covered, "beat the index") +
         '</div>' +
-        curveSVG(perf.curve) +
+        '<p class="sig ' + (tv != null && Math.abs(tv) >= 2 ? "ok" : "warn") +
+          '">' + esc(verdict) +
+          (sig.naive_t != null && tv != null
+            ? ', uncorrected ' + sig.naive_t.toFixed(2) : '') + '</p>' +
+        ((perf.curve && perf.curve.length > 1) ? curveSVG(perf.curve) : "") +
       '</div>'
     : "";
+  /* Rendered on ANY closed record, not only one long enough to draw a curve.
+     The headline was gated on `curve.length > 1`, so the young record -- the
+     one where the sample-size warning matters most -- showed no summary at
+     all. */
+  const chart = head;
 
   /* PER POSITION, NOT SUMMED. `avg_excess` is the average one position
      returned against the index over the days it was held -- a number an
@@ -2859,7 +2908,8 @@ function viewHistory(v) {
       'figures the day the market takes it to its stop, its rank band or its ' +
       'holding limit \u2014 until then it is above, marked and uncounted.</p>';
 
-  return reg + chart + openHTML(open) + closed + excluded;
+  return '<div class="stack">' + reg + chart + openHTML(open) +
+         closed + excluded + '</div>';
 }
 
 async function confirmWipe() {
