@@ -454,12 +454,25 @@ any feature reads past *t*.
 theme off changes the model without a decision being taken, and the next person
 to read the config sees a model that is not the one running.
 
+**Every run**, because these need no forward outcome:
+
+- each theme's **share of today's cross-sectional spread**, flagged past 55% or
+  15 points above its own declared weight. Whether one theme is doing most of
+  the separating between names is visible the moment the scores exist.
+- **book drawdown** against a −25% flag (deepest across both sealed windows:
+  −23.9%), from closed trades. This lags an open book — a position underwater
+  contributes nothing until it exits — so it is a *floor* on the drawdown, not
+  an estimate, and it says so on the line. Silent below 20 closed trades.
+
+**Quarterly**, because these need outcomes that are 21 sessions away:
+
 - rolling IC **per factor**, oriented by the shipped sign
 - rolling IC **per theme** — a composite can hold up in aggregate while one
   theme has inverted, and the composite's own IC will not say which
-- each theme's **share of realised cross-sectional spread**, flagged past 55%
-  or 15 points above its own declared weight
-- book drawdown against a −25% flag (deepest across both sealed windows: −23.9%)
+
+The split is the point. Putting the whole monitor on the quarterly command left
+the daily run with nothing to say about the model at all, so a theme could take
+over the ranking in October and nobody would look until January.
 
 The influence share is a **dispersion** share, not a variance share. Variance is
 quadratic in the weight: measured as variance, momentum reads 62% at its

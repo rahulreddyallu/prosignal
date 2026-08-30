@@ -19,6 +19,7 @@ import datetime as dt
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
@@ -397,9 +398,25 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
                         train_sessions=train_sessions)
     )
 
+    # THE DRAWDOWN FLAG, on the same channel as the theme flags. It reads
+    # CLOSED trades, so it lags an open book and is a floor on the drawdown
+    # rather than an estimate -- `review_realised_drawdown` says so on the line
+    # itself. It stays silent below twenty closed trades: a six-name book's
+    # realised curve after four exits is noise, and "0%, inside the flag" would
+    # reassure about a book that has not been tested yet.
+    scoring_notes = list(getattr(scores, "notes", []) or [])
+    try:
+        from . import v3_monitor as _v3mon
+        from . import outcomes as _out
+        _p = Path(config.paths.ledger) / "outcomes.jsonl"
+        if _p.exists():
+            scoring_notes += _v3mon.review_realised_drawdown(
+                _out.load_outcomes(_p))
+    except Exception as exc:                        # never fail a run to report
+        log.warning("drawdown check did not run", extra={"error": str(exc)})
+
     result = AnalysisRun(output=output, context=context, timings_ms=timings,
-                         funnel=funnel,
-                         scoring_notes=list(getattr(scores, "notes", []) or []))
+                         funnel=funnel, scoring_notes=scoring_notes)
 
     # THE SCREEN READS THIS, not the API's job queue.
     #

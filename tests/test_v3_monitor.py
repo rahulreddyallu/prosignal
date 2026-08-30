@@ -386,3 +386,66 @@ def test_the_daily_influence_line_reports_every_shipped_theme(runnable_cfg):
     for t, th in v3.THEMES.items():
         assert t in line
         assert f"declared {th.weight:.0%}" in line
+
+
+# ------------------------------------------- the drawdown flag, on real shapes
+def _outcomes(returns):
+    """Closed trades in the shape `performance.equity_curve` consumes."""
+    base = dt.date(2026, 1, 5)
+    return [{"ticker": f"T{i:03d}",
+             "entry_date": (base + dt.timedelta(days=i)).isoformat(),
+             "exit_date": (base + dt.timedelta(days=i + 20)).isoformat(),
+             "net_return": float(r), "status": "CLOSED"}
+            for i, r in enumerate(returns)]
+
+
+def test_a_book_with_no_closed_trades_says_nothing_rather_than_zero():
+    """'0%, inside the flag' about a book that has taken no trades is a
+    reassurance, not a measurement. Silence is the correct output."""
+    assert mon.review_realised_drawdown([]) == []
+    assert mon.review_realised_drawdown(_outcomes([0.01] * 3)) == []
+
+
+def test_too_few_closed_trades_is_still_silence():
+    n = mon.MIN_CLOSED_TRADES_FOR_DRAWDOWN - 1
+    assert mon.review_realised_drawdown(_outcomes([-0.05] * n)) == []
+
+
+def test_a_deep_realised_drawdown_is_flagged():
+    # peak equity 1 + 25*0.03 = 1.75; trough 1.75 - 25*0.02 = 1.25; -28.6%.
+    # 20 down instead of 25 gives -22.9% and must NOT fire -- checked below.
+    up = [0.03] * 25
+    down = [-0.02] * 25
+    notes = mon.review_realised_drawdown(_outcomes(up + down))
+    assert len(notes) == 1 and notes[0].startswith("FLAG drawdown")
+    assert "Nothing has been disabled" in notes[0]
+    assert "realised only" in notes[0], "the lag must be stated on the line"
+
+    # And the threshold is a threshold, not a mood: the same shape stopping
+    # just short of it reports the number and does not flag.
+    shallower = mon.review_realised_drawdown(_outcomes(up + [-0.02] * 20))
+    assert not shallower[0].startswith("FLAG")
+    assert "-22.9%" in shallower[0]
+
+
+def test_a_healthy_book_reports_the_number_without_a_flag():
+    notes = mon.review_realised_drawdown(_outcomes([0.02] * 30))
+    assert len(notes) == 1 and not notes[0].startswith("FLAG")
+    assert "inside the -25% flag" in notes[0]
+    assert "30 closed trades" in notes[0]
+
+
+def test_the_drawdown_note_never_hides_that_it_lags_an_open_book():
+    """A position open and underwater contributes nothing until it exits, so
+    this is a FLOOR on the drawdown, not an estimate. Every line must say so --
+    a number that looks complete and is not is the failure mode here."""
+    for rets in ([0.02] * 30, [0.03] * 25 + [-0.02] * 25):
+        note = mon.review_realised_drawdown(_outcomes(rets))[0]
+        assert "realised only" in note or "realised only" in note.lower()
+        assert "open position" in note.lower()
+
+
+def test_the_drawdown_check_is_silent_on_junk_instead_of_raising():
+    """It runs inside a live pipeline. Reporting must never fail a run."""
+    assert mon.review_realised_drawdown([{"nonsense": 1}] * 40) == []
+    assert mon.review_realised_drawdown(None) == []

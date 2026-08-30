@@ -44,7 +44,8 @@ __all__ = ["FactorHealth", "ThemeHealth", "DrawdownFlag", "rolling_factor_ic",
            "theme_influence_share", "cross_section_influence",
            "review_cross_section", "review_drawdown", "MIN_PERIODS",
            "IC_ALERT_T", "DOMINANCE_ALERT", "DOMINANCE_EXCESS", "DRAWDOWN_FLAG",
-           "MIN_NAMES_FOR_INFLUENCE"]
+           "MIN_NAMES_FOR_INFLUENCE", "review_realised_drawdown",
+           "MIN_CLOSED_TRADES_FOR_DRAWDOWN"]
 
 #: Fewer than this many scored periods and a rolling IC is not worth reading.
 MIN_PERIODS = 40
@@ -350,6 +351,54 @@ def review_themes(ic_frame: pd.DataFrame, panel: Optional[pd.DataFrame] = None,
                                "; ".join(notes) if notes
                                else "consistent with its shipped weight"))
     return out
+
+
+#: Closed trades below which a drawdown is noise rather than a measurement. A
+#: six-name book's realised curve after four exits says nothing about the book.
+MIN_CLOSED_TRADES_FOR_DRAWDOWN = 20
+
+
+def review_realised_drawdown(outcomes: Sequence[Dict[str, object]],
+                             threshold: float = DRAWDOWN_FLAG,
+                             min_trades: int = MIN_CLOSED_TRADES_FOR_DRAWDOWN
+                             ) -> List[str]:
+    """Run notes for the book's drawdown, from CLOSED trades only.
+
+    WHAT THIS CANNOT SEE, said here rather than discovered later: the curve is
+    built from resolved outcomes, so a position that is open and deeply
+    underwater contributes NOTHING until it exits. On a six-name book held a
+    median of twenty sessions that is a real lag, and it biases the measurement
+    in the comfortable direction -- the realised drawdown is the shallower one.
+    It is still worth having, because it is the only drawdown the engine can
+    compute without marking an open book to market, and a flag that arrives
+    late is better than a number nobody ever produces. Read it as a floor on
+    the drawdown, not an estimate of it.
+
+    Returns [] when there is nothing to say. Silence is correct on a book with
+    no closed trades; reporting "0%, inside the flag" would be a reassurance
+    about a book that has not yet been tested.
+    """
+    from .performance import equity_curve
+
+    try:
+        curve = equity_curve(list(outcomes or []))
+    except Exception:
+        return []
+    if len(curve) < int(min_trades):
+        return []
+    # The curve is a running SUM of per-trade returns on an equal-slot book --
+    # deliberately not compounded, because compounding overlapping holds would
+    # imply leverage the strategy never took. So equity is 1 + that sum.
+    eq = [1.0 + float(pt["cumulative"]) for pt in curve]
+    dates = [pt.get("date") for pt in curve]
+    flag = review_drawdown(eq, None, threshold)
+    if flag.flagged:
+        return [f"FLAG drawdown: {flag.note} Measured on {len(curve)} closed "
+                f"trades to {dates[-1]}, realised only -- an open position "
+                f"underwater is not in this number yet."]
+    return [f"Book drawdown {flag.drawdown:.1%} from its peak, inside the "
+            f"{threshold:.0%} flag, on {len(curve)} closed trades (realised "
+            f"only; open positions are not marked to market here)."]
 
 
 def review_drawdown(equity: Sequence[float],

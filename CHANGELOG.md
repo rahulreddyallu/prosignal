@@ -157,7 +157,15 @@ snapshots, so a point-in-time liquidity screen stands in. Stated, not papered ov
   `floor_blocked` count in the funnel.
 - `v3_monitor.py` — rolling IC **per factor and per theme**, each theme's share
   of realised cross-sectional spread, and a −25% drawdown flag. All **flag**;
-  none disable.
+  none disable. **Split by what each one needs to know.** Rolling IC needs
+  forward outcomes, so it cannot say anything about today and stays quarterly.
+  Theme dominance needs none — whether one theme is doing most of the
+  separating between names is a property of today's scores — so it runs on
+  **every** run and its flag lands in the run notes. The drawdown flag reads
+  closed trades, which lags an open book: it is a *floor* on the drawdown, not
+  an estimate, and every line it prints says so. It stays silent below 20
+  closed trades, because "0%, inside the flag" about an untested book is a
+  reassurance rather than a measurement.
 - `validation/v3_panel.py` + `prosignal research v3 --monitor --recheck` — the
   quarterly re-check, same discipline, and it **withholds a verdict** until the
   window holds the 8 independent 21-session windows the deploy was judged on.
