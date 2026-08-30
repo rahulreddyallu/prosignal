@@ -879,6 +879,9 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
         universe_percentile=round(score.percentile, 1),
         rank=position or score.rank,
         model_rank=score.rank,
+        earnings_note=earnings_note,
+        entry_admissible=bool(getattr(score, "entry_admissible", True)),
+        entry_block_reason=getattr(score, "entry_block_reason", None),
         why_this_signal_exists=why,
         market_regime=[
             f"Bucket {regime.regime_bucket}; trend {regime.trend_regime.value}; "

@@ -726,6 +726,21 @@ class Recommendation(_Contract):
     #: form so the UI can sort and align on them without parsing prose.
     factor_detail: Dict[str, FactorScore] = Field(default_factory=dict)
 
+    #: Earnings proximity, when there is something to say. Carried as its own
+    #: field rather than left inside `false_signal_flagged`, because the screen
+    #: has to show it WITHOUT string-matching prose -- and a name reporting
+    #: tomorrow is the one risk on this card a stop cannot cover, so it must
+    #: not end up in a collapsed technical drawer.
+    earnings_note: Optional[str] = None
+    #: Whether this name clears the ABSOLUTE floor and may be OPENED. Carried
+    #: onto the card from `StockScore` because the screen needs it: a name that
+    #: may be held but not bought is a different instruction from one that may
+    #: be bought, and a watchlist that does not distinguish them invites the
+    #: reader to open a position the engine would refuse.
+    entry_admissible: bool = True
+    #: Why not, when not.
+    entry_block_reason: Optional[str] = None
+
     cost_note: Optional[str] = None
     unvalidated_parameter_warning: str = (
         "Every threshold behind this output is an UNVALIDATED hypothesis until a "

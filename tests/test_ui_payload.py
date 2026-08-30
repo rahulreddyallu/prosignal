@@ -332,14 +332,80 @@ def test_the_advanced_section_does_not_repeat_the_summary():
     panel = panel[:panel.index("\nfunction ", 20)]
     adv = panel[panel.index("const advanced"):]
     assert "r.members" in panel, "the advanced section must show the members"
-    assert "measured factors behind" in adv, (
-        "the summary must say how many measurements sit behind the themes"
+    # The wording has changed twice; what must not change is that the summary
+    # COUNTS the measurements and names the themes they sit under, so a reader
+    # can tell a five-row summary from the twenty rows underneath it.
+    assert "members +" in adv and "rows.length" in adv, (
+        "the summary must say how many measurements sit behind how many themes"
     )
     # The old duplicate: a second full table built from `rows` with z/coef/
     # contrib columns. The theme header carries those now, one line each.
     assert adv.count("rows.map(") == 0, (
         "the advanced section must not rebuild the drivers table"
     )
+
+
+def test_the_panel_leads_with_the_model_that_ordered_the_book():
+    """THE BUG THIS PINS. `factors` carries the v3 themes that ORDER the book
+    and the fitted 26-factor themes that only watch it, in one flat dict. The
+    panel rendered all eleven rows under one heading -- "the fitted model's
+    separate reading" -- and summed their members together, which is how a
+    22-factor model came to advertise "12 measured factors" on its own
+    analysis screen.
+
+    Two models, two sections, and the one that decides comes first."""
+    html = _html()
+    panel = html[html.index("function panelHTML"):]
+    panel = panel[:panel.index("\nfunction ", 20)]
+
+    assert "p.themes" in panel, "the panel must read the v3 themes"
+    assert "p.model_reading" in panel, "and the secondary model separately"
+    assert "What ordered this name" in panel
+    assert "chose nothing" in panel, "the secondary model must be labelled as such"
+
+    # Order matters: what decided is above what only watched.
+    ret = panel[panel.rindex("return key + lead"):]
+    assert ret.index("themeTable") < ret.index("drivers"), (
+        "the composite that ordered the book must render above the model that "
+        "did not"
+    )
+
+
+def test_the_panel_never_recomputes_a_contribution():
+    """v3 renormalises its weights over the themes a name actually has, so
+    `z x weight` is not the contribution -- measured on a live card it read 19%
+    low on every theme, uniformly. The engine serialises the real number; the
+    panel prints it."""
+    html = _html()
+    panel = html[html.index("function panelHTML"):]
+    panel = panel[:panel.index("\nfunction ", 20)]
+    theme_block = panel[panel.index("const themeTable"):panel.index("const themeMembers")]
+    assert "r.contribution" in theme_block
+    assert "r.z * r.coefficient" not in theme_block.replace(" ", "")
+    assert "r.z*r.coefficient" not in theme_block.replace(" ", "")
+
+
+def test_the_shortlist_says_why_it_has_no_return_column():
+    """People keep looking for a % return column. The reason it is absent is
+    that the engine estimates no per-name return -- the only return figures it
+    has are population base rates identical on every row. Leaving that as a
+    hole invites the reader to assume the number was omitted by accident."""
+    html = _html()
+    assert "function expectancyHTML" in html
+    block = html[html.index("function expectancyHTML"):]
+    block = block[:block.index("\nfunction ", 20)]
+    assert "identical on every name above" in block
+    assert "not a forecast" in block
+    assert "no return column" in block
+
+
+def test_the_hold_shown_is_not_a_bare_policy_constant():
+    """"up to 63 sessions" is the backstop that force-closes a position, the
+    same on every name in every run, and it read as a holding period. It is
+    named as a backstop and the study's measured hold is shown beside it."""
+    html = _html()
+    assert "-session backstop" in html
+    assert "sessions in the study" in html
 
 
 def test_the_panel_says_what_was_computed_and_not_priced():

@@ -241,6 +241,21 @@ button { font: inherit; color: inherit; }
 /* ------------------------------------------------------------- slate */
 /* What left the screen since the previous run. Set below the cards: it is
    context for the list, not part of it. */
+.earn-w { color: var(--neg); font-weight: 550; }
+.xp { margin-top: var(--sp-4); margin-bottom: var(--sp-4); }
+.xp h3 { font-size: 12px; font-weight: 550; letter-spacing: .06em;
+         text-transform: uppercase; color: var(--ink-2); margin: 0 0 var(--sp-3); }
+.xgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+         gap: var(--sp-3); }
+.xcell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.xk { font-size: 11.5px; color: var(--ink-2); letter-spacing: .02em; }
+.xv { font-size: 18px; font-weight: 600; color: var(--ink); }
+.xs { font-size: 11.5px; color: var(--ink-3, var(--ink-2)); }
+.xnote { font-size: 12.5px; line-height: 1.6; color: var(--ink-2);
+         margin: var(--sp-3) 0 0; }
+@media (max-width: 560px) {
+  .xgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .departures { margin-top: var(--sp-5); padding-top: var(--sp-4);
               border-top: 1px solid var(--line); }
 .departures h3 { font-size: 12px; font-weight: 550; letter-spacing: .06em;
@@ -1613,11 +1628,19 @@ function renderSettings() {
     ? '<button class="btn ghost xs" id="ingest">Refresh</button>' : "";
 
   return (
+    /* DAILY SIGNALS IS A SCHEDULER SWITCH AND NOTHING ELSE.
+       It carried the MEASUREMENT window in its subtitle -- "Measuring since
+       12 Aug" -- while a second row below carried the FORWARD TEST window,
+       which is the same kind of statement: an out-of-sample period opened
+       against one configuration and void when that configuration changes. Two
+       rows, two vocabularies, one question, and the reader reasonably read
+       them as the same control listed twice. The window state has moved down
+       to Measurement, beside the other window, and this row now says only
+       whether the job runs. */
     '<div class="grp">' +
       setRow("Daily signals",
-             on ? (cur ? "Measuring since " + esc(day(cur.started))
-                       : "Runs every weekday after the close")
-                : "Off \u2014 nothing is being recorded",
+             on ? "Runs every weekday after the close"
+                : "Off \u2014 no scan runs and nothing is recorded",
              toggle("sw-cron", on, "Daily signals")) +
       setRow("Dark mode", "", toggle("sw-theme", currentTheme() === "dark",
                                      "Dark mode")) +
@@ -1639,18 +1662,39 @@ function renderSettings() {
                   esc(String(mdl.fitted_for || "\u2014")))
                : "Fits on the next scan",
              "") +
+    '</div>' +
+
+    /* MEASUREMENT: the one question both of these answer -- since when, under
+       which configuration, and is that window still one experiment. */
+    '<div class="grp">' +
+      '<div class="grp-h">Out-of-sample measurement</div>' +
       setRow("Forward test",
              fwd.registered
                ? (fwd.config_matches
                     ? (fwd.sessions_elapsed + " of " + fwd.sessions_target +
                        " sessions since " + esc(String(fwd.started_on)))
-                    : "Not valid \u2014 the configuration changed after it was " +
-                      "registered, so the window is not one experiment")
-               : "Not registered",
+                    /* `registered_config` is what the window was opened
+                       against; `config_version` is what the engine runs NOW.
+                       Reading `config_version` for both printed the same
+                       string twice and made the sentence say nothing. */
+                    : "Void \u2014 opened against " +
+                      esc(String(fwd.registered_config || "an earlier configuration")) +
+                      ", the engine now runs " +
+                      esc(String(fwd.config_version || "a different configuration")) +
+                      ". Observations either side of that change came from " +
+                      "different models, so they are not one experiment.")
+               : "Not registered \u2014 registering opens an 18-month window " +
+                 "against the configuration running now",
              '<button class="btn ghost xs" id="fwd">' +
              (fwd.registered && !fwd.config_matches ? "Re-register" : "Register") +
              '</button>',
              fwd.registered && !fwd.config_matches) +
+      setRow("Recording period",
+             cur ? "Open since " + esc(day(cur.started)) +
+                   " \u00b7 results are attributed to it"
+                 : "None open \u2014 runs are recorded, but not grouped into a " +
+                   "period to be scored as one",
+             "") +
     '</div>' +
 
     '<div class="grp quiet">' +
@@ -2087,16 +2131,24 @@ function viewOverview(v) {
       '<h2>Shortlist</h2>' +
       '<div class="count">' + counts.join(" ") + '</div>' +
       (function () {
-        const b = v.book || {};
-        if (!b.exit_rank && !b.horizon_sessions) return "";
+        const b = v.book || {}, e = v.expectancy || {};
         const bits = [];
         if (b.exit_rank) bits.push("held while inside the top " + b.exit_rank);
-        if (b.horizon_sessions) bits.push("up to " + b.horizon_sessions + " sessions");
-        return '<div class="note">' + bits.join(" \u00b7 ") + '</div>';
+        /* "up to 63 sessions" read as a holding period and is not one -- it is
+           the backstop that force-closes a position, identical on every name in
+           every run. The number a reader wants beside it is what a trade
+           ACTUALLY lasted, which the study measured. Naming both stops the
+           policy constant from being read as a forecast. */
+        if (e.typical_hold_sessions != null)
+          bits.push("typically " + Math.round(e.typical_hold_sessions) +
+                    " sessions in the study");
+        if (b.horizon_sessions)
+          bits.push(b.horizon_sessions + "-session backstop");
+        return bits.length ? '<div class="note">' + bits.join(" \u00b7 ") + '</div>' : "";
       })() +
     '</div>' +
+    expectancyHTML(v) +
     '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>' +
-    gone +
     '<div class="rerun">' +
       '<button class="btn ghost sm" onclick="document.getElementById(\'scan\').click()">' +
       'Re-run this scan</button>' +
@@ -2176,6 +2228,47 @@ function alertsHTML(v) {
    eligibility, data-quality or defence check." is one fact printed five times
    and eighty words spent on it. Identical reasons are collapsed to a single
    line naming the tickers; genuinely different reasons still get their own. */
+/* THE RETURN FIGURES, ONCE, FOR THE LIST -- not once per row.
+
+   The shortlist has no "% return" column and people keep looking for it. The
+   reason it is missing is worth stating rather than leaving as a hole: THIS
+   ENGINE MAKES NO PER-NAME RETURN FORECAST. The only return numbers it has are
+   population base rates from one study of the configuration -- the same 7.09%
+   and the same 42 sessions against every name on the page. A per-row column
+   would repeat one number down the list while reading as a per-name estimate,
+   which is the most dangerous shape a number can take on this screen.
+
+   So they are shown here, attached to the list where they belong, labelled as
+   what they are, with the cost they are net of. */
+function expectancyHTML(v) {
+  const e = v.expectancy;
+  if (!e) return "";
+  const pct = (x, dp) => x == null ? "\u2014" :
+    (x > 0 ? "+" : "") + Number(x).toFixed(dp == null ? 2 : dp) + "%";
+  const rate = (x) => x == null ? "\u2014" : (Number(x) * 100).toFixed(1) + "%";
+  const cell = (k, val, sub) =>
+    '<div class="xcell"><span class="xk">' + k + '</span>' +
+    '<span class="xv num">' + val + '</span>' +
+    (sub ? '<span class="xs">' + sub + '</span>' : "") + '</div>';
+  return '<div class="box xp">' +
+    '<h3>What the study measured \u2014 for the strategy, not for these names</h3>' +
+    '<div class="xgrid">' +
+      cell("Mean return", pct(e.expected_return_pct), "median " + pct(e.median_return_pct)) +
+      cell("Mean excess", pct(e.expected_excess_pct), "median " + pct(e.median_excess_pct)) +
+      cell("Ended positive", rate(e.win_rate), "beat the index " + rate(e.beat_rate)) +
+      cell("Typical hold", (e.typical_hold_sessions == null ? "\u2014"
+            : Math.round(e.typical_hold_sessions) + " sessions"),
+           (e.backstop_hold_sessions ? e.backstop_hold_sessions + "-session backstop" : "")) +
+    '</div>' +
+    '<p class="xnote">These are the trades this configuration took in the study, ' +
+    'net of ' + (e.assumed_cost_bps != null ? Number(e.assumed_cost_bps).toFixed(0) : "\u2014") +
+    ' bps of round-trip cost. They are <b>identical on every name above</b> and ' +
+    'they are not a forecast for any of them \u2014 this engine estimates no ' +
+    'per-name return, which is why the shortlist has no return column. What is ' +
+    'per-name is on each card: the entry zone, the stop and the distance to it.</p>' +
+    '</div>';
+}
+
 function departuresHTML(v) {
   const d = v.departures || [];
   if (!d.length) return "";
@@ -2260,6 +2353,24 @@ function downside(p) {
    "why is this on my screen". The run states the real reason itself, in
    `technical.why_raw[0]`; this trims it to the clause that carries it. */
 function whyLine(p) {
+  /* WHAT PUT THIS NAME HERE, in the terms of the model that put it here.
+
+     This tested for `mom_6_1_r` -- the single column that ordered the book two
+     rankings ago -- and fell through to "<theme> leads at +0.98 sd" for
+     everything else, which described the FITTED model on a book the v3
+     composite orders. Under v3 the honest line names the theme that carried
+     the most of THIS name's composite, and says how much of it. */
+  const th = p.themes || [];
+  if (th.length) {
+    const lead = th[0];
+    const total = th.reduce((n, r) => n + Math.abs(r.contribution || 0), 0);
+    const share = total > 0 ? Math.abs(lead.contribution) / total : null;
+    const pct = Math.round((lead.z + 1) / 2 * 100);
+    return esc(lead.label) + " " + pct + ordinal(pct) + " in its sector" +
+      (share != null ? " \u00b7 " + Math.round(share * 100) + "% of the score"
+                     : "") +
+      (th.length < 5 ? " \u00b7 " + th.length + " of 5 themes" : "");
+  }
   const raw = ((p.technical || {}).why_raw || [])[0];
   if (raw && /mom_6_1_r/.test(raw)) {
     const m = raw.match(/^Ranked #(\d+) of the eligible universe/);
@@ -2270,6 +2381,13 @@ function whyLine(p) {
   }
   const c = (p.contributions || [])[0];
   return c ? esc(c.label) + " leads at " + (c.z > 0 ? "+" : "") + c.z.toFixed(2) + " sd" : "";
+}
+
+/* 1st, 2nd, 3rd, 4th ... 11th, 21st. The card printed a bare "th". */
+function ordinal(n) {
+  n = Math.round(n);
+  if (n % 100 >= 10 && n % 100 <= 20) return "th";
+  return { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th";
 }
 
 function cardHTML(p) {
@@ -2329,6 +2447,15 @@ function cardHTML(p) {
         ? fig("Entry", money(L.entry[0]) + "\u2013" + money(L.entry[1]), "zone")
         : "") +
     '</div>' +
+    (function () {
+      /* Only the SCHEDULED case earns a line on the card front. "No confirmed
+         date on file" is true of three names in four and would be a line on
+         every row; it stays in the panel, where the sentence has room to say
+         that unknown is not the same as clear. */
+      const m = /reports? (today|in \d+ sessions?)/.exec(p.earnings_note || "");
+      return m ? '<div class="why earn-w">Reports ' + esc(m[1]) +
+                 ' \u00b7 a gap opens through the stop</div>' : "";
+    })() +
     '<div class="why">' + whyLine(p) + '</div>' +
     '<div class="card-foot"><span></span>' +
       '<span class="more">View analysis \u2192</span>' +
@@ -2838,7 +2965,8 @@ function panelHTML(p) {
   const L1 = (p.levels || {}).target_1;
   const up = (L1 && p.price) ? (L1 / p.price - 1) : null;
   const dn = downside(p);
-  const rows = p.contributions || [];
+  const rows = p.model_reading || p.contributions || [];
+  const themes = p.themes || [];
 
   // Numbers first. They were four screens down, under three paragraphs and
   // five collapsed panels, on the page opened to find them.
@@ -2905,6 +3033,15 @@ function panelHTML(p) {
       ? '<div class="gate"><span>Where it is weakest</span>' + esc(route) + '</div>'
       : "";
   })();
+  /* EARNINGS PROXIMITY, VISIBLE. It arrives in `against`, which is rendered
+     only inside the collapsed technical drawer -- and a name reporting
+     tomorrow is the one risk on this card that the stop cannot cover, because
+     an overnight gap opens through a stop rather than filling at it. It gets
+     its own box, above the model tables, at the same weight as the checks that
+     could not run. */
+  const earn = p.earnings_note
+    ? '<div class="gate warn"><span>Earnings</span>' + esc(p.earnings_note) + '</div>'
+    : "";
   const nt = (p.technical && p.technical.not_testable) || [];
   const untested = nt.length
     ? '<div class="gate warn"><span>Checks that could not run</span>' +
@@ -2929,16 +3066,98 @@ function panelHTML(p) {
      would let a future window overturn the decision -- under a heading that
      says what they are. */
   const ranking = ((p.technical || {}).why_raw || [])[0];
-  const lead = ranking && /mom_6_1_r/.test(ranking)
+  const lead = themes.length
     ? '<div class="gate lead"><span>Why it is in the book</span>' +
-      esc(ranking.split(" -- ")[0].replace(/\s*by mom_6_1_r\s*$/, "")) +
-      ' on sector-neutral 6-1 momentum \u2014 the one column that orders this ' +
-      'book.</div>'
+      'Ranked #' + (p.rank != null ? p.rank : "\u2014") + ' by the v3 composite: ' +
+      themes.length + ' theme' + (themes.length === 1 ? "" : "s") +
+      ' combined at its own horizon, then blended under a 40% cap. The table ' +
+      'below sums to the composite.</div>'
+    : (ranking && /mom_6_1_r/.test(ranking)
+       ? '<div class="gate lead"><span>Why it is in the book</span>' +
+         esc(ranking.split(" -- ")[0].replace(/\s*by mom_6_1_r\s*$/, "")) +
+         ' on sector-neutral 6-1 momentum \u2014 the one column that orders this ' +
+         'book.</div>'
+       : "");
+
+  /* THE COMPOSITE THAT ACTUALLY ORDERS THE BOOK, first and on its own.
+
+     This panel used to render every row in `factors` under one heading called
+     "the fitted model's separate reading" -- and after v3 shipped that dict
+     held BOTH the five themes that choose and the six fitted themes that only
+     watch. Eleven rows, one label, and the member count summed across both,
+     which is where "12 measured factors" came from on a 22-factor model.
+
+     They are two different models and they are drawn as two. */
+  const themeTable = themes.length
+    ? '<h4 class="ph">What ordered this name' +
+      '<span class="ph-s">v3 composite \u00b7 sums to the score</span></h4>' +
+      /* THREE numeric columns, not four. These tables were measured to fit a
+         375px panel with three; a fourth pushed the contribution off the edge
+         on a phone and left it reachable only by scrolling the table
+         sideways. The weight is not dropped -- it moves under the theme name,
+         where it has room to be spelled out. */
+      '<div class="tw"><table class="ftab drv"><thead><tr><th>Theme</th>' +
+      '<th class="num">pct</th>' +
+      '<th class="num">contributes</th></tr></thead><tbody>' +
+      themes.map((r) =>
+        '<tr><td class="fx">' + esc(r.label) +
+        '<div class="fx-d">' + (r.coefficient * 100).toFixed(1) +
+        '% weight \u00b7 <code>' + esc(r.factor) + '</code></div></td>' +
+        '<td class="num">' + Math.round((r.z + 1) / 2 * 100) + '</td>' +
+        '<td class="num ' + (r.contribution > 0 ? "v-pos" : "v-neg") + '">' +
+        (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(4) +
+        '</td></tr>').join("") +
+      '</tbody></table></div>' +
+      '<p class="fam-lede">pct is this name\u2019s percentile within its sector ' +
+      'on that theme. Weights renormalise over the themes a name actually has, ' +
+      'so the contributions sum to the composite even when a theme is missing ' +
+      '\u2014 they are read from the run, not re-multiplied here.</p>' +
+      (themes.length < 5
+        ? '<p class="fam-lede">Scored on ' + themes.length + ' of 5 themes. ' +
+          'A name missing one is not directly comparable with a name scored on ' +
+          'all five.</p>'
+        : "")
+    : "";
+
+  /* WHICH FACTORS EACH THEME IS MADE OF -- the FACTOR level of
+     FACTOR / THEME / Z / WEIGHT / CONTRIB. A theme line saying "Momentum 98th"
+     does not say which momentum moved, and the reader cannot check the theme
+     against the measurements it came from. Collapsed, because five themes of
+     ten factors is a wall on first read and the theme table above is the
+     summary that most people want. */
+  const themeMembers = themes.length
+    ? '<details class="adv"><summary>The ' +
+        themes.reduce((n, r) => n + ((r.members || []).length), 0) +
+        ' factors behind these ' + themes.length + ' themes</summary>' +
+        '<p class="fam-lede">Each theme is the sign-oriented mean of its ' +
+        'factors\u2019 sector-neutral ranks, re-ranked within the day so the ' +
+        'themes are comparable. Ranks run \u22121 to +1; the sign in brackets ' +
+        'is the orientation the screen fixed, so a negative sign means a HIGH ' +
+        'raw reading scores badly.</p>' +
+        themes.map((r) => {
+          const ms = r.members || [];
+          if (!ms.length) return "";
+          return '<div class="fam"><div class="fam-h"><b>' + esc(r.label) +
+            '</b><span>contributes ' + (r.contribution > 0 ? "+" : "") +
+            r.contribution.toFixed(4) + ' at ' +
+            (r.coefficient * 100).toFixed(1) + '%</span></div>' +
+            '<div class="tw"><table class="ftab"><tbody>' +
+            ms.slice().sort((a, b) => Math.abs(b.rank || 0) - Math.abs(a.rank || 0))
+              .map((m) =>
+              '<tr><td class="fx"><code>' + esc(m.name) + '</code>' +
+              (m.description ? '<div class="fx-d">' + esc(m.description) + '</div>' : "") +
+              '</td><td class="num">' +
+              (m.rank == null ? "\u2014"
+                              : (m.rank > 0 ? "+" : "") + Number(m.rank).toFixed(3)) +
+              '</td></tr>').join("") +
+            '</tbody></table></div></div>';
+        }).join("") +
+      '</details>'
     : "";
 
   const drivers = rows.length
     ? '<h4 class="ph">The fitted model\u2019s separate reading' +
-      '<span class="ph-s">monitored, not the chooser</span></h4>' +
+      '<span class="ph-s">recorded and monitored \u2014 it chose nothing</span></h4>' +
       '<div class="tw"><table class="ftab drv"><thead><tr><th>Theme</th>' +
       '<th class="num">sd</th><th class="num">adds</th>' +
       '</tr></thead><tbody>' + top + '</tbody></table></div>'
@@ -3003,12 +3222,15 @@ function panelHTML(p) {
   const exits = (L.exits && L.exits.length) ? exitsHTML(L.exits) : "";
 
   const advanced = members
-    ? '<details class="adv"><summary>All ' + members +
-        ' measured factors behind these ' + rows.length + ' themes</summary>' +
-        '<p class="fam-lede">One coefficient is fitted per THEME, over the ' +
-        'average of its members\u2019 cross-sectional ranks. Ranks run ' +
-        '\u22121 to +1 against today\u2019s universe, within sector where the ' +
-        'sector is large enough.</p>' +
+    ? '<details class="adv"><summary>The ' + members +
+        ' columns this card carries, behind the fitted model\u2019s ' + rows.length +
+        ' themes</summary>' +
+        '<p class="fam-lede">This is the SECONDARY model, not the one that ' +
+        'ordered the book \u2014 the v3 composite\u2019s own factors are ' +
+        'listed under each theme above. One coefficient is fitted per theme ' +
+        'here, over the average of its members\u2019 cross-sectional ranks. ' +
+        'Ranks run \u22121 to +1 against today\u2019s universe, within sector ' +
+        'where the sector is large enough.</p>' +
         blocks + ledger +
         techHTML(p.technical) +
       '</details>'
@@ -3016,7 +3238,8 @@ function panelHTML(p) {
         techHTML(p.technical) +
       '</details>';
 
-  return key + lead + gate + untested + exits + drivers + advanced;
+  return key + lead + earn + themeTable + themeMembers + gate + untested +
+         exits + drivers + advanced;
 }
 
 function wire() {

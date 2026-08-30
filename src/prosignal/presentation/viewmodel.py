@@ -205,6 +205,15 @@ def build_view(
             "exit_rank": int(exit_rank),
             "horizon_sessions": horizon_sessions,
         },
+        # WHAT THE ENGINE ESTIMATES AND WHAT IT DOES NOT, once, for the whole
+        # list. Every return and hold figure this engine has is a POPULATION
+        # base rate from one study -- the same 7.09% and the same 42 sessions
+        # on every name -- so a per-row "expected return" column would be the
+        # same number repeated down the page while reading as a per-name
+        # forecast. There is no per-name return estimate to show. Stating that
+        # once, next to the study figures, is the honest version of the column
+        # that keeps being looked for.
+        "expectancy": _expectancy(recommendations + watchlist),
         "departures": list(payload.get("slate_departures") or []),
         "new_entries_blocked": payload.get("new_entries_blocked"),
         "entry_clock": dict(entry_clock or payload.get("entry_clock") or {}),
@@ -418,7 +427,22 @@ def _build_pick(
             }
             for c in categories
         ],
-        "contributions": _contributions(card.get("factors") or {}),
+        # THE TWO MODELS, SEPARATED. `themes` is the v3 composite -- what
+        # ordered this book. `model_reading` is the fitted 26-factor model,
+        # which is recorded and monitored and chose nothing. They arrived as
+        # one flat dict and the panel rendered all eleven rows under a single
+        # heading, counting their members together, which is where "12
+        # measured factors" came from.
+        "themes": _contributions(card.get("factors") or {}, tier="v3_theme"),
+        "model_reading": _contributions(card.get("factors") or {},
+                                        tier="model_secondary"),
+        # Kept for anything still reading the old key: the rows that DECIDE,
+        # falling back to whatever tier exists when v3 is not the ranker.
+        "contributions": (_contributions(card.get("factors") or {}, tier="v3_theme")
+                          or _contributions(card.get("factors") or {})),
+        "earnings_note": card.get("earnings_note"),
+        "entry_admissible": bool(card.get("entry_admissible", True)),
+        "entry_block_reason": card.get("entry_block_reason"),
         # The card shows the largest few. Without the denominator a reader
         # cannot tell whether that is most of the model or a corner of it.
         "factors_considered": len(card.get("factors") or {}),
@@ -446,6 +470,35 @@ def _build_pick(
     return pick
 
 
+def _expectancy(cards: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The study's population figures, taken from the first card that has them.
+
+    They are IDENTICAL on every card by construction -- they describe the
+    trades the configuration took in the study, not this name -- which is
+    exactly why they belong to the list rather than to a row.
+    """
+    for c in cards or []:
+        tp = c.get("trade_plan") or {}
+        if not tp:
+            continue
+        out = {
+            "sample_trades": tp.get("sample_trades"),
+            "sample_period": tp.get("sample_period"),
+            "expected_return_pct": tp.get("expected_return_pct"),
+            "median_return_pct": tp.get("median_return_pct"),
+            "expected_excess_pct": tp.get("expected_excess_pct"),
+            "median_excess_pct": tp.get("median_excess_pct"),
+            "win_rate": tp.get("probability_of_profit"),
+            "beat_rate": tp.get("probability_of_beating_benchmark"),
+            "assumed_cost_bps": tp.get("assumed_cost_bps"),
+            "typical_hold_sessions": tp.get("expected_hold_sessions"),
+            "backstop_hold_sessions": tp.get("planned_hold_sessions"),
+            "cadence_sessions": tp.get("cadence_sessions"),
+        }
+        return out if any(v is not None for v in out.values()) else None
+    return None
+
+
 def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
     """The columns the run measured and deliberately did not price.
 
@@ -465,7 +518,12 @@ def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
     from ..features.crossmodel import (FEATURE_COLUMNS, UNSCORED_CONTROLS,
                                        UNSCORED_DIAGNOSTICS)
 
-    factors = card.get("factors") or {}
+    # ONLY THE FITTED MODEL'S COLUMNS. This counted members across every entry
+    # in `factors`, and since v3 that dict also holds the composite's own five
+    # themes -- so the sum was the two models added together and the "columns
+    # not priced" arithmetic below went negative.
+    factors = {k: v for k, v in (card.get("factors") or {}).items()
+               if (v or {}).get("tier") in (None, "model", "model_secondary")}
     members = sum(len((f or {}).get("members") or []) for f in factors.values())
     if not members:
         return None
@@ -490,14 +548,35 @@ def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
     return " ".join(bits)
 
 
-def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[Dict[str, Any]]:
-    """What each factor actually added to the score, largest first.
+#: The v3 themes, which are NOT the fitted model's themes even where the word
+#: is the same. `reversal` in FAMILY_MAP is the estimator's one-month move;
+#: v3's `reversal` is four factors oriented at ten sessions. Sharing a label
+#: between them put two different measurements under one name in one panel.
+V3_THEME_LABELS: Dict[str, str] = {
+    "momentum":  "Momentum",
+    "quality":   "Business quality",
+    "ownership": "Delivery-backed ownership",
+    "risk":      "Downside risk",
+    "reversal":  "Short-horizon reversal",
+}
 
-    contribution = standardised loading x fitted coefficient. This is the
-    arithmetic behind the ranking and it was previously only available as
-    prose. The factor's own name is kept alongside the readable one -- someone
-    checking the model against its source needs the identifier, not a
-    paraphrase of it.
+
+def _contributions(factors: Dict[str, Any], top: Optional[int] = None,
+                   tier: Optional[str] = None) -> List[Dict[str, Any]]:
+    """What each theme actually added to the score, largest first.
+
+    THE CONTRIBUTION IS READ, NOT RECOMPUTED. This multiplied `standardised x
+    weight` and ignored the `contribution` the engine had already serialised
+    -- which is right for the fitted model, where the coefficient is the
+    weight, and WRONG for the v3 composite, whose weights renormalise over the
+    themes a name actually has. Measured on a live card: every v3 theme read
+    19% low, uniformly, because the name was scored on four themes of five and
+    the client re-multiplied by the undiluted 40%. `rundetail` serialises the
+    contribution precisely so the client does not have to do this arithmetic;
+    it is now used.
+
+    `tier` selects one model's rows: `v3_theme` for what ORDERS the book,
+    `model_secondary` for the fitted 26-factor reading that only watches it.
     """
     from .evidence import FAMILY_MAP, FACTOR_MAP
 
@@ -505,14 +584,24 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[D
     for name, detail in factors.items():
         if not (detail or {}).get("available", False):
             continue
+        if tier is not None and (detail or {}).get("tier") != tier:
+            continue
         sd = detail.get("standardised")
         weight = detail.get("weight")
         if not isinstance(sd, (int, float)) or not isinstance(weight, (int, float)):
             continue
+        served = detail.get("contribution")
+        contribution = (round(float(served), 5)
+                        if isinstance(served, (int, float))
+                        else round(float(sd) * float(weight), 5))
         fam = FAMILY_MAP.get(name)
         mapped = FACTOR_MAP.get(name)
+        if (detail or {}).get("tier") == "v3_theme":
+            fam = None
+            mapped = (None, V3_THEME_LABELS.get(name, name.title()))
         rows.append({
             "factor": name,
+            "tier": (detail or {}).get("tier"),
             # The reader's name for the theme. `lottery` is the literature's
             # word (Bali, Cakici & Whitelaw 2011) and it reads as a guess
             # rather than a measurement; what it measures is how lottery-like
@@ -522,7 +611,7 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None) -> List[D
             "category": fam[0] if fam else (mapped[0] if mapped else None),
             "z": round(float(sd), 3),
             "coefficient": round(float(weight), 5),
-            "contribution": round(float(sd) * float(weight), 5),
+            "contribution": contribution,
             "raw": detail.get("raw"),
             # The measured factors this theme averages, so the panel can show
             # WHICH one moved instead of repeating the theme with more columns.
