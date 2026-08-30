@@ -771,6 +771,8 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .grp.quiet .rl { color: var(--ink-2); font-weight: 450; font-size: 13px; }
 .grp-h { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
          color: var(--ink-3); padding-bottom: 6px; }
+.grp-note { font-size: 12.5px; line-height: 1.55; color: var(--ink-2);
+            padding: 0 0 var(--sp-3); }
 /* `height: 58px` with a nowrap, ellipsised subtitle truncated every row that
    had anything to say -- "2,212 sessions stored - 3 sessions behi...",
    "Erases the price store and re-fetches it ...". A subtitle cut mid-word is
@@ -1692,6 +1694,12 @@ function renderSettings() {
        which configuration, and is that window still one experiment. */
     '<div class="grp">' +
       '<div class="grp-h">Out-of-sample measurement</div>' +
+      /* THE DISTINCTION, ON THE SCREEN. The comment below explained it to
+         whoever reads the source; the owner reading the drawer still saw two
+         rows about windows and reasonably asked why both exist. One sentence
+         costs less than the question. */
+      '<div class="grp-note">Daily signals collects the record. These decide ' +
+      'what it will be judged as.</div>' +
       /* THESE ARE NOT THE SAME THING AS "Daily signals", and the screen never
          said so. The cron COLLECTS -- it ranks every weekday and writes a row.
          The forward test is a PRE-REGISTRATION: a start date, a config hash and
@@ -1720,11 +1728,17 @@ function renderSettings() {
              (fwd.registered && !fwd.config_matches ? "Re-register" : "Register") +
              '</button>',
              fwd.registered && !fwd.config_matches) +
+      /* OPENED BY THE DAILY SIGNALS SWITCH, which is the link the owner was
+         missing: turning the cron on calls `/operations/resume`, and that is
+         what starts a period. Two rows for one mechanism reads as duplication
+         unless the row says which switch owns it. */
       setRow("Recording period",
              cur ? "Open since " + esc(day(cur.started)) +
-                   " \u00b7 results are attributed to it"
-                 : "None open. Runs are still recorded; they are just not "
-                   + "grouped into one period to be scored together.",
+                   " \u00b7 opened by Daily signals; groups runs so they can " +
+                   "be scored as one"
+                 : "None open \u2014 Daily signals opens one when it is " +
+                   "switched on. Runs are still recorded; they are just not " +
+                   "grouped into one period to be scored together.",
              "") +
     '</div>' +
 
