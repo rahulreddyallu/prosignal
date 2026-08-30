@@ -776,6 +776,21 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .grp.quiet .rl { color: var(--ink-2); font-weight: 450; font-size: 13px; }
 .grp-h { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
          color: var(--ink-3); padding-bottom: 6px; }
+.fwd { display: flex; align-items: center; justify-content: space-between;
+       gap: var(--sp-4); padding: var(--sp-3) var(--sp-4);
+       border-radius: var(--r-md); border: 1px solid var(--line);
+       background: var(--surface); margin-bottom: var(--sp-4); }
+.fwd > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fwd .btn { flex: none; }
+.fwd b { font-size: 13.5px; font-weight: 600; }
+.fwd span { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.fwd.ok { border-left: 3px solid var(--accent); }
+.fwd.void { border-left: 3px solid var(--neg); }
+.fwd.void b { color: var(--neg); }
+.fwd.off { border-left: 3px solid var(--line); }
+.nr-dim { opacity: .55; }
+.dim-h { border-top: 1px dashed var(--line); padding-top: var(--sp-3);
+         margin-top: var(--sp-3); }
 .grp-note { font-size: 12.5px; line-height: 1.55; color: var(--ink-2);
             padding: 0 0 var(--sp-3); }
 /* `height: 58px` with a nowrap, ellipsised subtitle truncated every row that
@@ -969,6 +984,26 @@ path.cb { fill: none; stroke: var(--ink-3); stroke-width: 1.25;
 @media (max-width: 400px) {
   .brand span { font-size: 11.5px; }
   #mkt-status { font-size: 11px; }
+}
+/* COMPACT CARDS ON A PHONE. Six cards at desktop spacing ran past three
+   screens, and the reader scrolling for the sixth has forgotten the first.
+   Nothing is removed -- every number stays -- the air between them is what
+   shrinks: tighter padding, a smaller headline, less gap above the figure
+   row, and the why-line and footer pulled in. */
+@media (max-width: 640px) {
+  .card { padding: var(--sp-3) var(--sp-4); gap: 6px; }
+  .card-top { row-gap: 2px; }
+  .card-top .name { font-size: 16px; line-height: 1.25; }
+  .card-top .p { font-size: 17px; }
+  .card-top .rank { font-size: 11px; }
+  .figs { margin-top: var(--sp-3); padding-top: 8px; gap: 8px 12px; }
+  .fl { font-size: 10px; }
+  .fv { font-size: 13.5px; }
+  .fs { font-size: 11px; }
+  .why { font-size: 12px; line-height: 1.45; }
+  .card-foot { margin-top: 2px; }
+  .more { font-size: 12.5px; }
+  .cards { gap: var(--sp-3); }
 }
 @media (max-width: 640px) {
   body { font-size: 14.5px; }
@@ -1695,50 +1730,16 @@ function renderSettings() {
              "") +
     '</div>' +
 
-    /* MEASUREMENT: the one question both of these answer -- since when, under
-       which configuration, and is that window still one experiment. */
-    '<div class="grp">' +
-      '<div class="grp-h">Out-of-sample measurement</div>' +
-      /* THE DISTINCTION, ON THE SCREEN. The comment below explained it to
-         whoever reads the source; the owner reading the drawer still saw two
-         rows about windows and reasonably asked why both exist. One sentence
-         costs less than the question. */
-      '<div class="grp-note">Daily signals collects the record. These fix what ' +
-      'counts as a verdict on it.</div>' +
-      /* THESE ARE NOT THE SAME THING AS "Daily signals", and the screen never
-         said so. The cron COLLECTS -- it ranks every weekday and writes a row.
-         The forward test is a PRE-REGISTRATION: a start date, a config hash and
-         the pass/fail criteria written down BEFORE the data arrives, which is
-         the only thing that stops a result being chosen after the fact. One
-         gathers the evidence; the other fixes what will count as a verdict. */
-      setRow("Forward test",
-             fwd.registered
-               ? (fwd.config_matches
-                    ? (fwd.sessions_elapsed + " of " + fwd.sessions_target +
-                       " sessions since " + esc(String(fwd.started_on)))
-                    /* `registered_config` is what the window was opened
-                       against; `config_version` is what the engine runs NOW.
-                       Reading `config_version` for both printed the same
-                       string twice and made the sentence say nothing. */
-                    : "Void \u2014 the configuration changed after it opened. "
-                      + "Re-register starts a new 18-month window from today.")
-               : "Not open. Register fixes today's configuration and the pass "
-                 + "mark for 18 months.",
-             '<button class="btn ghost xs" id="fwd">' +
-             (fwd.registered && !fwd.config_matches ? "Re-register" : "Register") +
-             '</button>',
-             fwd.registered && !fwd.config_matches) +
-      /* OPENED BY THE DAILY SIGNALS SWITCH, which is the link the owner was
-         missing: turning the cron on calls `/operations/resume`, and that is
-         what starts a period. Two rows for one mechanism reads as duplication
-         unless the row says which switch owns it. */
-      setRow("Recording period",
-             cur ? "Open since " + esc(day(cur.started)) +
-                   " \u00b7 opened by the Daily signals switch"
-                 : "None open. The Daily signals switch opens one.",
-             "") +
-    '</div>' +
+    /* RECORDING PERIOD IS GONE. It was opened by the Daily signals switch and
+       reported nothing that switch does not -- one mechanism, two rows, which
+       is what made this section read as a duplicate of the cron.
 
+       THE FORWARD TEST STAYS, and it moved OFF this drawer: it is not a
+       setting, it is the frame the History page is read in. A record with no
+       fixed start date and no pass mark is a record you can restart whenever
+       the numbers turn, and then eighteen months of it means nothing. That is
+       precisely the failure the daily cron plus a Clear button makes easy, so
+       it earns its place -- as a line on History, where the evidence is. */
     '<div class="grp quiet">' +
       '<div class="grp-h">Destructive</div>' +
       /* WHAT IT ACTUALLY DOES, because "clears the History page" is true and
@@ -2622,26 +2623,83 @@ function sparkHTML(path, entry) {
 function openHTML(op) {
   const rows = (op && op.positions) || [];
   if (!rows.length) return "";
-  const live = rows.slice().sort((a, b) => b.unrealised - a.unrealised);
-  const body = live.map((r) =>
-    '<button class="nr" data-stock="' + esc(r.ticker) + '">' +
+
+  /* THE QUESTION THIS PAGE IS ACTUALLY ASKED: if I had bought these, where
+     would I be? It was answerable only for CLOSED positions, so the page sat
+     blank for weeks while the cron issued calls every morning -- and when it
+     did answer, it answered without the index, which makes +2.3% unreadable:
+     in a +4% tape that is the signal losing.
+
+     Every open call is now marked to the latest close AND to the index over
+     the identical days. The marks stay out of the realised statistics -- a
+     mark can reverse tomorrow, and letting a good afternoon into the win rate
+     is how a record gets improved by choosing when to look at it. */
+  const mine = rows.filter((r) => r.current_engine !== false);
+  const older = rows.filter((r) => r.current_engine === false);
+  const live = mine.slice().sort((a, b) =>
+    (b.excess != null ? b.excess : b.unrealised) -
+    (a.excess != null ? a.excess : a.unrealised));
+
+  const row = (r, dim) =>
+    '<button class="nr' + (dim ? " nr-dim" : "") + '" data-stock="' +
+      esc(r.ticker) + '">' +
       '<span class="nr-t">' + esc(r.ticker) + '</span>' +
-      '<span class="nr-h">' + money(r.entry_price) + ' \u2192 ' +
-        money(r.last_price) + ' \u00b7 ' + r.sessions_held +
+      '<span class="nr-h">' + r.sessions_held +
         (r.sessions_held === 1 ? " session" : " sessions") +
-        (r.reaffirmed ? ' \u00b7 re-signalled ' + r.reaffirmed +
-          (r.reaffirmed === 1 ? " time" : " times") : "") + '</span>' +
+        (r.benchmark != null
+          ? ' \u00b7 index ' + (r.benchmark >= 0 ? "+" : "") +
+            (r.benchmark * 100).toFixed(1) + '%'
+          : "") +
+        (r.reaffirmed ? ' \u00b7 re-signalled ' + r.reaffirmed + 'x' : "") +
+      '</span>' +
       sparkHTML(r.path, r.entry_price) +
       '<span class="nr-v">' + signed(r.unrealised) + '</span>' +
-    '</button>').join("");
-  const up = op.up || 0;
+    '</button>';
+
+  /* THE HEADLINE IS THE EXCESS, not the raw mark. */
+  /* WHEN THE CURRENT ENGINE HAS ISSUED NOTHING YET, the summary describes an
+     empty set and "0 of 0 ahead of the index" is a statistic about nothing.
+     Say what is true: these belong to the previous configuration. */
+  if (!mine.length && older.length) {
+    return '<div class="col open">' +
+        '<div class="col-h"><span>Open calls</span><b>\u2014</b></div>' +
+        '<div class="col-s">All ' + older.length + ' open call' +
+          (older.length === 1 ? "" : "s") + ' below were issued by an earlier ' +
+          'configuration, so none is this engine\u2019s record. Calls made ' +
+          'from here are counted.</div>' +
+        '<div class="col-b">' + older.map((r) => row(r, true)).join("") + '</div>' +
+      '</div>';
+  }
+
+  const head = (op.avg_excess != null)
+    ? signed(op.avg_excess) + ' vs the index'
+    : signed(op.avg_unrealised);
+  const sub = [
+    (op.beating != null ? op.beating + ' of ' + mine.length + ' ahead of the index'
+                        : (op.up || 0) + ' of ' + mine.length + ' above entry'),
+    (op.avg_unrealised != null && op.avg_benchmark != null
+      ? 'you ' + (op.avg_unrealised >= 0 ? "+" : "") +
+        (op.avg_unrealised * 100).toFixed(1) + '%, index ' +
+        (op.avg_benchmark >= 0 ? "+" : "") +
+        (op.avg_benchmark * 100).toFixed(1) + '%'
+      : null),
+    'marked to ' + esc(day(op.as_of)),
+  ].filter(Boolean).join(" \u00b7 ");
+
+  const olderBlock = older.length
+    ? '<div class="col-s dim-h">' + older.length + ' call' +
+        (older.length === 1 ? "" : "s") + ' from an earlier configuration \u2014 ' +
+        'shown, not counted</div>' +
+      '<div class="col-b">' + older.map((r) => row(r, true)).join("") + '</div>'
+    : "";
+
   return '<div class="col open">' +
-      '<div class="col-h"><span>Still open</span>' +
-        '<b>' + signed(op.avg_unrealised) + '</b></div>' +
-      '<div class="col-s">' + up + ' of ' + rows.length + ' above entry \u00b7 ' +
-        'marked to ' + esc(day(op.as_of)) + ', not yet a result. A name the ' +
-        'engine re-signals while it is still held stays one position.</div>' +
-      '<div class="col-b">' + body + '</div>' +
+      '<div class="col-h"><span>Open calls</span><b>' + head + '</b></div>' +
+      '<div class="col-s">' + sub + '. Not results \u2014 they can reverse ' +
+        'before they close, and they are kept out of every figure above. A ' +
+        'name re-signalled while still held stays one call.</div>' +
+      '<div class="col-b">' + live.map((r) => row(r, false)).join("") + '</div>' +
+      olderBlock +
     '</div>';
 }
 
@@ -2672,6 +2730,12 @@ function viewHistory(v) {
   const rows = perf.by_ticker || [];
   const ep = perf.epoch || {};
   const open = perf.open || {};
+  /* ROWS, NOT THE SCOPED COUNT. `open.n` counts only the calls issued by the
+     configuration running now, which is right for the statistics and wrong
+     for deciding whether this page has anything to show: with ten open calls
+     from a previous engine it read zero and rendered "no calls yet" over a
+     list it was holding. */
+  const openRows = (open.positions || []).length;
   const nOpen = open.n || 0;
   const nClosed = h.n || 0;
 
@@ -2684,7 +2748,12 @@ function viewHistory(v) {
       ' decided by a superseded configuration and are not counted here.</p>'
     : "";
 
-  if (!nClosed && !nOpen) {
+  /* THE PAGE OPENS ON THE FIRST CALL, not the first CLOSE. It waited for a
+     position to close, which on a 20-session hold is a month of a blank page
+     while the cron issued six calls every morning. Open calls are marked to
+     the latest close and to the index over the same days, so the answer to
+     "what would I have made" exists from the second session. */
+  if (!nClosed && !openRows) {
     /* WHY IT IS EMPTY, which "nothing has closed yet" does not cover. Open
        marks are scoped to the configuration running now, so the day after any
        config change every one of them belongs to the previous engine and the
@@ -2692,10 +2761,10 @@ function viewHistory(v) {
        unexplained that reads as a broken page. */
     const dropped = open.excluded_open || 0;
     return '<div class="box empty">' +
-      '<h3>The record opens here</h3>' +
-      '<p>No position has closed under this configuration yet. Every call ' +
-      'lands on this page the day it closes, with what it returned against ' +
-      'the index over the same days.</p>' +
+      '<h3>No calls yet</h3>' +
+      '<p>Every call lands here the morning after it is issued, marked to the ' +
+      'latest close and to the index over the same days \u2014 open or ' +
+      'closed. Run a scan, or wait for the daily job.</p>' +
       (dropped
         ? '<p class="fine">' + dropped + ' open ' +
           (dropped === 1 ? 'position was' : 'positions were') +
@@ -2706,6 +2775,31 @@ function viewHistory(v) {
           'again when they close.</p>') +
       '</div>' + excluded;
   }
+
+
+  /* THE FORWARD TEST, ON THE PAGE IT DESCRIBES. It sat in Settings looking
+     like a switch nobody needed beside a cron that already runs. It is not a
+     switch: it is the reason this page can be believed. A record with no
+     fixed start and no pass mark written down first is one you can restart
+     whenever it turns against you -- which the Clear button makes a single
+     tap -- and eighteen months of that measures nothing. Here it is the
+     header the evidence is read under. */
+  const fwd = state.forward || {};
+  const reg = fwd.registered
+    ? (fwd.config_matches
+        ? '<div class="fwd ok"><div><b>' + fwd.sessions_elapsed + ' of ' +
+          fwd.sessions_target + ' sessions</b><span>Running against a fixed ' +
+          'configuration since ' + esc(String(fwd.started_on)) + '. The pass ' +
+          'mark was set before the data arrived.</span></div></div>'
+        : '<div class="fwd void"><div><b>Not a fixed record</b><span>The ' +
+          'configuration changed after this window opened, so what is below ' +
+          'mixes two engines.</span></div>' +
+          '<button class="btn ghost xs" id="fwd">Restart</button></div>')
+    : '<div class="fwd off"><div><b>Nothing is pre-committed</b><span>These ' +
+      'numbers can be restarted whenever they turn. Fixing the start date and ' +
+      'the pass mark first is what makes a live record evidence rather than a ' +
+      'scoreboard.</span></div>' +
+      '<button class="btn ghost xs" id="fwd">Register</button></div>';
 
   /* THE CURVE FIRST. It was below a per-ticker wall of text, which is the
      wrong way round: the question this page answers is what the engine did,
@@ -2746,11 +2840,11 @@ function viewHistory(v) {
   const closed = nClosed
     ? '<div class="cols">' + list("Paid off", won, "up") +
       list("Went against", lost, "dn") + '</div>'
-    : '<p class="fine">Nothing has closed yet. A position lands in the ' +
-      'figures above the day the market takes it to its stop, its rank band ' +
-      'or its holding limit.</p>';
+    : '<p class="fine">Nothing has closed yet. A call joins the realised ' +
+      'figures the day the market takes it to its stop, its rank band or its ' +
+      'holding limit \u2014 until then it is above, marked and uncounted.</p>';
 
-  return chart + openHTML(open) + closed + excluded;
+  return reg + chart + openHTML(open) + closed + excluded;
 }
 
 async function confirmWipe() {
@@ -3031,6 +3125,12 @@ function wire() {
   }));
   $$("button[data-stock]").forEach((el) =>
     el.addEventListener("click", () => openStock(el.dataset.stock)));
+  /* The forward-test control lives on History now, so it is wired by the page
+     render rather than by the settings drawer. A button painted by one
+     function and wired by another is how Clear once looked normal and did
+     nothing. */
+  const fwdBtn = $("#fwd");
+  if (fwdBtn) fwdBtn.addEventListener("click", doForward);
   // The tile mounts its own build button. buildScreen binds its copy at
   // mount; the tile is rebuilt by render, so it binds here instead.
   const tileBoot = $(".tile #boot");

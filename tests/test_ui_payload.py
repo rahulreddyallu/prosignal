@@ -102,11 +102,10 @@ def test_the_view_is_json_serialisable():
     "could not be completed",         # a failed run must not imply a trade
     "Not tested",      # NOT_TESTABLE is not a pass
     "What would move this to Buy",    # the near misses stay actionable
-    # "No results yet" was the empty History page. It is now "The record opens
-    # here", because the page is scoped to the running configuration and the
-    # honest statement is not "there are no results" -- there are 128 of them --
-    # but "none of them were decided by this engine".
-    "The record opens here",
+    # The empty History page. It waited for a CLOSE and now waits for a CALL:
+    # open positions are marked to the latest close and to the index over the
+    # same days, so this state means the engine has issued nothing at all.
+    "No calls yet",
     "superseded configuration",       # and what is being left out, in one line
     "New market data",       # store moved on, results did not
     "What this configuration has done",  # history is scoped, and says so
@@ -136,10 +135,18 @@ def test_no_engine_vocabulary_is_rendered_as_a_label(term):
 
 
 def test_the_score_is_not_presented_as_a_probability():
-    html = _html().lower()
+    """RENDERED TEXT, not the source. This searched the whole file, so a code
+    comment explaining why a mark must be kept OUT of the win rate failed the
+    test that exists to stop a win rate being shown. What matters is what
+    reaches a reader."""
+    html = _html()
+    body = html[html.index("<body>"):]
+    rendered = " ".join(re.findall(r">([^<>{}]{3,120})<", body)).lower()
+    strings = " ".join(re.findall(r"'([^'\n]{3,120})'", html)).lower()
     for phrase in ("probability of", "% chance", "likelihood of profit",
                    "confidence:", "win rate"):
-        assert phrase not in html
+        assert phrase not in rendered, f"{phrase!r} is rendered"
+        assert phrase not in strings, f"{phrase!r} is in a rendered string"
 
 
 def test_the_interface_makes_no_third_party_request():
@@ -864,11 +871,14 @@ def test_an_empty_history_explains_itself():
     CONFIGURATION, with the count of what was left out beside it.
     """
     html = _html()
-    assert "The record opens here" in html
-    assert "closed under this configuration" in html
+    # The empty state now fires only when there is NOTHING to show -- no
+    # closed positions AND no open calls -- because open calls are marked and
+    # listed from the second session rather than waiting for a close.
+    assert "No calls yet" in html
+    assert "marked to the latest close" in html
     assert "superseded configuration" in html, \
         "an empty page must say what it excluded, or it reads as broken"
-    assert "the day it closes" in html
+    assert "open or closed" in html or "marked to the latest close" in html
     assert "target or a stop" not in html, \
         "the target and the stop-as-exit are not how a position ends any more"
 
@@ -1079,7 +1089,10 @@ def test_open_calls_are_shown_not_just_counted():
     html = _html()
     assert "function openHTML" in html
     body = html[html.index("function openHTML"):html.index("function viewHistory")]
-    assert "entry_price" in body and "last_price" in body
+    # The row leads with what the reader is judging -- how long it has been
+    # held and what the index did over the same days -- rather than the two
+    # prices it was derived from.
+    assert "sessions" in body and "r.benchmark" in body
     assert "unrealised" in body
     assert "sessions_held" in body
     # And it must be reachable with nothing closed at all. Asserted on the
@@ -1088,7 +1101,7 @@ def test_open_calls_are_shown_not_just_counted():
     # so a source-position comparison reads the order backwards.
     view = html[html.index("function viewHistory"):]
     view = view[:view.index("\nfunction ", 20)]
-    ret = re.search(r"return chart \+ ([^;]+);", view)
+    ret = re.search(r"return reg \+ chart \+ ([^;]+);", view)
     assert ret, "viewHistory must end in one composed return"
     order = ret.group(1)
     assert order.index("openHTML(open)") < order.index("closed"), \
@@ -1098,7 +1111,7 @@ def test_open_calls_are_shown_not_just_counted():
 def test_an_open_mark_is_never_presented_as_a_result():
     html = _html()
     body = html[html.index("function openHTML"):html.index("function viewHistory")]
-    assert "not yet a result" in body
+    assert "Not results" in body
 
 
 def test_the_interface_script_actually_parses():
@@ -1120,3 +1133,53 @@ def test_the_interface_script_actually_parses():
     # No node: catch the specific shape that caused it -- a line that reads
     # like prose sitting where a statement belongs.
     pytest.skip("node not available to parse-check the interface")
+
+
+def test_history_opens_on_the_first_call_not_the_first_close():
+    """It waited for a position to CLOSE. On a twenty-session hold that is a
+    month of a blank page while the cron issues six calls every morning, and
+    the question the page is asked -- "if I had bought these, where would I
+    be?" -- is answerable from the second session."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    assert "openRows" in view, "the empty state must key on rows, not the scoped count"
+    assert "!nClosed && !openRows" in view
+
+
+def test_an_open_call_is_shown_against_the_index_over_the_same_days():
+    """+2.3% is unreadable on its own: in a +4% tape it is the signal losing.
+    The closed figures have carried the benchmark since v1 and the open ones
+    did not, so the only number available from day two was the one that could
+    not be judged."""
+    html = _html()
+    fn = html[html.index("function openHTML"):]
+    fn = fn[:fn.index("\nfunction ", 20)]
+    assert "r.benchmark" in fn, "each call needs the index over its own window"
+    assert "avg_excess" in fn, "and the headline is the excess, not the raw mark"
+    assert "kept out of every figure above" in fn, (
+        "a mark must never be pooled into the realised statistics"
+    )
+
+
+def test_calls_from_an_older_configuration_are_shown_not_hidden():
+    """Scoping to the running configuration is right for the STATISTICS and
+    wrong for the list: the day after any config change the page went blank
+    while Today showed six BUYs."""
+    html = _html()
+    fn = html[html.index("function openHTML"):]
+    fn = fn[:fn.index("\nfunction ", 20)]
+    assert "current_engine" in fn
+    assert "shown, not counted" in fn or "none is this engine" in fn
+
+
+def test_the_forward_test_moved_onto_the_page_it_describes():
+    """It sat in Settings looking like a switch beside a cron that already
+    runs, which is why it read as duplication. It is not a switch -- it is the
+    reason the record below can be believed, so it is the header of it."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    assert "Nothing is pre-committed" in view
+    assert 'id="fwd"' in view, "and the action sits with the explanation"
+    assert "Recording period" not in html, "the duplicate row is gone"
