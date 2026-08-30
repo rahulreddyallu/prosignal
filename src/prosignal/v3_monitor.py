@@ -41,8 +41,10 @@ from .features.v3 import THEMES, FACTOR_THEME
 
 __all__ = ["FactorHealth", "ThemeHealth", "DrawdownFlag", "rolling_factor_ic",
            "rolling_theme_ic", "review_factors", "review_themes",
-           "theme_influence_share", "review_drawdown", "MIN_PERIODS",
-           "IC_ALERT_T", "DOMINANCE_ALERT", "DOMINANCE_EXCESS", "DRAWDOWN_FLAG"]
+           "theme_influence_share", "cross_section_influence",
+           "review_cross_section", "review_drawdown", "MIN_PERIODS",
+           "IC_ALERT_T", "DOMINANCE_ALERT", "DOMINANCE_EXCESS", "DRAWDOWN_FLAG",
+           "MIN_NAMES_FOR_INFLUENCE"]
 
 #: Fewer than this many scored periods and a rolling IC is not worth reading.
 MIN_PERIODS = 40
@@ -64,6 +66,8 @@ DOMINANCE_EXCESS = 0.15
 #: Book drawdown past which the run carries a loud flag. The deepest drawdown
 #: across both sealed windows was -23.9%.
 DRAWDOWN_FLAG = -0.25
+#: Below this many scored names an influence share is noise, not a measurement.
+MIN_NAMES_FOR_INFLUENCE = 30
 
 
 @dataclass
@@ -190,6 +194,66 @@ def theme_influence_share(panel: pd.DataFrame) -> Dict[str, float]:
         for i, c in enumerate(cols):
             acc[c[:-8]].append(float(sd[i] / tot))
     return {k: float(np.mean(v)) for k, v in acc.items() if v}
+
+
+def cross_section_influence(scored: pd.DataFrame) -> Dict[str, float]:
+    """Each theme's share of TODAY's cross-sectional spread. One date, no labels.
+
+    THIS IS THE HALF OF THE MONITOR THAT CAN RUN ON EVERY RUN. Rolling IC needs
+    forward outcomes, so it cannot say anything about today until twenty-one
+    sessions have passed -- which is correct, and also means that on its own it
+    would leave the daily run with nothing to say about the model at all. The
+    dominance question does not need outcomes: whether one theme is doing most
+    of the separating between names is a property of the scores as they stand,
+    visible the moment they are computed.
+
+    So a theme that has quietly taken over the ranking is caught the same day,
+    and whether it was RIGHT to is answered three weeks later by the IC.
+    """
+    cols = [t + "_contrib" for t in THEMES if t + "_contrib" in scored.columns]
+    if not cols or len(scored) < MIN_NAMES_FOR_INFLUENCE:
+        return {}
+    v = scored[cols].to_numpy("float64")
+    if not np.isfinite(v).any():
+        return {}
+    sd = np.nanstd(v, axis=0)
+    tot = float(np.nansum(sd))
+    if tot <= 0:
+        return {}
+    return {c[:-8]: float(sd[i] / tot) for i, c in enumerate(cols)}
+
+
+def review_cross_section(scored: pd.DataFrame,
+                         dominance: float = DOMINANCE_ALERT,
+                         excess: float = DOMINANCE_EXCESS) -> List[str]:
+    """Notes for one run: which themes are running more than they were given.
+
+    Returns human-readable lines, never a decision. Nothing is disabled and no
+    weight moves -- a run that silently reweighted itself because one theme
+    looked large today would be a different model every morning.
+    """
+    share = cross_section_influence(scored)
+    if not share:
+        return []
+    ordered = sorted(share.items(), key=lambda kv: -kv[1])
+    body = ", ".join(f"{t} {v:.0%} (declared {THEMES[t].weight:.0%})"
+                     for t, v in ordered)
+    notes = [f"Theme influence on this cross-section: {body}. This is the share "
+             f"of the spread between names that each theme actually produced "
+             f"today, against the weight it was given; they agree when the "
+             f"themes are equally dispersed."]
+    for t, v in ordered:
+        w = THEMES[t].weight
+        if v > dominance or v > w + excess:
+            notes.append(
+                f"FLAG {t}: it is producing {v:.0%} of today's separation "
+                f"between names against a declared weight of {w:.0%}. The cap "
+                f"constrains the coefficient, not the influence -- if the other "
+                f"themes have gone flat, this ranking is mostly {t} whatever "
+                f"the config says. Nothing has been changed; check "
+                f"`prosignal research v3 --monitor` for whether it is still "
+                f"PAYING, which needs outcomes this run does not have yet.")
+    return notes
 
 
 def review_factors(ic_frame: pd.DataFrame, window: int = 52,

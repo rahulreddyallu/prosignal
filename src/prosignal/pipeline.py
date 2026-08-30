@@ -93,6 +93,13 @@ class AnalysisRun:
     context: RunContext
     timings_ms: Dict[str, float] = field(default_factory=dict)
     funnel: Dict[str, int] = field(default_factory=dict)
+    #: What stage 4 said about HOW it ranked -- the scorer, the sealed-holdout
+    #: numbers behind it, and any theme running more of today's spread than the
+    #: weight it was given. Stage 4 has written these on every run since the v2
+    #: deploy and `CoreScores.notes` was read by nothing: not rendered, not
+    #: persisted, not in the ledger. A monitor that flags into a field nobody
+    #: reads is not a monitor, so the notes are carried out of the run here.
+    scoring_notes: List[str] = field(default_factory=list)
 
 
 def run_analysis(
@@ -391,7 +398,8 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     )
 
     result = AnalysisRun(output=output, context=context, timings_ms=timings,
-                         funnel=funnel)
+                         funnel=funnel,
+                         scoring_notes=list(getattr(scores, "notes", []) or []))
 
     # THE SCREEN READS THIS, not the API's job queue.
     #

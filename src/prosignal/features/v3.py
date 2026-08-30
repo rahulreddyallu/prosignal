@@ -68,7 +68,8 @@ import pandas as pd
 __all__ = ["Theme", "THEMES", "FACTOR_THEME", "ALL_FACTORS", "MIN_THEMES",
            "MIN_LOOKBACK_SESSIONS", "sector_neutral_rank", "theme_subscore",
            "score_frame", "attribution", "absolute_floor", "cap_weights",
-           "BOOK", "BOOK_NOTE", "EXCLUDED_THEMES"]
+           "BOOK", "BOOK_NOTE", "HOLDOUT_BOOK", "RESEARCH_BOOK",
+           "LIVE_BOOK", "EXCLUDED_THEMES"]
 
 
 @dataclass(frozen=True)
@@ -264,20 +265,58 @@ def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
 
 
 #: The shipped book. NOT holdout-tested at this setting -- see BOOK_NOTE.
-BOOK = {"slots": 12, "entry_rank": 24, "exit_rank": 48,
-        "rebalance_every_signal_dates": 2, "signal_date_stride_sessions": 5,
-        "max_per_sector": 3, "weighting": "equal", "universe_max_names": 750,
-        "floor_applies_to": "entries_only"}
+#: THREE BOOKS EXIST AND ONLY ONE OF THEM TRADES. Keeping them apart matters
+#: more than any of their contents, because a number measured on one and quoted
+#: about another is how a backtest becomes a claim it never made.
+#:
+#: 1. HOLDOUT_BOOK -- the book the sealed windows actually evaluated.
+#: 2. RESEARCH_BOOK -- the lower-turnover replacement chosen on TRAINING data
+#:    after the holdout showed costs were eating the book. Never traded.
+#: 3. The LIVE book -- what production trades. It is NOT either of these and it
+#:    does not live here: it is `capital.max_open_positions`,
+#:    `stage6_entry.admission.{entry_rank,exit_rank,entry_cadence_sessions}` in
+#:    `config/parameters.yaml`, which is the only place that can change it.
+#:    Mirrored below for reading only; `tests/test_v3_score.py` fails if this
+#:    copy drifts from the config, because a stale mirror is worse than none.
+HOLDOUT_BOOK = {"slots": 10, "entry_rank": 20, "exit_rank": 30,
+                "rebalance_every_signal_dates": 1,
+                "signal_date_stride_sessions": 5,
+                "floor_applies_to": "whole_population"}
+
+RESEARCH_BOOK = {"slots": 12, "entry_rank": 24, "exit_rank": 48,
+                 "rebalance_every_signal_dates": 2,
+                 "signal_date_stride_sessions": 5,
+                 "max_per_sector": 3, "weighting": "equal",
+                 "universe_max_names": 750, "floor_applies_to": "entries_only"}
+
+#: Read-only mirror of the LIVE book. The config is the source of truth.
+LIVE_BOOK = {"slots": 6, "entry_rank": 6, "exit_rank": 18,
+             "entry_cadence_sessions": 21}
+
+#: Kept as the name older code imported. It is the RESEARCH book -- which is
+#: not what trades -- so anything reading it for the live configuration is
+#: reading the wrong thing.
+BOOK = RESEARCH_BOOK
 
 BOOK_NOTE = (
-    "The COMPOSITE carries two sealed-holdout evaluations. This BOOK does not. "
-    "The book that was tested (10 slots, exit 30, weekly, floor filtering the "
-    "whole population) lost to the benchmark by 2.8% a year on window A and beat "
-    "it by 2.0% on window B, and on both the reason was transaction costs of "
-    "9.7% and 13.7% a year. Both windows are spent, so the replacement was "
-    "chosen on the TRAINING window against a stated cost target -- turnover "
-    "needs no labels to measure -- and it is shipped labelled as awaiting its "
-    "own sealed test. The quarterly re-check is what will settle it.")
+    "THE COMPOSITE CARRIES TWO SEALED-HOLDOUT EVALUATIONS. NO BOOK DOES. "
+    "The book the windows evaluated -- 10 slots, exit 30, weekly, the floor "
+    "filtering the whole population -- lost to the benchmark by 2.8% a year on "
+    "window A and beat it by 2.0% on window B, and on both the reason was "
+    "transaction costs of 9.7% and 13.7% a year. "
+    "AND THAT IS NOT THE BOOK THAT TRADES. Production runs SIX positions on a "
+    "21-session cadence with a 3x exit band (18), which is both slower and far "
+    "more concentrated than anything either window measured. Slower cuts the "
+    "cost drag that sank the tested book, and turnover needs no labels to "
+    "verify. More concentrated cuts the other way, and it leans on the "
+    "statistic that generalised LEAST: top-ten excess on window A was +0.38% "
+    "at t 0.81, indistinguishable from zero, while the quintile spread held at "
+    "t 2.89. Ordering within the top few names is the part of this model the "
+    "holdouts did not support, and a six-name book is a bet on exactly that. "
+    "Read the shortlist as drawn from an evidenced ranking; the concentration "
+    "is an operator's risk choice, not a validated one. Both windows are spent, "
+    "so no book can be settled here -- the quarterly re-check is what will do "
+    "it, once its window stops overlapping window A.")
 
 
 def absolute_floor(scored: pd.DataFrame, dist_200dma: pd.Series,

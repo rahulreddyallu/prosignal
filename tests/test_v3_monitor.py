@@ -272,3 +272,117 @@ def test_every_flag_is_serialisable_for_the_run_record():
     for payload in (f, t, d):
         json.loads(json.dumps(payload, default=float))
     assert d["peak_date"] == "2026-01-01" and d["trough_date"] == "2026-02-01"
+
+
+# ------------------------------------------- the half that runs every day
+def _one_date(seed=5, flat=(), scale=None):
+    """One scored cross-section, as stage 4 produces it: no forward labels."""
+    rng = np.random.default_rng(seed)
+    n = 200
+    idx = [f"S{i:03d}" for i in range(n)]
+    out = pd.DataFrame(index=idx)
+    for t, th in v3.THEMES.items():
+        sub = (pd.Series(rng.normal(size=n)).rank(pct=True).to_numpy() - 0.5) * 2
+        out[t + "_sub"] = sub
+        w = 0.0 if t in flat else th.weight * (scale or {}).get(t, 1.0)
+        out[t + "_contrib"] = sub * w
+    return out
+
+
+def test_the_daily_check_needs_no_forward_outcome():
+    """Rolling IC cannot say anything about today -- the outcome is 21 sessions
+    away. Dominance can: it is a property of the scores as they stand. That is
+    the whole reason this half runs on every run."""
+    scored = _one_date()
+    assert not [c for c in scored.columns if c.startswith("y")]
+    share = mon.cross_section_influence(scored)
+    assert set(share) == set(v3.THEMES)
+    assert sum(share.values()) == pytest.approx(1.0)
+    for t, th in v3.THEMES.items():
+        assert share[t] == pytest.approx(th.weight, abs=0.03)
+
+
+def test_a_healthy_cross_section_gets_a_line_and_no_flag():
+    notes = mon.review_cross_section(_one_date())
+    assert len(notes) == 1 and notes[0].startswith("Theme influence")
+    assert "declared 40%" in notes[0]
+    assert not [n for n in notes if n.startswith("FLAG")]
+
+
+def test_the_daily_check_catches_the_takeover_the_brief_asked_about():
+    """Four themes go flat, momentum keeps its 40% weight, and the ranking is
+    now momentum alone. Nothing in the config would say so."""
+    scored = _one_date(flat={"quality", "ownership", "risk", "reversal"})
+    share = mon.cross_section_influence(scored)
+    assert share["momentum"] == pytest.approx(1.0)
+    flags = [n for n in mon.review_cross_section(scored) if n.startswith("FLAG")]
+    assert len(flags) == 1 and "momentum" in flags[0]
+    assert "Nothing has been changed" in flags[0]
+    assert "still" in flags[0] and "PAYING" in flags[0], \
+        "the flag must say what it cannot know from one date"
+
+
+def test_a_small_theme_over_running_is_caught_on_one_date_too():
+    scored = _one_date(scale={"quality": 3.1})
+    flags = [n for n in mon.review_cross_section(scored) if n.startswith("FLAG")]
+    assert len(flags) == 1 and "quality" in flags[0]
+    assert "declared weight of 19%" in flags[0]
+
+
+def test_too_few_names_is_no_measurement_rather_than_a_wrong_one():
+    scored = _one_date().head(mon.MIN_NAMES_FOR_INFLUENCE - 1)
+    assert mon.cross_section_influence(scored) == {}
+    assert mon.review_cross_section(scored) == []
+
+
+def test_a_frame_without_contributions_says_nothing_instead_of_guessing():
+    scored = _one_date().drop(columns=[t + "_contrib" for t in v3.THEMES])
+    assert mon.cross_section_influence(scored) == {}
+    assert mon.review_cross_section(scored) == []
+
+
+def test_the_daily_check_changes_no_state_either():
+    before = copy.deepcopy(v3.THEMES)
+    scored = _one_date(flat={"quality", "risk"})
+    snap = scored.copy(deep=True)
+    mon.review_cross_section(scored)
+    assert v3.THEMES == before
+    pd.testing.assert_frame_equal(scored, snap)
+
+
+# ------------------------------------- the channel the flags travel through
+def test_the_scoring_notes_reach_the_run_and_the_persisted_payload(runnable_cfg):
+    """THE BUG THIS PINS: stage 4 wrote `CoreScores.notes` on every run since
+    the v2 deploy -- which scorer ordered the book, the sealed-holdout numbers
+    behind it, why the regime multipliers were withheld, how many names cleared
+    the absolute floor -- and nothing read the field. Not the card, not the
+    ledger, not the run-detail payload the screen renders.
+
+    So the daily theme-dominance flag would have been raised into a field
+    nobody reads, which is worse than not raising it: the engine would look
+    monitored. A flag needs a channel, and this test is the channel."""
+    from prosignal.pipeline import run_analysis
+    from prosignal import rundetail
+
+    run = run_analysis(runnable_cfg)
+    assert run.scoring_notes, "stage 4 said nothing about how it ranked"
+
+    joined = " ".join(run.scoring_notes)
+    assert "v3 composite" in joined, "the run does not record which model ranked it"
+    assert "Theme influence on this cross-section" in joined, \
+        "the dominance check did not run on this run"
+
+    payload = rundetail.shape(run)
+    assert payload["scoring_notes"] == run.scoring_notes
+    import json
+    json.loads(json.dumps(payload, default=str))
+
+
+def test_the_daily_influence_line_reports_every_shipped_theme(runnable_cfg):
+    from prosignal.pipeline import run_analysis
+
+    line = next(n for n in run_analysis(runnable_cfg).scoring_notes
+                if n.startswith("Theme influence"))
+    for t, th in v3.THEMES.items():
+        assert t in line
+        assert f"declared {th.weight:.0%}" in line

@@ -33,13 +33,24 @@ For **window B the entire pipeline** — screen, stability, redundancy, admissio
 theme weights — was re-run on data ending 2021-02-17 and evaluated once on the
 eighteen months that followed. That tests the *method*, not a fitted model.
 
-**The ranking is holdout-validated. The shipped book is not.** Every theme
-carried positive information out of sample on both windows, which is the
-two-level structure doing its job rather than momentum doing all the work. The
-ten-name book, though, earned ~15.7% gross on window B and paid **13.7%** of it
-away in costs — and that was visible before either seal was opened, at 9.9% in
-validation. `features/v3.py::BOOK_NOTE` says so in the code, and turnover and
-cost drag are reported on every run.
+**The ranking is holdout-validated. No book is.** Every theme carried positive
+information out of sample on both windows, which is the two-level structure
+doing its job rather than momentum doing all the work. The ten-name book the
+windows evaluated, though, earned ~15.7% gross on window B and paid **13.7%** of
+it away in costs — and that was visible before either seal was opened, at 9.9%
+in validation.
+
+**And that is not the book that trades.** Production runs **six** positions on a
+21-session cadence with a 3× exit band, from `config/parameters.yaml` — slower
+*and* far more concentrated than anything either window measured. Slower cuts
+the cost drag that sank the tested book, and turnover needs no labels to verify.
+More concentrated cuts the other way, and it leans on the statistic that
+generalised least: top-ten excess on window A was **+0.38% at t 0.81**,
+indistinguishable from zero, while the quintile spread held at t 2.89. Ordering
+within the top few names is the part of this model the holdouts did not support,
+and a six-name book is a bet on exactly that. The concentration is an operator's
+risk choice, not a validated one. `features/v3.py::BOOK_NOTE` now says all of
+this, and a test fails if the mirror of the live book drifts from the config.
 
 ### A defect found, and what it cost
 

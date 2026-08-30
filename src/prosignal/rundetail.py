@@ -149,6 +149,13 @@ def shape(run) -> Dict[str, Any]:
             "compatibility": r.compatibility().value,
             "notes": r.notes,
         },
+        # HOW IT RANKED, on the record with the run. Stage 4 writes these on
+        # every run -- which scorer ordered the book, what the sealed holdouts
+        # said, and any theme producing more of today's spread than its weight
+        # -- and `CoreScores.notes` reached nothing: not the screen, not the
+        # ledger, not here. The evidence panel could show a card without ever
+        # saying which model chose it.
+        "scoring_notes": list(getattr(run, "scoring_notes", []) or []),
         "funnel": run.funnel,
         "no_trade": (
             {

@@ -383,9 +383,33 @@ stamp 0.015% buy, exchange 0.00297%, SEBI 0.0001%, GST 18% on the right base,
 ₹20 brokerage, ₹15.93 DP sell, plus square-root impact — **87 bps round trip**
 on a ₹1.25 lakh position at ₹20 cr ADTV.
 
-**So the shipped ranking is holdout-validated and the shipped book is not.**
-`features/v3.py::BOOK_NOTE` says so in the code, and turnover and cost drag are
-reported on every run rather than left to be discovered.
+### Three books exist, and only one of them trades
+
+Keeping them apart matters more than any of their contents: a number measured on
+one book and quoted about another is how a backtest becomes a claim it never
+made.
+
+| | slots | entry | exit | cadence | evaluated? |
+|---|---|---|---|---|---|
+| the holdout book | 10 | 20 | 30 | weekly | **yes, both windows** |
+| the research book (`v3.RESEARCH_BOOK`) | 12 | 24 | 48 | 10 sessions | no — chosen on training against a cost target |
+| **the LIVE book** (`parameters.yaml`) | **6** | **6** | **18** | **21 sessions** | **no** |
+
+The live book is both **slower** and **much more concentrated** than anything
+the sealed windows measured. Slower is the safe direction: it cuts the cost drag
+that sank the tested book, and turnover is arithmetic on a fee schedule — no
+labels needed to verify it.
+
+Concentration cuts the other way, and it leans on the statistic that generalised
+**least**. On window A the top-ten excess was **+0.38% at t 0.81** —
+indistinguishable from zero — while the quintile spread held at t 2.89. The
+ordering *within* the top few names is precisely the part of this model the
+holdouts did not support, and a six-name book is a bet on exactly that.
+
+**So the ranking is holdout-validated and no book is.** The concentration is an
+operator's risk choice, not a validated one. `features/v3.py::BOOK_NOTE` says
+this in the code, `LIVE_BOOK` mirrors the config with a test that fails when it
+drifts, and turnover and cost drag are reported on every run.
 
 ## 9. Power — is any of this distinguishable from luck?
 

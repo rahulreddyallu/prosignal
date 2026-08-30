@@ -141,6 +141,19 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
             f"2021-07..2022-12, with every theme positive out of sample on both. "
             f"The RANKING is what generalised; a ten-name book at these "
             f"transaction costs did not -- see CHANGELOG.md.")
+        # THE DOMINANCE CHECK RUNS ON EVERY RUN, not only when somebody types a
+        # research command. A theme that has taken over the ranking is a
+        # property of today's scores and needs no forward outcome to see, so
+        # leaving it to a quarterly command would mean the one thing the brief
+        # asked to watch live -- "if one theme starts dominating live even
+        # though it was capped in training" -- was watched four times a year.
+        # It FLAGS. No weight moves and nothing is disabled.
+        try:
+            from .. import v3_monitor as v3mon
+            notes.extend(v3mon.review_cross_section(v3_scored.loc[covered.index]))
+        except Exception as exc:                    # never fail a run to report
+            log.warning("theme influence check did not run",
+                        extra={"error": str(exc)})
         return covered, source
 
     if source == "v2_composite":

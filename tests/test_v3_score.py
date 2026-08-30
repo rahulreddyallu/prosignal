@@ -267,3 +267,39 @@ def test_the_percentile_on_the_card_is_a_real_ordinal():
     assert [_ordinal(n) for n in (1, 2, 3, 4, 11, 12, 13, 21, 41, 92, 100)] == \
         ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "41st",
          "92nd", "100th"]
+
+
+# ---------------------------------------------------------------- the books
+def test_the_live_book_mirror_matches_the_config_that_actually_trades():
+    """THE MISREAD THIS PREVENTS. `v3.BOOK` describes a 12-slot book on a
+    10-session rebalance. Production trades SIX positions on a 21-session
+    cadence, from `config/parameters.yaml`. Nothing reads `v3.BOOK` -- so a
+    reader of the shipped scorer would have taken it for the live book, and
+    reasoned about turnover, concentration and cost for a book that does not
+    exist. A stale mirror is worse than no mirror, so this fails when it drifts.
+    """
+    from prosignal.config.loader import load_config
+
+    p = load_config().params
+    val = lambda x: getattr(x, "value", x)
+    live = {"slots": int(val(p.capital.max_open_positions)),
+            "entry_rank": int(val(p.stage6_entry.admission.entry_rank)),
+            "exit_rank": int(val(p.stage6_entry.admission.exit_rank)),
+            "entry_cadence_sessions":
+                int(val(p.stage6_entry.admission.entry_cadence_sessions))}
+    assert v3.LIVE_BOOK == live, (
+        "features/v3.py::LIVE_BOOK has drifted from parameters.yaml, which is "
+        "the only thing that changes what trades. Update the mirror.")
+
+
+def test_the_three_books_are_distinct_and_the_note_says_which_one_trades():
+    """A number measured on one book and quoted about another is how a backtest
+    becomes a claim it never made."""
+    assert v3.LIVE_BOOK != v3.RESEARCH_BOOK != v3.HOLDOUT_BOOK
+    assert v3.BOOK is v3.RESEARCH_BOOK, "BOOK must stay the research book"
+    assert v3.LIVE_BOOK["slots"] < v3.HOLDOUT_BOOK["slots"], \
+        "the live book is the more concentrated one -- that is the point"
+    note = v3.BOOK_NOTE
+    assert "NO BOOK DOES" in note, "the note must not imply a book was validated"
+    assert "SIX positions" in note and "21-session" in note
+    assert "t 0.81" in note, "the weakest holdout statistic must be named"

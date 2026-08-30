@@ -827,6 +827,21 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     _table("Candidates surviving each gate", ["gate", "count"],
            [[k.replace('_', ' '), f"{v:,}"] for k, v in run.funnel.items()])
 
+    # HOW IT RANKED, and whether one theme is running the ranking today. Stage 4
+    # has written this on every run since the v2 deploy and nothing displayed
+    # it, so a flag raised here reached nobody. The dominance check is the half
+    # of the monitor that needs no forward outcome, which is what lets it run
+    # daily instead of quarterly.
+    notes = list(getattr(run, "scoring_notes", []) or [])
+    if notes:
+        _print()
+        _rule("Scoring")
+        for note in notes:
+            if note.startswith("FLAG"):
+                _print(f"[bold yellow]{note}[/bold yellow]" if _console else note)
+            else:
+                _print(f"  {note}")
+
     decision = f"{len(o.recommendations)} BUY / {len(o.watchlist)} WATCH"
     _print()
     _rule("Decision")
