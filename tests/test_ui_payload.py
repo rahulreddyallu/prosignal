@@ -1183,3 +1183,18 @@ def test_the_forward_test_moved_onto_the_page_it_describes():
     assert "Nothing is pre-committed" in view
     assert 'id="fwd"' in view, "and the action sits with the explanation"
     assert "Recording period" not in html, "the duplicate row is gone"
+
+
+def test_a_call_issued_today_is_shown_rather_than_dropped():
+    """The engine fills at the next open, so a call made on the most recent
+    close has no mark yet. History rendered nothing for those rows, and a
+    fresh install that scanned once read 'No calls yet' while Today listed
+    seven BUYs. The row is shown with the reason it has no number."""
+    html = _html()
+    fn = html[html.index("function openHTML"):]
+    fn = fn[:fn.index("\nfunction ", 20)]
+    assert 'r.state === "pending"' in fn, "the state has to be read to be shown"
+    assert "fills at the next open" in fn, "and it must say why there is no mark"
+    assert "\\u2014" in fn or "—" in fn, (
+        "a pending call shows a dash, never a 0.0% that would be counted"
+    )
