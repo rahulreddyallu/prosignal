@@ -177,11 +177,44 @@ class UniverseResolver:
         # across every year would rescan the whole price store on every run.
         listed_before = self._listed_at_least(sessions, int(min_history_sessions))
 
+        # NON-EQUITY INSTRUMENTS ARE NOT STOCKS AND MUST NOT BE RANKED AS ONE.
+        # NSE publishes ETFs, gold and silver funds, liquid funds and bond funds
+        # in the same cash bhavcopy, under the same EQ series. Several are among
+        # the most traded lines on the exchange, so a liquidity screen admits
+        # them -- and they do not rank neutrally. A liquid or bond fund has
+        # almost no drawdown, almost no downside volatility, near-zero return
+        # kurtosis, a steady drift and a high delivered fraction, so it tops the
+        # risk, ownership and momentum-consistency themes at once. Measured on a
+        # live run before this existed, THREE OF THE TOP FIVE names were bond
+        # ETFs, and across the 2025-26 sealed window they took 26% of the
+        # ten-name book. See `data/instruments.py` for the rule and for why real
+        # companies with matching names (GOLDIAM, SKYGOLD, PNBGILTS, SILVERTUC)
+        # are kept.
+        non_equity = set()
+        try:
+            from .instruments import non_equity_symbols
+            # A LONGER READ THAN THE LIQUIDITY WINDOW, because the volatility
+            # backstop needs a real sample; sixty sessions of a quiet quarter in
+            # a thin line looks exactly like a liquid fund.
+            vol_start = sessions[-min(len(sessions), 520)]
+            vpx = self.store.read_prices(start=vol_start, end=as_of,
+                                         columns=["date", "symbol", "close"])
+            wide = (vpx.assign(date=pd.to_datetime(vpx["date"]))
+                    .pivot_table(index="date", columns="symbol", values="close",
+                                 aggfunc="last", observed=True).sort_index())
+            non_equity = non_equity_symbols(
+                list(adtv.index), equity_master=self.store.read_equity_master(),
+                close=wide)
+        except Exception as exc:                       # pragma: no cover
+            log.warning("the non-equity filter could not run; the universe may "
+                        "contain ETFs and funds", extra={"error": str(exc)})
+
         eligible = adtv[adtv >= float(min_adtv_inr)].index
         keep = [
             s for s in eligible
             if float(quoted_close.get(s, 0.0)) >= float(min_price_inr)
             and s in listed_before
+            and s not in non_equity
         ]
         ranked = adtv.reindex(keep).sort_values(ascending=False)
         symbols = [str(s) for s in ranked.head(int(max_names)).index]
@@ -206,7 +239,8 @@ class UniverseResolver:
             note=(
                 f"point-in-time liquidity screen over {len(window)} sessions ending "
                 f"{as_of}; {len(symbols)} names; sector known for {known} "
-                f"({100.0 * known / len(symbols):.0f}%)"
+                f"({100.0 * known / len(symbols):.0f}%); "
+                f"{len(non_equity)} ETFs/funds excluded as non-equity"
             ),
         )
         self._apply_listing_dates(snap, as_of)

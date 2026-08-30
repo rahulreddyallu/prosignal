@@ -209,10 +209,38 @@ sitting on a real but much smaller edge.
 window was re-cut, no second configuration was tried. `work/v2/holdout.py`
 refuses to run twice.
 
+## 8a. The window has since been spent twice more — read the t's accordingly
+
+**Added 2026-08-30.** This holdout window, 2025-03-06 → 2026-08-17, is the same
+window v3 later used as its window A. It has therefore now been opened for
+three configurations: v2 once (§8), v3's contaminated-universe run, and v3's
+equity-only re-run.
+
+Each of those was a single blind evaluation of a configuration frozen before the
+window was touched, which is the rule. But the rule controls one kind of error
+and not this one: the more configurations a *window* judges, the better the
+luckiest of them looks, and v2's +2.4% book excess was the first of three draws
+from it rather than the only one. Nothing here retroactively invalidates §8 —
+v2's numbers were produced before v3 existed and no v2 parameter has moved since
+— but a reader comparing v2's holdout t-statistics against v3's should know the
+two share a window, so their errors are correlated and their difference is not
+an independent comparison.
+
+The clean read of v3 is its **window B** (2021-07 → 2022-12), which no v2 search
+ever touched. v2 has no equivalent: it was never evaluated on B. That asymmetry
+is a fact about the search order, not a claim that either scorer is better.
+
+**What this costs going forward:** this window is spent. The next configuration
+to be judged needs a window none of the three has seen — which in practice means
+waiting for one to accumulate, and is exactly what `scripts/quarterly_recheck.sh`
+is accumulating.
+
 ## 9. What is NOT established
 
 - That the shortlist ordering is meaningful between #1 and #10. On the holdout
   it was not. The card says so.
+- That v2's holdout result and v3's window-A result are independent evidence.
+  They are the same 72 dates (§8a).
 - That a ten-name book earns an excess return. The point estimate is +2.4% a
   year with a null standard deviation of roughly ±12 points.
 - That any of this survives a regime the 2018–2026 window does not contain.

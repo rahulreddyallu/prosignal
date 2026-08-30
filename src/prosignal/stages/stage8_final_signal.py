@@ -203,6 +203,9 @@ def run(
     # -- a Stage 5 penalty lands on final_score and can pull it below 0.60
     # while the pre-defence percentile stands -- but only one of them
     # selects, and tuning the other has no effect.
+    gate_counts["cleared_absolute_floor"] = sum(
+        1 for sym in survivors
+        if getattr(by_ticker.get(sym), "entry_admissible", True))
     qualified: List[str] = []
     # THE NO TRADE VETO. A second model, fitted only on the trades this engine
     # would have taken, predicting whether one reaches its profit barrier before
@@ -231,10 +234,20 @@ def run(
             + " No new position is opened on a gate that did not run."
         )
 
+    floor_blocked = 0
     for sym in survivors:
         score = by_ticker.get(sym)
         decision = entries.decisions.get(sym)
         if score is None or decision is None:
+            continue
+        # THE ABSOLUTE FLOOR, applied to ENTRIES ONLY. A name below it is still
+        # ranked, still shown and still holdable; it just cannot be opened.
+        # Filtering the whole population instead ejected a held name the moment
+        # it slipped below its long average even while it was still ranked
+        # third, and those forced exits cost 3.2 points of annual return in
+        # turnover on the training window.
+        if not getattr(score, "entry_admissible", True):
+            floor_blocked += 1
             continue
         # `percentile` is the stage-4 rank, measured BEFORE Stage 5 ran, and it
         # stays that way: it is a UNIVERSE POSITION test, and a penalty is not a
@@ -527,10 +540,16 @@ def run(
             scores, gate_counts, cfg, defense=defense, entries=entries,
         ), gate_counts
 
+    reason = ("No candidate cleared every gate. This is the designed outcome "
+              "when the evidence does not justify risking capital.")
+    if floor_blocked:
+        reason += (f" {floor_blocked} of {len(survivors)} defended names were "
+                   f"refused by the ABSOLUTE FLOOR -- below their long moving "
+                   f"average, or on the wrong side of too many themes. That is "
+                   f"the floor doing its job: the book holds cash because the "
+                   f"names failed a test, not because of a view on the market.")
     return [], watch, _no_trade(
-        "No candidate cleared every gate. This is the designed outcome when the "
-        "evidence does not justify risking capital.",
-        scores, gate_counts, cfg, defense=defense, entries=entries,
+        reason, scores, gate_counts, cfg, defense=defense, entries=entries,
     ), gate_counts
 
 
@@ -541,6 +560,19 @@ def _band(score: float, cfg) -> StrengthBand:
     if score >= fv(cfg.strength_bands.medium_min):
         return StrengthBand.MEDIUM
     return StrengthBand.LOW
+
+
+def _ordinal(n: int) -> str:
+    """1st, 2nd, 3rd, 4th ... 11th, 12th, 13th ... 21st, 92nd.
+
+    The card printed `f"{pct:.0f}th"`, which reads fine at 98 and wrong at every
+    percentile ending 1, 2 or 3 -- "92th", "41th", "21th". Small, and on the one
+    line a reader uses to place the name against its sector.
+    """
+    n = int(n)
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}" + {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
 def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
@@ -558,7 +590,21 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
     rank_cfg = (getattr(config.params.stage4_core_score, "ranking", None)
                 if config is not None else None)
     source = str(rank_cfg.source) if rank_cfg is not None else "fitted_composite"
-    if source == "v2_composite":
+    if source == "v3_composite":
+        why.append(
+            f"Ranked #{score.rank} of {scores.universe_size} eligible names by the "
+            f"v3 composite -- 22 factors in 5 themes, each theme combined on its "
+            f"own and then blended with weights capped at 40%, floored at 6% and "
+            f"capped again at the share of names the theme can speak about. The "
+            f"THEME rows below sum to the score; the factor rows under each are "
+            f"what that theme is made of. On two sealed windows the ranking's "
+            f"quintile spread was +1.1% and +0.9% per 21 sessions (t 2.9, 3.1) "
+            f"and every theme carried positive information out of sample -- but "
+            f"the ten-name BOOK lost to its benchmark on one window and beat it "
+            f"on the other, in both cases inside the transaction costs. Read the "
+            f"position as a shortlist from an evidenced ranking, not as an "
+            f"ordering you can trust between #1 and #10.")
+    elif source == "v2_composite":
         why.append(
             f"Ranked #{score.rank} of {scores.universe_size} eligible names by the "
             f"v2 composite -- ten equal-weighted sector-neutral factor ranks, "
@@ -614,6 +660,67 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 f"so they were set to zero rather than given a weight the data "
                 f"did not support."
             )
+    elif source == "v3_composite":
+        # TWO LEVELS ON THE CARD, because the score has two levels. Theme rows
+        # carry the sub-score and the weight it was blended at and sum to the
+        # composite; the factors under each theme carry the ranks it was built
+        # from. "momentum +0.42" does not say which momentum moved.
+        themes = [f for f in score.factors.values()
+                  if f.evidence_tier == "v3_theme" and f.contribution is not None]
+        for f in sorted(themes, key=lambda x: -abs(x.contribution)):
+            pct = ((f.standardised + 1.0) / 2.0 * 100.0
+                   if f.standardised is not None else None)
+            pos = f"{_ordinal(pct)} pct" if pct is not None else "not scored"
+            # NO SQUARE BRACKETS. The card renders through Rich, which reads
+            # `[momentum]` as a style tag and prints nothing -- the theme name,
+            # the one thing these lines exist to say, vanished silently.
+            why.append(
+                f"THEME {f.name}: {pos} in its sector, weight {f.weight:.0%}, "
+                f"contributes {f.contribution:+.4f} of a composite of "
+                f"{score.composite_raw:+.4f} ({f.citation})")
+            members = [m for m in (f.members or []) if m.rank is not None]
+            if members:
+                inside = ", ".join(
+                    f"{m.name} {((m.rank + 1) / 2 * 100):.0f}"
+                    for m in sorted(members, key=lambda m: -abs(m.rank))[:5])
+                why.append(f"    from: {inside}"
+                           + (f" (+{len(members) - 5} more)" if len(members) > 5 else ""))
+        n_themes = len([f for f in score.factors.values()
+                        if f.evidence_tier == "v3_theme"])
+        absent = [f.name for f in score.factors.values()
+                  if f.evidence_tier == "v3_theme" and not f.available]
+        if absent:
+            why.append(
+                f"No data for the {', '.join(absent)} theme"
+                f"{'s' if len(absent) > 1 else ''} on this name; the remaining "
+                f"weights renormalise, so it is scored on "
+                f"{n_themes - len(absent)} of {n_themes} "
+                f"themes and is not directly comparable with a name scored on all "
+                f"five.")
+        # THE 26-FACTOR FITTED MODEL, SECOND AND LABELLED AS SUCH. It did not
+        # order this book -- the v3 composite did -- but it is still fitted and
+        # still monitored, and a reader who cannot see it has no way to notice
+        # the two models disagreeing about a name. Which is the case worth
+        # noticing: agreement is the ordinary state.
+        sec = [f for f in score.factors.values()
+               if f.evidence_tier == "model_secondary" and f.raw_value is not None
+               and abs(f.weight or 0.0) > 1e-12]
+        if sec:
+            shown = sorted(sec, key=lambda f: -abs(f.raw_value))[:5]
+            why.append(
+                f"Separately, the fitted 26-factor model reads the same name. It "
+                f"does NOT order this book and did not choose this position; it "
+                f"is recorded and monitored so a disagreement is visible:")
+            for f in shown:
+                direction = "raises" if f.raw_value >= 0 else "lowers"
+                z = (f"{f.standardised:+.2f} sd" if f.standardised is not None
+                     else "n/a")
+                why.append(
+                    f"    {f.name}: {z} vs the universe, {direction} its own "
+                    f"score by {abs(f.raw_value):.4f} "
+                    f"(coefficient {f.weight:+.5f})")
+            if len(sec) > len(shown):
+                why.append(f"    (+{len(sec) - len(shown)} more themes near zero)")
     elif source == "v2_composite":
         # THIS NAME'S OWN RANK PER FACTOR, not the composite percentile. The
         # first version printed `score.percentile` on every line, so all ten
@@ -630,7 +737,7 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                         key=lambda f: -abs(f.contribution))
         for f in ranked:
             pct = (f.standardised + 1.0) / 2.0 * 100.0 if f.standardised is not None else None
-            pos = f"{pct:.0f}th pct" if pct is not None else "unranked"
+            pos = f"{_ordinal(pct)} pct" if pct is not None else "unranked"
             why.append(
                 f"{f.name}: {pos} in its sector, weight {f.weight:+.2f}, "
                 f"contributes {f.contribution:+.4f} to a composite of "
@@ -649,7 +756,7 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 continue
             why.append(
                 f"{fname}: raw {f.raw_value:+.2%}, universe rank "
-                f"{score.percentile:.0f}th, weight {f.weight:.0%} [{f.evidence_tier}] "
+                f"{_ordinal(score.percentile)}, weight {f.weight:.0%} [{f.evidence_tier}] "
                 f"({f.citation})"
             )
     if abs(final_score - defense_res.score_before) > 1e-9:

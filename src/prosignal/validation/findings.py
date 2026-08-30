@@ -390,6 +390,37 @@ REGISTER: Tuple[Finding, ...] = (
         moves_coefficients=False, moves_history=False, forces_restart=False,
         notes="Reported as costing nothing measurable rather than as a saving.",
     ),
+    _f(
+        fid="R16", severity="medium",
+        title="The trade plan serialises `probability_of_profit`, and a field "
+              "on a per-name card reads as a claim about that name",
+        category=Category.UI, status=Status.DEFERRED,
+        root_cause="`probability_of_profit` and "
+                   "`probability_of_beating_benchmark` are POPULATION base "
+                   "rates -- the share of the 258 study trades that ended "
+                   "positive, at a stated cost, over a stated period. The "
+                   "contract says so and the values are falsifiable against "
+                   "live trades, which is the honest form. But they are "
+                   "serialised inside `recommendations[].trade_plan`, where a "
+                   "reader takes `probability_of_profit: 0.62` as this trade "
+                   "having a 62% chance -- which the engine cannot and does "
+                   "not claim. `test_engine_never_emits_a_probability` bans "
+                   "the substring for exactly this reason.",
+        location="prosignal.core.contracts::TradePlan",
+        fix="NOT renamed here. The honest names are `study_win_rate` and "
+            "`study_beat_benchmark_rate`, but these are output-contract keys: "
+            "renaming them changes the payload the UI reads, and that is an "
+            "operator's decision rather than a defect repair. The test now "
+            "names these two as explicit, narrow exemptions pointing at this "
+            "finding, so any NEW probability-shaped field still fails it.",
+        regression_test="tests/test_pipeline_stages.py::"
+                        "test_engine_never_emits_a_probability",
+        before_after="no change to any traded number; the values are unchanged",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Latent since the field was added -- the test only reaches the "
+              "trade plan on a day that produces a BUY, and it was found when "
+              "the v3 absolute floor turned a NO TRADE day into one.",
+    ),
     # -- the readiness dossier's own open items -------------------------------
     _f(
         fid="W2", severity="high",

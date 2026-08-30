@@ -44,6 +44,8 @@ from ..data.types import DATE, SYMBOL
 from ..features import compute_features
 from ..features.crosssec import liquidity_mask
 from ..features import v2 as v2feat
+from ..features import v3 as v3feat
+from ..features import v3_factors as v3fac
 from ..features.exits import rules_from_config
 from ..features.labels import BarrierSpec
 from ..features.refit_gate import RefitVerdict, review_refit
@@ -86,7 +88,8 @@ class RankingUnavailable(PipelineError):
         super().__init__(stage=STAGE_NAME, message=message, **context)
 
 
-def _apply_ranking_policy(composite_raw, model_features, cfg, notes, v2_scored=None):
+def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
+                          v2_scored=None, v3_scored=None):
     """Return the series the book is ordered by, and say which one it is.
 
     `composite_raw` arrives holding whatever ranked upstream -- the fitted
@@ -103,6 +106,42 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes, v2_scored=N
     source = str(getattr(cfg.ranking, "source", "fitted_composite"))
     if source == "fitted_composite":
         return composite_raw, "fitted_composite"
+
+    if source == "v3_composite":
+        # THE SHIPPED SCORER. Twenty-two factors in five themes, combined within
+        # theme and then blended with weights capped at 40%, floored at 6%, and
+        # additionally capped at each theme's coverage. Selected on 2018-11 to
+        # 2024-10; evaluated ONCE on each of two sealed windows, one of which
+        # (2021-07 to 2022-12) no search had touched and for which the whole
+        # pipeline was re-run on data ending 2021-02. Numbers in CHANGELOG.md.
+        if v3_scored is None or "score" not in getattr(v3_scored, "columns", []):
+            raise RankingUnavailable(
+                "stage4_core_score.ranking.source is 'v3_composite' and the v3 "
+                "block did not build. Falling back to another scorer would "
+                "issue signals from a model that was not the one measured.")
+        ranked = v3_scored["score"].dropna()
+        covered = ranked.reindex(composite_raw.index).dropna()
+        floor = max(int(0.6 * len(composite_raw)), 20)
+        if len(covered) < floor:
+            raise RankingUnavailable(
+                f"the v3 composite covers {len(covered)} of "
+                f"{len(composite_raw)} scoreable names, under the {floor} "
+                f"floor. A ranking built on a minority of the universe is a "
+                f"ranking of that minority.")
+        nth = v3_scored["n_themes"].reindex(covered.index)
+        notes.append(
+            f"Book ordered by the v3 composite: {len(v3feat.ALL_FACTORS)} factors "
+            f"in {len(v3feat.THEMES)} themes "
+            f"({', '.join(f'{t} {th.weight:.0%}' for t, th in v3feat.THEMES.items())}), "
+            f"each theme combined on its own and blended with weights capped at "
+            f"40%, floored at 6% and additionally capped at the theme's "
+            f"coverage. Median name scored on {nth.median():.0f} of "
+            f"{len(v3feat.THEMES)} themes. Sealed holdouts, one run each: rank IC "
+            f"+0.049 (t 3.69) on 2025-03..2026-08 and +0.036 (t 3.83) on "
+            f"2021-07..2022-12, with every theme positive out of sample on both. "
+            f"The RANKING is what generalised; a ten-name book at these "
+            f"transaction costs did not -- see CHANGELOG.md.")
+        return covered, source
 
     if source == "v2_composite":
         # THE SHIPPED SCORER. Ten equal-weighted, sign-oriented sector-neutral
@@ -242,6 +281,77 @@ def build_v2_block(store, calendar, symbols, as_of, sectors, cfg):
     raw = raw.reindex([s for s in symbols if s in raw.index])
     scored = v2feat.score_frame(raw, sectors,
                                 min_factors=int(iv(cfg.ranking.v2_min_factors)))
+    return raw, scored, None
+
+
+def build_v3_block(store, calendar, symbols, as_of, sectors, cfg):
+    """The v3 two-level thematic score for ``as_of``.
+
+    Returns (raw factor values, scored frame, error). Reads only sessions at or
+    before ``as_of``; the fundamental block is as-of joined on DISCLOSURE dates,
+    never on period ends.
+    """
+    need = v3fac.LOOKBACK_SESSIONS + 15
+    window = calendar.trailing_window(as_of, need)
+    start = window[0] if window else calendar.first
+    px = store.read_prices(symbols=symbols, start=start, end=as_of)
+    if px is None or px.empty:
+        return None, None, "no prices in the v3 lookback window"
+    px = px.copy()
+    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
+
+    def piv(frame, col):
+        if col not in frame.columns:
+            return None
+        return frame.pivot_table(index=DATE, columns=SYMBOL, values=col,
+                                 aggfunc="last", observed=True).sort_index()
+
+    close = piv(px, "close")
+    if close is None or close.empty:
+        return None, None, "the store served no close for the v3 window"
+    open_, vwap, turnover = piv(px, "open"), piv(px, "vwap"), piv(px, "turnover")
+
+    # DELIVERY COMES FROM ITS OWN TABLE. `prices.deliv_pct` is a write-time
+    # column that is empty across this store; reading it here would make the
+    # whole ownership theme -- 19% of the composite -- silently neutral.
+    deliv = None
+    try:
+        dl = store.read_delivery(symbols=symbols, start=start, end=as_of)
+        if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
+            dl = dl.copy()
+            dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
+            deliv = piv(dl, "deliv_pct")
+            if deliv is not None:
+                deliv = deliv.reindex(index=close.index)
+    except Exception as exc:
+        log.warning("delivery unavailable; the ownership theme will be absent",
+                    extra={"error": str(exc)})
+
+    # The market as it stood: equal-weight return of the names being scored.
+    bench = close.mean(axis=1)
+    bench_ret = bench / bench.shift(1) - 1.0
+
+    fund = None
+    try:
+        from ..features import pit_fundamentals as pitf
+        recs = pitf.build_records(store=store)
+        if recs is not None and not recs.empty:
+            fsyms = [c for c in close.columns if c in set(recs["symbol"])]
+            if fsyms:
+                blk = pitf.asof_panel(recs, close.index, fsyms)
+                fund = {k: v.reindex(columns=close.columns)
+                        for k, v in blk.items()
+                        if k in ("ttm_revenue", "ttm_net_profit", "fund_age_days")}
+    except Exception as exc:
+        log.warning("point-in-time fundamentals unavailable; the quality theme "
+                    "will be absent and the remaining weights renormalise",
+                    extra={"error": str(exc)})
+
+    raw = v3fac.factor_frame(close, open_, vwap, turnover, deliv, bench_ret, fund)
+    if raw.empty:
+        return None, None, "the v3 factor frame came back empty"
+    raw = raw.reindex([x for x in symbols if x in raw.index])
+    scored = v3feat.score_frame(raw, sectors, min_themes=int(iv(cfg.ranking.v3_min_themes)))
     return raw, scored, None
 
 
@@ -548,15 +658,37 @@ def run(
     # hand-weighted composite, the fitted model, the regime diagnosis and every
     # note explaining them -- still happens and is still recorded. Only the
     # series the order is taken from changes.
-    v2_raw = v2_scored = None
-    if str(getattr(cfg.ranking, "source", "")) == "v2_composite":
+    v2_raw = v2_scored = v3_raw = v3_scored = None
+    _src = str(getattr(cfg.ranking, "source", ""))
+    if _src == "v2_composite":
         v2_raw, v2_scored, v2_err = build_v2_block(
             store, calendar, symbols, as_of, sectors, cfg)
         if v2_err:
             notes.append(f"v2 block unavailable: {v2_err}")
+    elif _src == "v3_composite":
+        v3_raw, v3_scored, v3_err = build_v3_block(
+            store, calendar, symbols, as_of, sectors, cfg)
+        if v3_err:
+            notes.append(f"v3 block unavailable: {v3_err}")
 
     composite_raw, ranking_source = _apply_ranking_policy(
-        composite_raw, model_features, cfg, notes, v2_scored=v2_scored)
+        composite_raw, model_features, cfg, notes, v2_scored=v2_scored,
+        v3_scored=v3_scored)
+
+    # THE ABSOLUTE FLOOR, computed here and enforced at entry. Names that fail
+    # it stay in the ranking -- they are holdable and they belong on a watchlist
+    # -- and cannot be bought. When fewer clear it than there are slots, the
+    # book holds cash, which is how NO TRADE happens.
+    _fl = getattr(cfg, "absolute_floor", None)
+    _floor_on = bool(bv(_fl.enabled)) if _fl is not None else False
+    _floor_ma = int(iv(_fl.above_ma_sessions)) if _fl is not None else 200
+    _floor_min_themes = int(iv(_fl.min_positive_themes)) if _fl is not None else 3
+    _floor_scope = str(v(_fl.applies_to)) if _fl is not None else "entries"
+    _above_ma = {}
+    if _floor_on and not closes.empty:
+        ma = closes.rolling(_floor_ma, min_periods=int(_floor_ma * 0.75)).mean()
+        if len(ma):
+            _above_ma = (closes.iloc[-1] > ma.iloc[-1]).to_dict()
 
     composite_unit = rank_to_unit_interval(composite_raw)
     percentile = composite_unit * 100.0
@@ -565,7 +697,59 @@ def run(
     scores: List[StockScore] = []
     for rank, sym in enumerate(order.index, start=1):
         factors = {}
-        if ranking_source == "v2_composite" and v2_scored is not None \
+        if ranking_source == "v3_composite" and v3_scored is not None \
+                and sym in v3_scored.index:
+            # THE CARD EXPLAINS THE NUMBER IT PRINTS, AT BOTH LEVELS. Theme rows
+            # carry the sub-score and the weight it was blended at and sum to
+            # the composite; factor rows carry the ranks the theme was built
+            # from. "momentum +0.42" does not say which momentum moved.
+            for tname, th in sorted(
+                    v3feat.THEMES.items(),
+                    key=lambda kv: -(abs(_f(v3_scored.at[sym, kv[0] + "_contrib"]) or 0.0))):
+                factors[tname] = FactorScore(
+                    name=tname,
+                    raw_value=None,
+                    standardised=_f(v3_scored.at[sym, tname + "_sub"]),
+                    weight=round(th.weight, 5),
+                    contribution=_f(v3_scored.at[sym, tname + "_contrib"]),
+                    available=pd.notna(v3_scored.at[sym, tname + "_sub"]),
+                    evidence_tier="v3_theme",
+                    citation=f"theme sub-score, oriented at {th.horizon} sessions",
+                    members=[
+                        FactorMember(
+                            name=fn,
+                            rank=_f(v3_scored.at[sym, fn + "_r"]),
+                            available=bool(v3_raw is not None and sym in v3_raw.index
+                                           and pd.notna(v3_raw.at[sym, fn])),
+                            description=f"sign {int(th.signs[fn]):+d}")
+                        for fn in th.names],
+                )
+            # AND THE 26-FACTOR FITTED MODEL, KEPT. It no longer decides -- the
+            # v3 composite orders the book -- but it is still fitted, still
+            # monitored, and it is a second independent reading of the same
+            # name. Dropping it from the card when the ranking source changed
+            # made a working model invisible and left the reader unable to see
+            # when the two disagree, which is exactly the moment worth seeing.
+            # Tier `model_secondary` so the card can say it did not choose.
+            if model_contrib is not None and sym in model_contrib.index:
+                mrow = model_contrib.loc[sym]
+                mz = model_z.loc[sym] if model_z is not None else None
+                for name in mrow.abs().sort_values(ascending=False).index:
+                    if name in factors:      # never shadow a theme row
+                        continue
+                    factors[name] = FactorScore(
+                        name=name,
+                        raw_value=_f(mrow.get(name)),
+                        standardised=_f(mz.get(name)) if mz is not None else None,
+                        weight=round(float(
+                            model.coef.get(name + "_f",
+                                           model.coef.get(name + "_r", 0.0))), 5),
+                        available=pd.notna(mrow.get(name)),
+                        evidence_tier="model_secondary",
+                        citation=_MODEL_CITE.get(name),
+                        members=_members_for(name, sym, model_features),
+                    )
+        elif ranking_source == "v2_composite" and v2_scored is not None \
                 and sym in v2_scored.index:
             # THE CARD EXPLAINS THE NUMBER IT PRINTS. These terms sum to the
             # composite by construction: contribution = rank x sign x weight,
@@ -626,17 +810,47 @@ def run(
                     evidence_tier=_TIER.get(name),
                     citation=_CITE.get(name),
                 )
+        adm, reason = True, None
+        if _floor_on and v3_scored is not None and sym in v3_scored.index:
+            npos = v3_scored.at[sym, "n_themes_positive"]
+            above = bool(_above_ma.get(sym, False))
+            npos_ok = bool(pd.notna(npos) and npos >= _floor_min_themes)
+            adm = above and npos_ok
+            if not adm:
+                bits = []
+                if not above:
+                    bits.append(f"below its {_floor_ma}-session average")
+                if not npos_ok:
+                    bits.append(f"only {0 if pd.isna(npos) else int(npos)} themes "
+                                f"above the median, {_floor_min_themes} required")
+                reason = ("fails the absolute floor: " + " and ".join(bits)
+                          + ". It can be held, not opened.")
         scores.append(
             StockScore(
                 ticker=str(sym),
                 sector=sectors.get(sym),
                 factors=factors,
+                entry_admissible=adm,
+                entry_block_reason=reason,
                 composite_raw=float(composite_raw.get(sym, 0.0)),
                 composite_score=float(composite_unit.get(sym, 0.0)),
                 percentile=float(percentile.get(sym, 0.0)),
                 rank=rank,
             )
         )
+
+    if _floor_on:
+        n_ok = sum(1 for sc in scores if sc.entry_admissible)
+        notes.append(
+            f"Absolute floor ({_floor_scope}): {n_ok} of {len(scores)} ranked "
+            f"names may be OPENED -- above their {_floor_ma}-session average and "
+            f"on the right side of at least {_floor_min_themes} themes. The rest "
+            f"stay ranked and holdable. If fewer clear it than there are slots, "
+            f"the book holds cash: that is the NO TRADE state, and it is reached "
+            f"by the names failing a test rather than by a view on the market.")
+        if _floor_scope == "population":
+            keep = {sc.ticker for sc in scores if sc.entry_admissible}
+            scores = [sc for sc in scores if sc.ticker in keep]
 
     # Measured on the MODEL's own features, not on the hand-weighted composite's.
     # It ran on `frame` -- the legacy composite's factor block -- so the

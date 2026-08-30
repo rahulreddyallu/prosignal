@@ -239,18 +239,31 @@ class TestTheRankingPolicy:
         with pytest.raises(RankingUnavailable):
             _apply_ranking_policy(composite, f, self._Cfg(), [])
 
-    def test_the_shipped_config_asks_for_the_v2_composite(self, cfg):
-        """What actually orders the book, as of the 2026-08-29 deploy.
+    def test_the_shipped_config_asks_for_the_v3_composite(self, cfg):
+        """What actually orders the book, as of the 2026-08-30 deploy.
 
-        This asserted `measured_factor` / `mom_6_1_r`, which was the previous
-        answer. `column` is deliberately still set to `mom_6_1_r` so the
-        comparison against the single-column ranking stays runnable, and this
-        test now pins BOTH: the source that ranks, and the retained comparator.
+        This has now been three answers: `measured_factor`/`mom_6_1_r`, then
+        `v2_composite`, now `v3_composite`. Each time the previous one stayed
+        REACHABLE -- `column` is still `mom_6_1_r` and the v2 block still
+        builds -- so the comparison against what shipped before stays runnable
+        rather than becoming a story about what used to happen. This test pins
+        all three: what ranks, and both retained comparators.
         """
         r = cfg.params.stage4_core_score.ranking
-        assert r.source == "v2_composite"
+        assert r.source == "v3_composite"
         assert r.column == "mom_6_1_r"
         assert int(r.v2_min_factors.value) == 7
+        assert int(r.v3_min_themes.value) == 3
+
+    def test_the_absolute_floor_ships_on_and_applies_to_entries_only(self, cfg):
+        """Applied to the whole population instead, the floor forces an exit
+        every time a held name dips below its 200-DMA, and forced exits are
+        turnover: measured on training data, cost drag 8.8% -> 5.6%."""
+        f = cfg.params.stage4_core_score.absolute_floor
+        assert bool(f.enabled.value) is True
+        assert int(f.above_ma_sessions.value) == 200
+        assert int(f.min_positive_themes.value) == 3
+        assert str(f.applies_to.value) == "entries"
 
     def test_the_v2_composite_ranks_and_refuses_to_fall_back(self):
         """The failure mode that matters is not that the v2 block breaks -- it

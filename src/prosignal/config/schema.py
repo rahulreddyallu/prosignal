@@ -1076,12 +1076,19 @@ class RankingConfig(_Base):
 
     #: v2_composite | measured_factor | fitted_composite | family_average.
     source: str = Field("measured_factor",
-                        pattern="^(v2_composite|measured_factor|fitted_composite"
-                                "|family_average)$")
+                        pattern="^(v3_composite|v2_composite|measured_factor"
+                                "|fitted_composite|family_average)$")
     #: v2_composite only: how many of the ten v2 factors a name must have before
     #: it is scored at all. A name ranked on four of ten is not comparable with
     #: one ranked on ten, and median-filling the gap ranks it by a number nobody
     #: computed for it.
+    #: v3_composite only: how many of the five themes a name must have before it
+    #: is scored. A name scored on two themes is not the same measurement as one
+    #: scored on five, and blending them into one ranking hides that.
+    v3_min_themes: TI = Field(default_factory=lambda: Tunable[int](
+        value=3, status="MEASURED",
+        note="Three of five. Validated across 2 and 4; the ranking is flat in "
+             "this parameter and 3 keeps the widest population."))
     v2_min_factors: TI = Field(default_factory=lambda: Tunable[int](
         value=7, status="MEASURED",
         note="Seven of ten. Below it a name is ranked on a minority of the "
@@ -1095,8 +1102,36 @@ class RankingConfig(_Base):
     note: Optional[str] = None
 
 
+class AbsoluteFloorConfig(_Base):
+    """The floor a name must clear to be BOUGHT.
+
+    A floor on a cross-sectional rank cannot fire -- somebody is top of the list
+    every day. This one is measured against the stock: above its own long
+    moving average, and on the right side of several themes at once.
+    """
+
+    enabled: TB = Field(default_factory=lambda: Tunable[bool](
+        value=True, status="MEASURED"))
+    above_ma_sessions: TI = Field(default_factory=lambda: Tunable[int](
+        value=200, status="MEASURED"))
+    min_positive_themes: TI = Field(default_factory=lambda: Tunable[int](
+        value=3, status="MEASURED"))
+    applies_to: TS = Field(default_factory=lambda: Tunable[str](
+        value="entries", status="MEASURED",
+        note="entries | population. `population` ejects a held name when it "
+             "drops below the average and cost 3.2 points of annual return in "
+             "forced exits."))
+
+    @model_validator(mode="after")
+    def _check(self):
+        if str(self.applies_to.value) not in {"entries", "population"}:
+            raise ValueError("absolute_floor.applies_to must be entries|population")
+        return self
+
+
 class Stage4Config(_Base):
     ranking: RankingConfig = Field(default_factory=RankingConfig)
+    absolute_floor: AbsoluteFloorConfig = Field(default_factory=AbsoluteFloorConfig)
     weighting_mode: TS
     standardisation: TS
     winsorize_pct: TF

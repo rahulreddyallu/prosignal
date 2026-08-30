@@ -1,5 +1,179 @@
 # CHANGELOG
 
+## v3 signal engine — the two-level thematic composite — 2026-08-30
+
+Full search record in `research/V3_SEARCH.md`; search code in `work/v3/`;
+sealed artefacts and result tables in `research/v3/`.
+
+v3 replaces the v2 **combination step**, not the engine. The universe screen,
+execution model, cost model, holdout machinery and UI contract are unchanged.
+What changed is how factors become a score: v2 summed ten factor ranks flat,
+which is whichever theme brought the most columns wearing a disguise. v3 groups
+22 factors into 5 themes, combines within each theme first, and blends the
+themes under a cap.
+
+### The holdouts that earned the deploy
+
+**Two** windows, sealed before any v3 model was fitted, opened once each per
+configuration:
+
+| | **A** 2025-03-06→2026-08-17 | **B** 2021-07-01→2022-12-27 |
+|---|---|---|
+| signal dates / rows | 72 / 54,000 | 75 / 40,027 |
+| rank IC, h=21 (t) | **+0.0493 (3.69)** | **+0.0357 (3.83)** |
+| quintile spread (t) | **+1.07% (2.89)** | **+0.86% (3.05)** |
+| top-ten excess (t) | +0.38% (0.81) | +1.37% (2.50) |
+| themes with positive OOS IC | **5 of 5** | **3 of 3** |
+| shuffled-score null, p | 0.02 | 0.01 |
+| ten-name book, net excess | −2.8%/yr | +2.0%/yr |
+| modelled cost drag | 9.7%/yr | 13.7%/yr |
+| max drawdown | −23.9% | −16.4% |
+
+For **window B the entire pipeline** — screen, stability, redundancy, admission,
+theme weights — was re-run on data ending 2021-02-17 and evaluated once on the
+eighteen months that followed. That tests the *method*, not a fitted model.
+
+**The ranking is holdout-validated. The shipped book is not.** Every theme
+carried positive information out of sample on both windows, which is the
+two-level structure doing its job rather than momentum doing all the work. The
+ten-name book, though, earned ~15.7% gross on window B and paid **13.7%** of it
+away in costs — and that was visible before either seal was opened, at 9.9% in
+validation. `features/v3.py::BOOK_NOTE` says so in the code, and turnover and
+cost drag are reported on every run.
+
+### A defect found, and what it cost
+
+The **first** evaluation of both windows ran on a universe that still contained
+ETFs, gold funds and liquid funds — NSE publishes them in the same EQ-series
+bhavcopy as equities, and they took **26.25% of window A's top-ten slots**. That
+run read A +0.0586 (3.66) / +1.12% (2.65) / −7.2% book and B +0.0380 (4.08) /
++0.90% (3.18) / +1.3% book; both are kept on the record in `parameters.yaml`.
+
+The **universe** was defective, not the configuration, so both windows were
+re-run with every parameter untouched — nothing was tuned after a holdout number
+was seen. It still costs: window A has now been evaluated three times counting
+the pre-seal dry run, and its t-statistics carry that multiplicity. Window B,
+positive before and after the fix, is the cleaner read.
+
+### The shipped configuration
+
+- **22 factors in 5 themes.** momentum (10, oriented at 42 sessions), quality
+  (2, 21), ownership (3, 10), risk (3, 21), reversal (4, 10). Each theme is
+  oriented at the horizon it works at: forced onto one 42-session label the
+  reversal sub-score came out **anti-predictive at t −3.96**.
+- **Level 1**: sign-oriented equal-weight mean of sector-neutral factor ranks,
+  re-ranked within the date so themes are commensurable. Equal weight beat
+  IC-weighted, ridge and XGBoost on every ranking column of the fold comparison
+  (the learned methods bought a ~4-point shallower drawdown by ranking worse;
+  ridge was significantly *anti*-predictive on top-k at t −2.05).
+- **Level 2**: weights from validated contribution, then **cap 0.40, floor 0.06,
+  and a coverage cap**. Shipped: momentum 0.400, quality 0.190, ownership 0.189,
+  risk 0.111, reversal 0.110.
+- **Absolute floor**, entries only: close > 200-session MA **and** ≥3 themes
+  above the cross-sectional median. Below it, **NO TRADE**.
+
+### Three things the search found that the brief did not ask for
+
+- **The coverage cap.** Weights renormalise over the themes a *name* has. Fitted
+  without a coverage constraint, `quality` took the 40% cap while only **19% of
+  names have fundamentals** — ranking the 19% and the 81% by two different
+  models and calling it one score. Capping each theme at the share of names it
+  can speak about: IC t 4.84 → **5.80**, quintile t 2.91 → **3.42**.
+- **A rank floor cannot fire.** "≥3 themes above median" alone left at least
+  **87 names on every one of 235 validation dates**. Adding the 200-DMA
+  condition made it a floor: 11 names at the COVID trough against a 10-slot
+  book, 8–9 in the 2022 drawdown, 47 (A) and 9 (B) minimum on the sealed windows.
+- **The floor belongs on entries, not holdings.** Applied to the population it
+  forces an exit every time a held name dips below its 200-DMA, and forced exits
+  are turnover: cost drag **8.8% → 5.6%**, excess +0.1% → +1.8% (training only).
+
+### The brief's redundancy suspicions, measured
+
+Two of the three were refuted and the real duplicate was elsewhere:
+`mom_6_1` vs `rev_1m_scaled` **+0.028**; `deliv_pct_60` vs `deliv_trend`
+**+0.095**; but `deliv_z_21` vs `deliv_trend` **+0.848**. 11 factors were cut by
+an order-independent survivor pass at |rho| ≥ 0.80, keeping the stronger of each
+pair by stability t.
+
+### Three themes ship with nothing, and each was built in full first
+
+- **value** — 0 of 8 clear at any horizon. Built PIT-correct against measured
+  filing lags; balance-sheet data in this store begins **2023** and the median
+  training date has **zero** names with a book value. A data limitation, not a
+  verdict on value.
+- **liquidity** — 0 of 9. `volume_shock_5` clears at h=42 and flips sign between
+  the halves of its own life.
+- **seasonality** — 0 of 2. Placebo |t| threshold **9.9** against a real 1.2.
+
+An empty theme is **excluded, not carried at zero** — carrying it would put a
+dead column into the per-name renormalisation.
+
+### Point-in-time integrity
+
+Every fundamental factor is as-of joined on **disclosure** dates, never period
+ends. Where a real `filing_date` exists it is used; where only `period_end`
+exists the lag is the **measured p99** of the real filing lag by quarter-end
+month — `{Mar: 112, Jun: 104, Sep: 60, Dec: 60}` days, from 3,504 real filings.
+The statutory 45-day deadline would have leaked on **15.9%** of them. A per-field
+staleness gate drops anything older than 420 days, and market cap is made
+split-invariant rather than recomputed from a current share count.
+
+**Survivorship, measured rather than assumed:** 141 of 1,425 panel symbols stop
+printing before the panel ends, 6.2% of rows belong to them, and 26–38% of an
+old cross-section is absent from today's list. The panel keeps them. What is
+still missing is point-in-time *index membership* — the store has no membership
+snapshots, so a point-in-time liquidity screen stands in. Stated, not papered over.
+
+### Code changes
+
+- `features/v3.py` — the shipped scorer: themes, `theme_subscore`,
+  `cap_weights` (cap / floor / coverage), `score_frame`, `absolute_floor`,
+  `attribution` returning **FACTOR / THEME / VALUE / Z / WEIGHT / CONTRIB /
+  LEVEL**, and `BOOK_NOTE` stating plainly that the book is not holdout-tested.
+- `features/v3_factors.py` — all 22 factors, computed exactly as researched.
+- `features/pit_fundamentals.py` — the disclosure-date as-of join.
+- `data/instruments.py` — non-equity exclusion by scheme pattern plus a
+  volatility backstop, applied only to symbols absent from the equity master.
+  183 excluded; the real gold-**jewellery** equities SKYGOLD, GOLDIAM and
+  SILVERTUC are kept, which is what the backstop's 504-session window and
+  250-observation minimum were calibrated to protect.
+- `stage4_core_score.py` — ranking source `v3_composite` and `build_v3_block`.
+  It raises `RankingUnavailable` rather than silently falling back to v2: a run
+  that quietly scores with a different model than the config names is worse than
+  a run that fails.
+- `stage8_final_signal.py` — the card now shows the **theme** line and the
+  factors beneath it, and gates entries on the absolute floor with a
+  `floor_blocked` count in the funnel.
+- `v3_monitor.py` — rolling IC **per factor and per theme**, each theme's share
+  of realised cross-sectional spread, and a −25% drawdown flag. All **flag**;
+  none disable.
+- `validation/v3_panel.py` + `prosignal research v3 --monitor --recheck` — the
+  quarterly re-check, same discipline, and it **withholds a verdict** until the
+  window holds the 8 independent 21-session windows the deploy was judged on.
+
+### One monitoring defect fixed before it ever ran
+
+The theme-dominance alarm compared a **variance** share against a threshold set
+in the units of the linear 40% weight cap. Variance is quadratic in the weight,
+so at the shipped configuration momentum reads w²/Σw² = **62%** while carrying
+40% — the alarm would have fired on a perfectly healthy book every day from the
+first run, and a monitor that always fires is a monitor that gets turned off.
+Now measured as a **dispersion** share, which reads back the declared weight
+when themes are equally dispersed, with a second rule that catches a *small*
+theme over-running (quality could double its influence without approaching an
+absolute 55%). Pinned by `tests/test_v3_monitor.py`.
+
+### Read this before trusting the shortlist
+
+Same caveat as v2, and it has not gone away: the ordering *within* the top ten
+was not better than the ranking as a whole. Read the output as a shortlist drawn
+from an evidenced ranking, not as an ordering — and note that the ranking is
+what the holdouts validated, while the ten-name book's excess sits barely
+outside a permuted-label null whose quintile spread sits **6.4 standard
+deviations** outside it.
+
+---
+
 ## v2 signal engine — 2026-08-29
 
 Full search record in `research/V2_SEARCH.md`; search code in `work/v2/`;

@@ -2498,6 +2498,134 @@ def cmd_research_v2(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_research_v3(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Live health of the shipped v3 thematic composite, and its re-check.
+
+    THREE READS, and the second is the one v2 could not give. `--monitor`
+    reports the rolling IC of every FACTOR against its shipped sign, of every
+    THEME against its own sub-score, and each theme's share of the composite's
+    realised cross-sectional spread. A composite can hold up in aggregate while
+    one theme has inverted, and the composite's own IC will not say which.
+
+    Nothing here disables anything. A monitor that switches a theme off changes
+    the model without a decision being taken, and the next person to read the
+    config sees a model that is not the one running.
+
+    `--recheck` applies the FROZEN configuration to the most recent
+    `--holdout-months` of signal dates, once, under the discipline that earned
+    the deploy -- and refuses a verdict until the window holds as much
+    independent evidence as the sealed holdouts did.
+    """
+    import json
+
+    from .data.store import DataStore
+    from .validation import v3_panel as vp
+    from . import v3_monitor as vm
+    from .features import v3 as v3feat
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = sessions[-1]
+    start = None
+    if args.years:
+        start = end - dt.timedelta(days=int(365.25 * float(args.years)))
+
+    _rule("Building the v3 themed panel")
+    panel = vp.build_v3_panel(store, start=start, end=end)
+    if panel.empty:
+        _print("the panel came back empty; nothing to report")
+        return 1
+    _print(f"{len(panel):,} rows over {panel['date'].nunique()} signal dates "
+           f"({panel['date'].min().date()} to {panel['date'].max().date()})")
+
+    label = f"y{vp.LABEL_HORIZON_SESSIONS}"
+    scored = panel.dropna(subset=[label])
+    if scored.empty:
+        _print(f"no row has a resolved {label} label yet")
+        return 1
+
+    if args.monitor or not args.recheck:
+        _rule("Rolling THEME IC, and the share of the ranking each theme runs")
+        tic = vm.rolling_theme_ic(scored, label)
+        th = vm.review_themes(tic, scored, window=int(args.window))
+        _print(f"{'theme':12s} {'weight':>7s} {'share':>7s} {'n':>4s} "
+               f"{'IC':>9s} {'t':>7s}  state")
+        for h in th:
+            ic = "     n/a" if h.ic_mean is None else f"{h.ic_mean:+9.4f}"
+            t = "    n/a" if h.ic_t is None else f"{h.ic_t:+7.2f}"
+            sh = ("    n/a" if h.influence_share is None
+                  else f"{h.influence_share:6.1%}")
+            state = ("INVERTED" if h.inverted else
+                     "DOMINATING" if h.dominating else
+                     "no verdict" if h.ic_mean is None else "ok")
+            _print(f"{h.name:12s} {h.weight:6.1%} {sh} {h.n_periods:4d} "
+                   f"{ic} {t}  {state}")
+        _print("")
+        _print("  'share' is each theme's share of the composite's realised "
+               "cross-sectional")
+        _print("  spread -- influence, not declared weight. It reads back the "
+               "weight when the")
+        _print(f"  themes are equally dispersed; past {vm.DOMINANCE_ALERT:.0%}, "
+               f"or {vm.DOMINANCE_EXCESS:.0%} above its own")
+        _print("  weight, a theme is running more of the ranking than it was "
+               "given.")
+
+        _rule("Rolling FACTOR IC, oriented by the shipped sign")
+        fic = vm.rolling_factor_ic(scored, label)
+        fh = vm.review_factors(fic, window=int(args.window))
+        _print(f"{'factor':22s} {'theme':12s} {'sign':>4s} {'n':>4s} "
+               f"{'IC':>9s} {'t':>7s}  state")
+        for h in fh:
+            ic = "     n/a" if h.ic_mean is None else f"{h.ic_mean:+9.4f}"
+            t = "    n/a" if h.ic_t is None else f"{h.ic_t:+7.2f}"
+            sg = v3feat.THEMES[h.theme].signs.get(h.name, 0)
+            state = "INVERTED" if h.inverted else ("no verdict"
+                                                   if h.ic_mean is None else "ok")
+            _print(f"{h.name:22s} {h.theme:12s} {int(sg):+4d} {h.n_periods:4d} "
+                   f"{ic} {t}  {state}")
+        flagged = [h for h in list(th) + list(fh)
+                   if getattr(h, "inverted", False) or getattr(h, "dominating", False)]
+        _print("")
+        if flagged:
+            for h in flagged:
+                _print(f"  FLAG {h.name}: {h.note}")
+            _print("")
+            _print("  Flags are for a human to read. Nothing has been disabled.")
+        else:
+            _print("  Nothing is flagged. This is not evidence the edge is "
+                   "intact -- the")
+            _print("  test fires on inversion and on dominance, not on decay.")
+
+    if args.recheck:
+        _rule(f"Re-check -- last {args.holdout_months} months, applied once")
+        res = vp.recheck(scored, holdout_months=int(args.holdout_months),
+                         label=label)
+        r = res.reference
+        _print(f"window        {res.holdout_start} to {res.as_of} "
+               f"({res.holdout_dates} signal dates)")
+        _print(f"rank IC       {res.ic:+.4f}  (t {res.ic_t:+.2f})   "
+               f"deploy earned {r['ic']:+.4f} (t {r['ic_t']:.2f}) on A, "
+               f"{r['ic_window_b']:+.4f} on B")
+        _print(f"quintile      {res.spread:+.4f}  (t {res.spread_t:+.2f})   "
+               f"deploy earned {r['spread']:+.4f} (t {r['spread_t']:.2f}) on A, "
+               f"{r['spread_window_b']:+.4f} on B")
+        _print(f"shuffled null p = {res.null_p_spread:.3f}")
+        _print("")
+        _print(f"VERDICT  {res.verdict}")
+        _print(f"  {res.note}")
+        if res.verdict == "FAILS":
+            _print("")
+            _print("  Do not retune against this window. A configuration "
+                   "adjusted after seeing")
+            _print("  a holdout result has to earn a window that result has "
+                   "not touched.")
+        if args.json:
+            _print(json.dumps(res.to_dict(), indent=1, default=str))
+    return 0
+
+
 def cmd_research_decay(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Is a theme still working, or did it used to work?
 
@@ -3038,6 +3166,24 @@ def build_parser() -> argparse.ArgumentParser:
                       help="how much history to build the panel over")
     v2_p.add_argument("--json", action="store_true", help="also print the raw verdict")
     v2_p.set_defaults(func=cmd_research_v2)
+
+    v3_p = research_sub.add_parser(
+        "v3", help="health of the shipped v3 thematic composite, and its re-check")
+    v3_p.add_argument("--monitor", action="store_true",
+                      help="rolling IC per FACTOR and per THEME, plus the share "
+                           "of the ranking each theme actually runs (default)")
+    v3_p.add_argument("--recheck", action="store_true",
+                      help="apply the frozen configuration to the most recent "
+                           "months, once, under the same holdout discipline that "
+                           "earned the deploy")
+    v3_p.add_argument("--holdout-months", type=int, default=3,
+                      help="length of the re-check window (default 3)")
+    v3_p.add_argument("--window", type=int, default=52,
+                      help="rolling window, in signal dates, for the ICs")
+    v3_p.add_argument("--years", type=float, default=3.0,
+                      help="how much history to build the panel over")
+    v3_p.add_argument("--json", action="store_true", help="also print the raw verdict")
+    v3_p.set_defaults(func=cmd_research_v3)
 
     decay_p = research_sub.add_parser(
         "decay", help="evaluate the pre-committed kill criterion per theme")

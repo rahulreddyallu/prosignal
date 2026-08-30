@@ -329,6 +329,13 @@ class StockScore(_Contract):
     ticker: str
     sector: Optional[str] = None
     factors: Dict[str, FactorScore] = Field(default_factory=dict)
+    #: Whether the name clears the ABSOLUTE floor and may be BOUGHT. A name
+    #: below it is still ranked and still shown -- it is a holdable position and
+    #: a legitimate watchlist entry -- it just cannot be opened. When too few
+    #: names clear the floor the book holds cash, which is how NO TRADE happens.
+    entry_admissible: bool = True
+    #: Why not, when not.
+    entry_block_reason: Optional[str] = None
     composite_raw: float = 0.0
     #: Composite mapped onto 0..1 across the eligible universe. Every threshold
     #: in Stage 5/8 operates on this scale.

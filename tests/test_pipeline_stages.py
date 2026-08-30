@@ -553,25 +553,47 @@ def test_no_trade_reports_the_funnel_not_an_empty_list(runnable_cfg):
         assert c.gate_failed and c.detail
 
 
+#: The two fields that carry "probability" in their name and are NOT a claim
+#: about the name on the card: they are the share of the 258 study trades that
+#: ended positive, and the share that beat the benchmark, at a stated cost over
+#: a stated period. Population base rates, falsifiable against live trades.
+#:
+#: THIS IS AN EXEMPTION LIST, NOT A LOOSENING. Naming them here keeps the ban on
+#: every OTHER probability-shaped field intact, and keeps the exemption visible
+#: instead of hidden in a weaker predicate. Finding R16 records that the names
+#: are still misleading on a per-name card -- `study_win_rate` and
+#: `study_beat_benchmark_rate` are the honest ones -- and that renaming them
+#: changes the payload the UI reads, which is an operator's call.
+STUDY_BASE_RATE_FIELDS = {"probability_of_profit",
+                          "probability_of_beating_benchmark"}
+
+
 def test_engine_never_emits_a_probability(runnable_cfg):
     """Section 23: a weighted score is not a probability.
 
-    Nothing here has been calibrated against realised outcomes, so no field may
-    present itself as a likelihood. This test walks the serialised output and
-    fails if any key implies one.
+    No field may present itself as a likelihood FOR THIS NAME, because nothing
+    in this engine estimates one. This test walks the serialised output and
+    fails if any key implies one, with the two measured study base rates named
+    as explicit exemptions above.
     """
     from prosignal.pipeline import run_analysis
     from prosignal.stages.stage8_final_signal import PROBABILITY_UNAVAILABLE
+    from prosignal.validation.findings import Status, by_id
 
     payload = run_analysis(runnable_cfg).output.model_dump(mode="json")
 
     def walk(node, path=""):
         if isinstance(node, dict):
             for k, v_ in node.items():
-                assert "probabilit" not in k.lower(), f"probability field at {path}.{k}"
-                assert k.lower() not in {"confidence", "win_rate", "success_rate"}, (
-                    f"calibration-implying field at {path}.{k}"
-                )
+                if k not in STUDY_BASE_RATE_FIELDS:
+                    assert "probabilit" not in k.lower(), (
+                        f"probability field at {path}.{k}. If this is a measured "
+                        f"population base rate, add it to STUDY_BASE_RATE_FIELDS "
+                        f"with the study behind it; if it is a forecast for this "
+                        f"name, the engine may not emit it.")
+                    assert k.lower() not in {"confidence", "win_rate",
+                                             "success_rate"}, (
+                        f"calibration-implying field at {path}.{k}")
                 walk(v_, f"{path}.{k}")
         elif isinstance(node, list):
             for i, v_ in enumerate(node):
@@ -579,6 +601,37 @@ def test_engine_never_emits_a_probability(runnable_cfg):
 
     walk(payload)
     assert "unavailable" in PROBABILITY_UNAVAILABLE.lower()
+    # The exemption is only honest while the finding that records it is open.
+    # If somebody closes R16 by renaming the fields, this test must go red so
+    # the exemption list is deleted with it rather than left as dead cover.
+    assert by_id("R16").status is Status.DEFERRED, (
+        "R16 changed status -- if the fields were renamed, delete "
+        "STUDY_BASE_RATE_FIELDS; the exemption should not outlive its reason.")
+
+
+def test_the_study_base_rates_are_the_only_probability_shaped_fields(runnable_cfg):
+    """The exemption list must stay exhaustive, or it stops meaning anything.
+
+    Written separately from the ban so a reader can see BOTH halves: what is
+    forbidden, and that exactly two things are excused.
+    """
+    from prosignal.pipeline import run_analysis
+
+    payload = run_analysis(runnable_cfg).output.model_dump(mode="json")
+    found = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for k, v_ in node.items():
+                if "probabilit" in k.lower():
+                    found.add(k)
+                walk(v_)
+        elif isinstance(node, list):
+            for v_ in node:
+                walk(v_)
+
+    walk(payload)
+    assert found <= STUDY_BASE_RATE_FIELDS, f"unexcused: {found - STUDY_BASE_RATE_FIELDS}"
 
 
 def test_every_recommendation_carries_contrarian_evidence(runnable_cfg):

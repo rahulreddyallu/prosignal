@@ -1,0 +1,61 @@
+31 factors cleared the screen AND held their sign in both halves
+
+=== the pairs the brief named ===
+  resid_mom_252_21       vs mom_6_1                rho = +0.552
+  mom_6_1                vs rev_1m_scaled          rho = +0.028
+  resid_mom_252_21       vs rev_1m_scaled          rho = +0.005
+  deliv_pct_60           vs deliv_trend            rho = +0.095
+  deliv_z_21             vs deliv_trend            rho = +0.848
+  deliv_z_21             vs deliv_chg_5            rho = +0.344
+  prox_52w               vs prox_52w_now           rho = +0.699
+  voladj_mom_6_1         vs voladj_mom_12_1        rho = +0.662
+
+=== clusters at |rho| >= 0.80, among survivors ===
+  [momentum] ['dist_200dma', 'mom_6_1', 'trend_slope_120', 'voladj_mom_6_1']
+  [reversal] ['price_vs_vwap_20', 'rev_2w', 'rsi_14']
+  [reversal] ['resid_rev_21', 'rev_1m_scaled']
+  [risk] ['max_dd_120', 'ulcer_120']
+  [ownership] ['deliv_trend', 'deliv_z_21']
+
+=== every |rho| >= 0.60 pair among survivors ===
+  mom_2_0                rev_1m_scaled          +0.629   [momentum / reversal]
+  mom_3_1                mom_6_1                +0.610   [momentum / momentum]
+  mom_3_1                voladj_mom_6_1         +0.600   [momentum / momentum]
+  mom_3_1                trend_slope_120        +0.673   [momentum / momentum]
+  mom_6_1                mom_accel              -0.764   [momentum / momentum]
+  mom_6_1                voladj_mom_6_1         +0.961   [momentum / momentum]
+  mom_6_1                voladj_mom_12_1        +0.656   [momentum / momentum]
+  mom_6_1                prox_52w               +0.605   [momentum / momentum]
+  mom_6_1                trend_slope_120        +0.875   [momentum / momentum]
+  mom_12_6               voladj_mom_12_1        +0.709   [momentum / momentum]
+  mom_accel              voladj_mom_6_1         -0.744   [momentum / momentum]
+  voladj_mom_12_1        voladj_mom_6_1         +0.662   [momentum / momentum]
+  intraday_mom_126       mom_6_1                +0.663   [momentum / momentum]
+  intraday_mom_126       voladj_mom_6_1         +0.660   [momentum / momentum]
+  prox_52w               voladj_mom_6_1         +0.644   [momentum / momentum]
+  prox_52w               prox_52w_now           +0.699   [momentum / momentum]
+  prox_52w               ulcer_120              -0.744   [momentum / risk]
+  prox_52w_now           ulcer_120              -0.678   [momentum / risk]
+  dist_200dma            mom_2_0                +0.670   [momentum / momentum]
+  dist_200dma            mom_3_1                +0.607   [momentum / momentum]
+  dist_200dma            mom_6_1                +0.783   [momentum / momentum]
+  dist_200dma            voladj_mom_6_1         +0.752   [momentum / momentum]
+  dist_200dma            voladj_mom_12_1        +0.634   [momentum / momentum]
+  dist_200dma            prox_52w_now           +0.694   [momentum / momentum]
+  dist_200dma            trend_slope_120        +0.846   [momentum / momentum]
+  trend_slope_120        voladj_mom_6_1         +0.844   [momentum / momentum]
+  rev_1w                 rev_2w                 +0.637   [reversal / reversal]
+  rev_2w                 rsi_14                 +0.759   [reversal / reversal]
+  rev_1m_scaled          rev_2w                 +0.613   [reversal / reversal]
+  rev_1m_scaled          rsi_14                 +0.746   [reversal / reversal]
+  resid_rev_21           rev_1m_scaled          +0.864   [reversal / reversal]
+  resid_rev_21           rsi_14                 +0.671   [reversal / reversal]
+  price_vs_vwap_20       rev_1w                 +0.693   [reversal / reversal]
+  price_vs_vwap_20       rev_2w                 +0.879   [reversal / reversal]
+  price_vs_vwap_20       rev_1m_scaled          +0.775   [reversal / reversal]
+  price_vs_vwap_20       resid_rev_21           +0.714   [reversal / reversal]
+  price_vs_vwap_20       rsi_14                 +0.871   [reversal / reversal]
+  max_dd_120             prox_52w               +0.664   [risk / momentum]
+  max_dd_120             prox_52w_now           +0.642   [risk / momentum]
+  max_dd_120             ulcer_120              -0.907   [risk / risk]
+  deliv_trend            deliv_z_21             +0.848   [ownership / ownership]
