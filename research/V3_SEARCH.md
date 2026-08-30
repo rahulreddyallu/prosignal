@@ -480,7 +480,105 @@ declared 40%, and a 55% alarm set in the units of the weight cap would have
 fired on a perfectly healthy book every day from the first run. A monitor that
 always fires is a monitor that gets turned off.
 
-## 13. Known limitations
+## 13. What was tried after the deploy, and what it found
+
+Both sealed windows are spent, so nothing below could be *validated*. All of it
+is either a screen on the training window under the same bar the other 93
+factors faced, or a measurement that predicts no return and so spends no
+evidence.
+
+### Dividend yield -- built, screened, REJECTED
+
+The value theme ships empty because this store's balance-sheet history begins in
+2023. A dividend needs only a price and a payment record, and the payment record
+runs dense from 2017 -- so `value` had one factor it could actually support and
+it had not been tried.
+
+Built PIT-correct (`work/v3/divyield.py`): trailing-12-month payments keyed on
+the **ex-date** -- a dividend is announced before it goes ex, so this is strictly
+conservative -- each payment converted into the adjusted currency of its own
+ex-date so a 1:10 split cannot manufacture a yield. Coverage: 29.5% of the
+median training cross-section, 181 of 750 live names.
+
+| horizon | IC | naive t | placebo \|t\| 95th | keep |
+|---|---|---|---|---|
+| 10 | -0.0087 | -1.42 | 5.89 | no |
+| 21 | -0.0166 | -2.72 | 8.17 | no |
+| 42 | -0.0297 | -4.77 | 11.29 | no |
+| 63 | -0.0353 | **-5.45** | **13.69** | no |
+
+**It fails at every horizon, and it is a good illustration of why the screen
+exists.** A naive t of -5.45 reads as a strong factor. But a payout policy
+barely changes from quarter to quarter, so the factor is enormously persistent,
+and persistence alone produces |t| above 13.7 in five percent of placebo
+alignments. The sign is also negative -- in this momentum-led universe the
+dividend payers are the mature slow-growth names.
+
+So `value` stays empty, and now for a **measured** reason rather than a data
+one. Anyone tempted to add dividend yield should read this table first.
+
+### Earnings-window gap risk -- measured, and now disclosed on the card
+
+Not a factor. The calendar is dense for 179 symbols and has a median of **two**
+rows for everybody else, so a cross-sectional earnings factor would be measuring
+a quarter of the universe and guessing at the rest.
+
+It is a **risk** measurement, and it needed making. The engine sizes every
+position off an ATR stop and prints the result as the risk -- but a stop is a
+level, not a fill, and an overnight gap opens through it.
+
+Measured on 179 symbols with a real calendar over 246,437 sessions, each name
+compared against **itself** outside its own earnings windows:
+
+| | non-earnings | within 3 days | ratio |
+|---|---|---|---|
+| daily return sd | 2.12% | 3.23% | **1.79x** |
+| abs overnight gap p90 | 1.23% | 2.35% | 1.91x |
+| abs overnight gap p99 | 3.74% | 6.15% | 1.64x |
+| P(gap worse than -5%) | 0.20% | 0.96% | **4.94x** |
+| P(gap worse than -8%) | 0.07% | 0.19% | 2.83x |
+| 1st-percentile session | -5.09% | -7.93% | |
+
+**The control matters and the obvious comparison is wrong.** Comparing earnings
+sessions against every session in the store gave a ratio of 1.6x -- because the
+names that have calendars are large caps, calmer than the universe around them.
+Restricted to the same names over the span their own calendar covers, the true
+ratio is **4.94x**. The naive version understates the risk threefold, in the
+direction that makes holding through an earnings print look safe.
+
+The window is barely worse on a typical day (median gap 0.59% against 0.39%) and
+about five times more likely to produce the one move a stop cannot protect
+against. That asymmetry is why the card reports a tail probability rather than a
+volatility multiple.
+
+Shipped as a **disclosure, not a gate** (`features/earnings.py`): gating entries
+would change a traded number and both windows are spent. A name with no
+scheduled date reads as UNKNOWN, never as clear -- the forward feed is NSE
+board-meeting notices and covers 173 of 750 live names.
+
+### What the engine is actually running on
+
+Nobody had quantified the inputs. Measured on the live 750-name universe:
+
+| input | coverage | consequence |
+|---|---|---|
+| prices, delivery | ~100% | momentum, risk, reversal, ownership work everywhere |
+| **sector map** | **61.2%** | see below |
+| PIT fundamentals | 25.6% | quality is capped at 19% by the coverage cap |
+| dividend history | 24.1% | the rejected value factor |
+| earnings calendar (history) | 99.7% | the risk measurement above |
+| earnings calendar (forward) | 23.1% | the disclosure fires for a quarter of names |
+
+**The sector-neutral rank is sector-neutral for barely half the book.** 291 of
+750 names have no sector at all, and folding in the six sectors below the
+12-name minimum puts **329 names -- 43.9% of the universe -- into one mixed
+residual bucket**. For those, "sector-neutral rank" is a plain universe rank.
+This is not new behaviour and not a regression: the research ran on the same
+map, so the holdout numbers already include it. But it bounds how much the
+sector neutrality is buying, and it had never been measured. `equity_master`
+carries no industry column, so it cannot be improved from inside this store.
+
+## 14. Known limitations
 
 1. **No ownership-structure data.** Promoter holding, pledge percentage and
    FII/DII flows are unbuildable from this store — no network route to them was
@@ -493,3 +591,8 @@ always fires is a monitor that gets turned off.
 4. **The shipped book is not holdout-validated.** Only the ranking is.
 5. **Window A carries a multiplicity charge of 3.** Read its t-statistics with
    that in mind; window B is the cleaner read.
+6. **The sector-neutral rank covers 56% of the book** (SS13). The other 44% is
+   ranked in one mixed residual bucket.
+7. **Everything in SS13 is unvalidated by construction.** The screen is the same
+   bar the shipped factors cleared, but a screen is not a holdout, and no fresh
+   window exists until roughly March 2027.

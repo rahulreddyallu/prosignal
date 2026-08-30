@@ -59,6 +59,7 @@ def run(
     config,
     company_names: Optional[Dict[str, str]] = None,
     held: Optional[Sequence[str]] = None,
+    earnings_notes: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[Recommendation], List[Recommendation], Optional[NoTradeReport],
              Dict[str, int]]:
     """Returns (buys, watchlist, no_trade, gate_counts).
@@ -187,7 +188,8 @@ def run(
         return _card(sym, names.get(sym), score, defense_res, decision,
                      plans.get(sym), regime, eligibility, scores,
                      defense_res.score_after, cfg, position=positions[sym],
-                     config=config)
+                     config=config,
+                     earnings_note=(earnings_notes or {}).get(sym))
 
     # -- the score gate, applied once, in score order ------------------------
     # Score gate first, then the entry trigger. Counting the trigger before
@@ -577,7 +579,7 @@ def _ordinal(n: int) -> str:
 
 def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
           scores, final_score, cfg, position: int = 0,
-          config=None) -> Recommendation:
+          config=None, earnings_note: Optional[str] = None) -> Recommendation:
     """Build the recommendation, including the evidence AGAINST it."""
     why: List[str] = []
     # WHAT PUT THIS NAME HERE, first, before any theme attribution. Under
@@ -775,6 +777,15 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
     flagged = [
         f"{c.check}: {c.reason} (-{c.penalty:.2f})" for c in defense_res.penalised()
     ]
+    # EARNINGS PROXIMITY, and it belongs HERE rather than among the reasons to
+    # buy. The position is sized off an ATR stop and the card prints the result
+    # as the risk; a stop is a level, not a fill, and an overnight gap opens
+    # through it. Measured on this store, an earnings window carries 1.8x the
+    # daily volatility and 4.9x the chance of a gap worse than -5%. It is a
+    # disclosure, not a gate -- gating entries would change a traded number and
+    # both sealed windows are spent.
+    if earnings_note:
+        flagged = flagged + [earnings_note]
     untestable = [f"{c.check}: {c.reason}" for c in defense_res.not_testable()]
 
     # Contrarian evidence is mandatory, not decorative.

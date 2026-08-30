@@ -182,6 +182,50 @@ when themes are equally dispersed, with a second rule that catches a *small*
 theme over-running (quality could double its influence without approaching an
 absolute 55%). Pinned by `tests/test_v3_monitor.py`.
 
+### Tried after the deploy: one rejected, one shipped as a disclosure
+
+Both sealed windows are spent, so neither could be validated. One is a screen
+under the same bar the other 93 factors faced; the other predicts no return and
+so spends no evidence. Full tables in `research/V3_SEARCH.md` SS13.
+
+- **Dividend yield: built, screened, REJECTED.** The value theme is empty
+  because balance-sheet history starts in 2023, but a dividend needs only a
+  price and a payment record and that runs dense from 2017. Built PIT-correct,
+  split-invariant, 29.5% coverage — and it **fails the placebo screen at every
+  horizon**. At h=63 the naive t is −5.45, which reads as a strong factor, but a
+  payout policy barely moves quarter to quarter so persistence alone produces
+  |t| above **13.69** in five percent of placebo alignments. Value stays empty
+  for a measured reason now rather than a data one.
+- **Earnings-gap risk: measured and now on the card.** The engine sizes off an
+  ATR stop and prints the result as the risk. A stop is a level, not a fill.
+  Measured on 179 names with a real calendar over 246,437 sessions, each name
+  against **itself** outside its earnings windows: an earnings window carries
+  **1.79× the daily volatility** and **4.94× the chance of an overnight gap
+  worse than −5%** (0.96% against 0.20%). The card now says when a name reports
+  and that the printed risk is a floor on the loss, not a cap. A **disclosure,
+  not a gate** — gating would change a traded number.
+  - The obvious comparison is wrong and flattered the answer threefold:
+    earnings sessions against *all* sessions in the store gives 1.6×, because
+    the names with calendars are large caps calmer than the universe around
+    them. `work/v3/earnings_gap.py` controls for it.
+
+### What the engine is actually running on, measured
+
+| input | coverage of the live 750 |
+|---|---|
+| prices, delivery | ~100% |
+| **sector map** | **61.2%** |
+| PIT fundamentals | 25.6% |
+| dividend history | 24.1% |
+| earnings calendar — history / forward | 99.7% / 23.1% |
+
+**The sector-neutral rank is sector-neutral for barely half the book.** 291 names
+have no sector, and with the six sectors below the 12-name minimum folded in,
+**329 — 43.9% of the universe — rank inside one mixed residual bucket**. Not a
+regression: the research used the same map, so the holdout numbers include it.
+But it bounds what the sector neutrality buys, and it had never been measured.
+`equity_master` has no industry column, so this store cannot improve it.
+
 ### Read this before trusting the shortlist
 
 Same caveat as v2, and it has not gone away: the ordering *within* the top ten

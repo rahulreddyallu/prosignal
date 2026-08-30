@@ -285,6 +285,25 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # ---- Stage 8 ----------------------------------------------------------
     step(8)
     t = _clock()
+    # EARNINGS PROXIMITY for the names that could be carded. Computed here
+    # because stage 8 has no store, and computed for the SCORED set rather than
+    # the whole universe so it costs a lookup rather than a scan. It is a risk
+    # disclosure and never a gate: it changes no score, no rank and no
+    # admission.
+    earnings_notes: Dict[str, str] = {}
+    try:
+        from .features import earnings as _earn
+        _syms = [s.ticker for s in scores.ranked_scores]
+        _cal = _earn.earnings_dates(store)
+        _until = _earn.sessions_until_next(_cal, _syms, resolved, sessions)
+        _since = _earn.days_since_last(_cal, _syms, resolved)
+        for _s in _syms:
+            _n = _earn.risk_note(_s, _until.get(_s), _since.get(_s))
+            if _n:
+                earnings_notes[_s] = _n
+    except Exception as exc:
+        log.warning("earnings proximity unavailable", extra={"error": str(exc)})
+
     buys, watch, no_trade, gate_counts = stage8_final_signal.run(
         regime=regime,
         eligibility=eligibility,
@@ -295,6 +314,7 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         closes=closes,
         config=config,
         company_names=dict(universe.company_names),
+        earnings_notes=earnings_notes,
         # Stage 8 needs the same book Stage 6 got. Its sector, correlation and
         # book-size limits are ENTRY limits; without knowing what is already
         # held it applied them to open positions and evicted them, which is how
