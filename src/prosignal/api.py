@@ -1376,23 +1376,6 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             },
             "configurations": sorted({str(r.get("config_version") or "")
                                       for r in rows if r.get("config_version")}),
-            # THE ENGINES THAT CAME BEFORE, EACH ON ITS OWN.
-            #
-            # These were reduced to a count -- "128 earlier positions were
-            # decided by a superseded configuration" -- and thrown away. That
-            # is right about the ARITHMETIC and wasteful with the evidence:
-            # 128 closed calls across eight configurations is the only record
-            # this deployment has, and the owner cannot see any of it.
-            #
-            # So: shown, one row per configuration, never summed and never
-            # averaged into the live figure. Pooling eight models reports a
-            # strategy nobody ran; hiding them reports nothing at all. Each
-            # row carries its own n, because a mean over four trades is not
-            # the same kind of object as a mean over sixty-three.
-            "superseded": _perf.by_configuration(
-                [r for r in all_rows
-                 if str(r.get("config_version") or "") != live_cfg],
-                store, benchmark=bench, horizon=horizon),
             # Which experiment this page is reporting, and what it is not.
             "epoch": {
                 "id": epoch_id,

@@ -106,7 +106,7 @@ def test_the_view_is_json_serialisable():
     # open positions are marked to the latest close and to the index over the
     # same days, so this state means the engine has issued nothing at all.
     "No calls yet",
-    "superseded configuration",       # and what is being left out, in one line
+    "are not counted",                # and what is being left out, in one line
     "New market data",       # store moved on, results did not
     "What this configuration has done",  # history is scoped, and says so
     # "Not followed yet" belonged to `outcomeRow`, which was removed: nothing
@@ -876,7 +876,7 @@ def test_an_empty_history_explains_itself():
     # listed from the second session rather than waiting for a close.
     assert "No calls yet" in html
     assert "marked to the latest close" in html
-    assert "superseded configuration" in html, \
+    assert "decided by an earlier configuration" in html, \
         "an empty page must say what it excluded, or it reads as broken"
     assert "open or closed" in html or "marked to the latest close" in html
     assert "target or a stop" not in html, \
@@ -1101,7 +1101,8 @@ def test_open_calls_are_shown_not_just_counted():
     # so a source-position comparison reads the order backwards.
     view = html[html.index("function viewHistory"):]
     view = view[:view.index("\nfunction ", 20)]
-    ret = re.search(r"return reg \+ chart \+ ([^;]+);", view)
+    ret = re.search(r"return '<div class=\"stack\">' \+ reg \+ chart \+ ([^;]+);",
+                    view, re.S)
     assert ret, "viewHistory must end in one composed return"
     order = ret.group(1)
     assert order.index("openHTML(open)") < order.index("closed"), \
@@ -1111,7 +1112,10 @@ def test_open_calls_are_shown_not_just_counted():
 def test_an_open_mark_is_never_presented_as_a_result():
     html = _html()
     body = html[html.index("function openHTML"):html.index("function viewHistory")]
-    assert "Not results" in body
+    assert "not counted above" in body, (
+        "a mark is what a position happens to be worth today; the page has to "
+        "say it is outside the realised figures"
+    )
 
 
 def test_the_interface_script_actually_parses():
@@ -1157,7 +1161,7 @@ def test_an_open_call_is_shown_against_the_index_over_the_same_days():
     fn = fn[:fn.index("\nfunction ", 20)]
     assert "r.benchmark" in fn, "each call needs the index over its own window"
     assert "avg_excess" in fn, "and the headline is the excess, not the raw mark"
-    assert "kept out of every figure above" in fn, (
+    assert "not counted above" in fn, (
         "a mark must never be pooled into the realised statistics"
     )
 
@@ -1238,17 +1242,3 @@ def test_a_ratio_is_never_printed_without_its_count():
     fn = view[view.index("const ratio ="):]
     fn = fn[:fn.index(";", fn.index("'</div>'"))]
     assert "' of '" in fn, "the count is rendered beside the percentage"
-
-
-def test_earlier_configurations_are_shown_rather_than_only_counted():
-    """128 closed calls across eight configurations were reduced to one line
-    saying they are not counted. Correct about the arithmetic, and the only
-    record the deployment had."""
-    html = _html()
-    view = html[html.index("function viewHistory"):]
-    view = view[:view.index("\nasync function ", 20)]
-    assert "perf.superseded" in view
-    assert "not added together" in view, (
-        "the reason they are listed separately has to be on the page"
-    )
-    assert "shortCfg" in view, "eight hashes have to be told apart"
