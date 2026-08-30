@@ -788,6 +788,30 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .fwd.void { border-left: 3px solid var(--neg); }
 .fwd.void b { color: var(--neg); }
 .fwd.off { border-left: 3px solid var(--line); }
+
+/* The verdict line under the headline. It is the sentence that stops a mean
+   over four trades reading as a property of the engine. */
+.sig { font-size: 12.5px; line-height: 1.55; margin: var(--sp-2) 0 0;
+       padding-top: var(--sp-2); border-top: 1px solid var(--line); }
+.sig.ok { color: var(--ink-2); }
+/* Deliberately NOT var(--neg). Red is what a losing return is printed in,
+   and "not distinguishable from zero" is a statement about the evidence, not
+   about the money. Sharing the colour made the two read as one thing. */
+.sig.warn { color: var(--ink); font-weight: 500; }
+.sig.warn::before { content: ""; display: inline-block; width: 6px;
+  height: 6px; border-radius: 50%; background: var(--ink-3);
+  margin-right: 7px; vertical-align: middle; }
+
+/* Earlier configurations: several populations, listed, never summed. */
+.prior { opacity: .82; }
+.pr-h { font-size: 12px; font-weight: 600; letter-spacing: .06em;
+        text-transform: uppercase; color: var(--ink-2); }
+.pr { display: flex; align-items: baseline; justify-content: space-between;
+      gap: var(--sp-3); padding: 7px 0; border-top: 1px solid var(--line); }
+.pr-m { min-width: 0; }
+.pr-c { font-size: 13px; font-weight: 600; }
+.pr-d { font-size: 12px; color: var(--ink-2); margin-top: 1px; }
+.pr-v { flex: none; font-variant-numeric: tabular-nums; font-size: 13px; }
 .nr-dim { opacity: .55; }
 .dim-h { border-top: 1px dashed var(--line); padding-top: var(--sp-3);
          margin-top: var(--sp-3); }
@@ -2731,6 +2755,15 @@ function openHTML(op) {
    The endpoint now scopes every figure to the running configuration. When that
    record is empty the page says so plainly rather than reaching backwards for
    something to print. */
+/* `baseline-v1@4796c401fe1ffa54` is unreadable in a list and unrecognisable
+   truncated to nothing. The label plus six hex characters is enough to tell
+   eight of them apart, which is all this has to do. */
+function shortCfg(cv) {
+  const s = String(cv || "");
+  const at = s.indexOf("@");
+  return at < 0 ? s : s.slice(0, at) + " \u00b7 " + s.slice(at + 1, at + 7);
+}
+
 function viewHistory(v) {
   const perf = state.perf;
   if (perf === null || perf === undefined) {
@@ -2757,11 +2790,43 @@ function viewHistory(v) {
   /* One line, not a section. What is excluded and why -- so an empty page
      reads as "nothing has closed under this configuration" rather than as a
      page that is broken. */
-  const excluded = ep.excluded_closed
-    ? '<p class="fine">' + ep.excluded_closed + ' earlier ' +
-      (ep.excluded_closed === 1 ? 'position was' : 'positions were') +
-      ' decided by a superseded configuration and are not counted here.</p>'
-    : "";
+  /* THE ENGINES BEFORE THIS ONE, each on its own row.
+     This was a single line saying N positions "are not counted here", which
+     is correct about the arithmetic and throws the evidence away: on a real
+     deployment it was 128 closed calls across eight configurations, the only
+     record that deployment had, and none of it was visible.
+     They are separate populations, so they are listed separately and nothing
+     is summed across them. Dimmed, because none of them is the engine you
+     are about to trade. */
+  const prior = perf.superseded || [];
+  const priorRow = (c) =>
+    '<div class="pr">' +
+      '<div class="pr-m"><div class="pr-c">' + esc(shortCfg(c.config_version)) +
+        '</div><div class="pr-d">' + c.n +
+        (c.n === 1 ? ' call' : ' calls') +
+        (c.last_signal ? ' \u00b7 to ' + esc(day(c.last_signal)) : '') +
+        (c.corrected_t != null ? ' \u00b7 t ' + c.corrected_t.toFixed(2) : '') +
+        '</div></div>' +
+      '<div class="pr-v">' +
+        (c.avg_excess != null ? signed(c.avg_excess) : signed(c.avg_return)) +
+      '</div>' +
+    '</div>';
+
+  const excluded = prior.length
+    ? '<div class="box prior"><div class="pr-h">Earlier configurations</div>' +
+        '<p class="fine">' + ep.excluded_closed + ' closed ' +
+        (ep.excluded_closed === 1 ? 'call was' : 'calls were') +
+        ' decided by an engine that is no longer running. Each is shown ' +
+        'against the index over its own days. They are not added together ' +
+        'and they are not part of any figure above \u2014 averaging several ' +
+        'models reports a strategy nobody ran.</p>' +
+        prior.map(priorRow).join("") +
+      '</div>'
+    : (ep.excluded_closed
+        ? '<p class="fine">' + ep.excluded_closed + ' earlier ' +
+          (ep.excluded_closed === 1 ? 'position was' : 'positions were') +
+          ' decided by a superseded configuration and are not counted here.</p>'
+        : "");
 
   /* THE PAGE OPENS ON THE FIRST CALL, not the first CLOSE. It waited for a
      position to close, which on a 20-session hold is a month of a blank page
@@ -2816,26 +2881,61 @@ function viewHistory(v) {
       'scoreboard.</span></div>' +
       '<button class="btn ghost xs" id="fwd">Register</button></div>';
 
-  /* THE CURVE FIRST. It was below a per-ticker wall of text, which is the
-     wrong way round: the question this page answers is what the engine did,
-     and the two lists underneath are how it did it. */
-  const chart = (perf.curve && perf.curve.length > 1)
+  /* WHAT THE NUMBER IS WORTH, beside the number.
+     The server has always computed an overlap-corrected Newey-West t,
+     the uncorrected one, and the effective sample size once the overlap
+     between simultaneously-held positions is taken out. None of it reached
+     this page. What reached this page was a percentage in 28px type and a
+     win rate, which is how a record of four trades reads as a property of
+     the engine.
+     Positions held at the same time are not independent observations, so
+     twelve closed calls can carry an effective n near three. The correction
+     is what says so. */
+  const sig = h.significance || {};
+  const tv = sig.t;
+  const eff = sig.effective_n;
+  const verdict = (tv == null)
+    ? (nClosed < 2 ? "one closed call cannot be told from chance"
+                   : "too few closed calls to test")
+    : (Math.abs(tv) >= 2
+        ? "distinguishable from zero (t " + tv.toFixed(2) + ")"
+        : "NOT distinguishable from zero (t " + tv.toFixed(2) + ")");
+  const effLine = (eff != null && nClosed > 1)
+    ? " \u00b7 " + nClosed + " closed calls, worth about " +
+      (eff < 1.95 ? "one independent observation"
+                  : eff.toFixed(1) + " independent observations")
+    : (nClosed ? " \u00b7 " + nClosed + " closed" : "");
+
+  /* A ratio without its count is a claim without evidence. 67% is three
+     trades or two thousand and the page said the same thing either way. */
+  const ratio = (v, n, label) => v == null ? "" :
+    '<div class="chart-k"><b>' + Math.round(v * 100) + '%</b>' +
+    '<span>' + (n ? Math.round(v * n) + ' of ' + n + ' ' : "") +
+    label + '</span></div>';
+
+  const head = nClosed
     ? '<div class="box chart">' +
         '<div class="chart-h">' +
           '<div><div class="chart-v">' + signed(h.avg_excess) + '</div>' +
-            '<div class="chart-s">average per position vs the index \u00b7 ' +
-            nClosed + ' closed' +
-            (nOpen ? " \u00b7 " + nOpen + " open" : "") + '</div></div>' +
-          (h.win_rate != null
-            ? '<div class="chart-k"><b>' + Math.round(h.win_rate * 100) + '%</b>' +
-              '<span>paid off</span></div>' : "") +
-          (h.beat_rate != null
-            ? '<div class="chart-k"><b>' + Math.round(h.beat_rate * 100) + '%</b>' +
-              '<span>beat the index</span></div>' : "") +
+            '<div class="chart-s">average per position vs the index' +
+            effLine + '</div></div>' +
+          ratio(h.win_rate, nClosed, "paid off") +
+          ratio(h.beat_rate, h.benchmark_covered, "beat the index") +
         '</div>' +
-        curveSVG(perf.curve) +
+        '<p class="sig ' + (tv != null && Math.abs(tv) >= 2 ? "ok" : "warn") +
+          '">' + esc(verdict) + '.' +
+          (sig.naive_t != null && tv != null
+            ? ' Uncorrected it reads t ' + sig.naive_t.toFixed(2) +
+              ' \u2014 the gap is the overlap between positions held together.'
+            : '') + '</p>' +
+        ((perf.curve && perf.curve.length > 1) ? curveSVG(perf.curve) : "") +
       '</div>'
     : "";
+  /* Rendered on ANY closed record, not only one long enough to draw a curve.
+     The headline was gated on `curve.length > 1`, so the young record -- the
+     one where the sample-size warning matters most -- showed no summary at
+     all. */
+  const chart = head;
 
   /* PER POSITION, NOT SUMMED. `avg_excess` is the average one position
      returned against the index over the days it was held -- a number an

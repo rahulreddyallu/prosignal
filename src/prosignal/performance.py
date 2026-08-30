@@ -713,3 +713,59 @@ def holding_profile(outcomes: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "by_exit": {k: {"n": len(v), "median": float(np.median(v))}
                     for k, v in sorted(by.items(), key=lambda x: -len(x[1]))},
     }
+
+
+def by_configuration(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
+                     benchmark: str = "Nifty 200", horizon: int = 63,
+                     step: int = 21, limit: int = 12) -> List[Dict[str, Any]]:
+    """One record per configuration that produced trades. Never pooled.
+
+    The History page scopes its statistics to the configuration running now,
+    which is correct -- averaging eight models reports a strategy nobody ran,
+    and the t-statistic of a pooled sample is meaningless. But the excluded
+    rows were then reduced to a COUNT, and on a real deployment that count was
+    128 closed calls across eight configurations: the only record the
+    deployment had, and none of it visible.
+
+    Both failures are avoidable. A configuration is a population; several
+    configurations are several populations. Report them as such -- side by
+    side, each with its own n -- and the reader can see the history without
+    any two of them being added together.
+
+    Newest first, because the engine that ran most recently is the one most
+    like the engine running now.
+    """
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for o in outcomes:
+        cv = str(o.get("config_version") or "")
+        if not cv or o.get("net_return") is None:
+            continue
+        groups.setdefault(cv, []).append(o)
+    if not groups:
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for cv, rows in groups.items():
+        summary = performance(rows, store, benchmark=benchmark,
+                              horizon=horizon, step=step)
+        if not summary.get("n"):
+            continue
+        dates = [str(r.get("signal_date") or "")[:10] for r in rows
+                 if r.get("signal_date")]
+        sig = summary.get("significance") or {}
+        out.append({
+            "config_version": cv,
+            "n": summary["n"],
+            "avg_return": summary.get("avg_return"),
+            "avg_excess": summary.get("avg_excess"),
+            "win_rate": summary.get("win_rate"),
+            "beat_rate": summary.get("beat_rate"),
+            "corrected_t": sig.get("t"),
+            "effective_n": sig.get("effective_n"),
+            "first_signal": min(dates) if dates else None,
+            "last_signal": max(dates) if dates else None,
+        })
+    # By the last day each configuration issued a call: recency is the only
+    # ordering that means anything across populations this different.
+    out.sort(key=lambda r: str(r.get("last_signal") or ""), reverse=True)
+    return out[:limit]

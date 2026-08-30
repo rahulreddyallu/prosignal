@@ -1198,3 +1198,57 @@ def test_a_call_issued_today_is_shown_rather_than_dropped():
     assert "\\u2014" in fn or "—" in fn, (
         "a pending call shows a dash, never a 0.0% that would be counted"
     )
+
+
+def test_the_headline_shows_whether_the_number_can_be_believed():
+    """The server has computed an overlap-corrected Newey-West t, the naive
+    one and the effective sample size since v1. The page rendered none of it
+    -- a percentage in 28px type and a win rate, which is how a record of four
+    trades reads as a property of the engine. On a real deployment: 4 closed
+    calls, effective n 1.71, corrected t -0.05."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    assert "h.significance" in view, "the verdict has to be read to be shown"
+    assert "distinguishable from zero" in view
+    assert "effective_n" in view, (
+        "positions held together are not independent observations, and the "
+        "count that says so is the point"
+    )
+    assert "naive_t" in view, "the size of the overlap correction stays visible"
+
+
+def test_the_headline_does_not_wait_for_an_equity_curve():
+    """It was gated on `curve.length > 1`, so the young record -- the one
+    where the sample-size warning matters most -- showed no summary at all."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    head = view[view.index("const head ="):view.index("const chart = head")]
+    assert "nClosed" in head.split("?")[0], "the headline keys on closed calls"
+    assert "curve" in head, "the curve is drawn INSIDE it when there is one"
+
+
+def test_a_ratio_is_never_printed_without_its_count():
+    """67% is three trades or two thousand and the page said the same thing
+    either way."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    fn = view[view.index("const ratio ="):]
+    fn = fn[:fn.index(";", fn.index("'</div>'"))]
+    assert "' of '" in fn, "the count is rendered beside the percentage"
+
+
+def test_earlier_configurations_are_shown_rather_than_only_counted():
+    """128 closed calls across eight configurations were reduced to one line
+    saying they are not counted. Correct about the arithmetic, and the only
+    record the deployment had."""
+    html = _html()
+    view = html[html.index("function viewHistory"):]
+    view = view[:view.index("\nasync function ", 20)]
+    assert "perf.superseded" in view
+    assert "not added together" in view, (
+        "the reason they are listed separately has to be on the page"
+    )
+    assert "shortCfg" in view, "eight hashes have to be told apart"
