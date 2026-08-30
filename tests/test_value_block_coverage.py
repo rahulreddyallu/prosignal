@@ -213,17 +213,23 @@ def test_a_breach_names_the_pair_rather_than_only_counting_them():
     )
 
 
-def test_the_panel_says_score_and_contributions_are_different_units():
-    """A reader adding up contributions of ~0.12 and seeing a score of 0.898 has
-    no way to connect them. The chain is: the model's raw prediction (which the
-    contributions DO sum to), ranked across the day's eligible universe, mapped
-    onto [0,1]. So 0.898 is the 89.8th percentile of today's names."""
+def test_the_panel_never_shows_a_bare_zero_to_one_score():
+    """A reader adding up contributions of ~0.12 beside a score of 0.898 has no
+    way to connect them, and 0.898 on a stock card reads as a probability.
+
+    The old fix was a caption explaining that Score is a percentile position.
+    The better fix is the one that shipped: the score is not on the panel at
+    all. RANK is -- "#1 of the eligible universe" -- which is the same fact in
+    a unit nobody mistakes for a likelihood. A caption is only needed while the
+    confusing number is still on screen."""
     import pathlib
 
     page = pathlib.Path("src/prosignal/static/index.html").read_text()
-    # The caption moved and shortened with the rest of the panel's prose; what
-    # it has to keep saying is that Score is a POSITION, not a probability.
-    assert "not a probability" in page
+    panel = page[page.index("function panelHTML"):]
+    panel = panel[:panel.index("\nfunction ", 20)]
+    for banned in ("p.score", "technical.score", "t.score", ".percentile"):
+        assert banned not in panel, f"{banned} is back on the panel"
+    assert "p.rank" in panel, "rank is what replaced it"
     assert "eligible universe" in page
     # The old caption spelled out that contributions sum to the prediction and
     # not to Score. The contributions ARE the score now -- v3's theme

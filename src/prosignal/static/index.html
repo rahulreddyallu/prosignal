@@ -425,15 +425,12 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
             overflow-wrap: anywhere; }
 .fam .ftab .fx { min-width: 0; }
 .ftab code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
-.adv { margin-top: var(--sp-5); border-top: 1px solid var(--line);
-       padding-top: var(--sp-3); }
-.adv summary { cursor: pointer; list-style: none; font-size: 13px;
-               color: var(--ink-2); padding: 10px 0; line-height: 1.4;
-               display: flex; align-items: baseline; gap: 6px; }
-.adv summary::marker { content: ""; }
-.adv summary::-webkit-details-marker { display: none; }
-.adv summary::before { content: "\25B8  "; color: var(--ink-3); }
-.adv[open] summary::before { content: "\25BE  "; }
+/* ONE `.adv` RULE SET, NOT TWO. A flat top-bordered version lived here and a
+   bordered-card version lived further down; both matched, so the summary got
+   two paddings, two font sizes and two marker glyphs depending on cascade
+   order -- which is why the drawer read as the wrong size shut and its
+   contents sat hard against the border open. The card version below is the
+   one that stays. */
 /* The escape hatch. These tables fit at 375px today -- measured at 327px
    and 325px -- but a longer factor name or a narrower phone would push a
    numeric column off the edge with no way to reach it. */
@@ -601,11 +598,19 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 details.adv { border: 1px solid var(--line); border-radius: var(--r-md);
               background: var(--surface); }
 details.adv > summary { padding: 12px var(--sp-4); cursor: pointer;
-                        font-size: 13.5px; color: var(--ink-2); list-style: none; }
+                        font-size: 13px; font-weight: 550; color: var(--ink-2);
+                        list-style: none; line-height: 1.35; }
+details.adv > summary::marker { content: ""; }
+details.adv[open] > summary { border-bottom: 1px solid var(--line);
+                              margin-bottom: var(--sp-3); }
 details.adv > summary::-webkit-details-marker { display: none; }
 details.adv > summary::before { content: "▸ "; color: var(--ink-3); }
 details.adv[open] > summary::before { content: "▾ "; }
 details.adv .adv-body { padding: 0 var(--sp-4) var(--sp-4); }
+/* The member blocks inside carried their own margins tuned for a flush
+   container and doubled up against the card padding. */
+details.adv .adv-body > .fam:first-child { margin-top: 0; }
+details.adv .adv-body > .fam:last-child { margin-bottom: 0; }
 .raw { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
        background: var(--surface-sunk); border: 1px solid var(--line);
        border-radius: var(--r-sm); padding: var(--sp-3); overflow-x: auto;
@@ -1698,8 +1703,8 @@ function renderSettings() {
          whoever reads the source; the owner reading the drawer still saw two
          rows about windows and reasonably asked why both exist. One sentence
          costs less than the question. */
-      '<div class="grp-note">Daily signals collects the record. These decide ' +
-      'what it will be judged as.</div>' +
+      '<div class="grp-note">Daily signals collects the record. These fix what ' +
+      'counts as a verdict on it.</div>' +
       /* THESE ARE NOT THE SAME THING AS "Daily signals", and the screen never
          said so. The cron COLLECTS -- it ranks every weekday and writes a row.
          The forward test is a PRE-REGISTRATION: a start date, a config hash and
@@ -1715,15 +1720,10 @@ function renderSettings() {
                        against; `config_version` is what the engine runs NOW.
                        Reading `config_version` for both printed the same
                        string twice and made the sentence say nothing. */
-                    : "Void \u2014 opened against " +
-                      esc(String(fwd.registered_config || "an earlier configuration")) +
-                      ", the engine now runs " +
-                      esc(String(fwd.config_version || "a different configuration")) +
-                      ". Observations either side of that change came from " +
-                      "different models, so they are not one experiment.")
-               : "Not registered. The daily job already records every run; this "
-                 + "fixes the start date, the configuration and the pass mark "
-                 + "in advance, so the result cannot be chosen afterwards.",
+                    : "Void \u2014 the configuration changed after it opened. "
+                      + "Re-register starts a new 18-month window from today.")
+               : "Not open. Register fixes today's configuration and the pass "
+                 + "mark for 18 months.",
              '<button class="btn ghost xs" id="fwd">' +
              (fwd.registered && !fwd.config_matches ? "Re-register" : "Register") +
              '</button>',
@@ -1734,11 +1734,8 @@ function renderSettings() {
          unless the row says which switch owns it. */
       setRow("Recording period",
              cur ? "Open since " + esc(day(cur.started)) +
-                   " \u00b7 opened by Daily signals; groups runs so they can " +
-                   "be scored as one"
-                 : "None open \u2014 Daily signals opens one when it is " +
-                   "switched on. Runs are still recorded; they are just not " +
-                   "grouped into one period to be scored together.",
+                   " \u00b7 opened by the Daily signals switch"
+                 : "None open. The Daily signals switch opens one.",
              "") +
     '</div>' +
 
@@ -1752,14 +1749,10 @@ function renderSettings() {
          would quietly invalidate the statistic that says whether any of this
          beats luck. Nothing before the clear reappears. */
       setRow("Recorded results",
-             "Restarts History, the performance figures and the open-position "
-             + "list from now. The research log underneath is kept \u2014 the "
-             + "significance test is computed from it \u2014 but nothing before "
-             + "the clear is shown again.",
+             "Restarts History and the performance figures from today.",
              '<button class="btn ghost xs danger-t" id="wipe">Clear</button>') +
       setRow("Rebuild storage",
-             "Erases the price store and re-fetches it \u2014 hours, and it " +
-             "discards the history the model trains on",
+             "Re-fetches the whole price store. Takes hours.",
              '<button class="btn ghost xs danger-t" id="rebuild">Rebuild</button>') +
     '</div>'
   );
@@ -1867,14 +1860,19 @@ async function doIngest() {
 
 async function doForward() {
   const f = state.forward || {};
-  const msg = f.registered
-    ? "Re-open the forward test?\n\nThis discards the observations collected " +
-      "so far and starts a new 18-month window against the current " +
-      "configuration. That is the one thing a pre-registration exists to " +
-      "prevent, so only do it if the configuration has genuinely changed."
-    : "Open a forward test against the current configuration?\n\nIt runs for " +
-      "18 months and any configuration change invalidates it.";
-  if (!confirm(msg)) return;
+  /* THE THEMED MODAL, not `confirm()`. Clear asked through `ask()` and this
+     asked through the browser's own dialog, so two destructive actions in the
+     same drawer spoke in two different voices -- and the native one is the
+     voice a page uses when nobody designed the question. */
+  const ok = await ask(
+    f.registered ? "Restart the forward test?" : "Open a forward test?",
+    f.registered
+      ? "The 18-month window starts again from today and everything collected "
+        + "so far stops counting toward it."
+      : "Fixes today's configuration and the pass mark for 18 months. Any "
+        + "configuration change after this voids the window.",
+    f.registered ? "Restart" : "Open");
+  if (!ok) return;
   await settingsPost("/admin/forward/register",
     f.registered ? { confirm: "RESTART" } : null,
     "Opening the forward test\u2026",
@@ -2902,98 +2900,6 @@ function row(k, val) {
          '<span class="v">' + esc(val == null ? "—" : val) + '</span></div>';
 }
 
-/* `technical` is an object, not a string. esc()-ing it printed
-   "[object Object]" into the advanced block. These are its fields, each
-   rendered as what it actually is. */
-function techHTML(t) {
-  if (!t || typeof t !== "object") return "";
-  /* NUMBERS, NOT PARAGRAPHS.
-     This printed `why_raw`, `against_raw`, `cleared`, `not_testable`, the
-     research basis and a standing warning as multi-line blocks inside a
-     116px-label grid -- so an eight-line sentence about the estimator's
-     significance floor wrapped inside a narrow column on a phone and ran off
-     the bottom of the drawer. Every one of those strings is already ON the
-     card, in the sections that exist to carry them: the reasons for, the
-     reasons against, the checks that could not run. Repeating them here in a
-     worse container was the whole problem.
-
-     What belongs in a drawer called Advanced is what the card does NOT say:
-     the raw score, where it sat in the day's universe, and the rank actually
-     shown. Three numbers, aligned. */
-  const row = (k, v) => v == null || v === "" ? "" :
-    '<div class="tr"><span class="tk2">' + k + '</span>' +
-    '<span class="tv num">' + esc(String(v)) + '</span></div>';
-  return '<div class="tech">' +
-    row("Score", t.score != null ? Number(t.score).toFixed(3) : null) +
-    row("Percentile", t.percentile != null ? Number(t.percentile).toFixed(1) : null) +
-    row("Rank shown", t.display_rank) +
-  '</div>' +
-  '<p class="fam-lede">Score is this name\u2019s position in today\u2019s ' +
-  'eligible universe on a 0\u20131 scale, not a probability.</p>';
-}
-
-
-/* The exit ladder is an ordered list, so it is rendered as one rather than
-   as a wall of preformatted text. */
-/* WHAT ACTUALLY CLOSES THE POSITION.
-
-   The rungs arrive as engine strings -- "1. stop_loss_breach (Rs 466.45) --
-   protective stop breached [rung 2]" -- and were printed verbatim, machine
-   name, internal rung index and all. Under baseline-v1 the list ran to eight
-   entries including a profit target, a trailing stop and a thesis
-   invalidation; three of those are now disarmed and the run no longer emits
-   them, but the parsing has to be defensive anyway because a persisted payload
-   can outlive the configuration that wrote it.
-
-   The trailing "NOT an exit: ..." line is the engine explaining what it
-   removed and why. It is kept, as a note rather than a numbered rung, because
-   a reader who remembers the old card needs to see that the target did not go
-   missing -- it was measured and taken off. */
-const EXIT_NAMES = {
-  stop_loss_breach: "The disaster stop is breached",
-  new_hard_rejection: "It fails an eligibility or data-quality gate",
-  severe_regime_change: "The market moves to a no-new-entry regime",
-  signal_reversal: "Its rank falls outside the band",
-  time_expiration: "It reaches the holding limit",   // the number is appended
-  thesis_invalidation: "The invalidation level is breached",
-  trailing_stop: "The trailing stop is hit",
-  target_achieved: "The profit target is reached",
-};
-
-function exitsHTML(exits) {
-  const rungs = [];
-  let note = "";
-  (exits || []).forEach((e) => {
-    const text = String(e);
-    if (/^NOT an exit/i.test(text)) { note = text; return; }
-    // "3. signal_reversal (Rs 12.30) -- description [rung 5]"
-    const body = text.replace(/^\s*\d+\.\s*/, "").replace(/\s*\[rung \d+\]\s*$/, "");
-    const key = body.split(/[\s(]/)[0];
-    const level = (body.match(/\(Rs\s*([\d.,]+)\)/) || [])[1];
-    let label = EXIT_NAMES[key] || body.split(" -- ")[0].replace(/_/g, " ");
-    // The horizon is a number, and this is the one place it means something
-    // about THIS position rather than about the configuration -- it is the
-    // rung that ends the trade, and on this engine it is the exit most winners
-    // take. It sat in a Hold column on every card reading the same value.
-    const horizon = (state.view && state.view.book &&
-                     state.view.book.horizon_sessions) || null;
-    if (key === "time_expiration" && horizon) {
-      label += " of " + horizon + " sessions";
-    }
-    rungs.push('<li>' + esc(label) +
-      (level ? ' <span class="ex-l">Rs ' + esc(level) + '</span>' : "") + '</li>');
-  });
-  if (!rungs.length) return "";
-  // The engine's note runs to three sentences and carries the measurement that
-  // justified each removal. The first sentence is the part a reader of this
-  // card needs -- that the target did not go missing, it was taken off -- and
-  // the arithmetic behind it belongs in the findings register, not here.
-  const short = note ? note.split(/\.\s/)[0] + "." : "";
-  return '<h4 class="ph">What closes this position</h4>' +
-    '<ol class="exits-l">' + rungs.join("") + '</ol>' +
-    (short ? '<p class="fine">' + esc(short) + '</p>' : "");
-}
-
 function panelHTML(p) {
   const L = p.levels || {};
   // Only meaningful when the target rung is armed, which it is not on this
@@ -3088,6 +2994,7 @@ function panelHTML(p) {
   const nFac = themes.reduce((n, r) => n + ((r.members || []).length), 0);
   const themeMembers = nFac
     ? '<details class="adv"><summary>' + nFac + ' factors behind them</summary>' +
+        '<div class="adv-body">' +
         themes.map((r) => {
           const ms = r.members || [];
           if (!ms.length) return "";
@@ -3104,15 +3011,17 @@ function panelHTML(p) {
               '</td></tr>').join("") +
             '</tbody></table></div></div>';
         }).join("") +
-      '</details>'
+        '</div></details>'
     : "";
 
-  const exits = (L.exits && L.exits.length) ? exitsHTML(L.exits) : "";
-  const advanced = '<details class="adv"><summary>Advanced</summary>' +
-      techHTML(p.technical) + '</details>';
-
-  return key + lead + earn + themeTable + themeMembers + gate + untested +
-         exits + advanced;
+  /* WHAT CLOSES THIS POSITION AND ADVANCED ARE BOTH GONE.
+     The exit ladder was five rules identical on every card in every run --
+     a policy, not a property of this name -- followed by a line naming three
+     exits that do not fire. Advanced held a score, a percentile and a rank:
+     the rank is already at the top of this panel, and the other two are the
+     same fact in two more units. Two drawers, one of them a second drawer
+     under a card that already has one, for nothing the reader can act on. */
+  return key + lead + earn + themeTable + themeMembers + gate + untested;
 }
 
 function wire() {

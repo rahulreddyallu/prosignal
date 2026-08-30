@@ -308,20 +308,37 @@ def test_the_arithmetic_is_in_the_panel_and_covers_every_factor():
     assert "r.members" in panel, "and the factors it is made of"
 
 
-def test_the_advanced_section_does_not_repeat_the_summary():
+def test_the_panel_has_exactly_one_drawer_and_it_holds_the_factors():
     """It rendered the same theme rows the table above already showed, with two
-    more columns. The reader who opened it for the detail got the summary
-    again. What is underneath is the FACTORS -- and they now live in their own
-    drawer, counted on its label, while `Advanced` holds only what the card
-    does not say anywhere else."""
+    more columns; then it grew a SECOND drawer called Advanced holding a score,
+    a percentile and a rank -- the rank already at the top of the same panel
+    and the other two the same fact in different units. A card with one drawer
+    is a card with more detail available; a card with two is a filing cabinet.
+
+    One drawer, and it holds the thing the summary table cannot: which factor
+    inside each theme moved."""
     html = _html()
     panel = html[html.index("function panelHTML"):]
     panel = panel[:panel.index("\nfunction ", 20)]
     assert "nFac +" in panel, "the factor drawer must count what it holds"
-    assert "'>Advanced</summary>" in panel or "<summary>Advanced</summary>" in panel
+    assert "<summary>Advanced</summary>" not in panel, "the second drawer is gone"
+    assert panel.count('details class="adv"') == 1, "exactly one drawer"
+    assert "adv-body" in panel, "its contents need the padded wrapper"
     assert panel.count("themes.map(") == 2, (
         "one pass for the summary table, one for the factors -- not a third"
     )
+
+
+def test_the_exit_ladder_is_off_the_card():
+    """Five rules identical on every card in every run -- a policy, not a
+    property of this name -- followed by a line naming three exits that do not
+    fire. Neither told the reader anything about the position in front of
+    them."""
+    html = _html()
+    panel = html[html.index("function panelHTML"):]
+    panel = panel[:panel.index("\nfunction ", 20)]
+    assert "exitsHTML" not in panel
+    assert "techHTML" not in panel
 
 
 def test_the_panel_shows_only_the_model_that_ordered_the_book():
