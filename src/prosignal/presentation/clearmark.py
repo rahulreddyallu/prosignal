@@ -58,3 +58,33 @@ def clear_mark(root: Path) -> None:
     path = _path(root)
     if path.is_file():
         path.unlink()
+
+
+def logged_after(row: dict, stamp: Optional[str]) -> bool:
+    """Was this run logged after the watermark?
+
+    THE COMPARISON THAT MATTERS. A run carries two times and only one of them
+    is comparable to a watermark: `logged_at` is the wall clock, `date` is the
+    market session it scored, and those differ by a weekend every Monday.
+
+    Filtering on `date` emptied the open book permanently. A clear on Sunday
+    the 30th wrote `2026-08-30`; the newest run that could exist scored Friday
+    the 28th; `"2026-08-28" >= "2026-08-30"` is false, so every run ever
+    written was hidden -- including the ones logged minutes after the clear,
+    which are the exact runs a clear is supposed to KEEP.
+
+    No `logged_at` means keep. Failing open shows more than intended; failing
+    closed shows nothing at all, and nothing at all is the failure this
+    function exists to prevent.
+    """
+    if not stamp:
+        return True
+    logged = str(row.get("logged_at") or "")
+    return (not logged) or logged > str(stamp)
+
+
+def kept(rows, stamp: Optional[str]) -> list:
+    """The rows a clear did not hide, by the rule above."""
+    if not stamp:
+        return list(rows)
+    return [r for r in rows if logged_after(r, stamp)]
