@@ -1623,17 +1623,38 @@ def _scope_open(op: Dict[str, Any], config_version: str) -> Dict[str, Any]:
     if not rows or not any(r.get("config_version") for r in rows):
         return op
     kept = [r for r in rows if str(r.get("config_version") or "") == config_version]
+    # LABEL, DO NOT HIDE. This dropped every mark issued by an earlier
+    # configuration, which is right for the STATISTICS -- pooling two engines
+    # reports one -- and wrong for the list: the day after any config change
+    # the page went blank while Today showed six BUYs, and the owner is about
+    # to change configuration. The rows stay, each carrying whether it belongs
+    # to the engine running now; only the summary figures are scoped.
+    older = [r for r in rows if str(r.get("config_version") or "") != config_version]
+    for r in kept:
+        r["current_engine"] = True
+    for r in older:
+        r["current_engine"] = False
     out = dict(op)
     key = "rows" if "rows" in op else "positions"
-    out[key] = kept
+    out[key] = kept + older
     out["n"] = len(kept)
-    # RECOMPUTED, not carried over. Replacing the rows and keeping `up` and
-    # `avg_unrealised` from the unfiltered set reported one book's summary
-    # above another book's list -- n: 0 beside "18 above entry".
+    out["n_older"] = len(older)
+    # RECOMPUTED, not carried over, and computed on the CURRENT engine only.
+    # Replacing the rows and keeping `up` and `avg_unrealised` from the
+    # unfiltered set reported one book's summary above another book's list.
+    def _agg(field):
+        v = [r.get(field) for r in kept
+             if isinstance(r.get(field), (int, float))]
+        return (sum(v) / len(v)) if v else None
     marks = [r.get("unrealised") for r in kept
              if isinstance(r.get("unrealised"), (int, float))]
+    ex = [r.get("excess") for r in kept
+          if isinstance(r.get("excess"), (int, float))]
     out["up"] = sum(1 for m in marks if m > 0)
-    out["avg_unrealised"] = (sum(marks) / len(marks)) if marks else None
+    out["beating"] = sum(1 for e in ex if e > 0)
+    out["avg_unrealised"] = _agg("unrealised")
+    out["avg_benchmark"] = _agg("benchmark")
+    out["avg_excess"] = _agg("excess")
     return out
 
 

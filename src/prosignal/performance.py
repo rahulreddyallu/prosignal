@@ -417,7 +417,7 @@ def equity_curve(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
 # ---------------------------------------------------------------------------
 
 def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
-                   as_of=None) -> Dict[str, Any]:
+                   as_of=None, benchmark: str = "Nifty 200") -> Dict[str, Any]:
     """Signals that have not closed yet, marked to the latest close.
 
     These move every day, which is the point -- without them a page that only
@@ -469,6 +469,13 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
     if not want:
         return {"n": 0, "positions": []}
 
+    # THE INDEX OVER THE SAME DAYS. A mark of +2.3% is not a result until you
+    # know what the market did while the position was open -- +2.3% in a +4%
+    # tape is the signal losing. The closed figures have carried this since v1
+    # and the open ones did not, so the only number the page could show from
+    # day two was the one that could not be judged.
+    idx = _index_frame(store, benchmark)
+
     try:
         prices = store.read_prices(symbols=list(want.keys()))
     except Exception:
@@ -503,13 +510,21 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
             # cannot tell those apart.
             path = [float(v) for v in fut["close"].head(max_hold).tolist()
                     if np.isfinite(v)]
+            entry_dt = str(pd.Timestamp(fut.iloc[0][DATE]).date())
+            last_ds = str(pd.Timestamp(last_dt).date())
+            unreal = last_px / entry - 1.0
+            bench = _bench_return(idx, entry_dt, last_ds)
             out.append({
                 "ticker": ticker,
                 "signal_date": it["date"],
+                "entry_date": entry_dt,
                 "entry_price": entry,
                 "last_price": last_px,
-                "last_date": str(pd.Timestamp(last_dt).date()),
-                "unrealised": last_px / entry - 1.0,
+                "last_date": last_ds,
+                "unrealised": unreal,
+                # The index over the identical window, and the difference.
+                "benchmark": bench,
+                "excess": (unreal - bench) if bench is not None else None,
                 "sessions_held": held,
                 "config_version": it.get("config_version"),
                 "sessions_left": max_hold - held,
@@ -529,10 +544,21 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
     out = list(first.values())
     out.sort(key=lambda r: r["unrealised"])
     marks = np.array([r["unrealised"] for r in out], dtype=float) if out else np.array([])
+    ex = np.array([r["excess"] for r in out if r.get("excess") is not None],
+                  dtype=float)
+    bm = np.array([r["benchmark"] for r in out if r.get("benchmark") is not None],
+                  dtype=float)
     return {
         "n": len(out),
         "positions": out,
         "avg_unrealised": float(marks.mean()) if marks.size else None,
+        # WHAT TAKING EVERY CALL WOULD HAVE DONE, against the index over the
+        # same days. Equal weight, because that is the question being asked --
+        # "if I had bought these" -- and it is the SIGNAL's record rather than
+        # the six-slot book's.
+        "avg_benchmark": float(bm.mean()) if bm.size else None,
+        "avg_excess": float(ex.mean()) if ex.size else None,
+        "beating": int((ex > 0).sum()) if ex.size else 0,
         "up": int((marks > 0).sum()) if marks.size else 0,
         "as_of": out[0]["last_date"] if out else None,
         "note": ("Marked to the latest close. These are not results -- they "
