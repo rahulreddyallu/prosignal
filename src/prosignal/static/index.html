@@ -2777,17 +2777,17 @@ function viewHistory(v) {
     const dropped = open.excluded_open || 0;
     return '<div class="box empty">' +
       '<h3>No calls yet</h3>' +
-      '<p>Every call lands here the morning after it is issued, marked to the ' +
-      'latest close and to the index over the same days \u2014 open or ' +
-      'closed. Run a scan, or wait for the daily job.</p>' +
+      '<p>Every call lands here the day it is issued, and is marked to the ' +
+      'latest close and to the index over the same days from its first full ' +
+      'session on. Run a scan, or wait for the daily job.</p>' +
       (dropped
         ? '<p class="fine">' + dropped + ' open ' +
           (dropped === 1 ? 'position was' : 'positions were') +
           ' issued by an earlier configuration and are not counted as this ' +
           'engine\u2019s book. Calls made from here will appear as they are ' +
           'made, and again when they close.</p>'
-        : '<p class="fine">Calls appear here as soon as they are made, and ' +
-          'again when they close.</p>') +
+        : '<p class="fine">A call made on today\u2019s close shows here at ' +
+          'once, without a return, because it has not been filled yet.</p>') +
       '</div>' + excluded;
   }
 
