@@ -2640,21 +2640,30 @@ function openHTML(op) {
     (b.excess != null ? b.excess : b.unrealised) -
     (a.excess != null ? a.excess : a.unrealised));
 
-  const row = (r, dim) =>
-    '<button class="nr' + (dim ? " nr-dim" : "") + '" data-stock="' +
+  /* PENDING IS A REAL STATE, not a missing row. The engine fills at the NEXT
+     session's open, so a call issued on the most recent close has no entry
+     price and no return -- and it used to be dropped, which is why a fresh
+     install that ran one scan showed "no calls yet" over six names it had
+     just issued. It is shown with no numbers, because there are none yet. */
+  const row = (r, dim) => {
+    const pending = r.state === "pending" || r.unrealised == null;
+    return '<button class="nr' + (dim ? " nr-dim" : "") + '" data-stock="' +
       esc(r.ticker) + '">' +
       '<span class="nr-t">' + esc(r.ticker) + '</span>' +
-      '<span class="nr-h">' + r.sessions_held +
-        (r.sessions_held === 1 ? " session" : " sessions") +
-        (r.benchmark != null
-          ? ' \u00b7 index ' + (r.benchmark >= 0 ? "+" : "") +
-            (r.benchmark * 100).toFixed(1) + '%'
-          : "") +
-        (r.reaffirmed ? ' \u00b7 re-signalled ' + r.reaffirmed + 'x' : "") +
+      '<span class="nr-h">' + (pending
+        ? 'issued ' + esc(day(r.signal_date)) + ' \u00b7 fills at the next open'
+        : r.sessions_held + (r.sessions_held === 1 ? " session" : " sessions") +
+          (r.benchmark != null
+            ? ' \u00b7 index ' + (r.benchmark >= 0 ? "+" : "") +
+              (r.benchmark * 100).toFixed(1) + '%'
+            : "") +
+          (r.reaffirmed ? ' \u00b7 re-signalled ' + r.reaffirmed + 'x' : "")) +
       '</span>' +
-      sparkHTML(r.path, r.entry_price) +
-      '<span class="nr-v">' + signed(r.unrealised) + '</span>' +
+      (pending ? '<span class="spark"></span>' : sparkHTML(r.path, r.entry_price)) +
+      '<span class="nr-v">' + (pending ? '<span class="v-neu">\u2014</span>'
+                                       : signed(r.unrealised)) + '</span>' +
     '</button>';
+  };
 
   /* THE HEADLINE IS THE EXCESS, not the raw mark. */
   /* WHEN THE CURRENT ENGINE HAS ISSUED NOTHING YET, the summary describes an
@@ -2673,10 +2682,16 @@ function openHTML(op) {
 
   const head = (op.avg_excess != null)
     ? signed(op.avg_excess) + ' vs the index'
-    : signed(op.avg_unrealised);
+    : (op.avg_unrealised != null ? signed(op.avg_unrealised)
+                                 : '<span class="v-neu">\u2014</span>');
+  const nPend = mine.filter((r) => r.state === "pending").length;
+  const entered = mine.length - nPend;
   const sub = [
-    (op.beating != null ? op.beating + ' of ' + mine.length + ' ahead of the index'
-                        : (op.up || 0) + ' of ' + mine.length + ' above entry'),
+    (nPend ? nPend + ' issued today, not yet entered' : null),
+    (entered
+      ? (op.beating != null ? op.beating + ' of ' + entered + ' ahead of the index'
+                            : (op.up || 0) + ' of ' + entered + ' above entry')
+      : null),
     (op.avg_unrealised != null && op.avg_benchmark != null
       ? 'you ' + (op.avg_unrealised >= 0 ? "+" : "") +
         (op.avg_unrealised * 100).toFixed(1) + '%, index ' +

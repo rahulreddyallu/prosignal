@@ -497,6 +497,29 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
                 continue
             fut = f[f[DATE] > sig_dt]
             if fut.empty:
+                # ISSUED, NOT YET ENTERED. The engine fills at the NEXT
+                # session's open, so a call made on the most recent close has
+                # no entry price and no return -- correctly. It was dropped
+                # here, which meant a fresh install that ran one scan showed
+                # "no calls yet" over six names it had just issued. It is a
+                # real state and it is reported as one: no numbers, because
+                # there are none.
+                out.append({
+                    "ticker": ticker,
+                    "signal_date": it["date"],
+                    "state": "pending",
+                    "entry_date": None,
+                    "entry_price": None,
+                    "last_price": last_px,
+                    "last_date": str(pd.Timestamp(last_dt).date()),
+                    "unrealised": None,
+                    "benchmark": None,
+                    "excess": None,
+                    "sessions_held": 0,
+                    "config_version": it.get("config_version"),
+                    "sessions_left": max_hold,
+                    "path": [],
+                })
                 continue
             entry = float(fut.iloc[0]["open"])
             if not np.isfinite(entry) or entry <= 0:
@@ -521,6 +544,7 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
                 "entry_price": entry,
                 "last_price": last_px,
                 "last_date": last_ds,
+                "state": "open",
                 "unrealised": unreal,
                 # The index over the identical window, and the difference.
                 "benchmark": bench,
@@ -539,17 +563,28 @@ def open_positions(ledger_rows, resolved, store, *, max_hold: int = 63,
         if cur is None:
             first[r["ticker"]] = r
         else:
+            # An ENTERED leg always wins over a pending one: the same name
+            # signalled again today is the position being maintained, and the
+            # position is the one that has an entry price.
+            if cur.get("state") == "pending" and r.get("state") == "open":
+                r["reaffirmed"] = int(cur.get("reaffirmed") or 0) + 1
+                first[r["ticker"]] = r
+                continue
             cur["sessions_left"] = min(cur["sessions_left"], r["sessions_left"])
             cur["reaffirmed"] = int(cur.get("reaffirmed") or 0) + 1
     out = list(first.values())
-    out.sort(key=lambda r: r["unrealised"])
-    marks = np.array([r["unrealised"] for r in out], dtype=float) if out else np.array([])
+    out.sort(key=lambda r: (r.get("unrealised") is None,
+                            r.get("unrealised") if r.get("unrealised") is not None else 0.0))
+    marks = np.array([r["unrealised"] for r in out
+                      if r.get("unrealised") is not None], dtype=float)
     ex = np.array([r["excess"] for r in out if r.get("excess") is not None],
                   dtype=float)
     bm = np.array([r["benchmark"] for r in out if r.get("benchmark") is not None],
                   dtype=float)
+    n_pending = sum(1 for r in out if r.get("state") == "pending")
     return {
         "n": len(out),
+        "n_pending": n_pending,
         "positions": out,
         "avg_unrealised": float(marks.mean()) if marks.size else None,
         # WHAT TAKING EVERY CALL WOULD HAVE DONE, against the index over the

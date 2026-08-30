@@ -160,3 +160,51 @@ def test_a_call_already_on_file_is_not_retried_under_another_run_id():
              "stocks_scored": [{"ticker": "X", "last_close": 100.0, "stop": 1.0, "target_1": 2.0}]}]
     assert O._pending(rows, set()) != []
     assert O._pending(rows, set(), {("X", "2024-01-09")}) == []
+
+
+def test_a_signal_with_no_session_after_it_is_pending_not_missing():
+    """A call issued on the most recent close has no entry price, because the
+    engine fills at the NEXT session's open and that session has not happened.
+
+    It was dropped for that reason, so a fresh install that ran one scan
+    showed "No calls yet" on History over the six names Today was displaying
+    at that moment. Having no return yet is a state, not an absence."""
+    from prosignal import performance as P
+    f = _bars("AAA", "2024-01-01", 3, open_=100.0, close=100.0)
+    sig = str(f["date"].iloc[-1].date())      # signalled on the LAST session
+    store = _Store(f, [d.date() for d in f["date"]])
+    rows = [{"run_id": "r1", "date": sig, "config_version": "c",
+             "signals_generated": ["AAA"],
+             "stocks_scored": [{"ticker": "AAA", "last_close": 100.0,
+                                "stop": 90.0, "target_1": 110.0}]}]
+    op = P.open_positions(rows, [], store)
+    assert op["n"] == 1, "the call is on the page, not swallowed"
+    row = op["positions"][0]
+    assert row["state"] == "pending"
+    assert row["unrealised"] is None and row["entry_price"] is None, (
+        "there is no fill and therefore no return -- a zero would be a lie"
+    )
+    assert op["n_pending"] == 1
+    assert op["avg_unrealised"] is None, "a pending call cannot move an average"
+
+
+def test_a_pending_leg_never_displaces_the_entered_position():
+    """The same name signalled again today is the position being maintained.
+    Collapsing to whichever leg sorted first would replace a running holding,
+    with its entry and its mark, by an empty pending row."""
+    from prosignal import performance as P
+    f = _bars("AAA", "2024-01-01", 6, open_=100.0, close=100.0)
+    early, late = str(f["date"].iloc[0].date()), str(f["date"].iloc[-1].date())
+    store = _Store(f, [d.date() for d in f["date"]])
+    rows = [{"run_id": "r1", "date": early, "config_version": "c",
+             "signals_generated": ["AAA"],
+             "stocks_scored": [{"ticker": "AAA", "last_close": 100.0,
+                                "stop": 90.0, "target_1": 110.0}]},
+            {"run_id": "r2", "date": late, "config_version": "c",
+             "signals_generated": ["AAA"],
+             "stocks_scored": [{"ticker": "AAA", "last_close": 100.0,
+                                "stop": 90.0, "target_1": 110.0}]}]
+    op = P.open_positions(rows, [], store)
+    assert op["n"] == 1, "one name held is one call, however often re-signalled"
+    assert op["positions"][0]["state"] == "open"
+    assert op["positions"][0]["entry_price"] is not None
