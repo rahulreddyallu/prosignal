@@ -19,6 +19,7 @@ import datetime as dt
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
@@ -93,6 +94,13 @@ class AnalysisRun:
     context: RunContext
     timings_ms: Dict[str, float] = field(default_factory=dict)
     funnel: Dict[str, int] = field(default_factory=dict)
+    #: What stage 4 said about HOW it ranked -- the scorer, the sealed-holdout
+    #: numbers behind it, and any theme running more of today's spread than the
+    #: weight it was given. Stage 4 has written these on every run since the v2
+    #: deploy and `CoreScores.notes` was read by nothing: not rendered, not
+    #: persisted, not in the ledger. A monitor that flags into a field nobody
+    #: reads is not a monitor, so the notes are carried out of the run here.
+    scoring_notes: List[str] = field(default_factory=list)
 
 
 def run_analysis(
@@ -277,6 +285,25 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # ---- Stage 8 ----------------------------------------------------------
     step(8)
     t = _clock()
+    # EARNINGS PROXIMITY for the names that could be carded. Computed here
+    # because stage 8 has no store, and computed for the SCORED set rather than
+    # the whole universe so it costs a lookup rather than a scan. It is a risk
+    # disclosure and never a gate: it changes no score, no rank and no
+    # admission.
+    earnings_notes: Dict[str, str] = {}
+    try:
+        from .features import earnings as _earn
+        _syms = [s.ticker for s in scores.ranked_scores]
+        _cal = _earn.earnings_dates(store)
+        _until = _earn.sessions_until_next(_cal, _syms, resolved, sessions)
+        _since = _earn.days_since_last(_cal, _syms, resolved)
+        for _s in _syms:
+            _n = _earn.risk_note(_s, _until.get(_s), _since.get(_s))
+            if _n:
+                earnings_notes[_s] = _n
+    except Exception as exc:
+        log.warning("earnings proximity unavailable", extra={"error": str(exc)})
+
     buys, watch, no_trade, gate_counts = stage8_final_signal.run(
         regime=regime,
         eligibility=eligibility,
@@ -287,6 +314,7 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         closes=closes,
         config=config,
         company_names=dict(universe.company_names),
+        earnings_notes=earnings_notes,
         # Stage 8 needs the same book Stage 6 got. Its sector, correlation and
         # book-size limits are ENTRY limits; without knowing what is already
         # held it applied them to open positions and evicted them, which is how
@@ -390,8 +418,25 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
                         train_sessions=train_sessions)
     )
 
+    # THE DRAWDOWN FLAG, on the same channel as the theme flags. It reads
+    # CLOSED trades, so it lags an open book and is a floor on the drawdown
+    # rather than an estimate -- `review_realised_drawdown` says so on the line
+    # itself. It stays silent below twenty closed trades: a six-name book's
+    # realised curve after four exits is noise, and "0%, inside the flag" would
+    # reassure about a book that has not been tested yet.
+    scoring_notes = list(getattr(scores, "notes", []) or [])
+    try:
+        from . import v3_monitor as _v3mon
+        from . import outcomes as _out
+        _p = Path(config.paths.ledger) / "outcomes.jsonl"
+        if _p.exists():
+            scoring_notes += _v3mon.review_realised_drawdown(
+                _out.load_outcomes(_p))
+    except Exception as exc:                        # never fail a run to report
+        log.warning("drawdown check did not run", extra={"error": str(exc)})
+
     result = AnalysisRun(output=output, context=context, timings_ms=timings,
-                         funnel=funnel)
+                         funnel=funnel, scoring_notes=scoring_notes)
 
     # THE SCREEN READS THIS, not the API's job queue.
     #

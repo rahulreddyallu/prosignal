@@ -73,7 +73,8 @@ EXECUTION_MODEL = "statutory-india-v1+liquidity-gate-r13"
 
 
 def _git_sha(root: Path) -> str:
-    """HEAD, or `"unversioned"`. Never a guess."""
+    """HEAD, or `"unversioned"`. Never a guess. Informational only -- the
+    REPRODUCIBILITY gate compares `_code_sha`, for the reason given there."""
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root),
                              capture_output=True, text=True, timeout=10)
@@ -83,22 +84,90 @@ def _git_sha(root: Path) -> str:
         return "unversioned"
 
 
+#: Tracked directories whose contents ARE the running engine. `config/` is
+#: deliberately absent: `config_version` already fingerprints every tunable,
+#: and folding it in here would report one change as two.
+_CODE_TREES = ("src",)
+
+
+def _code_sha(root: Path) -> str:
+    """A hash of the CODE, stable across commits that touch only provenance.
+
+    THIS USED TO BE `git rev-parse HEAD`, and that made the REPRODUCIBILITY
+    gate unsatisfiable in the same way the dirty-tree check was. Opening an
+    epoch writes `data/ledger/epochs.jsonl`; that row has to be committed;
+    committing it moves HEAD; the gate then reports that the tree has drifted
+    from an epoch opened seconds earlier, on a tree where not one line of the
+    engine changed. Measured on this repository: three consecutive attempts to
+    open an epoch and restart the forward test, each refused for a commit that
+    contained only the previous attempt's epoch row.
+
+    `git rev-parse HEAD:src` is the tree object for the source directory. It
+    changes when any source file changes and does not change when a provenance
+    commit lands, which is exactly the property the gate needs.
+    """
+    parts = []
+    for tree in _CODE_TREES:
+        try:
+            out = subprocess.run(["git", "rev-parse", f"HEAD:{tree}"], cwd=str(root),
+                                 capture_output=True, text=True, timeout=10)
+            if out.returncode != 0 or len(out.stdout.strip()) < 12:
+                return "unversioned"
+            parts.append(out.stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            return "unversioned"
+    if len(parts) == 1:
+        return parts[0][:12]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:12]
+
+
+#: Tracked paths the epoch machinery WRITES WHILE OPENING AN EPOCH. They are
+#: provenance, not code, and counting them made the reproducibility gate
+#: unsatisfiable by construction: `open_production_epoch.sh` re-manifests the
+#: store (step 3) and appends the epoch row (step 4) before the gate is checked
+#: (step 5), so the tree was always dirty and the forward-test restart was
+#: always refused -- on a tree whose CODE was committed and clean. A gate that
+#: can never pass is a gate somebody eventually routes around, which is worse
+#: than not having one.
+#:
+#: `MANIFEST.json` in particular carries a `built_at` timestamp, so re-running
+#: the same command on unchanged data produces a diff every time.
+_PROVENANCE_PATHS = ("data/ledger/", "data/curated/MANIFEST.json")
+
+
 def _dirty(root: Path) -> Optional[bool]:
-    """Whether the working tree has uncommitted changes, or None if unknown.
+    """Whether the working tree has uncommitted CODE changes, or None if unknown.
 
     An epoch opened from a dirty tree names a commit that does not contain the
     code that ran. That is not automatically wrong -- it is how research is
     done -- but it must be recorded, because `code_sha` otherwise reads as a
     promise it cannot keep.
+
+    Provenance files the epoch machinery writes as part of opening are excluded
+    (see `_PROVENANCE_PATHS`); `provenance_uncommitted` reports them separately
+    so nothing is hidden, it is just not confused with a code change.
     """
+    d = _status(root)
+    return None if d is None else d["code_dirty"]
+
+
+def _status(root: Path) -> Optional[dict]:
+    """Split `git status --porcelain` into code changes and provenance writes."""
     try:
         out = subprocess.run(["git", "status", "--porcelain"], cwd=str(root),
                              capture_output=True, text=True, timeout=10)
         if out.returncode != 0:
             return None
-        return bool(out.stdout.strip())
     except (OSError, subprocess.SubprocessError):
         return None
+    code, prov = [], []
+    for line in out.stdout.splitlines():
+        path = line[3:].strip().strip('"')
+        if "->" in path:                      # a rename: judge the destination
+            path = path.split("->")[-1].strip().strip('"')
+        (prov if path.startswith(_PROVENANCE_PATHS) else code).append(path)
+    return {"code_dirty": bool(code), "code_paths": code,
+            "provenance_uncommitted": bool(prov), "provenance_paths": prov}
 
 
 def _feature_schema_sha() -> str:
@@ -112,8 +181,16 @@ def _feature_schema_sha() -> str:
         from ..features import crossmodel as cm
 
         families = getattr(cm, "FAMILIES", None) or getattr(cm, "THEMES", None) or {}
+        # WHAT ACTUALLY RANKS THE BOOK belongs in the fingerprint. Under
+        # `ranking.source: v2_composite` that is `features/v2.py` -- its factor
+        # names, signs, weights and lookbacks -- and hashing only `crosssec`
+        # would let the shipped factor set change without the epoch noticing,
+        # which is the one thing this hash exists to prevent.
+        from ..features.v2 import V2_FACTORS
+
         payload = {
             "features": {k: v[0] for k, v in sorted(FEATURES.items())},
+            "v2": [[f.name, f.sign, f.weight, f.lookback] for f in V2_FACTORS],
             "neutral_when_missing": sorted(NEUTRAL_WHEN_MISSING),
             "families": {k: sorted(v) for k, v in sorted(
                 (families or {}).items())} if isinstance(families, dict) else str(families),
@@ -136,6 +213,10 @@ class Identity:
     feature_schema_sha: str
     universe_policy: str
     execution_model: str
+    #: HEAD at the moment the epoch was opened. Recorded so a reader can find
+    #: the commit; NOT compared by the gate, because a provenance-only commit
+    #: moves it without changing the engine.
+    commit_sha: str = "unversioned"
 
     def fingerprint(self) -> str:
         payload = json.dumps({
@@ -143,6 +224,7 @@ class Identity:
             # the tree an epoch was opened from, not the model. Two clean runs
             # of the same commit must fingerprint identically.
             "code_sha": self.code_sha,
+            "commit_sha": self.commit_sha,
             "model_sources_sha": self.model_sources_sha,
             "config_version": self.config_version,
             "data_manifest_sha": self.data_manifest_sha,
@@ -170,7 +252,8 @@ def current_identity(cfg) -> Identity:
 
     root = Path(cfg.paths.root)
     return Identity(
-        code_sha=_git_sha(root),
+        code_sha=_code_sha(root),
+        commit_sha=_git_sha(root),
         code_dirty=_dirty(root),
         model_sources_sha=source_digest(),
         config_version=str(getattr(cfg, "version", "")),

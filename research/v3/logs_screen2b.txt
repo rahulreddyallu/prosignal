@@ -1,0 +1,47 @@
+93 factors, 293 dates, 142,298 rows
+
+93 factors | 293 dates | 1175 symbols | 142298 rows
+  h=10 done
+  h=21 done
+  h=42 done
+  h=63 done
+h=10: kept 23/93
+  momentum      8/24  mom_consist_126, prox_52w, intraday_mom_126, voladj_mom_12_1, mom_12_6, voladj_mom_6_1
+  reversal      6/10  max5_21, rev_1w, resid_rev_21, price_vs_vwap_20, rev_2w, rev_1m_scaled
+  value         0/ 8  
+  quality       1/15  net_margin
+  risk          4/19  ret_kurt_126, ulcer_120, downside_vol_60, max_dd_120
+  liquidity     0/ 9  
+  ownership     4/ 6  deliv_chg_5, deliv_z_21, deliv_trend, deliv_pct_60
+  seasonality   0/ 2  
+
+h=21: kept 15/93
+  momentum      6/24  mom_consist_126, intraday_mom_126, prox_52w, voladj_mom_12_1, voladj_mom_6_1, prox_52w_now
+  reversal      2/10  resid_rev_21, rev_1w
+  value         0/ 8  
+  quality       2/15  margin_stability, gross_profitability
+  risk          3/19  ret_kurt_126, ulcer_120, max_dd_120
+  liquidity     0/ 9  
+  ownership     2/ 6  deliv_z_21, deliv_chg_5
+  seasonality   0/ 2  
+
+h=42: kept 13/93
+  momentum      7/24  voladj_mom_12_1, mom_consist_126, intraday_mom_126, prox_52w, voladj_mom_6_1, prox_52w_now
+  reversal      0/10  
+  value         0/ 8  
+  quality       2/15  margin_stability, gross_profitability
+  risk          2/19  ret_kurt_126, ulcer_120
+  liquidity     1/ 9  volume_shock_5
+  ownership     1/ 6  deliv_z_21
+  seasonality   0/ 2  
+
+h=63: kept 17/93
+  momentum     13/24  intraday_mom_126, voladj_mom_6_1, dist_200dma, mom_consist_126, prox_52w_now, trend_slope_120
+  reversal      1/10  rev_1m_scaled
+  value         0/ 8  
+  quality       1/15  gross_profitability
+  risk          1/19  ret_kurt_126
+  liquidity     0/ 9  
+  ownership     1/ 6  deliv_z_21
+  seasonality   0/ 2  
+

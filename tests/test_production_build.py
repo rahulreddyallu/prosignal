@@ -239,10 +239,60 @@ class TestTheRankingPolicy:
         with pytest.raises(RankingUnavailable):
             _apply_ranking_policy(composite, f, self._Cfg(), [])
 
-    def test_the_shipped_config_asks_for_the_measured_column(self, cfg):
+    def test_the_shipped_config_asks_for_the_v3_composite(self, cfg):
+        """What actually orders the book, as of the 2026-08-30 deploy.
+
+        This has now been three answers: `measured_factor`/`mom_6_1_r`, then
+        `v2_composite`, now `v3_composite`. Each time the previous one stayed
+        REACHABLE -- `column` is still `mom_6_1_r` and the v2 block still
+        builds -- so the comparison against what shipped before stays runnable
+        rather than becoming a story about what used to happen. This test pins
+        all three: what ranks, and both retained comparators.
+        """
         r = cfg.params.stage4_core_score.ranking
-        assert r.source == "measured_factor"
+        assert r.source == "v3_composite"
         assert r.column == "mom_6_1_r"
+        assert int(r.v2_min_factors.value) == 7
+        assert int(r.v3_min_themes.value) == 3
+
+    def test_the_absolute_floor_ships_on_and_applies_to_entries_only(self, cfg):
+        """Applied to the whole population instead, the floor forces an exit
+        every time a held name dips below its 200-DMA, and forced exits are
+        turnover: measured on training data, cost drag 8.8% -> 5.6%."""
+        f = cfg.params.stage4_core_score.absolute_floor
+        assert bool(f.enabled.value) is True
+        assert int(f.above_ma_sessions.value) == 200
+        assert int(f.min_positive_themes.value) == 3
+        assert str(f.applies_to.value) == "entries"
+
+    def test_the_v2_composite_ranks_and_refuses_to_fall_back(self):
+        """The failure mode that matters is not that the v2 block breaks -- it
+        is that it breaks QUIETLY back to a scorer the holdout never measured."""
+        n = 80
+        idx = [f"T{i}" for i in range(n)]
+        composite = pd.Series(np.zeros(n), index=idx)
+        scored = pd.DataFrame({"score": np.linspace(-1, 1, n)}, index=idx)
+        notes = []
+        out, source = _apply_ranking_policy(
+            composite, None, self._Cfg("v2_composite"), notes, v2_scored=scored)
+        assert source == "v2_composite"
+        assert out.idxmax() == f"T{n - 1}" and out.idxmin() == "T0"
+        assert notes and "v2 composite" in notes[0]
+
+        with pytest.raises(Exception) as exc:
+            _apply_ranking_policy(composite, None, self._Cfg("v2_composite"),
+                                  [], v2_scored=None)
+        assert "v2" in str(exc.value)
+
+    def test_the_v2_composite_refuses_a_minority_of_the_universe(self):
+        n = 100
+        idx = [f"T{i}" for i in range(n)]
+        composite = pd.Series(np.zeros(n), index=idx)
+        thin = pd.DataFrame({"score": np.linspace(-1, 1, 30)}, index=idx[:30])
+        with pytest.raises(Exception) as exc:
+            _apply_ranking_policy(composite, None, self._Cfg("v2_composite"),
+                                  [], v2_scored=thin)
+        assert "minority" in str(exc.value)
 
 
 # =============================================================================

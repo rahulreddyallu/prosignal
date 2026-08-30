@@ -331,8 +331,18 @@ class DataStore:
     #: What the stages actually consume. The price table has 18 columns; no
     #: stage reads more than these, and projecting them cut a year-file from
     #: 33 MB to 17 MB in measurement.
+    #: VWAP IS A PRICE COLUMN AND IT IS SERVED. Every fill in this engine's
+    #: research -- and therefore every cost and every excess return it reports
+    #: -- is the VWAP of the session after the signal, which is the manual
+    #: next-session execution the product asks of its user. This list omitted
+    #: `vwap`, so the store held it (100% coverage in the parquet) and served
+    #: it to nobody: `build_v3_panel` and `build_v2_panel` both fall back to
+    #: open, then close, when vwap is absent, and would have quietly measured a
+    #: different execution than the one the holdouts were computed on. It also
+    #: left `price_vs_vwap_20` -- one of the four reversal factors -- NaN on
+    #: every production row.
     PRICE_COLUMNS = [
-        DATE, SYMBOL, "series", "open", "high", "low", "close",
+        DATE, SYMBOL, "series", "open", "high", "low", "close", "vwap",
         "volume", "turnover", "deliv_pct",
     ]
 
@@ -488,7 +498,8 @@ class DataStore:
         # like a valid answer is worse than no answer, so it raises.
         if requested is not None:
             req = set(requested)
-            if "adj_factor" in req and not (req & {"open", "high", "low", "close"}):
+            if "adj_factor" in req and not (req & {"open", "high", "low", "close",
+                                                    "vwap"}):
                 raise IntegrityError(
                     "adj_factor was requested without a price column. It is "
                     "computed during adjustment, not stored; reading it alone "
@@ -505,7 +516,12 @@ class DataStore:
                 return frame
             from .corporate_actions import apply_adjustments
 
-            price_cols = [c for c in ("open", "high", "low", "close") if c in frame.columns]
+            # vwap is adjusted with the rest. An unadjusted vwap beside an
+            # adjusted close makes `price_vs_vwap_20` read a 1:10 split as a
+            # -90% dislocation, and makes a VWAP fill price a post-split share
+            # at its pre-split price.
+            price_cols = [c for c in ("open", "high", "low", "close", "vwap")
+                          if c in frame.columns]
             if not price_cols:
                 return frame
             adjusted = apply_adjustments(frame, actions, price_columns=price_cols)

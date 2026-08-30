@@ -1,0 +1,104 @@
+{
+ "window": "B_equity_only",
+ "label_horizon": 21,
+ "config_sha256": "eb2bdb697919e41994d3687bf55c9339d2117221ebb575ff0f01002203cee4e8",
+ "signal_dates": 75,
+ "book_net_of_costs": {
+  "annualised_return": 0.09539384733989009,
+  "benchmark_annualised": 0.07520086124392789,
+  "excess_annualised": 0.020192986095962207,
+  "information_ratio": 0.05615853069346833,
+  "sharpe": 0.4897001173168134,
+  "max_drawdown": -0.16376587363894402,
+  "cost_drag_annualised": 0.13690955356643514,
+  "cash_share": 0.00800000000000011,
+  "median_hold_sessions": 20.0,
+  "closed_positions": 148,
+  "periods": 75,
+  "total_return": 0.14520799394198214,
+  "benchmark_total_return": 0.11393417764599012,
+  "excess_by_calendar_year": {
+   "2021": -0.0313289790938881,
+   "2022": 0.033194382507830245
+  }
+ },
+ "absolute_floor": {
+  "median_names_clearing": 48.0,
+  "min_names_clearing": 9,
+  "dates_short_of_a_full_book": 1,
+  "dates_with_no_name": 0,
+  "dates": 75
+ },
+ "ranking_h21": {
+  "ic": 0.035742112500474106,
+  "ic_t": 3.8256179443791045,
+  "topk": 0.01365779728939136,
+  "topk_t": 2.4975058884131798,
+  "quintile": 0.008627505855013927,
+  "quintile_t": 3.049836591036513,
+  "dates": 75
+ },
+ "ranking_h42": {
+  "ic": 0.04211927771984892,
+  "ic_t": 4.874919555151156,
+  "topk": 0.008796324512610833,
+  "topk_t": 1.3521247253527278,
+  "quintile": 0.014990732564280431,
+  "quintile_t": 3.932631399554458,
+  "dates": 75
+ },
+ "theme_ic_h21": {
+  "momentum": {
+   "ic": 0.02534049311106853,
+   "ic_t": 2.3076901095843327,
+   "weight": 0.4
+  },
+  "reversal": {
+   "ic": 0.015139954062953525,
+   "ic_t": 1.769748381287659,
+   "weight": 0.2
+  },
+  "risk": {
+   "ic": 0.02386582277627703,
+   "ic_t": 3.7430842605261003,
+   "weight": 0.4
+  }
+ },
+ "shuffled_score_null": {
+  "draws_book": 200,
+  "excess_mean": -0.14207678644987812,
+  "excess_sd": 0.061587247626906254,
+  "excess_p95": -0.0481518153863148,
+  "p_value_excess": 0.01,
+  "draws_quintile": 60,
+  "quintile_mean": 0.001305994590074988,
+  "p_value_quintile": 0.23333333333333334
+ },
+ "seal": {
+  "start": "2021-07-01",
+  "end": "2022-12-27",
+  "signal_dates": 75,
+  "rows": 40027,
+  "sha256": "2b4b5cb7c05d5d82fc20b3a6732772e96616996d2eed3f5f7cc191c1b62060e8",
+  "note": "untouched by every search so far; the pipeline is re-run end to end on pre-2021-07 data only before it is opened"
+ },
+ "universe_correction": {
+  "excluded_instruments": 11,
+  "excluded_rows_share": 0.01047,
+  "names": [
+   "BANKBEES",
+   "CPSEETF",
+   "GOLDBEES",
+   "JUNIORBEES",
+   "KOTAKBKETF",
+   "LIQUIDBEES",
+   "MON100",
+   "NIFTYBEES",
+   "PSUBNKBEES",
+   "SETFGOLD",
+   "SETFNIF50"
+  ],
+  "config_unchanged": true,
+  "trials_on_this_window": 2
+ }
+}

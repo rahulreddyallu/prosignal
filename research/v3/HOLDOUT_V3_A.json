@@ -1,0 +1,95 @@
+{
+ "window": "A",
+ "label_horizon": 21,
+ "config_sha256": "2b48aee043277700ab9dd252d79067849b691c1f0b6f50cbe8799f52e8be33ea",
+ "signal_dates": 72,
+ "book_net_of_costs": {
+  "annualised_return": 0.08033876144562768,
+  "benchmark_annualised": 0.15280853351607826,
+  "excess_annualised": -0.07246977207045058,
+  "information_ratio": -0.9130838593712773,
+  "sharpe": 0.5698233402970923,
+  "max_drawdown": -0.19275989738386667,
+  "cost_drag_annualised": 0.09512742969525104,
+  "cash_share": 0.008333333333333443,
+  "median_hold_sessions": 20.0,
+  "closed_positions": 145,
+  "periods": 72,
+  "total_return": 0.11671615195248553,
+  "benchmark_total_return": 0.22524953569331685,
+  "excess_by_calendar_year": {
+   "2025": -0.09993792569761473,
+   "2026": -0.04133918359816513
+  }
+ },
+ "absolute_floor": {
+  "median_names_clearing": 185.0,
+  "min_names_clearing": 54,
+  "dates_short_of_a_full_book": 0,
+  "dates_with_no_name": 0,
+  "dates": 72
+ },
+ "ranking_h21": {
+  "ic": 0.05861120546415005,
+  "ic_t": 3.6583829858853285,
+  "topk": -0.0010898635027579207,
+  "topk_t": -0.25439303935011226,
+  "quintile": 0.011224284147222837,
+  "quintile_t": 2.650793257528961,
+  "dates": 69
+ },
+ "ranking_h42": {
+  "ic": 0.0619983425779049,
+  "ic_t": 3.5298129263751954,
+  "topk": 0.004582721954927995,
+  "topk_t": 0.8025496863661817,
+  "quintile": 0.017857500022420515,
+  "quintile_t": 2.7186473102956668,
+  "dates": 65
+ },
+ "theme_ic_h21": {
+  "ownership": {
+   "ic": 0.04337889573793615,
+   "ic_t": 4.820943277379038,
+   "weight": 0.18939
+  },
+  "risk": {
+   "ic": 0.047975155470356204,
+   "ic_t": 3.1451851611914012,
+   "weight": 0.11088
+  },
+  "momentum": {
+   "ic": 0.033261782476259355,
+   "ic_t": 2.052486055714076,
+   "weight": 0.4
+  },
+  "quality": {
+   "ic": 0.05457128110334994,
+   "ic_t": 6.163848232131129,
+   "weight": 0.18991
+  },
+  "reversal": {
+   "ic": 0.02636846420829279,
+   "ic_t": 2.750010878874176,
+   "weight": 0.10982
+  }
+ },
+ "shuffled_score_null": {
+  "draws_book": 200,
+  "excess_mean": -0.20316348210584642,
+  "excess_sd": 0.07563083611681205,
+  "excess_p95": -0.07665130507358198,
+  "p_value_excess": 0.05,
+  "draws_quintile": 60,
+  "quintile_mean": -0.0006517776079514683,
+  "p_value_quintile": 0.0
+ },
+ "seal": {
+  "start": "2025-03-06",
+  "end": "2026-08-17",
+  "signal_dates": 72,
+  "rows": 54000,
+  "sha256": "b0e7abf9efa6ffb61d1979dc4623c3677d040695bfae93d945ec994a6c4f8f83",
+  "note": "the window the v2 configuration was already scored on; this is the SECOND configuration evaluated here and the trial count is 2"
+ }
+}

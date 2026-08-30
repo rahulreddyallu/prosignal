@@ -311,6 +311,11 @@ class FactorScore(_Contract):
     raw_value: Optional[float] = None
     standardised: Optional[float] = None
     weight: float = 0.0
+    #: standardised x weight -- the signed amount this factor moved THIS name's
+    #: composite. Carried explicitly rather than left for the reader to
+    #: multiply, because the renormalisation over available factors means the
+    #: product of the two printed numbers is not always the term that was used.
+    contribution: Optional[float] = None
     available: bool = True
     horizon_note: Optional[str] = None
     evidence_tier: Optional[str] = None
@@ -324,6 +329,13 @@ class StockScore(_Contract):
     ticker: str
     sector: Optional[str] = None
     factors: Dict[str, FactorScore] = Field(default_factory=dict)
+    #: Whether the name clears the ABSOLUTE floor and may be BOUGHT. A name
+    #: below it is still ranked and still shown -- it is a holdable position and
+    #: a legitimate watchlist entry -- it just cannot be opened. When too few
+    #: names clear the floor the book holds cash, which is how NO TRADE happens.
+    entry_admissible: bool = True
+    #: Why not, when not.
+    entry_block_reason: Optional[str] = None
     composite_raw: float = 0.0
     #: Composite mapped onto 0..1 across the eligible universe. Every threshold
     #: in Stage 5/8 operates on this scale.
@@ -713,6 +725,21 @@ class Recommendation(_Contract):
     #: Structured factor values, mirroring `why_this_signal_exists` in numeric
     #: form so the UI can sort and align on them without parsing prose.
     factor_detail: Dict[str, FactorScore] = Field(default_factory=dict)
+
+    #: Earnings proximity, when there is something to say. Carried as its own
+    #: field rather than left inside `false_signal_flagged`, because the screen
+    #: has to show it WITHOUT string-matching prose -- and a name reporting
+    #: tomorrow is the one risk on this card a stop cannot cover, so it must
+    #: not end up in a collapsed technical drawer.
+    earnings_note: Optional[str] = None
+    #: Whether this name clears the ABSOLUTE floor and may be OPENED. Carried
+    #: onto the card from `StockScore` because the screen needs it: a name that
+    #: may be held but not bought is a different instruction from one that may
+    #: be bought, and a watchlist that does not distinguish them invites the
+    #: reader to open a position the engine would refuse.
+    entry_admissible: bool = True
+    #: Why not, when not.
+    entry_block_reason: Optional[str] = None
 
     cost_note: Optional[str] = None
     unvalidated_parameter_warning: str = (

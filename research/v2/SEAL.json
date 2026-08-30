@@ -1,0 +1,16 @@
+{
+  "holdout_start": "2025-03-06",
+  "holdout_end": "2026-08-17",
+  "holdout_signal_dates": 72,
+  "holdout_rows": 54000,
+  "train_start": "2018-11-27",
+  "train_end": "2024-10-25",
+  "train_signal_dates": 293,
+  "train_rows": 142298,
+  "dead_zone_signal_dates": 17,
+  "purge_embargo_sessions": 84,
+  "sha256_holdout": "c4e4386d4c109f2f5cdd98370b69fab5451e5cab23c2150c9d6a898d71ae6b09",
+  "sha256_train": "7e947ba7d04e9403d8b08de102766e5dc94948967bc653997a8c87d2281404b3",
+  "sealed_at": "2026-08-29T18:44:20.258384+00:00",
+  "rule": "one blind evaluation per candidate configuration; no parameter may be changed after a holdout number is seen"
+}

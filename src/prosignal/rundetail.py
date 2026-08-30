@@ -149,6 +149,13 @@ def shape(run) -> Dict[str, Any]:
             "compatibility": r.compatibility().value,
             "notes": r.notes,
         },
+        # HOW IT RANKED, on the record with the run. Stage 4 writes these on
+        # every run -- which scorer ordered the book, what the sealed holdouts
+        # said, and any theme producing more of today's spread than its weight
+        # -- and `CoreScores.notes` reached nothing: not the screen, not the
+        # ledger, not here. The evidence panel could show a card without ever
+        # saying which model chose it.
+        "scoring_notes": list(getattr(run, "scoring_notes", []) or []),
         "funnel": run.funnel,
         "no_trade": (
             {
@@ -201,8 +208,22 @@ def card(rec) -> Dict[str, Any]:
         "factors": {
             name: {
                 "raw": f.raw_value,
+                # WHICH MODEL THIS ROW BELONGS TO. Without it the client gets
+                # one flat dict holding the v3 themes that ORDER the book and
+                # the fitted 26-factor themes that only watch it, with no way
+                # to tell them apart -- so the analysis panel rendered all
+                # eleven under one heading and counted their members together.
+                # `v3_theme` decides; `model_secondary` is a second reading;
+                # `v2`/`model` are what earlier rankings used.
+                "tier": getattr(f, "evidence_tier", None),
                 "standardised": f.standardised,
                 "weight": f.weight,
+                # THE FOURTH COLUMN OF THE PER-STOCK TABLE. `standardised x
+                # weight` is not always the term that was used -- the v2
+                # composite renormalises its weights over the factors a name
+                # actually has -- so the contribution is serialised rather than
+                # left for the client to multiply and get subtly wrong.
+                "contribution": getattr(f, "contribution", None),
                 "available": f.available,
                 # What the theme is made of. One coefficient is fitted per
                 # theme over the average of its members' ranks, so "lottery
@@ -240,6 +261,13 @@ def card(rec) -> Dict[str, Any]:
         "model_rank": rec.model_rank,
         "risk_category": rec.position_risk_category.value if rec.position_risk_category else None,
         "holding_period": rec.expected_holding_period,
+        # THE ABSOLUTE FLOOR, per name. A card that may be HELD but may not be
+        # OPENED is a different thing from one that may be bought, and the
+        # payload said nothing about which -- so the screen could show a name
+        # the engine would refuse to enter.
+        "earnings_note": getattr(rec, "earnings_note", None),
+        "entry_admissible": bool(getattr(rec, "entry_admissible", True)),
+        "entry_block_reason": getattr(rec, "entry_block_reason", None),
         # THE PLAN, serialised with the card. The History page has to be able to
         # show what a trade was issued AS -- its cadence, its planned hold and
         # the expectation stamped on it -- because that is the only thing a

@@ -955,20 +955,149 @@ stage4_core_score:
   # WHAT WOULD REVERSE THIS. `research estimator` showing the composite's
   # top-decile excess positive with t >= 2 on a window that does not overlap
   # the one above. That is the same bar this change had to clear.
+  # -------------------------------------------------------------------------
+  # WHAT ORDERS THE BOOK  --  v3, deployed 2026-08-30
+  # -------------------------------------------------------------------------
+  # v1 ranked on ONE column (`mom_6_1_r`). v2 ranked on ten equal-weighted
+  # factors. v3 ranks on TWENTY-TWO factors in FIVE THEMES, combined in two
+  # levels, because a flat sum of twenty-two factors is whichever theme brought
+  # the most of them wearing a disguise -- momentum brought ten, quality two.
+  #
+  #     factors -> one sub-score per theme -> a capped blend of themes
+  #
+  # THREE CONSTRAINTS ON THE BLEND, each measured rather than asserted:
+  #   cap 0.40     no theme above 40%. Uncapped, momentum and quality took 74%.
+  #   floor 0.06   no theme that cleared its screen falls below 6%. The floor
+  #                alone moved validation max drawdown from -38.5% to -34.9%.
+  #   coverage     a theme is also capped at the share of names it can speak
+  #                about. Weights renormalise per name, so `quality` at 40% on
+  #                19% coverage ranks two populations by different models --
+  #                and fitted without the constraint it took exactly that.
+  #
+  # SHIPPED WEIGHTS  momentum 40.0% | quality 19.0% | ownership 18.9% |
+  #                  risk 11.1% | reversal 11.0%
+  #
+  # EACH THEME IS ORIENTED AT ITS OWN HORIZON (momentum 42 sessions, risk and
+  # quality 21, reversal and ownership 10). Forced onto one 42-session label the
+  # reversal sub-score came out ANTI-predictive at t -3.96: reversal is a
+  # two-week effect and at forty-two sessions its sign has turned over.
+  #
+  # WHAT THE SEALED HOLDOUTS SAID -- two windows, ONE evaluation each:
+  #
+  #                            A 2025-03..2026-08   B 2021-07..2022-12
+  #   rank IC (t) h=21            +0.049 (3.69)        +0.036 (3.83)
+  #   quintile spread (t)         +1.07% (2.89)        +0.86% (3.05)
+  #   top-ten excess (t)          +0.38% (0.81)        +1.37% (2.50)
+  #   themes positive OOS             5 of 5              3 of 3
+  #   ten-name book, net excess       -2.8%/yr            +2.0%/yr
+  #   modelled cost drag               9.7%/yr           13.7%/yr
+  #   max drawdown                    -23.9%             -16.4%
+  #   shuffled-score null p             0.02               0.01
+  #
+  # AND THE RUN THOSE SUPERSEDE, kept on the record because it happened. The
+  # first evaluation of both windows scored a universe that still contained
+  # ETFs, gold and liquid funds -- NSE publishes them in the same EQ-series
+  # bhavcopy as equities -- and they took 26.25% of window A's top-ten slots:
+  #
+  #   rank IC (t) h=21            +0.059 (3.66)        +0.038 (4.08)
+  #   quintile spread (t)         +1.12% (2.65)        +0.90% (3.18)
+  #   top-ten excess (t)          -0.11% (-0.25)       +1.50% (2.72)
+  #   ten-name book, net excess       -7.2%/yr            +1.3%/yr
+  #
+  # The UNIVERSE was defective, not the configuration. Both windows were re-run
+  # with every parameter untouched -- nothing was tuned after a holdout number
+  # was seen -- so this is one defect found and corrected, not a second search.
+  # It still costs: window A has now been evaluated three times counting the
+  # pre-seal dry run, and its t-statistics carry that multiplicity. Window B,
+  # once before the fix and once after and positive on both, is the cleaner
+  # read. See `data/instruments.py` for the exclusion and how it was checked
+  # against real gold-JEWELLERY equities (SKYGOLD, GOLDIAM, SILVERTUC are kept).
+  #
+  # For window B the WHOLE PIPELINE -- screen, stability, admission, theme
+  # weights -- was re-run on data ending 2021-02-17 and evaluated once on the
+  # eighteen months that followed. That is a test of the METHOD, not of a
+  # fitted model, and it is the only genuinely uncontaminated read available.
+  #
+  # READ BOTH LINES. The RANKING generalised on both windows and every theme
+  # carried positive information out of sample -- which is the two-level
+  # structure doing its job rather than momentum doing all the work. The
+  # concentrated BOOK did not: on window B it earned roughly 15.7% gross and
+  # paid 13.7% of it away in transaction costs. That cost was 9.9% in
+  # validation too, so it was visible before the holdout and was selected past.
+  # `research/V3_SEARCH.md` carries the cost curve; turnover and cost drag are
+  # reported on every run rather than left to be discovered.
+  #
+  # THEMES WITH NO VALIDATED FACTOR, and each was built in full first:
+  #   value        0 of 8 clear the placebo screen at any horizon. Built
+  #                PIT-correct against measured filing lags; balance-sheet data
+  #                begins 2023 and the median training date has ZERO names with
+  #                a book value.
+  #   liquidity    0 of 9 clear.
+  #   seasonality  0 of 2 clear; placebo |t| threshold 9.9 against a real 1.2.
   ranking:
-    #: measured_factor -- rank on `column`, which is a sector-neutral rank
-    #: already, and use the fitted composite for attribution only.
-    #: fitted_composite -- the previous behaviour, kept so the comparison can
-    #: be re-run rather than argued about.
-    #: family_average -- rank on a `_f` family column.
-    source: "measured_factor"
+    #: v3_composite    -- the shipped scorer, `features/v3.py`.
+    #: v2_composite    -- the previous answer, kept so it can be re-run.
+    #: measured_factor -- rank on `column`, a sector-neutral rank already.
+    #: fitted_composite / family_average -- older behaviours, kept for comparison.
+    source: "v3_composite"
     column: "mom_6_1_r"
+    v3_min_themes:
+      value: 3
+      status: MEASURED
+      note: >-
+        Three of five. A name scored on two themes is not the same measurement
+        as one scored on five. Validated across 2, 3 and 4; the ranking is flat
+        in this parameter and 3 keeps the widest population.
+    v2_min_factors:
+      value: 7
+      status: MEASURED
+      note: >-
+        Seven of ten, for the retained v2 scorer.
     note: >-
-      Jegadeesh & Titman (1993) construction, skipping the most recent 21
-      sessions to avoid short-term reversal (Jegadeesh 1990). Sector-neutral
-      within any sector holding at least 12 eligible names, universe-wide
-      otherwise. This is the same column the composite already computes; only
-      its weight changes, from fitted to one.
+      The factor definitions, signs, theme membership and blend weights live in
+      `src/prosignal/features/v3.py` rather than here: they are what two sealed
+      holdouts measured, and a number that can be edited in a config file is a
+      number that can drift away from the thing that was tested.
+
+  # ---------------------------------------------------------------------------
+  # THE ABSOLUTE FLOOR, AND HOW NO TRADE HAPPENS
+  # ---------------------------------------------------------------------------
+  # A floor on a cross-sectional RANK cannot fire: somebody is top of the list
+  # every day however weak the day is. Measured over 235 validation dates,
+  # "at least three themes above the median" alone never left fewer than 87
+  # names. So the floor is absolute -- measured against the stock rather than
+  # against its peers -- and it bites where it should:
+  #
+  #   2020-03-24 (COVID trough)   23 of 292 names above their 200-DMA; 11 cleared
+  #   2022 drawdown (window B)    8 cleared, one date short of a full book
+  #
+  # IT GATES ENTRIES, NOT HOLDINGS. Filtering the whole population ejected a
+  # name the moment it slipped below its 200-session average even while it was
+  # still ranked third, and those forced exits were most of the turnover:
+  # measured on the training window, cost drag falls from 8.8% a year to 5.6%
+  # when the same floor applies to purchases only.
+  absolute_floor:
+    enabled:
+      value: true
+      status: MEASURED
+    above_ma_sessions:
+      value: 200
+      status: MEASURED
+      note: "Close must be above its 200-session average to be BOUGHT."
+    min_positive_themes:
+      value: 3
+      status: MEASURED
+      note: >-
+        At least three of the name's available themes above the cross-sectional
+        median. Broad rather than high: a name has to be on the right side of
+        several themes at once, not spike on one.
+    applies_to:
+      value: "entries"                # entries | population
+      status: MEASURED
+      note: >-
+        `population` ejects a held name when it drops below the average and cost
+        3.2 points of annual return in forced exits. `entries` is the shipped
+        setting.
 
   # DEFAULT IS EQUAL WEIGHT. The research program predicts equal-weighting wins
   # or ties against rank-IC weighting out-of-sample (Experiment #4), because

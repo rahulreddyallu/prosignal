@@ -1,0 +1,226 @@
+{
+ "name": "prosignal-v3",
+ "architecture": "two-level: factors -> theme sub-score -> capped theme blend",
+ "themes": {
+  "ownership": {
+   "weight": 0.18939,
+   "orientation_horizon_sessions": 10,
+   "validated_topk_contribution": 0.00149,
+   "validated_ic_t": 6.472,
+   "coverage": 0.8985,
+   "within_theme": "sign_oriented_equal_weight",
+   "factors": [
+    {
+     "name": "deliv_chg_5",
+     "sign": 1
+    },
+    {
+     "name": "deliv_pct_60",
+     "sign": 1
+    },
+    {
+     "name": "deliv_z_21",
+     "sign": 1
+    }
+   ]
+  },
+  "risk": {
+   "weight": 0.11088,
+   "orientation_horizon_sessions": 21,
+   "validated_topk_contribution": 2e-05,
+   "validated_ic_t": 5.783,
+   "coverage": 0.9983,
+   "within_theme": "sign_oriented_equal_weight",
+   "factors": [
+    {
+     "name": "downside_vol_60",
+     "sign": -1
+    },
+    {
+     "name": "ret_kurt_126",
+     "sign": -1
+    },
+    {
+     "name": "ulcer_120",
+     "sign": -1
+    }
+   ]
+  },
+  "momentum": {
+   "weight": 0.4,
+   "orientation_horizon_sessions": 42,
+   "validated_topk_contribution": 0.008781,
+   "validated_ic_t": 4.802,
+   "coverage": 0.9988,
+   "within_theme": "sign_oriented_equal_weight",
+   "factors": [
+    {
+     "name": "intraday_mom_126",
+     "sign": 1
+    },
+    {
+     "name": "mom_12_6",
+     "sign": 1
+    },
+    {
+     "name": "mom_2_0",
+     "sign": 1
+    },
+    {
+     "name": "mom_3_1",
+     "sign": 1
+    },
+    {
+     "name": "mom_accel",
+     "sign": -1
+    },
+    {
+     "name": "mom_consist_126",
+     "sign": 1
+    },
+    {
+     "name": "prox_52w",
+     "sign": 1
+    },
+    {
+     "name": "prox_52w_now",
+     "sign": 1
+    },
+    {
+     "name": "voladj_mom_12_1",
+     "sign": 1
+    },
+    {
+     "name": "voladj_mom_6_1",
+     "sign": 1
+    }
+   ]
+  },
+  "quality": {
+   "weight": 0.18991,
+   "orientation_horizon_sessions": 21,
+   "validated_topk_contribution": 0.0137,
+   "validated_ic_t": 4.756,
+   "coverage": 0.1899,
+   "within_theme": "sign_oriented_equal_weight",
+   "factors": [
+    {
+     "name": "margin_stability",
+     "sign": -1
+    },
+    {
+     "name": "net_margin",
+     "sign": -1
+    }
+   ]
+  },
+  "reversal": {
+   "weight": 0.10982,
+   "orientation_horizon_sessions": 10,
+   "validated_topk_contribution": -0.000592,
+   "validated_ic_t": 4.523,
+   "coverage": 0.9993,
+   "within_theme": "sign_oriented_equal_weight",
+   "factors": [
+    {
+     "name": "max5_21",
+     "sign": -1
+    },
+    {
+     "name": "price_vs_vwap_20",
+     "sign": -1
+    },
+    {
+     "name": "resid_rev_21",
+     "sign": -1
+    },
+    {
+     "name": "rev_1w",
+     "sign": -1
+    }
+   ]
+  }
+ },
+ "theme_weighting": {
+  "raw": "each theme's validated top-decile excess on the training window",
+  "cap": 0.4,
+  "floor": 0.06,
+  "coverage_cap": true,
+  "note": "the cap stops one theme swamping the rest and the floor stops a theme that cleared its screen from falling to zero on one window. Measured on validation, the floor alone moved max drawdown from -38.5% to -34.9% at no cost in excess. A theme is ALSO capped at its coverage: fitted on the whole training window without that, `quality` took the 45% cap on 19% coverage, which ranks the 19% and the 81% by different models. With the coverage cap the ranking improves (IC t 4.84 -> 5.80, quintile t 2.91 -> 3.42) and the ten-name book's excess falls (+5.5% -> +1.9%) -- the first pair is the statistic with power, the second is the one a permuted-label test put almost entirely inside its own null."
+ },
+ "min_themes": 3,
+ "absolute_floor": {
+  "rule": "close above the 200-session moving average AND at least 3 of the name's available themes above the cross-sectional median",
+  "why": "a floor on a cross-sectional RANK cannot fire -- somebody is top of the list every day. Measured: 'three themes above median' alone left at least 87 names on every one of 235 validation dates. With the trend condition the count fell to 11 at the COVID trough (2020-03-24), one name above a ten-slot book.",
+  "no_trade": "when fewer names clear the floor than there are slots, the remainder is held in CASH at 0%"
+ },
+ "universe": {
+  "source": "liquidity_pit",
+  "max_names": 750,
+  "min_adtv_inr": 50000000.0,
+  "adtv_lookback_sessions": 60,
+  "min_price_inr": 20.0,
+  "min_history_sessions": 300,
+  "note": "index membership history is not in this store, so the universe is a point-in-time liquidity screen. Measured survivorship: 141 of 1,425 panel symbols stopped printing before the end and 6.2% of rows belong to them; 26-38% of an old cross-section is absent from today's."
+ },
+ "book": {
+  "slots": 10,
+  "entry_rank": 20,
+  "exit_rank": 30,
+  "rebalance_every": 2,
+  "max_per_sector": 3,
+  "weighting": "equal"
+ },
+ "gate": "trend_npos3",
+ "execution": {
+  "fill": "next_session_vwap"
+ },
+ "pit_fundamentals": {
+  "disclosure_lag_days_by_quarter_end_month": {
+   "3": 112,
+   "6": 104,
+   "9": 60,
+   "12": 60
+  },
+  "calibration": "the measured p99 of the real filing lag on the 3,504 rows that carry a filing_date; the statutory 45-day deadline would have leaked on 15.9% of them",
+  "max_age_days": 420
+ },
+ "excluded_themes": {
+  "value": "0 of 8 factors clear the placebo screen at any horizon; balance-sheet data begins 2023 and covers a median of 0 names per training date",
+  "liquidity": "0 of 9 clear; volume_shock_5 clears at h=42 and its sign flips between the halves of its own life",
+  "seasonality": "0 of 2 clear; placebo |t| threshold 9.9 against a real t of -1.2"
+ },
+ "cut_factors": {
+  "dist_50dma": "sign flips between halves (-0.0125 -> +0.0044)",
+  "gross_profitability": "only 63 signal dates, under the 120 floor",
+  "volume_shock_5": "sign flips between halves (-0.0005 -> +0.0108)",
+  "mom_6_1": "|rho| 0.96 with voladj_mom_6_1 inside momentum; the weaker of the pair (|t| 3.67 vs 4.34)",
+  "max_dd_120": "|rho| 0.91 with ulcer_120 inside risk; the weaker of the pair (|t| 3.96 vs 4.48)",
+  "rev_2w": "|rho| 0.88 with price_vs_vwap_20 inside reversal; the weaker of the pair (|t| 1.88 vs 2.26)",
+  "rsi_14": "|rho| 0.87 with price_vs_vwap_20 inside reversal; the weaker of the pair (|t| 1.84 vs 2.26)",
+  "rev_1m_scaled": "|rho| 0.86 with resid_rev_21 inside reversal; the weaker of the pair (|t| 1.80 vs 3.32)",
+  "deliv_trend": "|rho| 0.85 with deliv_z_21 inside ownership; the weaker of the pair (|t| 3.18 vs 6.24)",
+  "dist_200dma": "|rho| 0.85 with trend_slope_120 inside momentum; the weaker of the pair (|t| 3.60 vs 3.99)",
+  "trend_slope_120": "|rho| 0.84 with voladj_mom_6_1 inside momentum; the weaker of the pair (|t| 3.99 vs 4.34)"
+ },
+ "validation": {
+  "window": "2020-01-31 .. 2024-10-25",
+  "folds": 8,
+  "purge_sessions": 63,
+  "embargo_sessions": 21,
+  "ic": 0.0444,
+  "ic_t": 5.8,
+  "quintile": 0.0082,
+  "quintile_t": 3.42,
+  "topk_t": 1.92,
+  "ann": 0.374,
+  "bench": 0.297,
+  "excess": 0.077,
+  "ir": 0.364,
+  "sharpe": 1.493,
+  "maxdd": -0.306,
+  "median_hold_sessions": 20,
+  "min_names_clearing_floor": 11
+ },
+ "config_sha256": "2b48aee043277700ab9dd252d79067849b691c1f0b6f50cbe8799f52e8be33ea"
+}

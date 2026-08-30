@@ -108,6 +108,52 @@ def test_signals_for_answers_the_audit_question(tmp_path):
 # =============================================================================
 
 
+#: How long the button-flow tests wait for a real run, in half-second ticks.
+#:
+#: This was 120 ticks -- sixty seconds -- which is generous against the fixture
+#: store and nowhere near enough against a production one: the first run after a
+#: deploy refits the cross-sectional model over ~2,200 sessions, and the engine
+#: itself prints "expect it to take longer" when it opens an epoch. The tests
+#: were failing on duration, not on behaviour, which is the kind of red that
+#: teaches a reader to ignore the suite.
+#:
+#: Twelve minutes, so the assertion is about whether the flow COMPLETES rather
+#: than about how fast the machine is. If it is ever hit, that is a real
+#: finding: something in the pipeline stopped terminating.
+_POLL_TICKS = 1440
+
+
+def _run_and_wait(client):
+    """Wait for the job slot, start an analysis, and wait for it to finish.
+
+    THE SLOT IS GLOBAL ON PURPOSE (`jobs.py`: "both job kinds rewrite or read
+    the same state"), and `live_cfg` is session-scoped, so two tests in this
+    module share one manager. Against the fixture store a run finishes inside a
+    single test and nobody notices; against a production store the second test
+    posted while the first was still running, was handed the FIRST job by the
+    idempotent endpoint, and then polled a job whose results belonged to the
+    other test. It failed as a timeout, which is the least informative shape a
+    test-isolation bug can take.
+
+    So: wait for idle, then post, then wait. Both waits are bounded, and hitting
+    either bound is a real finding -- something stopped terminating.
+    """
+    for _ in range(_POLL_TICKS):
+        live = [j for j in client.get("/analysis").json()["jobs"]
+                if j["state"] in ("RUNNING", "QUEUED", "PENDING")]
+        if not live:
+            break
+        time.sleep(0.5)
+    started = client.post("/analysis/run").json()
+    state = {"state": "UNKNOWN"}
+    for _ in range(_POLL_TICKS):
+        state = client.get(f"/analysis/{started['id']}").json()
+        if state["state"] in ("COMPLETED", "FAILED"):
+            break
+        time.sleep(0.5)
+    return started, state
+
+
 def _mgr(tmp_path, runner=None, timeout=900.0):
     return JobManager(
         db_path=tmp_path / "jobs.sqlite3",
@@ -271,15 +317,8 @@ def test_full_button_flow_end_to_end(client, runnable_cfg):
     `runnable_cfg` is here only for its skip: this drives the pipeline through
     the API, so it needs a store fresh enough for Stage 1 to let the run past.
     """
-    started = client.post("/analysis/run").json()
+    started, state = _run_and_wait(client)
     job_id = started["id"]
-
-    for _ in range(120):
-        state = client.get(f"/analysis/{job_id}").json()
-        if state["state"] in ("COMPLETED", "FAILED"):
-            break
-        time.sleep(0.5)
-
     assert state["state"] == "COMPLETED", f"analysis failed: {state.get('error')}"
 
     res = client.get(f"/analysis/{job_id}/results").json()
@@ -294,11 +333,7 @@ def test_full_button_flow_end_to_end(client, runnable_cfg):
 
 def test_run_is_persisted_to_the_ledger(client, runnable_cfg):
     before = Ledger(runnable_cfg.paths.ledger).count()
-    started = client.post("/analysis/run").json()
-    for _ in range(120):
-        if client.get(f"/analysis/{started['id']}").json()["state"] in ("COMPLETED", "FAILED"):
-            break
-        time.sleep(0.5)
+    _run_and_wait(client)
     assert Ledger(runnable_cfg.paths.ledger).count() > before
 
 

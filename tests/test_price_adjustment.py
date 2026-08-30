@@ -15,6 +15,43 @@ from prosignal.data.store import DataStore
 from prosignal.data.universe import UniverseResolver
 
 
+def _liquid_universe(store, cfg, as_of, max_names=200):
+    """The symbols the engine would actually have ranked on `as_of`.
+
+    THESE TESTS ASKED FOR "NIFTY 200" AND THIS STORE HAS NO INDEX MEMBERSHIP
+    SNAPSHOTS AT ALL -- zero for every index -- so both files failed at their
+    fixture on every run and had done for a while. A permanently red suite is
+    worse than a missing test: it trains everyone to skim past the failures,
+    and the next real one arrives in the same colour.
+
+    Skipping would have been the easy repair and the wrong one. Neither file
+    needs index MEMBERSHIP; both need a few hundred real symbols with real
+    prices. So they now resolve the same point-in-time liquidity screen the
+    shipped engine ranks -- which is a closer test of production than an index
+    list would have been, and runs.
+    """
+    import pytest
+    u = cfg.params.universe
+    def _v(x, d=None):
+        x = getattr(u, x, d)
+        return getattr(x, "value", x)
+    try:
+        snap = UniverseResolver(store, cfg.params).resolve_liquidity_pit(
+            as_of=as_of,
+            min_adtv_inr=float(_v("pit_min_adtv_inr", 5e7)),
+            lookback_sessions=int(_v("pit_adtv_lookback_sessions", 60)),
+            max_names=int(max_names),
+            min_history_sessions=int(_v("pit_min_history_sessions", 300)),
+            min_price_inr=float(_v("pit_min_price_inr", 20.0)))
+    except Exception as exc:
+        pytest.skip(f"no tradeable universe in this store: {exc}")
+    syms = sorted(set(snap.symbols))
+    if len(syms) < 20:
+        pytest.skip(f"only {len(syms)} liquid names in this store")
+    return syms
+
+
+
 @pytest.fixture
 def sessions(live_cfg):
     return DataStore(live_cfg.paths.curated, live_cfg.paths.snapshots).price_sessions()
@@ -23,7 +60,7 @@ def sessions(live_cfg):
 def _panel(cfg, adjust):
     store = DataStore(cfg.paths.curated, cfg.paths.snapshots, adjust_prices=adjust)
     s = store.price_sessions()
-    syms = sorted(set(UniverseResolver(store, cfg.params).resolve("NIFTY 200", s[-1]).symbols))
+    syms = _liquid_universe(store, cfg, s[-1])
     px = store.read_prices(symbols=syms, start=s[0], end=s[-1],
                            columns=["date", "symbol", "close"])
     px["date"] = pd.to_datetime(px["date"])
@@ -89,8 +126,7 @@ def test_the_label_is_close_to_close_but_entry_is_the_next_open(live_cfg, sessio
     import pandas as pd
 
     store = DataStore(live_cfg.paths.curated, live_cfg.paths.snapshots)
-    syms = sorted(set(UniverseResolver(store, live_cfg.params)
-                      .resolve("NIFTY 200", sessions[-1]).symbols))
+    syms = _liquid_universe(store, live_cfg, sessions[-1])
     px = store.read_prices(symbols=syms, start=sessions[-260], end=sessions[-1],
                            columns=["date", "symbol", "open", "close"])
     px["date"] = pd.to_datetime(px["date"])
