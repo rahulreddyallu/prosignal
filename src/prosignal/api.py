@@ -1097,13 +1097,24 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 continue
         return "|".join(parts)
 
-    def _clear_cut():
+    def _clear_stamp():
+        """The watermark, WHOLE.
+
+        It is an instant -- `2026-08-30T19:55:09` -- and it must be compared
+        against another instant. Truncating it to a date and comparing that
+        against the SESSION a run scored is what emptied this page: see
+        _ledger_after_clear.
+        """
         try:
             from .presentation.clearmark import read_mark
             mark = read_mark(cfg.paths.ledger)
         except Exception:
             return None
-        return str(mark)[:10] if mark else None
+        return str(mark) if mark else None
+
+    def _clear_cut():
+        stamp = _clear_stamp()
+        return stamp[:10] if stamp else None
 
     def _ledger_after_clear():
         """Ledger rows the clear did not hide.
@@ -1112,25 +1123,57 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         every row ever written while the outcomes beside it were filtered.
         So a clear emptied the results and left the open count intact -- one
         run after a clear reported fourteen open calls it had not made.
+
+        WHEN THE RUN WAS LOGGED, not which session it scored. `date` is the
+        market session; `logged_at` is the wall clock. A clear on Sunday the
+        30th wrote the watermark 2026-08-30, and the newest run that could
+        possibly exist scored Friday the 28th -- so `28 >= 30` was false for
+        every row ever written and the page went blank PERMANENTLY, through
+        any number of fresh scans, until a session date caught up with the
+        afternoon someone pressed Clear. `presentation.history.load_days` has
+        always compared `logged_at` to the whole stamp; this is the same
+        watermark read by the correct rule.
+
+        A row with no `logged_at` is KEPT. Failing open shows more than
+        intended; failing closed shows nothing at all, which is the failure
+        being fixed here.
         """
-        rows = Ledger(cfg.paths.ledger).read_all()
-        cut = _clear_cut()
-        if not cut:
-            return rows
-        return [r for r in rows if str(r.get("date") or "")[:10] >= cut]
+        from .presentation.clearmark import kept
+        return kept(Ledger(cfg.paths.ledger).read_all(), _clear_stamp())
+
+    def _runs_after_clear():
+        """run_ids the clear did not hide, or None when nothing is cleared."""
+        stamp = _clear_stamp()
+        if not stamp:
+            return None
+        return {str(r.get("run_id")) for r in _ledger_after_clear()
+                if r.get("run_id")}
 
     def _apply_clear_mark(rows):
-        """Drop resolved results issued before the last clear."""
-        try:
-            from .presentation.clearmark import read_mark
-            mark = read_mark(cfg.paths.ledger)
-        except Exception:
+        """Drop resolved results whose RUN was logged before the last clear.
+
+        Keyed on the run for the same reason as above, and so that the two
+        halves of this page agree: a call issued after the clear, on a
+        session that predates it, was listed as open and would then have
+        vanished on the day it closed.
+        """
+        stamp = _clear_stamp()
+        if not stamp:
             return rows
-        if not mark:
-            return rows
-        cut = str(mark)[:10]
-        return [r for r in rows
-                if str(r.get("signal_date") or "")[:10] >= cut]
+        after = _runs_after_clear() or set()
+        cut = stamp[:10]
+        out = []
+        for r in rows:
+            rid = str(r.get("run_id") or "")
+            if rid:
+                if rid in after:
+                    out.append(r)
+                continue
+            # No run to match it to. The old date rule, which is an
+            # approximation, but one that never un-clears the record.
+            if str(r.get("signal_date") or "")[:10] >= cut:
+                out.append(r)
+        return out
 
     def _git_commit() -> str:
         """Best effort. A period without a commit is still a period; one that
