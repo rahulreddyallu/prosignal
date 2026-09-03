@@ -175,30 +175,41 @@ def _feature_schema_sha() -> str:
 
     Adding a factor, retiring one, or moving a member between families changes
     what the model can express. None of that touches `parameters.yaml`.
+
+    WHAT ACTUALLY RANKS THE BOOK belongs in the fingerprint. That is
+    `features/v3.py` under `ranking.source: v3_composite` and `features/v9r.py`
+    under `v9r_core`; hashing only `crosssec` would let the shipped factor set
+    change without the epoch noticing, which is the one thing this hash exists
+    to prevent.
+
+    It used to hash `features/v2.py` as well. When the v2 engine was removed in
+    the 2026-09-03 cleanup that import raised, the bare `except` below swallowed
+    it, and the hash silently became the string "unknown" -- so the guard against
+    an unnoticed factor-set change was itself defeated by a factor-set change.
+    The except now names what failed instead of erasing it.
     """
     try:
         from ..features.crosssec import FEATURES, NEUTRAL_WHEN_MISSING
-        from ..features import crossmodel as cm
-
-        families = getattr(cm, "FAMILIES", None) or getattr(cm, "THEMES", None) or {}
-        # WHAT ACTUALLY RANKS THE BOOK belongs in the fingerprint. Under
-        # `ranking.source: v2_composite` that is `features/v2.py` -- its factor
-        # names, signs, weights and lookbacks -- and hashing only `crosssec`
-        # would let the shipped factor set change without the epoch noticing,
-        # which is the one thing this hash exists to prevent.
-        from ..features.v2 import V2_FACTORS
+        from ..features.families import FAMILIES
+        from ..features import v3 as v3feat
+        from ..features import v9r as v9rfeat
 
         payload = {
             "features": {k: v[0] for k, v in sorted(FEATURES.items())},
-            "v2": [[f.name, f.sign, f.weight, f.lookback] for f in V2_FACTORS],
             "neutral_when_missing": sorted(NEUTRAL_WHEN_MISSING),
-            "families": {k: sorted(v) for k, v in sorted(
-                (families or {}).items())} if isinstance(families, dict) else str(families),
+            "families": {k: sorted(v) for k, v in sorted(FAMILIES.items())},
+            "v3": {t: [[n, s] for n, s in sorted(th.signs.items())] + [th.weight]
+                   for t, th in sorted(v3feat.THEMES.items())},
+            "v9r": [list(v9rfeat.FACTORS),
+                    [round(v9rfeat.WEIGHTS[f], 6) for f in v9rfeat.FACTORS],
+                    v9rfeat.COVERAGE_FLOOR],
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-    except Exception:                                     # pragma: no cover
-        return "unknown"
+    except Exception as exc:
+        # NOT "unknown". A hash that cannot be computed is a broken fingerprint,
+        # and returning a constant makes every tree agree with every other one.
+        return f"UNHASHABLE:{type(exc).__name__}"
 
 
 @dataclass(frozen=True)

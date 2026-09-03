@@ -50,7 +50,7 @@ __all__ = ["EARNINGS_RISK", "NEAR_SESSIONS", "earnings_dates",
 
 #: Measured on 179 symbols with a real calendar, 246,437 sessions, 2017-2026,
 #: each name against itself outside its own earnings windows. Regenerate with
-#: `work/v3/earnings_gap.py` if the store changes.
+#: the v3 earnings-gap study (removed 2026-09-03) if the store changes.
 EARNINGS_RISK = {
     "window_days": 3,
     "symbols": 179,

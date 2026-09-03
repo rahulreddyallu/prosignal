@@ -41,7 +41,7 @@ For window B the ENTIRE pipeline -- screen, stability, admission, weights -- was
 re-run on data ending 2021-02-17 and evaluated once on the eighteen months that
 followed. The ranking is what generalised. The concentrated book is not: it
 earned roughly 15.7% gross on window B and paid 13.7% of it away in costs. See
-CHANGELOG.md; the book's cost curve is in `research/V3_SEARCH.md` and turnover
+CHANGELOG.md; the book's cost curve is in CHANGELOG.md and turnover
 is reported on every run rather than left to be discovered.
 
 THOSE ARE THE SECOND EVALUATION OF WINDOW A, and the first stands on the record

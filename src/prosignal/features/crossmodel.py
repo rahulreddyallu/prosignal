@@ -49,8 +49,8 @@ from .fundamentals import FEATURE_NAMES as FUND_NAMES, compute_features
 from .famamacbeth import (FMResult, SIGNIFICANCE_FLOOR, TAPER_C,
                           TAPER_HARD_FLOOR, fama_macbeth, gated_shrink,
                           is_degenerate)
-from .metalabel import MetaModel, fit_meta_out_of_sample, shortlist
 from .linear import predict, ridge_fit
+from .families import FAMILIES, UNSCORED_CONTROLS, UNSCORED_DIAGNOSTICS
 
 __all__ = ["CrossSectionalModel", "fit_predict", "load_cached", "save_cache",
            "score_with", "today_features", "contributions", "standardised_features"]
@@ -227,23 +227,6 @@ def _meta_blob(meta) -> Optional[Dict[str, object]]:
     }
 
 
-def _meta_from_blob(blob) -> Optional["MetaModel"]:
-    if not blob:
-        return None
-    try:
-        return MetaModel(
-            features=list(blob["features"]),
-            coef=np.array(blob["coef"], dtype="float64"),
-            intercept=float(blob["intercept"]),
-            mu=np.array(blob["mu"], dtype="float64"),
-            sd=np.array(blob["sd"], dtype="float64"),
-            n_train=int(blob["n_train"]),
-            base_rate=float(blob["base_rate"]),
-        )
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
 def load_cached(path, as_of: dt.date,
                 refit_every_sessions: Optional[int] = None,
                 estimator: Optional[str] = None,
@@ -305,8 +288,6 @@ def load_cached(path, as_of: dt.date,
         m.sd = np.array(blob["sd"], dtype="float64")
         m.intercept = float(blob["intercept"])
         m.estimator = str(blob.get("estimator", "ridge"))
-        m.meta = _meta_from_blob(blob.get("meta"))
-        m.meta_prob = None                 # scored per run, never cached
         m.fm_t_stat = dict(blob.get("fm_t_stat") or {})
         m.fm_lambda = dict(blob.get("fm_lambda") or {})
         m.fm_n_dates = int(blob.get("fm_n_dates", 0) or 0)
@@ -673,19 +654,6 @@ def score_with(model: CrossSectionalModel, features: pd.DataFrame,
     coef = np.array([model.coef[c] for c in cols], dtype="float64")
     raw = ((x - model.mu) / model.sd) @ coef + model.intercept
     s = pd.Series(raw, index=features["symbol"].to_numpy())
-    # The cheap path scores today from a cached model, and the veto has to come
-    # with it -- otherwise 20 of every 21 sessions produce no probability at
-    # all, and a gate whose rule is "unknown is not approved" refuses the book.
-    meta = getattr(model, "meta", None)
-    if meta is not None:
-        scored = features.copy()
-        scored["_meta_score"] = raw
-        try:
-            model.meta_prob = pd.Series(meta.predict_proba(scored),
-                                        index=features["symbol"].to_numpy())
-        except (KeyError, ValueError) as exc:
-            model.meta_prob = None
-            model.meta_unavailable = f"the veto could not score today's names: {exc}"
     return ((s.rank(pct=True) - 0.5) * 2.0).sort_values(ascending=False)
 
 
@@ -721,116 +689,8 @@ def standardised_features(model: CrossSectionalModel, features: pd.DataFrame) ->
     )
 
 
-# =============================================================================
-# Factor families
-# =============================================================================
-#
-# Seventeen coefficients over a set this collinear is not estimable, and the
-# near-uniform coefficient band was the model saying so. Measured on the live
-# universe:
-#
-#     amihud / turnover_ratio   -0.869    one factor measured from two sides
-#     resid_mom / mom_6_1       +0.770
-#     resid_mom / prox_52w      +0.601
-#
-# Ridge does not pick a winner among collinear inputs, it spreads the penalty
-# across the block, so three momentum coefficients that each look small carry an
-# effective weight of roughly three times any one of them.
-#
-# The members are averaged as ranks FIRST and one coefficient is fitted per
-# family. Five or six coefficients over several hundred names and a decade of
-# cross-sections is estimable; seventeen is not.
-#
-# LIQUIDITY IS NOT HERE, deliberately. The illiquidity premium is real but it is
-# compensation FOR trading costs, and a manual executor pays that cost rather
-# than collecting it -- a positive amihud loading walks the book into names
-# where realised slippage exceeds forecast alpha. It belongs in the universe
-# screen as a floor, which is where `universe.pit_min_adtv_inr` already puts it.
-FAMILIES: Dict[str, Tuple[str, ...]] = {
-    # Three names for one bet. Averaged, not fitted separately.
-    "mom": ("mom_6_1_r", "prox_52w_r", "resid_mom_r"),
-    # Reversal is the opposite side of the same axis and stays on its own: it is
-    # a different horizon, and folding it into `mom` would net out against it.
-    "reversal": ("resid_reversal_r",),
-    # Lottery demand. In India this is stronger than the US literature suggests,
-    # because the marginal buyer is retail. Signs are aligned so that a HIGHER
-    # composite means MORE lottery-like, and the fit is free to price it
-    # negatively.
-    #
-    # THREE MEMBERS, not four. These three are volatility measures correlating
-    # 0.48-0.68 within date, which is what makes them one family. `idio_skew`
-    # was the fourth and correlates +0.04 with downside_vol and +0.28 with
-    # max5_21 -- near-orthogonal to the family it was averaged into, while
-    # carrying a quarter of its weight. That is not diversification inside a
-    # family, it is a second factor hidden inside a first.
-    #
-    # The literature says the same: Bali, Cakici & Whitelaw (2011) find MAX
-    # subsumes idiosyncratic volatility -- controlling for MAX kills the IVOL
-    # effect -- so these three are one mechanism. Skewness preference is
-    # controlled for SEPARATELY in that paper and is a different channel.
-    "lottery": ("max5_21_r", "idio_vol_r", "downside_vol_r"),
-    # Skewness preference, on its own rather than diluting `lottery`. Measured
-    # against the real forward return it reads t -0.94, so the significance
-    # gate will almost certainly zero it -- which is the point. A theme that is
-    # visible and zeroed is more informative than one that is invisible and
-    # quietly diluting its neighbours.
-    "skew": ("idio_skew_r",),
-    # SPLIT, not averaged. Measured within date these two correlate -0.42: a
-    # high beta rank is RISKIER, a high max_dd rank is a SHALLOWER drawdown and
-    # therefore SAFER. Averaging them under a common sign cancelled the axis --
-    # beta alone t -3.67 and max_dd alone t +4.69 became a composite at t -0.93,
-    # which the significance gate then discarded for being insignificant. Two
-    # significant signals were averaged into one insignificant column.
-    #
-    # The families exist for ESTIMABILITY -- seventeen coefficients over a
-    # collinear set is not estimable -- and two ANTICORRELATED members are not a
-    # collinear block. They are two different bets. One coefficient each; the
-    # fit prices either, both or neither on its own evidence.
-    #
-    # A second cost of the average: max_dd_120 correlates +0.63 with prox_52w,
-    # so `risk` was partly a momentum factor wearing a risk label.
-    "beta": ("beta_120_r",),
-    "drawdown": ("max_dd_120_r",),
-    # Delivered share of traded volume. No clean analogue outside India.
-    "delivery": ("deliv_pct_r", "deliv_trend_r"),
-    "value": ("earnings_yield_r", "book_to_price_r", "ebitda_to_ev_r",
-              "fcf_yield_r", "sales_to_price_r"),
-    # Quality is a SLOW factor: a modest gross edge that turns over slowly and
-    # therefore sits far below breakeven turnover, which is where most of a
-    # gross edge is otherwise lost.
-    "quality": ("gross_profitability_r", "cash_op_profitability_r", "roce_r",
-                "accruals_r", "asset_growth_r", "net_issuance_r"),
-}
 
-#: Computed, reported, and NOT scored. `log_mcap` is carried so the size of what
-#: the model is ranking is visible, and so `research factors` can measure it --
-#: but it does not get a coefficient.
-#:
-#: Measured over 17 dates it reads IC -0.2297 at a hit rate of 0/17, which is
-#: not a factor, it is three independent 63-session windows in which small caps
-#: happened to win. Giving that a family coefficient equal in weight to momentum
-#: would rebuild by hand exactly the small-cap tilt the point-in-time panel fix
-#: took out. The unintended-sector-bet problem it was raised against is solved
-#: by ranking within sector, which is done.
-UNSCORED_CONTROLS = ("log_mcap_r",)
 
-#: Computed and reported, deliberately NOT scored, and not a control either.
-#: These belong to no family, which made them invisible: they were ranked,
-#: correlation-checked and discarded on every run with nothing saying so, and
-#: `research factors` reported `amihud` at IC +0.0362 (t +2.19) and
-#: `turnover_ratio` at -0.0319 (t -3.00) as though they were candidates.
-#:
-#: They are one factor measured from two sides -- they correlate -0.905 within
-#: date -- and the side they measure is the ILLIQUIDITY PREMIUM. That premium is
-#: real and it is compensation FOR trading costs, which a manual executor pays
-#: rather than collects. A positive loading walks the book into names where
-#: realised slippage exceeds forecast alpha. It belongs in the universe screen
-#: as a floor, which is where `universe.pit_min_adtv_inr` already puts it.
-#:
-#: Declared here so the exclusion is a decision on the record rather than an
-#: omission, and so the redundancy report can stop flagging a breach between two
-#: factors neither of which is used.
-UNSCORED_DIAGNOSTICS = ("amihud_r", "turnover_ratio_r")
 
 #: Families whose members are all price-derived, so they are always computable.
 FAMILY_COLUMNS = [f + "_f" for f in FAMILIES]
@@ -1193,9 +1053,6 @@ def fit_predict(
     significance_taper: bool = False,
     taper_c: float = TAPER_C,
     taper_hard_floor: float = TAPER_HARD_FLOOR,
-    metalabel: bool = False,
-    metalabel_top_k: int = 50,
-    metalabel_l2: float = 1.0,
 ) -> Tuple[Optional[pd.Series], Optional[CrossSectionalModel], Optional[str]]:
     """Rank every symbol by predicted forward return.
 
@@ -1394,33 +1251,7 @@ def fit_predict(
     # be judged against what is actually priced.
     model_coef_preview = dict(zip(features, fit["coef"].tolist()))
 
-    # THE NO TRADE VETO. A second model, fitted only on the trades this engine
-    # would actually have taken, predicting whether one reaches its profit
-    # barrier before its stop. It cannot pick a name the primary did not; it can
-    # only refuse one. Off by default -- see MetaLabelConfig for the measurement.
-    meta_model = None
-    meta_reason = None
-    if metalabel:
-        def _inner_primary(inner_train, frame):
-            inner_fit, _fm2, _why2 = fit_coefficients(
-                inner_train, features, estimator=estimator, alpha=A, horizon=H,
-                step=21, significance_floor=significance_floor,
-                shrink_toward=shrink_toward,
-                significance_taper=significance_taper, taper_c=taper_c,
-                taper_hard_floor=taper_hard_floor,
-                weights=(inner_train["uniqueness"].to_numpy("float64")
-                         if "uniqueness" in inner_train.columns else None))
-            if inner_fit is None:
-                return None
-            return predict(inner_fit, frame[features].to_numpy("float64"))
-
-        meta_model, meta_reason = fit_meta_out_of_sample(
-            panel, list(features) + ["_meta_score"], _inner_primary,
-            top_k=int(metalabel_top_k), l2=float(metalabel_l2))
-        if meta_model is None:
-            log.info("meta-label model unavailable; the veto is inert this refit",
-                     extra={"reason": meta_reason})
-
+    # The meta-label veto was removed here: AUC 0.4996, shipped disabled.
     del panel, x, y
     # THE REGIME LAYER ONLY ACTS WHEN IT CAN DO WHAT IT WAS DESIGNED TO DO.
     # Its purpose is to rotate weight OUT of momentum and INTO the crash
@@ -1463,16 +1294,6 @@ def fit_predict(
     # P(target before stop) for the names being ranked today, or None when the
     # veto could not be fitted. Computed here rather than in stage 8 so the
     # probability comes from the SAME feature frame the score did.
-    model_meta_prob = None
-    if meta_model is not None:
-        try:
-            model_meta_prob = pd.Series(
-                meta_model.predict_proba(latest), index=latest["symbol"].to_numpy())
-        except (KeyError, ValueError) as exc:
-            meta_reason = f"the veto could not score today's names: {exc}"
-            log.warning("meta-label scoring failed; the veto is inert",
-                        extra={"reason": meta_reason})
-
     model.dropped_for_coverage = dropped
     # Taken from the arguments the fit ACTUALLY consumed, not from a config
     # read a second time, so the fingerprint cannot drift from the model it
@@ -1481,9 +1302,6 @@ def fit_predict(
     model.label = label_fingerprint(H, barriers, exit_rules, admission_rules)
     model.regime_reachability = reach
     model.regime_multipliers_applied = multipliers_applied is not None
-    model.meta_prob = model_meta_prob
-    model.meta = meta_model
-    model.meta_unavailable = meta_reason
     model.estimator = estimator
     if fm is not None:
         model.fm_t_stat = dict(fm.t_stat)

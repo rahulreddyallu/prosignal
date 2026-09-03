@@ -207,12 +207,23 @@ def test_the_absolute_floor_can_actually_empty_the_list():
     assert passed.any() and not passed.all(), "the theme half must bind too"
 
 
-def test_the_floor_gates_entries_not_holdings():
-    """The scope is a config value and the shipped one is `entries`, because
-    filtering the population ejected held names and cost 3.2 points a year."""
+def test_the_floor_ships_disabled_and_its_scope_is_still_entries():
+    """The floor was DISABLED on measurement on 2026-09-02.
+
+    Treatment effect on the v3 composite across 66 purged and embargoed CPCV
+    folds, measured the way this config applies it (`applies_to: entries`, so it
+    blocks new opens and leaves the name ranked and holdable): ATE -2.2%, 95% CI
+    [-3.2%, -1.4%]. The interval sits clear of zero, so it is a removal rather
+    than a re-tune.
+
+    The SCOPE is still asserted because it is the part that was measured wrong
+    twice: an earlier draft claimed -14.3% by filtering the whole population
+    before ranking, which is not what this engine does. If the floor is ever
+    re-enabled, it must come back as `entries`.
+    """
     from prosignal.config.loader import load_config
     f = load_config().params.stage4_core_score.absolute_floor
-    assert bool(f.enabled.value) is True
+    assert bool(f.enabled.value) is False
     assert str(f.applies_to.value) == "entries"
     assert int(f.min_positive_themes.value) == 3
 

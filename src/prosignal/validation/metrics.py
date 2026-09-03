@@ -23,9 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import combinations
 from math import erf, exp, log, sqrt
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import pandas as pd
 
 __all__ = [
     "norm_cdf",
@@ -645,3 +646,85 @@ def decile_profile(
         "peak_bucket": peak,
         "top_is_peak": peak == len(values) - 1,
     }
+
+
+# ---------------------------------------------------------------------------
+# Panel metrics. These moved here from `v2_panel.py` when the v2 engine was
+# retired: they are generic cross-sectional statistics that the v3 panel and
+# any future scorer need, and they were only ever in a version-named module
+# because that is where they happened to be written first.
+# ---------------------------------------------------------------------------
+
+def rank_ic(panel: pd.DataFrame, label: str, score: str = "score") -> Tuple[float, float, int]:
+    ics = []
+    for _, g in panel.groupby("date", sort=True):
+        a = g[score].to_numpy("float64"); b = g[label].to_numpy("float64")
+        m = np.isfinite(a) & np.isfinite(b)
+        if m.sum() < 60:
+            continue
+        ra = pd.Series(a[m]).rank().to_numpy(); rb = pd.Series(b[m]).rank().to_numpy()
+        if ra.std() < 1e-12 or rb.std() < 1e-12:
+            continue
+        ics.append(float(np.corrcoef(ra, rb)[0, 1]))
+    ics = np.asarray(ics)
+    if len(ics) < 5:
+        return float("nan"), float("nan"), len(ics)
+    return (float(ics.mean()),
+            float(ics.mean() / (ics.std(ddof=1) / np.sqrt(len(ics)))), len(ics))
+
+
+def quintile_spread(panel: pd.DataFrame, label: str, q: int = 5,
+                    score: str = "score") -> Tuple[float, float, int]:
+    """Top-fifth minus bottom-fifth realised return, per period.
+
+    THE STATISTIC WITH POWER, and the reason it is the headline rather than the
+    book's annual excess: a permuted-label test run before the original deploy
+    put a ten-name book's five-year excess almost entirely inside its own null,
+    while this spread sat six standard deviations outside it. Judge the scorer
+    on the number that can tell signal from noise.
+    """
+    sp = []
+    for _, g in panel.groupby("date", sort=True):
+        g = g.dropna(subset=[score, label])
+        if len(g) < 100:
+            continue
+        k = max(len(g) // q, 5)
+        o = g.sort_values(score, ascending=False)
+        sp.append(float(o[label].head(k).mean() - o[label].tail(k).mean()))
+    sp = np.asarray(sp)
+    if len(sp) < 5:
+        return float("nan"), float("nan"), len(sp)
+    return (float(sp.mean()),
+            float(sp.mean() / (sp.std(ddof=1) / np.sqrt(len(sp)))), len(sp))
+
+
+@dataclass
+class V2Recheck:
+    """One quarterly verdict. Nothing here changes the model."""
+    as_of: dt.date
+    holdout_start: Optional[dt.date]
+    holdout_dates: int
+    ic: float
+    ic_t: float
+    spread: float
+    spread_t: float
+    null_p_spread: float
+    reference: Dict[str, float]
+    verdict: str
+    note: str
+    factor_health: List[Dict[str, object]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, object]:
+        d = {k: v for k, v in self.__dict__.items()}
+        d["as_of"] = self.as_of.isoformat()
+        d["holdout_start"] = self.holdout_start.isoformat() if self.holdout_start else None
+        return d
+
+
+#: Independent label windows the re-check needs before it issues a verdict.
+#: The deploy was judged on 8.6 of them; a quarterly window holds about 1.5.
+MIN_INDEPENDENT_WINDOWS = 8.0
+
+#: What the deploy earned, on 2025-03-06 to 2026-08-17, evaluated once.
+DEPLOY_REFERENCE = {"ic": 0.0451, "ic_t": 2.59, "spread": 0.0165, "spread_t": 2.56,
+                    "book_excess_ann": 0.0241, "book_maxdd": -0.140}

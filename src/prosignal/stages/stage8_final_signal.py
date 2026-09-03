@@ -213,7 +213,7 @@ def run(
     # would have taken, predicting whether one reaches its profit barrier before
     # its stop. It has no long side -- it cannot propose a name the primary did
     # not -- so its only power is to refuse. Disabled by default; the reason is
-    # measured and recorded in MetaLabelConfig.
+    # measured at per-date AUC 0.4996 and removed in the 2026-09-03 cleanup.
     #
     # It applies to NEW entries only. A held position is governed by the Stage 6
     # exit band, and letting a freshly refitted classifier close an open trade
@@ -606,15 +606,6 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
             f"on the other, in both cases inside the transaction costs. Read the "
             f"position as a shortlist from an evidenced ranking, not as an "
             f"ordering you can trust between #1 and #10.")
-    elif source == "v2_composite":
-        why.append(
-            f"Ranked #{score.rank} of {scores.universe_size} eligible names by the "
-            f"v2 composite -- ten equal-weighted sector-neutral factor ranks, "
-            f"listed below with what each contributed. On a sealed 17-month "
-            f"holdout this ranking's quintile spread was +1.65% per 42 sessions "
-            f"(t 2.56); the top ten names were NOT better than the ranking as a "
-            f"whole over that window, so read the position as a shortlist, not "
-            f"as an ordering you can trust between #1 and #10.")
     elif rank_cfg is not None and source != "fitted_composite":
         why.append(
             f"Ranked #{score.rank} of the eligible universe by {rank_cfg.column} "
@@ -723,35 +714,6 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                     f"(coefficient {f.weight:+.5f})")
             if len(sec) > len(shown):
                 why.append(f"    (+{len(sec) - len(shown)} more themes near zero)")
-    elif source == "v2_composite":
-        # THIS NAME'S OWN RANK PER FACTOR, not the composite percentile. The
-        # first version printed `score.percentile` on every line, so all ten
-        # factors read "98th" whatever they measured -- a table that looks like
-        # an attribution and carries none.
-        #
-        # And the raw value is printed WITHOUT a percent sign. Four of the ten
-        # are ratios or moments (a vol-adjusted return, a kurtosis, a delivery
-        # z-score); "+3363.09%" is a vol-adjusted return of 33.6 misread as a
-        # percentage, which is the kind of number a reader either dismisses or,
-        # worse, believes.
-        ranked = sorted((f for f in score.factors.values()
-                         if f.contribution is not None),
-                        key=lambda f: -abs(f.contribution))
-        for f in ranked:
-            pct = (f.standardised + 1.0) / 2.0 * 100.0 if f.standardised is not None else None
-            pos = f"{_ordinal(pct)} pct" if pct is not None else "unranked"
-            why.append(
-                f"{f.name}: {pos} in its sector, weight {f.weight:+.2f}, "
-                f"contributes {f.contribution:+.4f} to a composite of "
-                f"{score.composite_raw:+.4f} ({f.citation})"
-            )
-        missing = [f.name for f in score.factors.values() if not f.available]
-        if missing:
-            why.append(
-                f"Ranked neutral for want of an input: {', '.join(sorted(missing))}. "
-                f"The remaining weights renormalise, so this name is scored on "
-                f"{len(score.factors) - len(missing)} of {len(score.factors)} factors."
-            )
     else:
         for fname, f in score.factors.items():
             if f.raw_value is None:

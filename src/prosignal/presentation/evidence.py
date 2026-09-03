@@ -40,7 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from ..features.crossmodel import FAMILIES
+from ..features.families import FAMILIES
 
 __all__ = [
     "EVIDENCE_CATEGORIES", "FAMILY_MAP", "FACTOR_MAP", "COMPOSITE_KEYS",

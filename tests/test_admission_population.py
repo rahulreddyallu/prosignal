@@ -151,39 +151,6 @@ def test_asking_for_an_unfiltered_panel_is_not_the_same_as_asking_for_nothing():
     )
 
 
-# ------------------------------------------- one definition of a trade's end
-def test_no_module_books_profit_at_t1():
-    """`features/exits.py` exists to collapse the codebase's competing answers
-    to "how did this trade end". It reached the label, portfolio_sim and
-    research_panel -- and missed two: `outcomes._resolve_one` and
-    `backtest._simulate` both took profit at T1 (1.5R) while the model is
-    fitted against T2 (3.0R) via `rules_from_config`.
-
-    Measured out-of-sample over 49 purged dates, crossing label target against
-    book target:
-
-        label   book     NET     Sharpe
-        3.0R    3.0R   +0.36%    +0.21
-        1.5R    1.5R   -0.12%    -0.06
-        3.0R    1.5R   -0.22%    -0.18   <- what both modules were doing
-        1.5R    3.0R   +1.15%    +0.43
-
-    Booking at 1.5R is worse under BOTH labels, and the combination in use was
-    the worst of the four.
-    """
-    import inspect
-
-    from prosignal import backtest, outcomes
-
-    for fn in (outcomes._resolve_one, backtest._simulate):
-        src = inspect.getsource(fn)
-        assert 'reason = t1, "target_1"' not in src, (
-            f"{fn.__qualname__} books profit at T1; the model is fitted at T2"
-        )
-        assert "touched_t1" in src, (
-            f"{fn.__qualname__} must still RECORD reaching T1 -- it is real "
-            f"information about the trade, just not the end of it"
-        )
 
 
 def test_the_traded_target_is_the_one_the_label_is_fitted_on():
