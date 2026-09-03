@@ -20,11 +20,11 @@ holdouts. Fixes therefore split into:
 |---|---|---|---|---|
 | P0-1 | "quality" shown as *Business quality* but fitted anti-quality; "ownership" ≠ ownership (§D) | Honest card labels + config sign-warning | SAFE | ✅ merged (`fae96e2`) |
 | P0-2 | Book selected on holdout-overlapping data; only clean OOS book test lost (§I, K-1) | `recheck_status.py` (forward-gated status) + document that clean K-1 is forward-only | SAFE harness | ✅ harness; ⏳ verdict forward-gated |
-| P1-3 | Blend may not beat momentum-alone (§K-2) | `audit_2026_09.py` EXP-C (IC-level precursor) | SAFE harness | ✅ built; run ↓ |
-| P1-4 | Perf-proportional weights overfit / anti-OOS (§H, #4) | EXP-D equal- vs frozen-weight, same sub-scores | SAFE harness | ✅ built; run ↓ |
-| P1-5 | "quality" sign may be a 2020–21 artifact (§K-4) | EXP-A sign-stability across halves/thirds | SAFE harness | ✅ built; run ↓ |
+| P1-3 | Blend may not beat momentum-alone (§K-2) | `audit_2026_09.py` EXP-C (IC-level precursor) | SAFE harness | ✅ run — blend wins at IC level; book K-2 open |
+| P1-4 | Perf-proportional weights overfit / anti-OOS (§H, #4) | EXP-D equal- vs frozen-weight, same sub-scores | SAFE harness | ✅ run — frozen wins; not supported |
+| P1-5 | "quality" sign may be a 2020–21 artifact (§K-4) | EXP-A sign-stability across halves/thirds | SAFE harness | ✅ run — **stable, REFUTED**; keep+relabel |
 | P1-6 | Uncalibrated impact coeff gates net-of-cost (§H, K-6) | Cost break-even driver (needs book sim) | EPOCH-adjacent | ⏳ next round |
-| P2-7 | Delivery may be a liquidity/vol proxy (§K-3) | EXP-B incremental IC after controls | SAFE harness | ✅ built; run ↓ |
+| P2-7 | Delivery may be a liquidity/vol proxy (§K-3) | EXP-B incremental IC after controls | SAFE harness | ✅ run — **not a proxy, REFUTED** |
 | P2-8 | Residual panel survivorship inflates OOS IC (§E, K-5) | Survivorship-bounding run (needs delisted names) | DATA-gated | ⏳ data required |
 | P2-9 | Momentum factor theatre — prox/voladj dupes (§D, F) | Prune experiment → new epoch if it holds | EPOCH-gated | ⏳ after EXP results |
 | P3-10 | Doc contradictions / withdrawn-number consistency | Config note done; README/CHANGELOG sweep | SAFE | 🔄 partial |
@@ -41,16 +41,44 @@ holdouts. Fixes therefore split into:
    - `recheck_status.py` — K-1 forward-gated ranking status via the shipped
      `recheck()`.
 
-## Results — `audit_2026_09.py`
+## Results — `audit_2026_09.py`  (run 2026-09-03)
 
-_Filled from `research/v3/experiments/results_2026_09.json` after the run._
+Panel: 199,823 rows, **364 signal dates, 2019-03-19 .. 2026-07-30**, label `y21`.
+**Caveat that governs every number here:** signs/weights were fit on 2018-2024,
+so full-window IC is **partly in-sample**. Sign STABILITY across sub-periods and
+the liquidity/vol control test are the trustworthy reads; IC *levels* are not
+out-of-sample. The window does extend ~21 months past the 2024-10 fit end.
 
-| Experiment | Question | Result | Verdict |
+**These results OVERTURN three of the audit's own hypotheses. Recorded as such —
+a reviewer updates on evidence, and the point of gating model edits behind
+experiments is to catch exactly this before deleting a working factor.**
+
+| Exp | Question | Result | Verdict vs audit |
 |---|---|---|---|
-| EXP-A | Does "quality" hold its (negative) sign across sub-periods? | _pending_ | — |
-| EXP-B | Does delivery add IC after other themes + liquidity/vol? | _pending_ | — |
-| EXP-C | Does the 5-theme blend beat the best single theme (IC)? | _pending_ | — |
-| EXP-D | Does equal weight match/beat frozen perf-weights? | _pending_ | — |
+| EXP-A | Is the inverted "quality" sign a 2020-21 artifact? | quality IC **+0.0374 (t 6.34)**, no sign flip across halves or thirds; net_margin +0.040/+0.029 (no flip), margin_stability +0.009/+0.021 (no flip) | **REFUTED.** Sign is inverted vs the namesake but empirically **stable**. Do NOT drop it. Relabel only (done). |
+| EXP-B | Is delivery just a liquidity/vol proxy? | delivery IC raw **t 9.14**; residualised on ADTV+downside-vol **t 9.83** (unchanged) | **REFUTED.** Delivery is real and price-orthogonal, not a liquidity proxy. |
+| EXP-B′ | Does delivery add in a JOINT all-theme FM? | partial slope **t 0.36** (momentum t 3.38, quality t 6.12 are the only jointly-significant themes; risk −0.55, reversal 0.80) | Nuance: univariately strong, but partly spanned by momentum+quality at the return level. Worth a cleaner incremental test; not a reason to cut it. |
+| EXP-C | Does the 5-theme blend beat the best single theme? | composite spread **+0.0151 (t 6.85)** > best single (quality +0.0116; momentum +0.0112) | **REFUTED (IC level).** The blend adds ~35% over the best single theme. (Net-of-cost book K-2 still open.) |
+| EXP-D | Does equal weight beat the frozen perf-weights? | frozen spread **+0.0151** vs equal **+0.0122**; equal has marginally higher IC (0.0609 vs 0.0580) | **Not supported.** Frozen weights win on the headline spread. Finding #4 does not hold at the ranking level. |
+
+### What this means for the model-level items
+
+- **"Quality" / low-margin theme:** downgraded from *INVALID UNTIL FIXED* to
+  **KEEP + relabel + monitor**. The sign is stable; the honesty fix (label) is
+  the correct and sufficient action. `v3_monitor.review_themes` already flags an
+  inversion if it ever starts.
+- **Delivery theme:** **KEEP.** Genuine, price-orthogonal, non-liquidity signal.
+- **Equal-weight switch:** **do not make it.** No OOS-justified benefit.
+- **Blend vs momentum-alone:** the ensemble earns its place at the ranking
+  level; the remaining open question is net-of-cost at 6 names (K-2 book).
+
+### What remains genuinely unresolved (all BOOK / validation level)
+
+The IC experiments do **not** touch these, and they are the real risks:
+- **K-1** clean-window book test — forward-gated (`recheck_status.py`).
+- **K-6** cost break-even at 6 names — needs the book simulator (next round).
+- **DSR failure** (0.030 / 0.97) and **holdout-overlap book selection** — these
+  are about the traded book and multiple testing, not the ranking, and stand.
 
 ## Epoch-gated decisions (do NOT hand-edit; require a re-fit + re-seal)
 
