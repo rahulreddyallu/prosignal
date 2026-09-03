@@ -72,6 +72,16 @@ experiments is to catch exactly this before deleting a working factor.**
 - **Blend vs momentum-alone:** the ensemble earns its place at the ranking
   level; the remaining open question is net-of-cost at 6 names (K-2 book).
 
+### K-1 status (`recheck_status.py`, run 2026-09-03)
+
+Verdict **HOLDS** on the last 18 months (rank IC +0.0542 t 4.13, quintile spread
++1.25% t 3.56, null p 0.000), no theme inverted. **But the runner reports the
+window is 94% inside sealed holdout A** — so this is a re-reading of the dates
+the deploy was already judged on, not independent evidence. The clean K-1
+(traded book on dates that never touched the 378-cell surface) is **forward-only**
+and accrues as the live window moves past 2026-08. This is the honest status, not
+a pass.
+
 ### What remains genuinely unresolved (all BOOK / validation level)
 
 The IC experiments do **not** touch these, and they are the real risks:
