@@ -1,0 +1,14 @@
+{
+ "names": 3552,
+ "disappeared": 841,
+ "disappearance_rate_per_year": 0.02635767100916827,
+ "panel_rows": 199823,
+ "rows_die_within_horizon": 438,
+ "rows_die_nan_y21": 438,
+ "ic_reported": 0.0580316696359193,
+ "ic_reported_t": 8.288892631686918,
+ "ic_stressed": 0.05663455705593158,
+ "ic_stressed_t": 8.135443345800997,
+ "stress_return": -0.3,
+ "survivorship_inflation_ic": 0.0013971125799877165
+}

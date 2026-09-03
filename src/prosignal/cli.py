@@ -1521,7 +1521,10 @@ def _portfolio_inputs(cfg: AppConfig, store, sessions, symbols, end):
     # so membership on date t is decided by data through t-1.
     from .features.crosssec import liquidity_mask
     from .stages._cfg import fv as _fv, iv as _iv
-    u = cfg.params.stage1_universe
+    # `universe`, not `stage1_universe`: RootConfig names the block `universe`
+    # (see config schema). The wrong name crashed `research portfolio` -- and
+    # any other caller of `_portfolio_inputs` -- at this line. Fixed 2026-09.
+    u = cfg.params.universe
     elig = liquidity_mask(
         close, panels["turnover"],
         min_adtv_inr=_fv(u.pit_min_adtv_inr),
