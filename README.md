@@ -1,5 +1,12 @@
 # ProSignal
 
+> **2026-09-03 cleanup.** Sections below that describe the fitted cross-sectional
+> model, the meta-label veto, the v2 composite, or the `research estimator` /
+> `spread` / `metalabel` / `volscale` / `v2` commands describe code that has been
+> **removed**. They are kept as the record of what was measured and why it went.
+> `CHANGELOG.md` has the removals; `docs/MODEL_v9R.md` has the model that replaced
+> the fitted ranker as the only one with an out-of-sample number.
+
 A cross-sectional equity ranking engine for NSE cash equities. It reads
 point-in-time market data, ranks the eligible universe on sector-neutral 6-1
 momentum, and puts six names on a screen with the arithmetic that produced them

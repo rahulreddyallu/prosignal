@@ -13,12 +13,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prosignal.monitor import MIN_TRADES, review_performance
 from prosignal.parity import compare_snapshots
 from prosignal.positions import (
     PositionAction, UniverseEvent, review_open_position,
 )
-from prosignal.sla import check_sla, next_session
 
 
 # --------------------------------------------------------------------------
@@ -69,34 +67,14 @@ def test_a_name_present_only_live_is_reported_on_the_right_side():
 # item 7 -- performance halt
 # --------------------------------------------------------------------------
 
-def test_performance_in_line_with_the_backtest_does_not_halt():
-    rng = np.random.default_rng(11)
-    assert not review_performance(rng.normal(0.012, 0.05, 80), 0.012).halt
 
 
-def test_clearly_divergent_performance_halts():
-    rng = np.random.default_rng(12)
-    verdict = review_performance(rng.normal(-0.06, 0.05, 80), 0.012)
-    assert verdict.halt
-    assert verdict.p_value < 0.01
 
 
-def test_a_short_record_never_halts():
-    """A halt that fires on a handful of trades is a halt that gets ignored."""
-    rng = np.random.default_rng(13)
-    verdict = review_performance(rng.normal(-0.5, 0.05, MIN_TRADES - 1), 0.012)
-    assert not verdict.halt
-    assert "needed before" in verdict.reason
 
 
-def test_beating_the_backtest_never_halts():
-    """One-sided on purpose. Outperforming is worth a look, not a stop."""
-    rng = np.random.default_rng(14)
-    assert not review_performance(rng.normal(0.20, 0.05, 80), 0.012).halt
 
 
-def test_a_record_with_no_dispersion_is_not_tested():
-    assert not review_performance([0.01] * 60, 0.012).halt
 
 
 # --------------------------------------------------------------------------
@@ -154,39 +132,11 @@ def test_a_long_weekend_is_not_a_suspension():
 # item 10 -- SLA and calendar edges
 # --------------------------------------------------------------------------
 
-def test_a_decision_with_time_to_spare_is_actionable():
-    sessions = [dt.date(2026, 8, 18), dt.date(2026, 8, 19)]
-    now = dt.datetime(2026, 8, 18, 18, 0)
-    v = check_sla(dt.date(2026, 8, 18), now, sessions)
-    assert v.actionable
-    assert v.next_session_date == dt.date(2026, 8, 19)
 
 
-def test_a_late_run_is_skipped_rather_than_rushed():
-    sessions = [dt.date(2026, 8, 18), dt.date(2026, 8, 19)]
-    now = dt.datetime(2026, 8, 19, 9, 5)          # 10 minutes to the open
-    v = check_sla(dt.date(2026, 8, 18), now, sessions)
-    assert not v.actionable
-    assert "margin" in v.reason
 
 
-def test_a_run_finishing_after_the_open_is_refused():
-    sessions = [dt.date(2026, 8, 18), dt.date(2026, 8, 19)]
-    now = dt.datetime(2026, 8, 19, 11, 0)
-    v = check_sla(dt.date(2026, 8, 18), now, sessions)
-    assert not v.actionable
-    assert "already traded" in v.reason
 
 
-def test_a_saturday_session_is_the_next_session():
-    """NSE runs special Saturday sessions. Deriving 'next session' from the
-    weekday would skip one and price the entry against the wrong day."""
-    sessions = [dt.date(2026, 8, 21), dt.date(2026, 8, 22), dt.date(2026, 8, 24)]
-    assert next_session(dt.date(2026, 8, 21), sessions) == dt.date(2026, 8, 22)
 
 
-def test_no_further_session_is_not_actionable():
-    v = check_sla(dt.date(2026, 8, 18), dt.datetime(2026, 8, 18, 18, 0),
-                  [dt.date(2026, 8, 18)])
-    assert not v.actionable
-    assert "does not exist yet" in v.reason

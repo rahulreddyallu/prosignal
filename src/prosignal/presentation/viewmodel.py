@@ -515,8 +515,8 @@ def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
       unscored control      log_mcap, carried so the size of what is being
                             ranked is visible without paying it a coefficient.
     """
-    from ..features.crossmodel import (FEATURE_COLUMNS, UNSCORED_CONTROLS,
-                                       UNSCORED_DIAGNOSTICS)
+    from ..features.crossmodel import FEATURE_COLUMNS
+    from ..features.families import UNSCORED_CONTROLS, UNSCORED_DIAGNOSTICS
 
     # ONLY THE FITTED MODEL'S COLUMNS. This counted members across every entry
     # in `factors`, and since v3 that dict also holds the composite's own five

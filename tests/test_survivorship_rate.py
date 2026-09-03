@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTE = ROOT / "research" / "HISTORY_EXTENSION.md"
+NOTE = ROOT / "docs" / "findings" / "HISTORY_EXTENSION.md"
 
 #: Measured on this store, four windows 2017-2023.
 ANNUAL_DISAPPEARANCE = 0.043

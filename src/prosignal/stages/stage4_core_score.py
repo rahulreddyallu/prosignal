@@ -43,16 +43,10 @@ from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
 from ..features.crosssec import liquidity_mask
-from ..features import v2 as v2feat
 from ..features import v3 as v3feat
 from ..features import v3_factors as v3fac
 from ..features.exits import rules_from_config
 from ..features.labels import BarrierSpec
-from ..features.refit_gate import RefitVerdict, review_refit
-from ..features.crossmodel import (
-    contributions as cm_contributions,
-    standardised_features as cm_standardised,
-)
 from ..indicators import (
     momentum_skip,
     rank_to_unit_interval,
@@ -89,7 +83,7 @@ class RankingUnavailable(PipelineError):
 
 
 def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
-                          v2_scored=None, v3_scored=None):
+                          v3_scored=None):
     """Return the series the book is ordered by, and say which one it is.
 
     `composite_raw` arrives holding whatever ranked upstream -- the fitted
@@ -106,6 +100,28 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
     source = str(getattr(cfg.ranking, "source", "fitted_composite"))
     if source == "fitted_composite":
         return composite_raw, "fitted_composite"
+
+    if source == "v9r_core":
+        # THE MODEL THE SEALED 2012-2017 WINDOW MEASURED. Nine factors, equal
+        # risk contribution, unneutralised, no coverage renormalisation. It
+        # returned +9.50% net active at Newey-West t +1.87 against a
+        # pre-registered bar of 2.0 -- POSITIVE AND UNDERPOWERED, which is a
+        # FAILED ship gate, not a passed one. See docs/MODEL_v9R.md.
+        # It is selectable so it can be shadow-run against the incumbent; it is
+        # not the default and must not become one on this evidence alone.
+        if v3_scored is None or "score" not in getattr(v3_scored, "columns", []):
+            raise RankingUnavailable(
+                "stage4_core_score.ranking.source is 'v9r_core' and the scorer "
+                "did not build. Falling back would issue signals from a model "
+                "that was not the one measured.")
+        ranked = v3_scored["score"].dropna()
+        covered = ranked.reindex(composite_raw.index).dropna()
+        floor = max(int(0.6 * len(composite_raw)), 20)
+        if len(covered) < floor:
+            raise RankingUnavailable(
+                f"the v9R composite covers {len(covered)} of "
+                f"{len(composite_raw)} scoreable names, under the {floor} floor.")
+        return covered, "v9r_core"
 
     if source == "v3_composite":
         # THE SHIPPED SCORER. Twenty-two factors in five themes, combined within
@@ -154,41 +170,6 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
         except Exception as exc:                    # never fail a run to report
             log.warning("theme influence check did not run",
                         extra={"error": str(exc)})
-        return covered, source
-
-    if source == "v2_composite":
-        # THE SHIPPED SCORER. Ten equal-weighted, sign-oriented sector-neutral
-        # factor ranks (`features/v2.py`). Selected on 2018-11 to 2024-10 and
-        # evaluated ONCE, blind, on a sealed 2025-03 to 2026-08 holdout; the
-        # number that earned the deploy is in CHANGELOG.md and in
-        # `research/V2_SEARCH.md`, including the part of it that did not work.
-        if v2_scored is None or "score" not in getattr(v2_scored, "columns", []):
-            raise RankingUnavailable(
-                "stage4_core_score.ranking.source is 'v2_composite' and the v2 "
-                "block did not build, so there is no ranking to take. Falling "
-                "back to another scorer would issue signals from a model that "
-                "was not the one measured on the holdout."
-            )
-        ranked = v2_scored["score"].dropna()
-        covered = ranked.reindex(composite_raw.index).dropna()
-        floor = max(int(0.6 * len(composite_raw)), 20)
-        if len(covered) < floor:
-            raise RankingUnavailable(
-                f"the v2 composite covers {len(covered)} of "
-                f"{len(composite_raw)} scoreable names, under the {floor} "
-                f"floor. A ranking built on a minority of the universe is a "
-                f"ranking of that minority."
-            )
-        notes.append(
-            "Book ordered by the v2 composite: ten equal-weighted, "
-            "sign-oriented sector-neutral factor ranks. Sealed-holdout "
-            "2025-03-06 to 2026-08-17, evaluated once: rank IC +0.045 (t 2.59), "
-            "quintile spread +1.65% per 42 sessions (t 2.56), both outside a "
-            "200-draw shuffled null; book excess over the equal-weight "
-            "eligible universe +2.4% a year net of costs, which is inside "
-            "noise. The ranking is evidenced; a ten-name book's annual excess "
-            "is not."
-        )
         return covered, source
 
     column = str(cfg.ranking.column)
@@ -243,61 +224,9 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
     return covered, source
 
 
-def build_v2_block(store, calendar, symbols, as_of, sectors, cfg):
-    """The v2 score for ``as_of``: raw factor values and the ranked/weighted frame.
-
-    Reads only sessions at or before ``as_of``. The window is
-    ``v2.MIN_LOOKBACK_SESSIONS`` plus slack, which is what the search measured
-    each factor over -- a shorter read silently changes the statistic, which is
-    why the length comes from the factor spec rather than from a config number
-    somebody can shorten.
-    """
-    need = v2feat.MIN_LOOKBACK_SESSIONS + 15
-    window = calendar.trailing_window(as_of, need)
-    start = window[0] if window else calendar.first
-    px = store.read_prices(symbols=symbols, start=start, end=as_of)
-    if px is None or px.empty:
-        return None, None, "no prices in the v2 lookback window"
-    px = px.copy()
-    px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
-
-    def piv(col):
-        if col not in px.columns:
-            return None
-        return px.pivot_table(index=DATE, columns=SYMBOL, values=col,
-                              aggfunc="last", observed=True).sort_index()
-
-    close, open_, turnover = piv("close"), piv("open"), piv("turnover")
-    if close is None or turnover is None or close.empty:
-        return None, None, "the store served no close/turnover for the v2 window"
-
-    # DELIVERY COMES FROM ITS OWN TABLE. `prices.deliv_pct` is a write-time
-    # column that is empty for the whole store -- reading it here would make
-    # `deliv_z_21` silently neutral for every name on every run, which is a
-    # factor quietly deleted rather than a factor reported missing.
-    deliv = None
-    try:
-        dl = store.read_delivery(symbols=symbols, start=start, end=as_of)
-        if dl is not None and not dl.empty and "deliv_pct" in dl.columns:
-            dl = dl.copy()
-            dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
-            deliv = dl.pivot_table(index=DATE, columns=SYMBOL, values="deliv_pct",
-                                   aggfunc="last", observed=True).sort_index()
-            deliv = deliv.reindex(index=close.index)
-    except Exception as exc:
-        log.warning("delivery unavailable for the v2 block; deliv_z_21 ranks "
-                    "neutral", extra={"error": str(exc)})
-
-    raw = v2feat.factor_frame(close, turnover, open_, deliv)
-    if raw.empty:
-        return None, None, "the v2 factor frame came back empty"
-    raw = raw.reindex([s for s in symbols if s in raw.index])
-    scored = v2feat.score_frame(raw, sectors,
-                                min_factors=int(iv(cfg.ranking.v2_min_factors)))
-    return raw, scored, None
 
 
-def build_v3_block(store, calendar, symbols, as_of, sectors, cfg):
+def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False):
     """The v3 two-level thematic score for ``as_of``.
 
     Returns (raw factor values, scored frame, error). Reads only sessions at or
@@ -364,22 +293,17 @@ def build_v3_block(store, calendar, symbols, as_of, sectors, cfg):
     if raw.empty:
         return None, None, "the v3 factor frame came back empty"
     raw = raw.reindex([x for x in symbols if x in raw.index])
+    if v9r_mode:
+        # The v9R CORE scorer reads NINE of the same twenty-two factors and does
+        # not take `sectors`: it ranks unneutralised, because the sector map
+        # covers 754 symbols and 46.7% of a live cross-section otherwise ranks
+        # inside one residual bucket that is not a sector.
+        from ..features import v9r as v9rfeat
+        return raw, v9rfeat.score_frame(raw), None
     scored = v3feat.score_frame(raw, sectors, min_themes=int(iv(cfg.ranking.v3_min_themes)))
     return raw, scored, None
 
 
-def _win_probability(model) -> Optional[Dict[str, float]]:
-    """P(target before stop) per ticker, or None when the veto is inert.
-
-    A cached model reloaded from disk carries no meta model -- the classifier is
-    not serialised -- so this returns None on the cheap path rather than an
-    empty dict. The two are different: an empty dict says the veto ran and
-    scored nobody, None says it did not run.
-    """
-    probs = getattr(model, "meta_prob", None) if model is not None else None
-    if probs is None or len(probs) == 0:
-        return None
-    return {str(k): float(v) for k, v in probs.items() if v == v}
 
 
 def run(
@@ -554,139 +478,37 @@ def run(
             f"{', '.join(unscoreable[:8])}"
             + (" ..." if len(unscoreable) > 8 else "")
         )
-    # ---- fitted cross-sectional model -------------------------------------
-    # The hand-set factor weights above are not distinguishable from zero, and
-    # a fitted model over the same factors beats them. The figures that used to
-    # be quoted here (+1.11%/month at t = 3.44, 8.8 years of purged
-    # walk-forward) measured a RIDGE against the HORIZON return, and the engine
-    # now fits Fama-MacBeth against its own exit geometry -- so they described a
-    # model no code path could produce and have been removed rather than
-    # refreshed. `research estimator` measures what is actually running.
+    # ---- the fitted cross-sectional model, REMOVED -------------------------
+    # Until this cleanup the engine fitted a Fama-MacBeth cross-sectional model on
+    # every run, attributed it on the card, and then ranked on the v3 composite
+    # anyway. The fit was a diagnostic nobody ordered a book by.
     #
-    # The fit uses history ending one full label horizon before the decision
-    # date, so nothing in training overlaps today. When there is too little
-    # history the model abstains and the hand-weighted composite stands, which
-    # is stated on the card rather than substituted quietly.
-    (model_scores, model, model_unavailable, model_features,
-     refit_verdict) = _cross_sectional_model(store, symbols, as_of, cfg,
-                                            p.universe, regime,
-                                            risk_cfg=p.stage7_risk)
-    if refit_verdict is not None and not refit_verdict.accepted:
-        notes.append(
-            f"Refit held back: {refit_verdict.summary()}. The previous "
-            f"coefficients remain live and this needs manual review."
-        )
-    if model_unavailable and _is_model_failure(model_unavailable) and not _model_optional(cfg):
-        # The hand-weighted composite this would fall back to has never been
-        # shown to work. Quietly substituting it produces a watchlist that looks
-        # exactly like a healthy one while being scored by something that was
-        # measured at no better than zero.
-        raise ModelUnavailable(
-            f"the cross-sectional model could not score this run "
-            f"({model_unavailable}). Falling back to the hand-weighted composite "
-            f"would issue signals from a scorer never shown to beat an "
-            f"equal-weight benchmark. Set stage4_core_score.allow_composite_fallback "
-            f"to true to accept that explicitly."
-        )
+    # It cost about 3,000 lines across crossmodel / famamacbeth / linear /
+    # metalabel / refit_gate, all of it executing daily on the live signal path.
+    # `composite_raw` above is built from the FAMILY factors and never depended on
+    # it, so removing the fit leaves the scoreable universe exactly as it was.
+    #
+    # If a fitted ranker is wanted again, it should be re-derived and re-validated
+    # rather than restored: the coefficients it carried were fitted against the
+    # engine's own exit geometry, which is the defect `research/` recorded before
+    # the v3 composite replaced it as the ranking.
+    model_scores = model = model_features = refit_verdict = None
+    model_unavailable = None
 
     model_contrib = None
     model_z = None
-    if model_scores is not None:
-        aligned = model_scores.reindex(composite_raw.index).dropna()
-        if len(aligned) >= max(int(0.6 * len(composite_raw)), 20):
-            composite_raw = aligned
-            # The card must explain the number it prints. Once the model ranks,
-            # the hand-weighted composite's factors no longer describe the
-            # calculation, so the evidence comes from the fitted coefficients.
-            if model is not None and model_features is not None:
-                try:
-                    model_contrib = cm_contributions(model, model_features)
-                    model_z = cm_standardised(model, model_features)
-                except Exception as exc:
-                    log.warning("model attribution unavailable",
-                                extra={"error": str(exc)})
-            # No performance claim here. This line used to print
-            # "IC +0.052 (t 3.64) versus +0.025 (t 1.28)" over "8.8 years of
-            # purged walk-forward" on every single run. That measured the RIDGE
-            # against the HORIZON label, and neither exists any more -- the
-            # estimator is Fama-MacBeth and the label is the engine's own exit
-            # geometry. A number that describes a model no code path can produce
-            # is worse than no number, because it reads as current.
-            #
-            # `prosignal research estimator` and `research cpcv` measure the
-            # model that is actually running, on demand, and say what they
-            # measured it on.
-            notes.append(
-                f"Ranking from the fitted cross-sectional model "
-                f"({model.summary()}). Run `prosignal research estimator` for "
-                f"its out-of-sample standing against an equal-weight control."
-            )
-            # WHAT THE REGIME LAYER ACTUALLY DID, SAID OUT LOUD.
-            #
-            # `reachable_multipliers` refuses to scale momentum down when no
-            # defensive family is priced, because the weight would rotate into
-            # whatever else is weighted -- `delivery` on the shipped model --
-            # and delivery was never a crash stabiliser. That guard is correct
-            # and it fires on EVERY run: `value` and `quality` are dropped
-            # upstream at 38% date-span against a 60% floor, which the
-            # fundamentals feed cannot clear.
-            #
-            # The diagnosis was computed, attached to the model, and read by
-            # nothing. So Stage 2 measured the regime, the ledger recorded it,
-            # the card printed it, and a reader had no way to learn that the
-            # multiplier never reached a score. That is the defect: not the
-            # guard, but the silence about it.
-            reach = getattr(model, "regime_reachability", None)
-            if reach is not None:
-                targeted = ", ".join(reach.get("targeted") or []) or "nothing"
-                if getattr(model, "regime_multipliers_applied", False):
-                    moved = float(reach.get("share_of_weight_moved") or 0.0)
-                    notes.append(
-                        f"Regime multipliers APPLIED to "
-                        f"{', '.join(reach.get('reachable') or []) or 'nothing'}, "
-                        f"moving {moved:.0%} of the fitted weight."
-                    )
-                else:
-                    receives = ", ".join(reach.get("receives_the_weight") or [])
-                    notes.append(
-                        f"Regime multipliers computed and NOT APPLIED: they "
-                        f"target {targeted}, and no defensive family is priced "
-                        f"(value and quality are dropped for coverage), so "
-                        f"scaling momentum down would rotate the book into "
-                        f"{receives or 'nothing'} rather than into a "
-                        f"stabiliser. The regime measurement on this card "
-                        f"describes the market, not a change to the ranking. "
-                        f"The crash control that DOES bind is the entry gate "
-                        f"(no_new_entry_buckets), not a weighting."
-                    )
-        else:
-            notes.append(
-                f"Cross-sectional model covered only {len(aligned)} of "
-                f"{len(composite_raw)} scored names; hand-weighted composite retained."
-            )
-    else:
-        notes.append(f"Cross-sectional model unavailable: {model_unavailable}")
 
-    # WHAT ORDERS THE BOOK, applied last so that everything above -- the
-    # hand-weighted composite, the fitted model, the regime diagnosis and every
-    # note explaining them -- still happens and is still recorded. Only the
-    # series the order is taken from changes.
-    v2_raw = v2_scored = v3_raw = v3_scored = None
+    v3_raw = v3_scored = None
     _src = str(getattr(cfg.ranking, "source", ""))
-    if _src == "v2_composite":
-        v2_raw, v2_scored, v2_err = build_v2_block(
-            store, calendar, symbols, as_of, sectors, cfg)
-        if v2_err:
-            notes.append(f"v2 block unavailable: {v2_err}")
-    elif _src == "v3_composite":
+    if _src in ("v3_composite", "v9r_core"):
         v3_raw, v3_scored, v3_err = build_v3_block(
-            store, calendar, symbols, as_of, sectors, cfg)
+            store, calendar, symbols, as_of, sectors, cfg,
+            v9r_mode=(_src == "v9r_core"))
         if v3_err:
             notes.append(f"v3 block unavailable: {v3_err}")
 
     composite_raw, ranking_source = _apply_ranking_policy(
-        composite_raw, model_features, cfg, notes, v2_scored=v2_scored,
-        v3_scored=v3_scored)
+        composite_raw, model_features, cfg, notes, v3_scored=v3_scored)
 
     # THE ABSOLUTE FLOOR, computed here and enforced at entry. Names that fail
     # it stay in the ranking -- they are holdable and they belong on a watchlist
@@ -762,27 +584,6 @@ def run(
                         citation=_MODEL_CITE.get(name),
                         members=_members_for(name, sym, model_features),
                     )
-        elif ranking_source == "v2_composite" and v2_scored is not None \
-                and sym in v2_scored.index:
-            # THE CARD EXPLAINS THE NUMBER IT PRINTS. These terms sum to the
-            # composite by construction: contribution = rank x sign x weight,
-            # renormalised over the factors this name actually has.
-            for f in sorted(v2feat.V2_FACTORS,
-                            key=lambda x: abs(_f(v2_scored.at[sym, x.name + "_contrib"]) or 0.0),
-                            reverse=True):
-                z = _f(v2_scored.at[sym, f.name + "_r"])
-                factors[f.name] = FactorScore(
-                    name=f.name,
-                    raw_value=(_f(v2_raw.at[sym, f.name])
-                               if v2_raw is not None and sym in v2_raw.index else None),
-                    standardised=z,
-                    weight=round(f.sign * f.weight, 5),
-                    contribution=_f(v2_scored.at[sym, f.name + "_contrib"]),
-                    available=bool(v2_raw is not None and sym in v2_raw.index
-                                   and pd.notna(v2_raw.at[sym, f.name])),
-                    evidence_tier="v2",
-                    citation=f.note,
-                )
         elif model_contrib is not None and sym in model_contrib.index:
             # Attribution from the fit: contribution = coefficient x z-score,
             # and the terms sum back to the score. Ordered by absolute size, so
@@ -890,8 +691,7 @@ def run(
     model_block = None
     member_block = None
     if model_features is not None and not model_features.empty:
-        from ..features.crossmodel import (UNSCORED_CONTROLS,
-                                           UNSCORED_DIAGNOSTICS)
+        from ..features.families import UNSCORED_CONTROLS, UNSCORED_DIAGNOSTICS
         fitted = [c for c in (getattr(model, "features", None) or [])
                   if c in model_features.columns]
         if len(fitted) >= 2:
@@ -921,11 +721,11 @@ def run(
                                if model is not None else None),
         typical_dispersion=(float(getattr(model, "train_dispersion", 0.0))
                             if model is not None else None),
-        win_probability=_win_probability(model),
-        win_probability_unavailable=(
-            None if not bool(cfg.metalabel.enabled)
-            else (getattr(model, "meta_unavailable", None)
-                  or ("no model was fitted this run" if model is None else None))),
+        # The meta-label veto is gone (AUC 0.4996, shipped disabled), so there is
+        # no win probability and nothing to explain its absence. The card reads
+        # None for both rather than carrying a field that can only say "off".
+        win_probability=None,
+        win_probability_unavailable=None,
         weighting_mode=str(v(cfg.weighting_mode)),
         standardisation=method,
         effective_weights={k: round(v, 4) for k, v in effective.items()},
@@ -945,7 +745,7 @@ def _members_for(family: str, symbol, features) -> List[FactorMember]:
     average the coefficient multiplied cannot disagree.
     """
     from ..features.crosssec import FEATURES
-    from ..features.crossmodel import FAMILIES
+    from ..features.families import FAMILIES
 
     if features is None or features.empty or family not in FAMILIES:
         return []
@@ -1209,413 +1009,6 @@ _MODEL_CITE = {
 }
 
 
-def _cross_sectional_model(store, symbols, as_of, cfg, universe, regime=None,
-                           risk_cfg=None):
-    """Fit the ridge ranker on history strictly before ``as_of``.
-
-    Failure is reported, never swallowed: a model that could not be fitted must
-    leave the hand-weighted composite visibly in charge.
-    """
-    from ..features import crossmodel as cm
-
-    # Factors rank within sector where the sector is big enough. Without this a
-    # value ratio compares a bank with an IT firm and every factor carries an
-    # unintended sector bet on top of what it measures.
-    # A store that cannot serve sectors falls back to universe-wide ranking
-    # rather than failing the run. Sectors are genuinely absent for part of this
-    # universe anyway -- it reaches past any index constituent file -- so
-    # partial coverage is the normal state and total absence is the same state
-    # taken to its limit.
-    try:
-        smap = store.read_sector_map()
-        sector_map = (dict(zip(smap["symbol"], smap["sector"]))
-                      if smap is not None and not smap.empty else {})
-    except Exception as exc:
-        log.warning("sector map unavailable; ranking against the whole universe",
-                    extra={"error": str(exc)})
-        sector_map = {}
-
-    # Stage 2 measures the regime and produces these. They were applied only to
-    # the hand-weighted composite's weights, so the fitted model -- the one that
-    # ranks -- never saw them: the multiplier was computed, logged, written to
-    # the ledger, printed on the card, and never reached a score.
-    multipliers = None
-    if regime is not None:
-        # `reversal` no longer takes the momentum multiplier. It is the
-        # OPPOSITE side of that axis, and under the engine's own exit geometry
-        # its fitted coefficient is negative -- a bet against names that have
-        # run up, which is a DEFENSIVE tilt. Scaling it down with momentum in a
-        # crash weakened the defence exactly when it was most wanted. The
-        # comment that justified pairing them ("the opposite side of the same
-        # axis") is the reason not to, once the sign is measured rather than
-        # assumed.
-        multipliers = {
-            "mom": float(regime.momentum_multiplier),
-            "value": float(regime.quality_multiplier),
-            # Quality is the other crash stabiliser and tracks the same
-            # multiplier as value, for the same reason.
-            "quality": float(regime.quality_multiplier),
-        }
-
-    cache = store.curated / "crosssec_model.json"
-    try:
-        sessions = store.price_sessions()
-        refit_every = iv(cfg.model_refit_every_sessions)
-        # THE LABEL GEOMETRY, BUILT ONCE AND USED TWICE. `fit_predict` consumes
-        # these objects and `load_cached` compares the fingerprint they produce,
-        # so both sides of the cache check read the same construction rather
-        # than the same config twice. Still inside the try, for the reason the
-        # note below on `lab` gives.
-        lab = cfg.labels
-        label_horizon = int(iv(cfg.model_horizon_sessions))
-        label_exit_rules = (rules_from_config(cfg, risk_cfg)
-                            if bool(lab.triple_barrier) and risk_cfg is not None
-                            and str(lab.barrier_source) == "engine" else None)
-        label_barriers = (BarrierSpec(
-            upper=float(lab.upper_sigma), lower=float(lab.lower_sigma),
-            horizon=label_horizon, vol_window=int(lab.vol_window_sessions))
-            if bool(lab.triple_barrier)
-            and str(lab.barrier_source) == "sigma" else None)
-        # R9. THE POPULATION THE FIT IS ESTIMATED OVER, built here and used
-        # twice for the same reason the label geometry is: `fit_predict`
-        # consumes the object and `load_cached` compares the fingerprint it
-        # produces, so the cache check and the fit cannot disagree.
-        #
-        # A name already below its thesis-invalidation level is eligible, is
-        # scored, and CANNOT BE BOUGHT -- stage 6 refuses it. Fitting on it
-        # estimates coefficients over a population the book does not trade.
-        # The predicate is stage 7's own geometry, which is what stage 6
-        # enforces, so both halves of F5 now read one construction.
-        #
-        # Independent of the label. Tying them together is exactly how they
-        # came apart: the admission filter lived inside `resolve_exits`, and
-        # `triple_barrier: false` routed around it, so the decision half
-        # shipped and the training half did not.
-        admit_only = bool(getattr(getattr(universe, "train_on_admissible_only",
-                                          None), "value", True))
-        admission_rules = (rules_from_config(cfg, risk_cfg)
-                           if admit_only and risk_cfg is not None else None)
-        if admit_only and risk_cfg is None:
-            log.warning(
-                "train_on_admissible_only is set and stage 7 is unreachable, "
-                "so the admission predicate cannot be built; the fit falls "
-                "back to the wide population and says so",
-                extra={"as_of": as_of.isoformat()})
-        label_fp = cm.label_fingerprint(
-            label_horizon, label_barriers, label_exit_rules, admission_rules)
-        cached = cm.load_cached(cache, as_of, refit_every,
-                                estimator=str(cfg.estimator.method),
-                                label=label_fp)
-
-        # Cheap path: a recent fit only needs today's features, which is one
-        # date of history instead of a thousand. The large read is what pushed
-        # peak RSS past the instance limit, so it happens on refit days only.
-        # The cached path reads exactly what the live feature row consumes. It
-        # was MIN_LOOKBACK + 10, short of the 756-session window
-        # `resid_reversal` standardises over, so the live statistic and the
-        # training statistic were computed on different windows. The wide read
-        # this comment used to worry about is the REFIT one (every symbol, 3,000
-        # sessions); this one is ~750 names and costs single-digit megabytes.
-        need = (cm.LIVE_HISTORY_SESSIONS if cached
-                else int(iv(cfg.model_max_train_sessions)) + int(iv(cfg.model_horizon_sessions)) + 5)
-        start = sessions[-need] if len(sessions) > need else sessions[0]
-        # On a REFIT the training panel must span every name the universe screen
-        # would have admitted on each past date -- not the names it admits
-        # today. Restricting the read to today's universe is what made the panel
-        # a projection of today's survivors backwards: measured against the
-        # screen resolved per date, 27% of the names eligible on 2024-08-12 are
-        # absent from today's set, and they were excluded for what happened
-        # afterwards.
-        #
-        # The cheap cached path scores today only, so it keeps the narrow read
-        # that the instance's memory budget was designed around. The wide read
-        # is 3.8s and 31 MB as float32, and it happens on refit days.
-        refitting = cached is None
-        # high/low make the barrier touch test intraday, which is what a stop
-        # actually is. Closes alone understate how often one is hit.
-        # `adj_factor` travels with the read: the universe screen's price
-        # floor is a tradeability test and must read the QUOTED price, not
-        # the back-adjusted one.
-        # `high`/`low` on BOTH paths, not only on a refit. The admissibility
-        # predicate needs ATR, and it has to be applied at the decision as well
-        # as in training or the two disagree about which names the model was
-        # fitted over. The cached read is one narrow window (LIVE_HISTORY_SESSIONS
-        # x ~750 names), so two more float columns cost single-digit megabytes;
-        # the wide read this block's memory budget was written around is the
-        # REFIT one, and it already carried them.
-        cols = [DATE, SYMBOL, "close", "turnover", "adj_factor", "high", "low"]
-        # `lab` is read further up now, where the label fingerprint is built --
-        # still inside this try, for the original reason: a config problem in
-        # this block must not raise before the delivery check, whose failure is
-        # the one the caller needs to see.
-        est = cfg.estimator
-        # `open` is the only column that is still label-gated: a bar gapping
-        # through the stop fills at the OPEN, and only the barrier label reads
-        # it. high/low moved up to the unconditional list above, because the
-        # admissibility predicate is a property of what the engine can BUY
-        # rather than of which label it fits -- coupling the two is what
-        # removed the mask from training when the barrier was turned off.
-        if refitting and bool(lab.triple_barrier):
-            # `open` too: a bar that gaps through the stop fills at the OPEN,
-            # not at the stop price, and assuming otherwise is the optimistic
-            # error. The label reads it through the shared exit resolver.
-            cols += ["open"]
-        px = store.read_prices(
-            symbols=None if refitting else list(symbols), start=start, end=as_of,
-            columns=cols,
-        )
-        if px.empty:
-            return None, None, "no price rows", None, None
-        px[DATE] = pd.to_datetime(px[DATE]).dt.normalize()
-        close = px.pivot_table(index=DATE, columns=SYMBOL, values="close",
-                               aggfunc="last", observed=True).sort_index()
-        turnover = px.pivot_table(index=DATE, columns=SYMBOL, values="turnover",
-                                  aggfunc="last", observed=True).sort_index()
-        adj = None
-        if "adj_factor" in px.columns:
-            adj = px.pivot_table(index=DATE, columns=SYMBOL, values="adj_factor",
-                                 aggfunc="last", observed=True).sort_index()
-        high = low = open_ = None
-        if "high" in px.columns and "low" in px.columns:
-            high = px.pivot_table(index=DATE, columns=SYMBOL, values="high",
-                                  aggfunc="last", observed=True).sort_index()
-            low = px.pivot_table(index=DATE, columns=SYMBOL, values="low",
-                                 aggfunc="last", observed=True).sort_index()
-        if "open" in px.columns:
-            open_ = px.pivot_table(index=DATE, columns=SYMBOL, values="open",
-                                   aggfunc="last", observed=True).sort_index()
-        del px
-
-        # Value and quality: the only inputs not derived from price and volume.
-        # Read once and passed to both paths so the fit and the live scoring see
-        # the same filings.
-        # Statements rather than the NSE filings table: that feed stopped in
-        # March 2025 and its columns had gone constant, so the fundamental block
-        # was contributing nothing to the score while still occupying five of
-        # the model's columns.
-        fundamentals = store.read_statements()
-        # Net issuance needs these: the raw share count cannot tell a placement
-        # from a bonus, and a 1:1 bonus doubles the count while diluting nobody.
-        try:
-            actions = store.read_corporate_actions()
-        except Exception:
-            actions = None
-        max_age = int(iv(cfg.max_fundamental_age_days))
-
-        # Delivered quantity as a share of traded volume. Read over the same
-        # window as the prices so the two panels align date for date; a name
-        # with no print ranks neutral rather than dropping out.
-        #
-        # A name with no print and the whole feed being gone are different
-        # things and used to be handled the same way. deliv_pct carries the
-        # largest coefficient in the fit, and crosssec lists it as
-        # neutral-when-missing, so swallowing a read failure here scored every
-        # name as though its delivered share were exactly average: measured,
-        # that replaces a third of the top decile and costs 18% of the IC while
-        # the run reports nothing. Per-name gaps stay neutral; an empty or
-        # unreadable panel is a failure and is raised, which the outer handler
-        # turns into a non-benign reason and Stage 4 into ModelUnavailable.
-        dl = store.read_delivery(
-            symbols=None if refitting else list(symbols), start=start, end=as_of)
-        if dl is None or dl.empty or "deliv_pct" not in dl.columns:
-            raise PipelineError(
-                STAGE_NAME,
-                "the delivery panel is empty or has no deliv_pct column. "
-                "deliv_pct is the model's largest coefficient and ranks neutral "
-                "when absent, so continuing would score every name as average on "
-                "it and report a normal-looking watchlist. Run "
-                "`prosignal data ingest` to refresh sec_bhavdata_full.",
-            )
-        dl[DATE] = pd.to_datetime(dl[DATE]).dt.normalize()
-        delivery = dl.pivot_table(
-            index=DATE, columns=SYMBOL, values="deliv_pct",
-            aggfunc="last", observed=True
-        ).sort_index()
-        del dl
-
-        covered = float(delivery.notna().any(axis=0).mean()) if not delivery.empty else 0.0
-        floor = fv(cfg.min_name_factor_coverage)
-        if covered < floor:
-            raise PipelineError(
-                STAGE_NAME,
-                f"delivery covers {covered:.0%} of the universe, below the "
-                f"{floor:.0%} floor. Below it the factor ranks most of the "
-                f"universe neutral, which is not a ranking.",
-            )
-
-        if cached is not None:
-            feats = cm.today_features(close, turnover, as_of,
-                                      fundamentals=fundamentals,
-                                      max_fundamental_age_days=max_age,
-                                      delivery=delivery, sectors=sector_map,
-                                      actions=actions,
-                                      high=high, low=low,
-                                      admission_rules=admission_rules)
-            if feats is None:
-                return None, None, "no symbol had a complete feature set today", None, None
-            return (cm.score_with(cached, feats, multipliers), cached, None,
-                    feats, None)
-
-        # The screen as it stood on every training date. `symbols` is the same
-        # screen resolved for TODAY, and it stays the scoring universe.
-        eligible = liquidity_mask(
-            close, turnover,
-            min_adtv_inr=float(fv(universe.pit_min_adtv_inr)),
-            lookback_sessions=int(iv(universe.pit_adtv_lookback_sessions)),
-            max_names=int(iv(universe.pit_max_names)),
-            min_history_sessions=int(iv(universe.min_history_sessions)),
-            min_price_inr=float(fv(universe.min_price_inr)),
-            adj_factor=adj,
-        )
-        scores, model, reason = cm.fit_predict(
-            close, turnover, as_of,
-            fundamentals=fundamentals, max_fundamental_age_days=max_age,
-            horizon=int(iv(cfg.model_horizon_sessions)),
-            alpha=float(fv(cfg.model_ridge_alpha)),
-            max_train_sessions=int(iv(cfg.model_max_train_sessions)),
-            min_train_rows=int(iv(cfg.model_min_train_rows)),
-            delivery=delivery,
-            eligible=eligible,
-            score_symbols=list(symbols),
-            sectors=sector_map,
-            multipliers=multipliers,
-            actions=actions,
-            # The engine's own geometry by default. `sigma` is research only.
-            # The label's geometry IS the engine's, read from stage 7's own
-            # config. If stage 7 is not reachable the label cannot be built
-            # honestly, so it falls back to the sigma geometry and says so
-            # rather than silently inventing a stop.
-            exit_rules=label_exit_rules,
-            barriers=label_barriers,
-            # R9: what the book could have OPENED, which is not what the
-            # universe screen would have LISTED.
-            admission_rules=admission_rules,
-            high=high, low=low, open_=open_,
-            uniqueness_weighting=bool(lab.uniqueness_weighting),
-            estimator=str(est.method),
-            significance_floor=float(est.significance_floor),
-            significance_taper=bool(est.significance_taper),
-            taper_c=float(est.taper_c),
-            taper_hard_floor=float(est.taper_hard_floor),
-            fm_window_dates=(int(est.window_dates)
-                             if est.window_dates is not None else None),
-            shrink_toward=str(est.shrink_toward),
-            metalabel=bool(cfg.metalabel.enabled),
-            metalabel_top_k=int(cfg.metalabel.shortlist_top_k),
-            metalabel_l2=float(cfg.metalabel.l2),
-        )
-        if model is not None:
-            # A refit is proposed, not installed. This is the one path where a
-            # bad upstream date reaches every future decision at once without
-            # failing anything, so the new coefficients are compared against the
-            # live ones before they replace them.
-            previous, previous_end, previous_est = cm.read_cached_coefficients(cache)
-            verdict = review_refit(
-                model.coef, previous, previous_end,
-                proposed_estimator=str(cfg.estimator.method),
-                previous_estimator=previous_est,
-            )
-            if verdict.accepted:
-                cm.archive_cache(cache)
-                cm.save_cache(cache, model, as_of)
-            else:
-                log.warning("refit rejected; previous coefficients stay live",
-                            extra={"verdict": verdict.summary(),
-                                   "sign_flips": verdict.sign_flips,
-                                   "magnitude_jumps": verdict.magnitude_jumps})
-                held = cm.load_cached(cache, as_of, refit_every,
-                                      estimator=str(cfg.estimator.method),
-                                      label=label_fp)
-                if held is not None:
-                    # The SAME feature construction as every other path. This
-                    # dropped `sectors` and `actions`, so a run that held its
-                    # previous coefficients also silently ranked every factor
-                    # universe-wide instead of within sector -- reintroducing
-                    # the unintended sector bet `sector_neutral_rank` exists to
-                    # remove -- and lost net issuance's bonus-vs-placement
-                    # correction. A rejected refit is a data problem; it must
-                    # not also change how the features are built.
-                    feats = cm.today_features(close, turnover, as_of,
-                                              fundamentals=fundamentals,
-                                              max_fundamental_age_days=max_age,
-                                              delivery=delivery,
-                                              sectors=sector_map,
-                                              actions=actions,
-                                              high=high, low=low,
-                                              admission_rules=admission_rules)
-                    if feats is not None:
-                        return (cm.score_with(held, feats, multipliers), held,
-                                None, feats, verdict)
-                # NOTHING TO HOLD ON TO. The gate's entire purpose is that the
-                # PREVIOUS coefficients stay live while a suspicious refit is
-                # reviewed. When the cached model cannot be loaded at all --
-                # written by a superseded version of the model, a different
-                # estimator, a feature set that no longer exists -- there is no
-                # previous model to keep, so rejecting does not protect it. It
-                # produces no model at all and the run dies.
-                #
-                # Observed on a deployment that had not pulled for nine
-                # releases: the refit fitted cleanly, `review_refit` said
-                # "proposed fit shares no factors with the live model" against a
-                # cache from a superseded feature set, `load_cached` refused the
-                # same cache for the same reason, and the engine reported
-                # MODEL_UNAVAILABLE every night with no path forward.
-                #
-                # That is the first-fit case, which `review_refit` already
-                # accepts when `previous` is absent -- an unloadable previous is
-                # absent in every sense that matters here. So it is installed
-                # and the replacement is stated loudly rather than being
-                # rejected into a dead engine.
-                log.warning(
-                    "the rejected refit is installed anyway: the cached model "
-                    "could not be loaded, so there were no previous "
-                    "coefficients for the gate to keep live",
-                    extra={"verdict": verdict.summary()})
-                cm.archive_cache(cache)
-                cm.save_cache(cache, model, as_of)
-                superseded = RefitVerdict(
-                    accepted=True,
-                    reasons=[
-                        f"the live cache could not be loaded, so there was no "
-                        f"previous model to keep. The gate had rejected this "
-                        f"refit ({verdict.summary()}), but rejecting would have "
-                        f"left no model at all rather than the older one. "
-                        f"Installed as a first fit; the superseded cache is "
-                        f"archived."
-                    ],
-                    compared_against=verdict.compared_against,
-                )
-                live = cm.today_features(close, turnover, as_of,
-                                         fundamentals=fundamentals,
-                                         max_fundamental_age_days=max_age,
-                                         delivery=delivery, sectors=sector_map,
-                                         actions=actions,
-                                         high=high, low=low,
-                                         admission_rules=admission_rules)
-                return scores, model, reason, live, superseded
-            # THE SAME KEYWORD SET AS EVERY OTHER PATH. This branch -- the
-            # ACCEPTED refit, the common case on a refit day -- dropped
-            # `sectors` and `actions` while the cached, rejected-refit and
-            # superseded branches all passed them. The score therefore came
-            # from sector-neutral ranks while the card's contributions, the
-            # member breakdown and the redundancy report were computed from
-            # universe-wide ranks: the numbers on the card did not sum to the
-            # number on the card, on every refit day. The comment sixty lines
-            # above documents fixing exactly this on the rejected-refit path;
-            # this is the same bug in the branch next to it.
-            live = cm.today_features(close, turnover, as_of,
-                                     fundamentals=fundamentals,
-                                     max_fundamental_age_days=max_age,
-                                     delivery=delivery, sectors=sector_map,
-                                     actions=actions,
-                                     high=high, low=low,
-                                     admission_rules=admission_rules)
-        else:
-            live = None
-        return scores, model, reason, live, None
-    except Exception as exc:  # a modelling failure must not take the run down
-        log.warning("cross-sectional model failed", extra={"error": str(exc)})
-        return None, None, f"{type(exc).__name__}: {exc}", None, None
 
 
 class ModelUnavailable(PipelineError):
@@ -1637,8 +1030,6 @@ def _min_coverage(cfg) -> float:
     return float(fv(cfg.min_name_factor_coverage))
 
 
-def _model_optional(cfg) -> bool:
-    return bool(bv(getattr(cfg, "allow_composite_fallback", False)))
 
 
 #: Reasons that mean "not enough data yet" rather than "something broke".
@@ -1651,13 +1042,3 @@ _BENIGN_REASONS = (
 )
 
 
-def _is_model_failure(reason: str) -> bool:
-    """Distinguish a broken model from one that legitimately cannot run yet.
-
-    A fresh store with too little history is an expected state: the composite
-    scores it and the card says the model was unavailable. An exception inside
-    the model is not expected, and falling back there hands the run to a scorer
-    never shown to work while looking exactly like a healthy result.
-    """
-    text = str(reason).lower()
-    return not any(b in text for b in _BENIGN_REASONS)

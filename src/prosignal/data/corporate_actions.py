@@ -34,6 +34,8 @@ __all__ = [
     "parse_action_subject",
     "build_adjustment_factors",
     "apply_adjustments",
+    "build_dividend_factors",
+    "dividend_amount",
     "detect_unexplained_jumps",
     "plausible_price_factors",
     "merge_action_sources",
@@ -64,6 +66,27 @@ _BONUS_PATTERNS = (
 _RIGHTS_PATTERNS = (re.compile(rf"rights\D*{_NUM}\s*[:/]\s*{_NUM}", re.I),)
 
 _DIVIDEND_PATTERN = re.compile(r"dividend", re.I)
+
+#: The rupee-per-share amount inside a dividend description ("dividend 2.5",
+#: "Interim Dividend Rs 12 Per Share"). NSE and the yfinance mirror both carry
+#: it in free text; neither carries a price factor, because the factor depends
+#: on the price on the cum-date, which text cannot know.
+_DIVIDEND_AMOUNT = re.compile(
+    r"dividend[^0-9]*(?:rs\.?|inr|\u20b9)?\s*([0-9]+(?:\.[0-9]+)?)", re.I)
+
+
+def dividend_amount(text: str) -> Optional[float]:
+    """Rupees per share in a dividend description, or None if not stated."""
+    if not text:
+        return None
+    m = _DIVIDEND_AMOUNT.search(str(text))
+    if not m:
+        return None
+    try:
+        amt = float(m.group(1))
+    except ValueError:
+        return None
+    return amt if 0.0 < amt < 10_000.0 else None
 
 
 def parse_action_subject(
@@ -143,10 +166,59 @@ def build_adjustment_factors(
     return factors
 
 
+def build_dividend_factors(
+    dates: Sequence[pd.Timestamp],
+    closes: Sequence[float],
+    actions: pd.DataFrame,
+) -> pd.Series:
+    """Cumulative TOTAL-RETURN factor per date for ONE symbol.
+
+    A cash dividend of D per share paid on a stock closing at P on the cum-date
+    drops the price by D on the ex-date for no loss to a holder. A price series
+    that ignores this understates every return spanning the ex-date, and the
+    understatement is systematic: it is largest for the highest-yielding names,
+    so a momentum or 52-week-high factor computed on published prices ranks
+    dividend payers too low by construction.
+
+    The factor for date t is the product of ``(P - D) / P`` over every dividend
+    whose ex-date is strictly after t, with P the last close at or before the
+    cum-date. Multiplying pre-ex prices by it puts the history on a total-return
+    basis, which is the basis a return-predicting factor should be measured on.
+
+    A dividend whose amount cannot be read, or which is not a sane fraction of
+    the price, is skipped -- leaving that series as published, which is the same
+    direction of caution the split parser takes.
+    """
+    idx = pd.DatetimeIndex(dates).normalize()
+    factors = pd.Series(1.0, index=idx, dtype="float64")
+    if actions is None or actions.empty or len(idx) == 0:
+        return factors
+    px = pd.Series(np.asarray(closes, dtype="float64"), index=idx).ffill()
+    divs = actions[actions["action_type"].astype(str).str.lower() == "dividend"]
+    for _, row in divs.iterrows():
+        ex_date = pd.Timestamp(row["ex_date"]).normalize()
+        amt = dividend_amount(row.get("raw_details"))
+        if amt is None:
+            continue
+        cum = px.loc[px.index < ex_date]
+        if cum.empty:
+            continue
+        p = float(cum.iloc[-1])
+        if not np.isfinite(p) or p <= 0.0:
+            continue
+        yld = amt / p
+        if not (0.0 < yld < 0.25):      # a 25%+ one-off is a special dividend
+            continue                    # or a units error; leave it alone
+        factors.loc[idx < ex_date] *= (1.0 - yld)
+    return factors
+
+
 def apply_adjustments(
     prices: pd.DataFrame,
     actions: pd.DataFrame,
     price_columns: Iterable[str] = ("open", "high", "low", "close", "prev_close", "last", "vwap"),
+    *,
+    total_return: bool = False,
 ) -> pd.DataFrame:
     """Return a corporate-action-adjusted copy of a tidy OHLCV frame.
 
@@ -157,6 +229,24 @@ def apply_adjustments(
     The applied factor is retained in ``adj_factor`` so any downstream check
     can see exactly what was done, and ``turnover`` is deliberately left alone
     because rupee turnover is unaffected by a share-count change.
+
+    ``total_return`` additionally rescales prices for cash dividends, which the
+    split/bonus factor deliberately does not. It DEFAULTS TO FALSE, and the
+    reason is coverage rather than correctness. Adjusting is the right treatment
+    in principle -- a price series that ignores dividends understates every
+    return spanning an ex-date, most for the highest yielders. But this store
+    holds dividends for 186 symbols, roughly a third of the tradeable universe
+    once an ADTV floor is applied, and that third is the larger and older third.
+    Turning the adjustment on for those names alone lifts their measured returns
+    relative to everyone else, which puts a size-correlated step into the labels
+    the cross-section is ranked against. Measured on the research panel, the
+    dividend-covered subset carries a standalone rank IC of +0.072 (t 10.5) --
+    larger than the whole v6 factor model's +0.043 -- and part of that is the
+    adjustment rather than the companies.
+
+    A uniform bias across every name is less damaging to a cross-sectional rank
+    model than a correction applied to a third of it. So: implemented, verified,
+    off by default, and to be turned on when dividend coverage is universe-wide.
     """
     if prices is None or prices.empty:
         return prices
@@ -183,8 +273,19 @@ def apply_adjustments(
         if sym_actions is not None and not sym_actions.empty:
             factors = build_adjustment_factors(chunk[DATE].to_numpy(), sym_actions)
             fac = factors.to_numpy()
+            if total_return and "close" in chunk.columns:
+                # Dividends rescale PRICE but not SHARE COUNT, so the volume and
+                # delivery divisions below must not see this factor. It is applied
+                # to the price columns only, and reported separately.
+                dfac = build_dividend_factors(
+                    chunk[DATE].to_numpy(), chunk["close"].to_numpy(), sym_actions
+                ).to_numpy()
+                chunk["div_factor"] = dfac
+            else:
+                dfac = None
+            pfac = fac if dfac is None else fac * dfac
             for col in cols:
-                chunk[col] = chunk[col].to_numpy() * fac
+                chunk[col] = chunk[col].to_numpy() * pfac
             if "volume" in chunk.columns:
                 with np.errstate(divide="ignore", invalid="ignore"):
                     chunk["volume"] = np.where(fac > 0, chunk["volume"].to_numpy() / fac, np.nan)

@@ -21,8 +21,8 @@ import pytest
 from prosignal.config.loader import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTE = ROOT / "research" / "PHASE6_MOMENTUM_CRASH.md"
-BASELINE = ROOT / "research" / "BASELINE_V1.json"
+NOTE = ROOT / "docs" / "findings" / "PHASE6_MOMENTUM_CRASH.md"
+BASELINE = ROOT / "docs" / "findings" / "BASELINE_V1.json"
 
 
 def test_the_daniel_moskowitz_state_is_still_on_the_no_entry_list():

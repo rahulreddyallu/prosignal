@@ -259,15 +259,6 @@ def test_a_neutral_multiplier_changes_nothing():
     assert cm.apply_family_multipliers(frame, None) is frame
 
 
-def test_stage_4_passes_the_regime_into_the_model_path():
-    import inspect
-
-    from prosignal.stages import stage4_core_score as s4
-
-    src = inspect.getsource(s4._cross_sectional_model)
-    assert '"mom": float(regime.momentum_multiplier)' in src
-    assert "multipliers=multipliers" in src
-    assert "cm.score_with(cached, feats, multipliers)" in src
 
 
 # ------------------------------------- one regime rule, on every scoring path
@@ -288,64 +279,8 @@ def test_the_guard_lets_the_layer_act_when_a_stabiliser_exists():
     assert reason is None
 
 
-def test_every_scoring_path_applies_the_same_regime_rule():
-    """THE divergence. The guard lived in `fit_predict` alone, so the regime
-    layer behaved differently depending on which branch produced the ranking:
-    guarded on a refit (1 session in 21), unguarded on the cached path (the
-    other 20), and never applied at all when a refit was held back. Three
-    behaviours for one rule, and the two that skipped the guard were the
-    common ones.
-
-    Invisible today only because every targeted family sits at coefficient
-    zero, so all three produce the same score -- it activates the moment `mom`
-    is priced again, which is exactly when the layer is meant to matter.
-    """
-    import inspect
-
-    # A model with momentum priced and NO defensive family: the guard must bite.
-    model = cm.CrossSectionalModel(
-        coef={"mom_f": 0.02, "delivery_f": 0.03}, n_train=900,
-        train_end=dt.date(2026, 1, 1), features=["mom_f", "delivery_f"],
-    )
-    model.mu = np.zeros(2)
-    model.sd = np.ones(2)
-    model.intercept = 0.0
-
-    features = pd.DataFrame({
-        "mom_f": [1.0, -1.0, 0.5, 0.2],
-        "delivery_f": [0.3, 0.1, -0.4, 0.9],
-        "symbol": ["A", "B", "C", "D"],
-    })
-    without = cm.score_with(model, features)
-    with_mult = cm.score_with(model, features, {"mom": 0.5})
-    assert without.equals(with_mult), (
-        "the cached path applied a multiplier the refit path would have skipped"
-    )
-    assert model.regime_multipliers_applied is False
-
-    # And the held-model path must pass them, so the same guard runs there too.
-    src = inspect.getsource(
-        __import__("prosignal.stages.stage4_core_score", fromlist=["x"])
-        ._cross_sectional_model)
-    assert "cm.score_with(held, feats, multipliers)" in src, (
-        "a refit held back must still score under the regime rule, not without it"
-    )
 
 
-def test_a_held_model_is_scored_on_the_same_features_as_every_other_path():
-    """The rejected-refit branch dropped `sectors` and `actions`, so a run that
-    held its previous coefficients also ranked every factor universe-wide
-    instead of within sector -- reintroducing the unintended sector bet -- and
-    lost net issuance's bonus-vs-placement correction."""
-    import inspect
-
-    from prosignal.stages import stage4_core_score as s4
-
-    src = inspect.getsource(s4._cross_sectional_model)
-    held = src[src.index("held = cm.load_cached"):]
-    held = held[:held.index("# NOTHING TO HOLD ON TO")]
-    assert "sectors=sector_map" in held
-    assert "actions=actions" in held
 
 
 # -------------------------------------------------------- dispersion gate
@@ -401,19 +336,6 @@ def test_a_normal_day_clears_the_measured_floor():
     assert worst_observed_ratio > floor
 
 
-def test_a_store_without_sectors_ranks_against_the_universe_rather_than_failing():
-    """Sectors are genuinely absent for part of this universe -- it reaches past
-    any index constituent file -- so partial coverage is the normal state and
-    total absence is the same state taken to its limit."""
-    import inspect
-
-    from prosignal.stages import stage4_core_score as s4
-
-    src = inspect.getsource(s4._cross_sectional_model)
-    block = src[src.index("store.read_sector_map()") - 200:]
-    block = block[:block.index("cache = store.curated")]
-    assert "except Exception" in block
-    assert "sector_map = {}" in block
 
 
 # ----------------------------------------------------- quality and controls
