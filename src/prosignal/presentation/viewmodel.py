@@ -552,10 +552,31 @@ def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
 #: is the same. `reversal` in FAMILY_MAP is the estimator's one-month move;
 #: v3's `reversal` is four factors oriented at ten sessions. Sharing a label
 #: between them put two different measurements under one name in one panel.
+#:
+#: THE LABEL DESCRIBES THE FITTED SIGN, NOT THE THEME'S ACADEMIC NAMESAKE.
+#: The internal theme KEY is frozen (`features/v3.py:THEMES`, hashed into
+#: `config_sha256` and matched by `tests/test_v3_score.py`) and cannot change
+#: without re-earning the sealed holdouts. The reader's LABEL can and must,
+#: because two keys are fitted with signs that invert their namesake:
+#:
+#:   key "quality"   = (net_margin -1, margin_stability -1). A POSITIVE
+#:                     contribution therefore means the name has LOW and
+#:                     UNSTABLE margins. Displaying that as "Business quality"
+#:                     tells a reader the opposite of what raised the score, so
+#:                     it is labelled for what it prices: a low-margin tilt,
+#:                     measured on the ~19% of names that carry fundamentals.
+#:   key "ownership" = delivery-fraction factors only. Delivery % is the share
+#:                     of traded volume taken to demat rather than squared off
+#:                     intraday; it is not a holdings/ownership measurement and
+#:                     is mechanically tied to turnover and volatility, so it is
+#:                     labelled "Delivery strength", not "ownership".
+#:
+#: See the 2026-09 quant audit, section D. Changing a LABEL is a presentation
+#: fix and does not touch the frozen model; changing a SIGN would.
 V3_THEME_LABELS: Dict[str, str] = {
     "momentum":  "Momentum",
-    "quality":   "Business quality",
-    "ownership": "Delivery-backed ownership",
+    "quality":   "Low-margin tilt",
+    "ownership": "Delivery strength",
     "risk":      "Downside risk",
     "reversal":  "Short-horizon reversal",
 }
