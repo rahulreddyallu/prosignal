@@ -23,7 +23,7 @@ holdouts. Fixes therefore split into:
 | P1-3 | Blend may not beat momentum-alone (§K-2) | `audit_2026_09.py` EXP-C (IC-level precursor) | SAFE harness | ✅ run — blend wins at IC level; book K-2 open |
 | P1-4 | Perf-proportional weights overfit / anti-OOS (§H, #4) | EXP-D equal- vs frozen-weight, same sub-scores | SAFE harness | ✅ run — frozen wins; not supported |
 | P1-5 | "quality" sign may be a 2020–21 artifact (§K-4) | EXP-A sign-stability across halves/thirds | SAFE harness | ✅ run — **stable, REFUTED**; keep+relabel |
-| P1-6 | Uncalibrated impact coeff gates net-of-cost (§H, K-6) | Cost break-even driver (needs book sim) | EPOCH-adjacent | ⏳ next round |
+| P1-6 | Uncalibrated impact coeff gates net-of-cost (§H, K-6) | `cost_sensitivity.py` — exact cost model on real selected names, swept | SAFE harness | ✅ cost side done; full book P&L still gated |
 | P2-7 | Delivery may be a liquidity/vol proxy (§K-3) | EXP-B incremental IC after controls | SAFE harness | ✅ run — **not a proxy, REFUTED** |
 | P2-8 | Residual panel survivorship inflates OOS IC (§E, K-5) | Survivorship-bounding run (needs delisted names) | DATA-gated | ⏳ data required |
 | P2-9 | Momentum factor theatre — prox/voladj dupes (§D, F) | Prune experiment → new epoch if it holds | EPOCH-gated | ⏳ after EXP results |
@@ -82,13 +82,37 @@ the deploy was already judged on, not independent evidence. The clean K-1
 and accrues as the live window moves past 2026-08. This is the honest status, not
 a pass.
 
+### K-6 cost sensitivity (`cost_sensitivity.py`, run 2026-09-03)
+
+Prices the EXACT shipped cost model on the real names the v3 score ranks top-6
+(median ADTV ₹34cr; ₹1.67L/position at ₹10L, 6 slots). Round-trip cost and the
+annual drag it implies at 34 trades/yr:
+
+| impact coeff | round-trip (median) | annual drag | vs window-A gross (+2.2%) | vs window-B gross (+15.6%) |
+|---|---|---|---|---|
+| 0.10 (shipped) | 80 bps | 4.5% | **net −2.3%** | net +11.1% |
+| 0.25 (2.5×) | 146 bps | 8.3% | net −6.1% | net +7.3% |
+| 0.50 (5×) | 256 bps | 14.5% | net −12.3% | net +1.1% |
+
+**The cost question is really a gross-edge question.** At the shipped coefficient
+the 6-name book's drag is ~4.5%/yr — below the 10-name/weekly holdout's 9.5%
+(slower cadence, as `BOOK_NOTE` predicts), but still **more than window A's entire
+gross edge**. Break-even vs window A needs a coefficient of ~0.006 (1/16th the
+shipped 0.10); window B survives even at 5×. **The two sealed windows disagree ~7×
+on the gross edge, so the net-of-cost verdict is undetermined until the forward
+test settles which gross number is real.** (Caveat: uses the 10-name book's gross
+as a proxy for the 6-name book's; it is a cost-side bound, not a re-simulated P&L.)
+
 ### What remains genuinely unresolved (all BOOK / validation level)
 
-The IC experiments do **not** touch these, and they are the real risks:
 - **K-1** clean-window book test — forward-gated (`recheck_status.py`).
-- **K-6** cost break-even at 6 names — needs the book simulator (next round).
+- **K-6 full book P&L** — the *cost side* is now bounded (above); a faithful
+  re-simulation of the 6-name book's *gross* edge (floor + cadence, validated
+  against the sealed book) is the remaining piece.
 - **DSR failure** (0.030 / 0.97) and **holdout-overlap book selection** — these
   are about the traded book and multiple testing, not the ranking, and stand.
+- **Gross-edge instability across windows** (A +2.2% vs B +15.6%) — the single
+  biggest open question; only forward data resolves it.
 
 ## Epoch-gated decisions (do NOT hand-edit; require a re-fit + re-seal)
 
