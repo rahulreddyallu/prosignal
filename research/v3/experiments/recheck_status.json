@@ -1,0 +1,282 @@
+{
+ "as_of": "2026-07-30",
+ "holdout_start": "2025-01-30",
+ "holdout_dates": 74,
+ "ic": 0.05424549370022086,
+ "ic_t": 4.126255815245643,
+ "spread": 0.012459693871023641,
+ "spread_t": 3.5569674113248335,
+ "null_p_spread": 0.0,
+ "reference": {
+  "ic": 0.0493,
+  "ic_t": 3.69,
+  "spread": 0.0107,
+  "spread_t": 2.89,
+  "topk": 0.0038,
+  "topk_t": 0.81,
+  "book_excess_ann": -0.0283,
+  "book_maxdd": -0.2392,
+  "cost_drag_ann": 0.0966,
+  "ic_window_b": 0.0357,
+  "spread_window_b": 0.0086
+ },
+ "verdict": "HOLDS",
+ "note": "quintile spread +1.25% per 21 sessions (t 3.56), outside a 200-draw shuffled null at p=0.000. The deploy earned +1.07% (t 2.89) on window A and +0.86% on window B. THIS WINDOW OVERLAPS SEALED HOLDOUT A (94%). The result below is substantially a re-reading of the dates the deploy was already judged on, not independent evidence: agreement with the deploy reference is expected and confirms nothing. Wait for the overlap to fall away before treating a verdict as news.",
+ "factor_health": [
+  {
+   "name": "intraday_mom_126",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.012273887797994104,
+   "ic_t": 1.0995606504174906,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "mom_12_6",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.05392151221082887,
+   "ic_t": 7.076994203400873,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "mom_2_0",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": -0.007524528494966439,
+   "ic_t": -0.660053543332288,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "mom_3_1",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.003375237958246645,
+   "ic_t": 0.34020373021889666,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "mom_accel",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.012603914279880984,
+   "ic_t": 1.3733736612069327,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "mom_consist_126",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.02266808657975553,
+   "ic_t": 2.2006900992550253,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "prox_52w",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.040548562481902486,
+   "ic_t": 2.775924052557775,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "prox_52w_now",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.02988058881473402,
+   "ic_t": 1.8399012248132156,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "voladj_mom_12_1",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.04750402896468097,
+   "ic_t": 4.389348612194811,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "voladj_mom_6_1",
+   "theme": "momentum",
+   "n_periods": 74,
+   "ic_mean": 0.025733114828464392,
+   "ic_t": 2.4025652570599147,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "margin_stability",
+   "theme": "quality",
+   "n_periods": 74,
+   "ic_mean": 0.02081050711764686,
+   "ic_t": 2.0851483991497344,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "net_margin",
+   "theme": "quality",
+   "n_periods": 74,
+   "ic_mean": 0.05222180870869684,
+   "ic_t": 4.881210203401315,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "deliv_chg_5",
+   "theme": "ownership",
+   "n_periods": 74,
+   "ic_mean": 0.02299112092227461,
+   "ic_t": 3.54366849628326,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "deliv_pct_60",
+   "theme": "ownership",
+   "n_periods": 74,
+   "ic_mean": 0.03957547150069119,
+   "ic_t": 3.27357938296766,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "deliv_z_21",
+   "theme": "ownership",
+   "n_periods": 74,
+   "ic_mean": 0.03236942056763109,
+   "ic_t": 4.649636566790909,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "downside_vol_60",
+   "theme": "risk",
+   "n_periods": 74,
+   "ic_mean": 0.01294707625931823,
+   "ic_t": 1.3024400855678269,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "ret_kurt_126",
+   "theme": "risk",
+   "n_periods": 74,
+   "ic_mean": 0.02298451802052053,
+   "ic_t": 5.143314578861311,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "ulcer_120",
+   "theme": "risk",
+   "n_periods": 74,
+   "ic_mean": 0.032156566804521,
+   "ic_t": 2.1485131373819875,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "max5_21",
+   "theme": "reversal",
+   "n_periods": 74,
+   "ic_mean": 0.023049780446682367,
+   "ic_t": 2.4377363682700803,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "price_vs_vwap_20",
+   "theme": "reversal",
+   "n_periods": 74,
+   "ic_mean": 0.022437605775390567,
+   "ic_t": 2.342154214790064,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "resid_rev_21",
+   "theme": "reversal",
+   "n_periods": 74,
+   "ic_mean": 0.025786211822645344,
+   "ic_t": 3.287935398707866,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  },
+  {
+   "name": "rev_1w",
+   "theme": "reversal",
+   "n_periods": 74,
+   "ic_mean": 0.02161303013550511,
+   "ic_t": 2.8771723435062952,
+   "inverted": false,
+   "note": "consistent with its shipped sign"
+  }
+ ],
+ "theme_health": [
+  {
+   "name": "momentum",
+   "weight": 0.4,
+   "n_periods": 74,
+   "ic_mean": 0.03133037061571583,
+   "ic_t": 2.3182528992149583,
+   "influence_share": 0.41270516675150876,
+   "inverted": false,
+   "dominating": false,
+   "note": "consistent with its shipped weight"
+  },
+  {
+   "name": "quality",
+   "weight": 0.18991,
+   "n_periods": 74,
+   "ic_mean": 0.05936906016775706,
+   "ic_t": 6.969092994684273,
+   "influence_share": 0.165107427219875,
+   "inverted": false,
+   "dominating": false,
+   "note": "consistent with its shipped weight"
+  },
+  {
+   "name": "ownership",
+   "weight": 0.18939,
+   "n_periods": 74,
+   "ic_mean": 0.04231607360304025,
+   "ic_t": 5.196469789307058,
+   "influence_share": 0.19531192434227704,
+   "inverted": false,
+   "dominating": false,
+   "note": "consistent with its shipped weight"
+  },
+  {
+   "name": "risk",
+   "weight": 0.11088,
+   "n_periods": 74,
+   "ic_mean": 0.03190896360272581,
+   "ic_t": 2.6203964654581657,
+   "influence_share": 0.11367679116471714,
+   "inverted": false,
+   "dominating": false,
+   "note": "consistent with its shipped weight"
+  },
+  {
+   "name": "reversal",
+   "weight": 0.10982,
+   "n_periods": 74,
+   "ic_mean": 0.02904835971935683,
+   "ic_t": 3.409859274108943,
+   "influence_share": 0.11319869052162203,
+   "inverted": false,
+   "dominating": false,
+   "note": "consistent with its shipped weight"
+  }
+ ]
+}

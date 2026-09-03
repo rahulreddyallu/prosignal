@@ -552,10 +552,23 @@ def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
 #: is the same. `reversal` in FAMILY_MAP is the estimator's one-month move;
 #: v3's `reversal` is four factors oriented at ten sessions. Sharing a label
 #: between them put two different measurements under one name in one panel.
+#: THE LABEL DESCRIBES THE FITTED SIGN, NOT THE THEME'S ACADEMIC NAMESAKE.
+#: The internal theme KEY is frozen (`features/v3.py:THEMES`, hashed into
+#: `config_sha256` and matched by `tests/test_v3_score.py`) and cannot change
+#: without re-earning the sealed holdouts. The reader's LABEL can and must,
+#: because two keys are fitted with signs that invert their namesake:
+#:   key "quality"   = (net_margin -1, margin_stability -1): a POSITIVE
+#:                     contribution means LOW, UNSTABLE margins, on the ~19% of
+#:                     names with fundamentals. "Business quality" told a reader
+#:                     the opposite of what raised the score.
+#:   key "ownership" = delivery-fraction factors only: the share of volume taken
+#:                     to demat, not a holdings measure, and tied to turnover.
+#: See the 2026-09 quant audit, section D. Changing a LABEL is a presentation
+#: fix and does not touch the frozen model; changing a SIGN would.
 V3_THEME_LABELS: Dict[str, str] = {
     "momentum":  "Momentum",
-    "quality":   "Business quality",
-    "ownership": "Delivery-backed ownership",
+    "quality":   "Low-margin tilt",
+    "ownership": "Delivery strength",
     "risk":      "Downside risk",
     "reversal":  "Short-horizon reversal",
 }
