@@ -728,6 +728,61 @@ class DataStore:
         out["ex_date"] = pd.to_datetime(out["ex_date"]).dt.normalize()
         return out
 
+    def write_results_calendar(self, df: pd.DataFrame) -> int:
+        """Every quarterly filing NSE has a record of, with its availability date.
+
+        Keyed on (symbol, period_end, consolidated) because NSE publishes a
+        Consolidated and a Non-Consolidated row for the same quarter and both
+        are real filings with their own timestamps. Collapsing them would
+        silently drop one, and which one survived would depend on row order.
+
+        Distinct from `earnings_calendar`, which holds SCHEDULED dates from
+        yfinance. This one is what was actually filed and when it became public.
+        """
+        return self.write_table("results_calendar", df,
+                                [SYMBOL, "period_end", "consolidated"])
+
+    def read_results_calendar(self) -> pd.DataFrame:
+        return self.read_table("results_calendar")
+
+    def write_shareholding(self, df: pd.DataFrame) -> int:
+        """Quarterly shareholding patterns -- promoter, public, free float.
+
+        Keyed on (symbol, period_end): one pattern per quarter. A revised
+        filing for the same quarter replaces the original, which is correct
+        here and is the opposite of the rule for RESULTS -- a restated income
+        statement must not backdate itself onto the date the original was
+        published, but a corrected shareholding pattern supersedes a wrong one
+        and both carry their own broadcast date.
+        """
+        return self.write_table("shareholding", df, [SYMBOL, "period_end"])
+
+    def read_shareholding(self) -> pd.DataFrame:
+        return self.read_table("shareholding")
+
+    def write_security_list(self, df: pd.DataFrame) -> int:
+        """Surveillance state per security, as DATED SNAPSHOTS.
+
+        Keyed on (symbol, snapshot_date) rather than symbol alone, because NSE
+        publishes only the current list: membership accumulates going forward
+        and cannot be reconstructed backwards. Keeping every snapshot is what
+        makes it point-in-time from the first one onward. Overwriting on symbol
+        would leave one undated list that silently claims to describe every
+        date, which is the survivorship error the universe screen already
+        refuses for index membership.
+        """
+        return self.write_table("security_list", df, [SYMBOL, "snapshot_date"])
+
+    def read_security_list(self) -> pd.DataFrame:
+        return self.read_table("security_list")
+
+    def write_fo_lots(self, df: pd.DataFrame) -> int:
+        """F&O eligibility and lot size, as dated snapshots. See above."""
+        return self.write_table("fo_lots", df, [SYMBOL, "snapshot_date"])
+
+    def read_fo_lots(self) -> pd.DataFrame:
+        return self.read_table("fo_lots")
+
     def write_earnings_calendar(self, df: pd.DataFrame) -> int:
         return self.write_table("earnings_calendar", df, [SYMBOL, "earnings_date"])
 

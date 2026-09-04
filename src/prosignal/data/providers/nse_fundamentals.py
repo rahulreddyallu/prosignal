@@ -34,7 +34,8 @@ from ...core.logging import get_logger
 from ..types import SYMBOL, normalise_symbol
 from .http import HttpClient, NseJsonSession
 
-__all__ = ["NseFundamentalsProvider", "FUNDAMENTAL_COLUMNS", "parse_indas_xbrl"]
+__all__ = ["NseFundamentalsProvider", "FUNDAMENTAL_COLUMNS", "parse_indas_xbrl",
+           "RESULTS_CALENDAR_COLUMNS"]
 
 log = get_logger(__name__)
 
@@ -44,6 +45,30 @@ FUNDAMENTAL_COLUMNS = [
     "revenue", "other_income", "total_income", "expenses", "finance_costs",
     "depreciation", "profit_before_tax", "tax_expense", "net_profit",
     "paid_up_capital", "face_value", "shares_outstanding",
+]
+
+#: Columns written to the curated `results_calendar` table.
+#:
+#: THE METADATA IS WORTH INGESTING ON ITS OWN, separately from the line items,
+#: because the two have wildly different costs. The metadata is ONE request per
+#: symbol and returns every quarter the company has ever filed -- 95 to 162 rows
+#: reaching back to 2005-03-31. The line items need one XBRL fetch per
+#: (symbol, quarter), which for a 750-name universe over that span is roughly
+#: ninety thousand requests.
+#:
+#: So this table answers "WHEN did each company report, and when did the market
+#: learn it" for the whole universe in about five minutes, and carries the
+#: `xbrl_url` so the line items can be fetched incrementally afterwards for
+#: whatever subset a factor actually needs.
+#:
+#: It also fixes something `features/earnings.py` records as a hard limit: the
+#: earnings calendar "is dense for 179 symbols and has a median of two rows for
+#: everybody else", which is why earnings proximity ships as a risk disclosure
+#: rather than a factor.
+RESULTS_CALENDAR_COLUMNS = [
+    SYMBOL, "period_end", "period_start", "filing_ts", "broadcast_ts",
+    "availability_date", "consolidated", "audited", "relating_to",
+    "financial_year", "is_bank", "ind_as", "isin", "xbrl_url", "seq_number",
 ]
 
 #: Ind-AS element names -> our column names. Taken from live filings, not docs.
@@ -215,6 +240,91 @@ class NseFundamentalsProvider:
             )
         if not frames:
             return pd.DataFrame(columns=FUNDAMENTAL_COLUMNS)
+        return pd.concat(frames, ignore_index=True)
+
+    # -- the results calendar: metadata only, every quarter ever filed ------
+    def fetch_calendar_symbol(self, symbol: str) -> pd.DataFrame:
+        """Every quarterly filing this symbol has ever made, WITHOUT the XBRL.
+
+        One request. No line items, so no per-quarter XBRL fetch -- which is
+        what makes the whole universe affordable. Every row carries the filing
+        TIMESTAMP and the derived `availability_date`, so a consumer never has
+        to re-derive when the market could have acted on it.
+        """
+        from ...features.pit_fundamentals import availability_date
+
+        sym = normalise_symbol(symbol)
+        payload = self.session.get_json(
+            self.results_path.format(symbol=sym), ttl_seconds=86400.0)
+        if not payload:
+            self.last_error = f"{sym}: results endpoint returned nothing"
+            return pd.DataFrame(columns=RESULTS_CALENDAR_COLUMNS)
+        rows = payload.get("data", payload) if isinstance(payload, dict) else payload
+        if not isinstance(rows, list) or not rows:
+            return pd.DataFrame(columns=RESULTS_CALENDAR_COLUMNS)
+
+        out: List[Dict[str, object]] = []
+        for row in rows:
+            filing_ts = (_parse_ts(row.get("filingDate"))
+                         or _parse_ts(row.get("broadCastDate")))
+            period_end = _parse_date(row.get("toDate"))
+            if filing_ts is None or period_end is None:
+                # No filing timestamp or no period means the row cannot be
+                # placed point-in-time. Dropped rather than guessed.
+                continue
+            out.append({
+                SYMBOL: sym,
+                "period_end": period_end,
+                "period_start": _parse_date(row.get("fromDate")),
+                "filing_ts": filing_ts,
+                "broadcast_ts": _parse_ts(row.get("broadCastDate")),
+                "consolidated": str(row.get("consolidated", "")).strip(),
+                "audited": str(row.get("audited", "")).strip(),
+                "relating_to": str(row.get("relatingTo", "")).strip(),
+                "financial_year": str(row.get("financialYear", "")).strip(),
+                "is_bank": str(row.get("bank", "")).strip().upper() == "Y",
+                "ind_as": str(row.get("indAs", "")).strip(),
+                "isin": str(row.get("isin", "")).strip(),
+                "xbrl_url": str(row.get("xbrl") or "").strip() or None,
+                "seq_number": str(row.get("seqNumber", "")).strip(),
+            })
+        if not out:
+            return pd.DataFrame(columns=RESULTS_CALENDAR_COLUMNS)
+        frame = pd.DataFrame(out)
+        frame["availability_date"] = availability_date(frame["filing_ts"]).to_numpy()
+        return frame[RESULTS_CALENDAR_COLUMNS]
+
+    def fetch_calendar(self, symbols: Iterable[str], progress=None) -> pd.DataFrame:
+        """The results calendar for every symbol. Failures are counted, never fatal.
+
+        A symbol that returns nothing is UNKNOWN, not "never filed": NSE's bot
+        shield and this endpoint's own quirks both produce empty answers that
+        mean "ask again", and treating those as an absence of filings would
+        convert "could not check" into "check passed".
+        """
+        frames: List[pd.DataFrame] = []
+        symbols = list(symbols)
+        empty: List[str] = []
+        for i, sym in enumerate(symbols, start=1):
+            if progress:
+                progress(i, len(symbols), sym)
+            try:
+                frame = self.fetch_calendar_symbol(sym)
+            except Exception as exc:  # noqa: BLE001 - recorded, run continues
+                empty.append(sym)
+                log.debug("results calendar failed",
+                          extra={"symbol": sym, "error": str(exc)})
+                continue
+            if frame.empty:
+                empty.append(sym)
+            else:
+                frames.append(frame)
+        if empty:
+            log.warning("results calendar returned nothing for some symbols",
+                        extra={"unknown": len(empty), "of": len(symbols)})
+        self.calendar_unknown = empty
+        if not frames:
+            return pd.DataFrame(columns=RESULTS_CALENDAR_COLUMNS)
         return pd.concat(frames, ignore_index=True)
 
     # -- helpers ------------------------------------------------------------
