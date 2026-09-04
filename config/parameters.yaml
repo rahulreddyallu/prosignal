@@ -427,6 +427,28 @@ providers:
 
     # Current constituent lists. These also carry the `Industry` column, which
     # is the engine's sector classification source.
+    # ALSO THE SECTOR SOURCE. `_refresh_sector_map` pools the `Industry` column
+    # of every file here, so this list decides how much of the cross-section can
+    # be ranked WITHIN sector rather than in one residual pool that is not a
+    # sector.
+    #
+    # Measured 2026-09-04 on the 204,425-row / 380-date v3 panel:
+    #
+    #   NIFTY 500 + MIDCAP 150 + SMALLCAP 250   500 symbols   46.9% of rows
+    #   + TOTAL MARKET + MICROCAP 250           754 symbols   67.7% of rows
+    #
+    # TOTAL MARKET is 750 names, which is the universe cap, so it is the right
+    # shape for this screen rather than a wider net thrown for its own sake.
+    #
+    # 67.7% IS THE CEILING FROM FREE NSE SOURCES AND THE v10 GATE ASKS FOR 80%.
+    # The residual 23.9% of rows are 729 symbols that were liquid enough to
+    # enter the panel and have since left the indices or delisted, and NSE
+    # publishes no historical point-in-time industry classification: the
+    # `industry` field on `corporates-financial-results` is EMPTY on every row
+    # of all ten missing symbols probed, and EQUITY_L.csv carries no industry
+    # column at all. Backfilling a current sector onto a name that has since
+    # been reclassified would be a lookahead, and inventing one would be worse.
+    # Recorded as measured; see docs/findings/PASS1_SECTOR_COVERAGE.md.
     index_constituent_files:
       "NIFTY 50": "/content/indices/ind_nifty50list.csv"
       "NIFTY 100": "/content/indices/ind_nifty100list.csv"
@@ -434,6 +456,8 @@ providers:
       "NIFTY 500": "/content/indices/ind_nifty500list.csv"
       "NIFTY MIDCAP 150": "/content/indices/ind_niftymidcap150list.csv"
       "NIFTY SMALLCAP 250": "/content/indices/ind_niftysmallcap250list.csv"
+      "NIFTY TOTAL MARKET": "/content/indices/ind_niftytotalmarket_list.csv"
+      "NIFTY MICROCAP 250": "/content/indices/ind_niftymicrocap250_list.csv"
 
   # ---- Secondary: Yahoo Finance via yfinance --------------------------------
   # Role: (a) the SECOND source required by the Stage 1 cross-source agreement
