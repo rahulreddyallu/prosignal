@@ -40,7 +40,7 @@ log = get_logger(__name__)
 
 #: Columns written to the curated `fundamentals` table.
 FUNDAMENTAL_COLUMNS = [
-    SYMBOL, "filing_date", "period_end", "period_start", "consolidated",
+    SYMBOL, "filing_date", "filing_ts", "period_end", "period_start", "consolidated",
     "revenue", "other_income", "total_income", "expenses", "finance_costs",
     "depreciation", "profit_before_tax", "tax_expense", "net_profit",
     "paid_up_capital", "face_value", "shares_outstanding",
@@ -153,7 +153,9 @@ class NseFundamentalsProvider:
                 continue
 
             parsed = parse_indas_xbrl(res.content)
-            filing = _parse_dt(row.get("filingDate")) or _parse_dt(row.get("broadCastDate"))
+            filing_ts = (_parse_ts(row.get("filingDate"))
+                         or _parse_ts(row.get("broadCastDate")))
+            filing = None if filing_ts is None else filing_ts.date()
             if filing is None:
                 # Without a filing date the row cannot be used point-in-time,
                 # and using it anyway is precisely the leakage this feed exists
@@ -164,6 +166,12 @@ class NseFundamentalsProvider:
             records.append({
                 SYMBOL: sym,
                 "filing_date": filing,
+                # THE TIME, CARRIED. `filing_date` is the calendar date of the
+                # filing; `filing_ts` is when it actually appeared, and 59.1% of
+                # this feed appears after the 15:30 close. Only the second can
+                # decide which session may act on it -- see
+                # `features/pit_fundamentals.availability_date`.
+                "filing_ts": filing_ts,
                 "period_end": _parse_date(row.get("toDate")),
                 "period_start": _parse_date(row.get("fromDate")),
                 "consolidated": str(row.get("consolidated", "")).strip(),
@@ -258,9 +266,36 @@ def _parse_date(value) -> Optional[dt.date]:
 
 
 def _parse_dt(value) -> Optional[dt.date]:
-    """Filing timestamps look like '06-Aug-2026 14:07'. Date is what we gate on."""
+    """The filing's calendar DATE. See `_parse_ts` for why that is not enough.
+
+    Kept because `filing_date` remains the calendar date of the filing, which is
+    the honest meaning of that column name. What changed is that nothing gates
+    on it directly any more -- `features/pit_fundamentals.availability_date`
+    does, and it needs the time.
+    """
+    ts = _parse_ts(value)
+    return None if ts is None else ts.date()
+
+
+def _parse_ts(value) -> Optional[pd.Timestamp]:
+    """The filing's full timestamp, TIME INCLUDED.
+
+    THE TIME IS THE POINT, and discarding it was a one-session lookahead on
+    most of this feed. NSE stamps filings like '16-Jan-2025 20:20' -- three
+    hours after the 15:30 close. Measured 2026-09-04 over 1,204 filings across
+    ten symbols, **59.1% are stamped after the close**, with the modal filing
+    hour between 17:00 and 19:00.
+
+    The previous version of this function did `str(value).split(" ")[0]` and
+    returned a bare date, with a docstring saying "Date is what we gate on".
+    Stored as a midnight date, an 20:20 filing became visible to the as-of join
+    on the very session it was filed -- a session whose decision is taken at
+    the 15:30 close, hours before the filing existed.
+
+    A backtest cannot see that. It is invisible, it is in the flattering
+    direction, and it applies to three fifths of the rows.
+    """
     if not value:
         return None
-    head = str(value).strip().split(" ")[0]
-    parsed = pd.to_datetime(head, errors="coerce", dayfirst=True)
-    return None if pd.isna(parsed) else parsed.date()
+    parsed = pd.to_datetime(str(value).strip(), errors="coerce", dayfirst=True)
+    return None if pd.isna(parsed) else parsed

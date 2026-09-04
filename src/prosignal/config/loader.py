@@ -152,8 +152,22 @@ class AppConfig:
 
         Returns self, so it can be chained at the call site.
         """
+        # RE-BINDING THE SAME STORE MUST NOT RE-RESOLVE. `load_config` caches
+        # the AppConfig process-wide, and `run_analysis` binds on every call --
+        # so clearing the cached identity unconditionally made every analysis in
+        # a process pay the fingerprint again. Identity by object, because two
+        # DataStore instances over the same directory are the same store for
+        # this purpose and a test that constructs one per call should not be
+        # charged for it.
+        if store is self._bound_store:
+            return self
+        same_dir = (self._bound_store is not None
+                    and getattr(store, "curated", None) is not None
+                    and getattr(store, "curated", None)
+                    == getattr(self._bound_store, "curated", object()))
         self._bound_store = store
-        self._identity = None
+        if not same_dir:
+            self._identity = None
         return self
 
     @property
