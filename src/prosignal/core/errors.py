@@ -129,6 +129,25 @@ class LedgerError(ProSignalError):
     code = "LEDGER_ERROR"
 
 
+class AmbiguousLedgerHistory(LedgerError):
+    """One market date carries several runs that disagree about the book.
+
+    The engine holds no live position state: `Ledger.previous_run` IS the whole
+    memory the next run has, and Stage 3, Stage 6, Stage 8 and the orphan review
+    all read the open book out of it. When a date holds rows that name different
+    books, there is no fact of the matter about what was held -- so the run
+    stops rather than picking whichever line was appended last.
+
+    Measured on the shipped ledger before this existed: 2026-08-18 carried 676
+    rows across 14 configuration versions recording SEVEN mutually inconsistent
+    books, and the selection rule was `when >= latest_date`, i.e. last line
+    wins. Every downstream hysteresis decision on that date was a coin toss
+    settled by file order.
+    """
+
+    code = "LEDGER_AMBIGUOUS"
+
+
 def describe_exception(exc: BaseException) -> Dict[str, Any]:
     """Normalise any exception into the dict shape the API returns to the webapp."""
     if isinstance(exc, ProSignalError):

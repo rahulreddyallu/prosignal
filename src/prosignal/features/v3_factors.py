@@ -21,8 +21,29 @@ from .v3 import ALL_FACTORS
 
 __all__ = ["factor_frame", "LOOKBACK_SESSIONS"]
 
-#: Sessions of history the block needs. `prox_52w` reads 273 of them.
-LOOKBACK_SESSIONS = 300
+#: Sessions of history the block needs.
+#:
+#: NOT set by the longest WINDOW -- `prox_52w` reads 273 -- but by the longest
+#: CHAIN. `resid_rev_21` is six rolling stages deep: a 21-session sum of a
+#: residual, over a 126-session idiosyncratic vol, over a beta from a
+#: 126-session covariance, over a 126-session demeaned benchmark. That reaches
+#: roughly 375 sessions behind the decision row, and every stage carries a
+#: `min_periods` relaxation, so a short window does not produce NaN -- it
+#: produces a DIFFERENT NUMBER, silently.
+#:
+#: Measured against a 1,200-session reference on live data: at 300 (+15, the 315
+#: Stage 4 actually read) `resid_rev_21` was wrong by up to 4.5e-2 on the last
+#: row, and up to 0.507 on another date. At 400 and beyond it is exact to 2e-14.
+#: Every other factor in the block was already bit-stable at 315. 420 is 400
+#: with a quarter of slack.
+LOOKBACK_SESSIONS = 420
+
+#: Own sessions a SYMBOL needs before `resid_rev_21` means anything. The frame
+#: has to be deep enough (LOOKBACK_SESSIONS) and so does the column: a name
+#: listed 320 sessions ago has no 375-session chain however much history the
+#: reader loaded. Measured convergence is at 400; below it the value is wrong
+#: rather than absent, because every stage relaxes on `min_periods`.
+RESID_REV_MIN_SESSIONS = 400
 
 
 def _roll(df, w, how, mp=None):
@@ -104,7 +125,20 @@ def factor_frame(close: pd.DataFrame, open_: Optional[pd.DataFrame] = None,
                   .div(bvar.replace(0, np.nan), axis=0)
         resid = ret.sub(_roll(ret, 126, "mean", mp=90)).sub(beta.mul(bc, axis=0))
         idio = _roll(resid, 126, "std", mp=90)
-        F["resid_rev_21"] = _roll(resid, 21, "sum", mp=15) / idio.replace(0, np.nan)
+        rr = _roll(resid, 21, "sum", mp=15) / idio.replace(0, np.nan)
+        # PER NAME, NOT ONLY PER FRAME. Loading enough sessions fixes the read;
+        # it does not help a SYMBOL that has not traded for that long. Every
+        # stage of the chain above relaxes on `min_periods`, so a name with 320
+        # sessions of its own gets a number rather than a NaN -- the same defect
+        # LOOKBACK_SESSIONS closes for the frame, one column at a time. On the
+        # live universe 64 of 750 names sit between 300 (the eligibility floor)
+        # and the depth this needs.
+        #
+        # NaN is the honest answer and it is cheap: `theme_subscore` averages
+        # the factors a name HAS, so reversal falls back to its other three and
+        # the name keeps a sub-score instead of losing the theme.
+        seen = ret.notna().cumsum()
+        F["resid_rev_21"] = rr.where(seen >= RESID_REV_MIN_SESSIONS)
     else:
         F["resid_rev_21"] = pd.DataFrame(np.nan, index=close.index,
                                          columns=close.columns)

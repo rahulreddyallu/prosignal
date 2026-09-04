@@ -2779,7 +2779,30 @@ costs:
 expectancy:
   #: Set false to stop stamping plans. The fields become null on the card and
   #: the ledger; nothing else changes.
-  enabled: true
+  #:
+  #: DISABLED 2026-09-05. Not because the study is bad -- it is careful, and the
+  #: table below is its honest output -- but because it measured a DIFFERENT
+  #: RANKER. Read the study line four rows down: "Sector-neutral 6-1 momentum
+  #: rank, six names, entries every 21 sessions". The engine ranks on
+  #: `stage4_core_score.ranking.source: v3_composite`, twenty-two factors in
+  #: five themes. Every card and every ledger row carried "probability of a net
+  #: profit 57.8%, mean +7.09%" as though it described the name being shown.
+  #:
+  #: The book GEOMETRY matches (6 slots, 21-session cadence, 63-session
+  #: backstop, 8xATR floor) which is what made this easy to miss -- the study id
+  #: names the geometry and not the scorer.
+  #:
+  #: Two further problems, either of which is on its own sufficient. The sample
+  #: period 2018-11-27 to 2026-08-25 CONTAINS the whole sealed holdout
+  #: 2025-01..2026-08. And the holdout figures these descend from are withdrawn
+  #: (README, "The holdout figures are withdrawn"), the panel having been
+  #: survivorship-biased.
+  #:
+  #: To re-enable: run the trade-level study on `v3_composite` at the live
+  #: geometry, on the TRAINING window only, and rewrite this block with a new
+  #: `study` and `measured_on`. A frequency from a model that is not running is
+  #: worse than no frequency, because the card gives the reader no way to tell.
+  enabled: false
   study: "horizon-map-2026-08 / 21-6-63-3.0-8atr-35pct"
   measured_on: "2026-08-29"
   sample_trades: 258

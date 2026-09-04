@@ -261,6 +261,20 @@ button { font: inherit; color: inherit; }
 .box-warn p { color: var(--ink-2); font-size: 14px; line-height: 1.6;
               max-width: 62ch; }
 
+/* A DISCLOSURE IS NOT AN ALARM. `box-warn` is the red rule -- something is
+   wrong and the reader should stop. The v3 composite ranking IS the model and
+   IS evidenced; what is not evidenced is the six-name book drawn from it. That
+   is a standing property of the configuration, true on every run, and painting
+   it red every day teaches the reader to skip the box that also carries the
+   real failures. */
+.box-note { background: var(--surface-2); border: 1px solid var(--line);
+            border-left: 3px solid var(--ink-3); border-radius: var(--r-md);
+            padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5); }
+.box-note b { display: block; color: var(--ink); margin-bottom: 5px;
+              font-size: 14.5px; }
+.box-note p { color: var(--ink-2); font-size: 14px; line-height: 1.6;
+              max-width: 62ch; }
+
 .slate-head { display: flex; align-items: center; gap: var(--sp-3);
               margin: var(--sp-7) 0 var(--sp-4); flex-wrap: wrap; }
 .slate-head h2 { font-size: 20px; letter-spacing: -0.02em; }
@@ -2179,9 +2193,23 @@ function viewOverview(v) {
   // A run the model could not score must not render as one it did. The
   // composite behind it measured t = -0.11 against equal weight.
   const scorer = v.scorer || {};
-  const unscored = scorer.validated === false
-    ? '<div class="box-warn"><b>This shortlist is not from the model</b>' +
-      '<p>' + esc(scorer.note || "") + '</p></div>'
+  /* TWO DIFFERENT STATEMENTS, and they used to share one red box.
+
+     "The model could not score this run" is a failure. "The ranking is
+     evidenced and the book size is not" is a standing disclosure about the
+     shipped configuration -- true every day, and the thing v3.BOOK_NOTE says
+     in the code. Rendering the second as the first meant either crying wolf
+     daily or, as actually shipped, never rendering at all: `_scorer_used`
+     reported validated=true on every v3 run because a theme named `reversal`
+     collided with a family of the same name in the deleted fitted model, so
+     this branch was unreachable. */
+  const sev = scorer.severity || (scorer.validated === false ? "alarm" : null);
+  const unscored = (scorer.validated === false && scorer.note)
+    ? (sev === "note"
+        ? '<div class="box-note"><b>What is evidenced here, and what is not</b>' +
+          '<p>' + esc(scorer.note) + '</p></div>'
+        : '<div class="box-warn"><b>This shortlist is not from the model</b>' +
+          '<p>' + esc(scorer.note) + '</p></div>')
     : "";
 
   const counts = [];

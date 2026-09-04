@@ -264,7 +264,28 @@ class TestTheRankingPolicy:
 # =============================================================================
 class TestTheTradePlan:
     """Every issued trade records what it is. Without it a resolved outcome can
-    be compared with the market and never with the engine's own claim."""
+    be compared with the market and never with the engine's own claim.
+
+    THE SHIPPED CONFIG HAS NO STUDY. `expectancy.enabled` is false as of
+    2026-09-05: the block it used to carry was measured on sector-neutral 6-1
+    momentum and the engine ranks on the v3 composite, so every card was
+    quoting the historical win rate of a model that is not running. The
+    mechanism is still the one that matters -- when a study IS configured, the
+    plan must carry it faithfully and must not drift from it -- so the tests
+    that check the mechanism configure one, and the test that checks the
+    shipped default asserts the claims are absent.
+    """
+
+    @pytest.fixture
+    def cfg_study(self, cfg):
+        """A configuration WITH an expectancy study, for the drift tests.
+
+        Reading the shipped flag instead would have made these tests pass or
+        fail on a deployment decision rather than on whether the plumbing
+        works, which is the wrong thing for them to be sensitive to.
+        """
+        cfg.params.expectancy.enabled = True
+        return cfg
 
     def test_it_records_the_cadence_and_the_planned_hold(self, cfg):
         tp = build_trade_plan(cfg, None)
@@ -273,44 +294,44 @@ class TestTheTradePlan:
         assert tp.cadence_sessions == int(adm.entry_cadence_sessions.value)
         assert tp.planned_hold_sessions == int(hold.max_holding_sessions.value)
 
-    def test_the_frequencies_come_from_the_config_study(self, cfg):
-        tp = build_trade_plan(cfg, None)
-        e = cfg.params.expectancy
+    def test_the_frequencies_come_from_the_config_study(self, cfg_study):
+        tp = build_trade_plan(cfg_study, None)
+        e = cfg_study.params.expectancy
         assert tp.probability_of_profit == pytest.approx(e.probability_of_profit)
         assert tp.expected_return_pct == pytest.approx(e.expected_return_pct)
         assert tp.basis_trades == int(e.sample_trades)
         assert e.study in tp.basis
 
-    def test_the_mean_and_the_median_are_both_carried(self, cfg):
+    def test_the_mean_and_the_median_are_both_carried(self, cfg_study):
         """Quoting only the mean describes a typical trade that does not exist.
 
         The distribution is right-skewed -- two thirds of the return comes from
         the 39% of positions that reach the time limit -- so mean +7.09% and
         median +3.65% are both true and neither alone is honest.
         """
-        tp = build_trade_plan(cfg, None)
+        tp = build_trade_plan(cfg_study, None)
         assert tp.median_return_pct < tp.expected_return_pct
 
-    def test_beating_the_benchmark_is_reported_separately_from_making_money(self, cfg):
+    def test_beating_the_benchmark_is_reported_separately_from_making_money(self, cfg_study):
         """The gap is the whole finding.
 
         58% of these trades make money and 51% beat the universe: most of the
         profit is the market, and quoting the first as though it were the second
         would be the most misleading number the card could print.
         """
-        tp = build_trade_plan(cfg, None)
+        tp = build_trade_plan(cfg_study, None)
         assert tp.probability_of_beating_benchmark < tp.probability_of_profit
 
     def test_the_caveat_is_never_empty(self, cfg):
         tp = build_trade_plan(cfg, None)
         assert "not a forecast" in tp.caveat.lower()
 
-    def test_the_risk_at_the_floor_is_sized_from_the_plan(self, cfg):
+    def test_the_risk_at_the_floor_is_sized_from_the_plan(self, cfg_study):
         plan = RiskPlan(ticker="X", reference_price=100.0, stop_price=65.0,
                         position_size_shares=200)
-        tp = build_trade_plan(cfg, plan)
+        tp = build_trade_plan(cfg_study, plan)
         assert tp.risk_at_stop_inr == pytest.approx(7000.0)
-        book = float(cfg.params.capital.total_capital_inr.value)
+        book = float(cfg_study.params.capital.total_capital_inr.value)
         assert tp.risk_at_stop_pct_of_book == pytest.approx(700000.0 / book)
 
     def test_no_size_means_no_invented_risk_number(self, cfg):
@@ -318,18 +339,26 @@ class TestTheTradePlan:
         tp = build_trade_plan(cfg, plan)
         assert tp.risk_at_stop_inr is None
 
-    def test_disabling_the_study_leaves_the_geometry_and_drops_the_claims(self, cfg):
-        """A deployment that has not run its own study must record no
-        expectation rather than somebody else's."""
-        cfg.params.expectancy.enabled = False
-        try:
-            tp = build_trade_plan(cfg, None)
-            assert tp.cadence_sessions and tp.planned_hold_sessions
-            assert tp.probability_of_profit is None
-            assert tp.expected_return_pct is None
-            assert tp.basis is None
-        finally:
-            cfg.params.expectancy.enabled = True
+    def test_the_shipped_config_records_no_expectation(self, cfg):
+        """THE SHIPPED STATE, pinned so re-enabling is a deliberate act.
+
+        A deployment that has not run its own study on the model it is running
+        must record no expectation rather than somebody else's. The block was
+        disabled on 2026-09-05 because it described sector-neutral 6-1 momentum
+        while the engine ranks on the v3 composite; re-enabling it without
+        rewriting `study` and `measured_on` puts the wrong model's win rate
+        back onto every card and into every ledger row.
+        """
+        assert cfg.params.expectancy.enabled is False, (
+            "expectancy is enabled again -- if a study was re-run on "
+            "v3_composite, update this test; if not, the card is quoting "
+            "another model's frequencies"
+        )
+        tp = build_trade_plan(cfg, None)
+        assert tp.cadence_sessions and tp.planned_hold_sessions
+        assert tp.probability_of_profit is None
+        assert tp.expected_return_pct is None
+        assert tp.basis is None
 
 
 # =============================================================================

@@ -310,11 +310,20 @@ class FactorScore(_Contract):
     name: str
     raw_value: Optional[float] = None
     standardised: Optional[float] = None
+    #: THE WEIGHT THIS NAME WAS BLENDED AT, not the frozen one from the fit.
+    #: Under the v3 composite the two differ whenever a name is missing a
+    #: theme, which is 91% of the live universe: the blend re-caps over the
+    #: themes a name actually has, so momentum's fitted 0.40 is the weight for a
+    #: five-theme name and the ceiling for a four-theme one. Serving the frozen
+    #: number here is what made the card print a weight that did not multiply
+    #: its own z into its own contribution -- out by exactly 1/den, 1.2344x on a
+    #: four-theme name, under a heading reading "sums to the score".
     weight: float = 0.0
     #: standardised x weight -- the signed amount this factor moved THIS name's
-    #: composite. Carried explicitly rather than left for the reader to
-    #: multiply, because the renormalisation over available factors means the
-    #: product of the two printed numbers is not always the term that was used.
+    #: composite. With `weight` now per-name, the identity `standardised *
+    #: weight == contribution` HOLDS, and `test_v3_blend_is_capped` pins it.
+    #: It is still carried explicitly rather than recomputed downstream, so
+    #: there is one arithmetic and not two.
     contribution: Optional[float] = None
     available: bool = True
     horizon_note: Optional[str] = None

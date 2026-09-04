@@ -145,18 +145,33 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
                 f"floor. A ranking built on a minority of the universe is a "
                 f"ranking of that minority.")
         nth = v3_scored["n_themes"].reindex(covered.index)
+        # THE WEIGHTS THIS RUN USED, and the LABELS rather than the dict keys.
+        # The note quoted `Theme.weight` -- the fit-time vector, correct for a
+        # name with all five themes and for 8.8% of this universe -- and named
+        # the themes by their internal keys, so it said "quality 19%" for a
+        # theme whose two factors both ship at -1 and which the screen has
+        # called "Low-margin tilt" since the labels were made honest. The note
+        # is written into the run record, so both halves outlived the screen.
+        _wmean = {
+            t: v3_scored[t + "_w"].dropna().mean()
+            for t in v3feat.THEMES if t + "_w" in v3_scored.columns
+        }
+        _shown = ", ".join(
+            f"{th.label} {_wmean.get(t, th.weight):.0%}"
+            for t, th in v3feat.THEMES.items())
         notes.append(
             f"Book ordered by the v3 composite: {len(v3feat.ALL_FACTORS)} factors "
-            f"in {len(v3feat.THEMES)} themes "
-            f"({', '.join(f'{t} {th.weight:.0%}' for t, th in v3feat.THEMES.items())}), "
-            f"each theme combined on its own and blended with weights capped at "
-            f"40%, floored at 6% and additionally capped at the theme's "
-            f"coverage. Median name scored on {nth.median():.0f} of "
-            f"{len(v3feat.THEMES)} themes. Sealed holdouts, one run each: rank IC "
-            f"+0.049 (t 3.69) on 2025-03..2026-08 and +0.036 (t 3.83) on "
-            f"2021-07..2022-12, with every theme positive out of sample on both. "
-            f"The RANKING is what generalised; a ten-name book at these "
-            f"transaction costs did not -- see CHANGELOG.md.")
+            f"in {len(v3feat.THEMES)} themes, at the mean weights this "
+            f"cross-section actually blended them at ({_shown}). Each theme is "
+            f"combined on its own, then blended with weights RE-CAPPED at 40% "
+            f"over the themes each name has -- a name missing one does not hand "
+            f"its share to whichever theme is largest. Median name scored on "
+            f"{nth.median():.0f} of {len(v3feat.THEMES)} themes. "
+            f"The two sealed holdouts (rank IC +0.049 t 3.69 on 2025-03..2026-08, "
+            f"+0.036 t 3.83 on 2021-07..2022-12) measured the blend BEFORE that "
+            f"re-cap and are not re-run: both windows are spent. The RANKING is "
+            f"what generalised there; a ten-name book at these transaction costs "
+            f"did not -- see CHANGELOG.md.")
         # THE DOMINANCE CHECK RUNS ON EVERY RUN, not only when somebody types a
         # research command. A theme that has taken over the ranking is a
         # property of today's scores and needs no forward outcome to see, so
@@ -413,8 +428,14 @@ def run(
             dropped_factors=dropped, notes=["every factor was dropped; no score computable"],
         )
 
-    for name, reason in dropped.items():
-        notes.append(f"{name} dropped: {reason}")
+    # Held until the ranking source is known, for the same reason the regime
+    # note is. These describe the FAMILY block. Under `v3_composite` that block
+    # does not rank, and its `quality` and the v3 theme keyed `quality` are
+    # different things computed from different sources -- so "quality dropped:
+    # no point-in-time fundamentals" went into the record of a run whose v3
+    # quality theme had scored 34 names, which reads as the theme being absent
+    # when it was present and carrying 19%.
+    _dropped_notes = [f"{name} dropped: {reason}" for name, reason in dropped.items()]
 
     # ---- winsorise -> standardise -> neutralise ----------------------------
     method = str(v(cfg.standardisation))
@@ -444,7 +465,17 @@ def run(
     total = sum(effective.values())
     if total > 0:
         effective = {n: w / total for n, w in effective.items()}
-    notes.append(
+    # SAID ONLY WHERE IT IS TRUE. This note went onto every run, and under
+    # `v3_composite` the multipliers it describes scale the FAMILY block --
+    # which `_apply_ranking_policy` then discards. An operator reading "regime
+    # 'range_lowvol' multipliers applied (momentum x0.75)" on a run whose book
+    # was ordered by an unmodified v3 blend is being told the engine leaned
+    # against momentum today. It did not.
+    #
+    # Deferred rather than deleted: the note is correct on the `fitted_composite`
+    # path, which is still selectable, so it is emitted after the ranking source
+    # is known instead of before.
+    _regime_note = (
         f"Regime '{regime.regime_bucket}' multipliers applied "
         f"(momentum x{regime.momentum_multiplier:.2f}, "
         f"sector-RS x{regime.sector_rs_multiplier:.2f}), then weights renormalised."
@@ -510,6 +541,16 @@ def run(
     composite_raw, ranking_source = _apply_ranking_policy(
         composite_raw, model_features, cfg, notes, v3_scored=v3_scored)
 
+    # The family block's regime multipliers and dropped factors moved the
+    # ranking only if the family block IS the ranking. `fitted_composite` is
+    # the one source where it is: every other branch of `_apply_ranking_policy`
+    # REPLACES `composite_raw` and keeps only its index, as a population filter.
+    # Listing the sources that discard it would have to be kept in step with
+    # that function; naming the single source that does not, does not.
+    if ranking_source == "fitted_composite":
+        notes.extend(_dropped_notes)
+        notes.append(_regime_note)
+
     # THE ABSOLUTE FLOOR, computed here and enforced at entry. Names that fail
     # it stay in the ranking -- they are holdable and they belong on a watchlist
     # -- and cannot be bought. When fewer clear it than there are slots, the
@@ -541,15 +582,34 @@ def run(
             for tname, th in sorted(
                     v3feat.THEMES.items(),
                     key=lambda kv: -(abs(_f(v3_scored.at[sym, kv[0] + "_contrib"]) or 0.0))):
+                # THE WEIGHT THIS NAME WAS BLENDED AT. `th.weight` is the
+                # frozen fit-time number and it is correct only for a name
+                # carrying all five themes -- 8.8% of the live universe. The
+                # blend re-caps per name, so serving the frozen figure here put
+                # a weight on the card that did not multiply its own z into its
+                # own contribution, uniformly out by 1/den. `score_frame` now
+                # emits the weight it used and this reads it.
+                _have = pd.notna(v3_scored.at[sym, tname + "_sub"])
+                _w = _f(v3_scored.at[sym, tname + "_w"]) \
+                    if tname + "_w" in v3_scored.columns else None
+                if _w is None:
+                    # A theme the name does not have was blended at ZERO, not at
+                    # its fit-time weight. The card drops unavailable rows so
+                    # this is invisible there, but the row goes into the ledger,
+                    # where "quality, weight 0.18991, contribution null" reads
+                    # as a theme that was carried and produced nothing rather
+                    # than one that was absent.
+                    _w = th.weight if _have else 0.0
                 factors[tname] = FactorScore(
                     name=tname,
                     raw_value=None,
                     standardised=_f(v3_scored.at[sym, tname + "_sub"]),
-                    weight=round(th.weight, 5),
+                    weight=round(_w, 5),
                     contribution=_f(v3_scored.at[sym, tname + "_contrib"]),
                     available=pd.notna(v3_scored.at[sym, tname + "_sub"]),
                     evidence_tier="v3_theme",
-                    citation=f"theme sub-score, oriented at {th.horizon} sessions",
+                    citation=(f"{th.label} -- theme sub-score, oriented at "
+                              f"{th.horizon} sessions"),
                     members=[
                         FactorMember(
                             name=fn,
@@ -728,7 +788,16 @@ def run(
         win_probability_unavailable=None,
         weighting_mode=str(v(cfg.weighting_mode)),
         standardisation=method,
-        effective_weights={k: round(v, 4) for k, v in effective.items()},
+        # THE WEIGHTS THAT RANKED THE BOOK, when something ranked it.
+        #
+        # This served `effective` -- the FAMILY block's weights, regime
+        # multipliers and all. Under `v3_composite` that block is computed and
+        # then discarded by `_apply_ranking_policy`; only its INDEX survives, as
+        # a population filter. So the field read
+        # {'momentum_12_1': 0.4688, 'sector_relative_strength': 0.5312} on a run
+        # that ordered its book by twenty-two factors in five themes: two
+        # numbers, summing to one, describing nothing that chose anything.
+        effective_weights=_reported_weights(ranking_source, v3_scored, effective),
         dropped_factors=dropped,
         ranked_scores=scores,
         redundancy=redundancy,
@@ -736,6 +805,32 @@ def run(
         notes=notes,
     )
 
+
+
+def _reported_weights(ranking_source, v3_scored, family_effective) -> Dict[str, float]:
+    """The blend weights the REPORT should carry: the ones that ranked the book.
+
+    Under `v3_composite` the weights are per-name -- the blend re-caps over the
+    themes each name has -- so a single vector is a summary, not the thing
+    itself. The mean over scored names is the honest summary and it is what the
+    dominance question is asked of ("is momentum running hotter than its cap
+    allows?"), so that is what is reported, keyed by theme.
+
+    Falls back to the family block's weights only when the family block is what
+    ranked, which is the `fitted_composite` path.
+    """
+    if ranking_source in ("v3_composite",) and v3_scored is not None:
+        out: Dict[str, float] = {}
+        for tname in v3feat.THEMES:
+            col = tname + "_w"
+            if col not in getattr(v3_scored, "columns", []):
+                continue
+            w = v3_scored[col].dropna()
+            if len(w):
+                out[tname] = round(float(w.mean()), 4)
+        if out:
+            return out
+    return {k: round(val, 4) for k, val in (family_effective or {}).items()}
 
 
 def _members_for(family: str, symbol, features) -> List[FactorMember]:

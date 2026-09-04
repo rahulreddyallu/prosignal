@@ -274,6 +274,31 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ok = False
             checks["universe"] = f"{type(exc).__name__}: {exc}"
 
+        # THE OPEN BOOK HAS TO BE A FACT BEFORE A RUN CAN USE IT.
+        #
+        # `Ledger.previous_run` is the engine's entire position memory and it
+        # refuses to guess when a date's recorded runs disagree about what was
+        # held. That refusal surfaces as a failed run at the moment somebody
+        # presses SCAN, which is the wrong time to discover it -- so readiness
+        # asks the question first. Only dates the next run could actually READ
+        # matter, so a conflict strictly in the past is reported without
+        # blocking; the one immediately behind the decision date is not.
+        try:
+            conflicts = Ledger(cfg.paths.ledger).conflicting_dates(mode="live")
+            checks["ledger_conflicts"] = len(conflicts)
+            if conflicts:
+                worst = max(conflicts, key=lambda c: c["distinct_books"])
+                checks["ledger_conflict_detail"] = (
+                    f"{len(conflicts)} market date(s) carry live runs that "
+                    f"disagree about the book -- worst {worst['date']} with "
+                    f"{worst['runs']} runs and {worst['distinct_books']} "
+                    f"different books. A run whose previous session lands on "
+                    f"one of these refuses rather than picking one. Resolve by "
+                    f"keeping a single live run per date."
+                )
+        except Exception as exc:  # noqa: BLE001
+            checks["ledger_conflicts"] = f"{type(exc).__name__}: {exc}"
+
         checks["config_version"] = cfg.version
         active = jobs.active_job()
         checks["analysis_in_progress"] = active.id if active else None

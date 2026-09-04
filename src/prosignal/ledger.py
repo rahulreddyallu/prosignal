@@ -22,10 +22,10 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from .modelprint import model_fingerprint
 from .core.contracts import FinalSignalOutput, LedgerRow, RunContext
-from .core.errors import LedgerError
+from .core.errors import AmbiguousLedgerHistory, LedgerError
 from .core.logging import get_logger
 
-__all__ = ["Ledger", "row_from_output"]
+__all__ = ["Ledger", "row_from_output", "AmbiguousLedgerHistory"]
 
 log = get_logger(__name__)
 
@@ -106,7 +106,47 @@ class Ledger:
             last = row
         return last
 
-    def previous_run(self, before: Optional[dt.date] = None) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _book_identity(row: Dict[str, Any]) -> tuple:
+        """What a row claims was held and shown. Two rows agreeing on this
+        describe the same state, whatever else differs between them."""
+        book = tuple(sorted(str(s) for s in (row.get("signals_generated") or [])))
+        slate = tuple(
+            str(e.get("ticker"))
+            for e in (row.get("slate_shown") or [])
+            if isinstance(e, dict) and e.get("ticker")
+        )
+        return book, slate
+
+    def _rows_on(self, when: dt.date, mode: Optional[str]) -> List[Dict[str, Any]]:
+        """Every row for one date and lineage, in a deterministic order.
+
+        Ordered by `(logged_at, run_id)` rather than by position in the file.
+        File order is an artefact of when a process happened to flush; two
+        clones of the same ledger must resolve the same book.
+        """
+        out = []
+        for row in self.iter_rows():
+            if self._row_date(row) != when:
+                continue
+            if mode is not None and str(row.get("mode") or "live") != mode:
+                continue
+            out.append(row)
+        return sorted(out, key=lambda r: (str(r.get("logged_at") or ""),
+                                          str(r.get("run_id") or "")))
+
+    @staticmethod
+    def _row_date(row: Dict[str, Any]) -> Optional[dt.date]:
+        try:
+            return dt.date.fromisoformat(str(row.get("date"))[:10])
+        except (TypeError, ValueError):
+            return None
+
+    def previous_run(
+        self,
+        before: Optional[dt.date] = None,
+        mode: Optional[str] = "live",
+    ) -> Optional[Dict[str, Any]]:
         """The most recent recorded run strictly before ``before``.
 
         The engine holds no live position state -- every run rebuilds its view
@@ -115,24 +155,95 @@ class Ledger:
         read together because this is a full scan of a file that grows without
         bound; doing it twice per run was pure waste.
 
+        TWO THINGS THIS GUARDS, both of which it used to get wrong.
+
+        LINEAGE. Rows are filtered to one ``mode`` -- the run's own. A live run
+        reads live history; a replay of a past date reads replay history. They
+        used to share one stream, so a backfill appended after a live run became
+        that run's successor and the next live session inherited a book from a
+        reconstruction. `mode` has existed on the row since v1 and was written
+        as the literal "live" on every path, so nothing could tell them apart.
+        Pass ``mode=None`` to read across every lineage, which is what a
+        reporting caller wants and a pipeline caller never does.
+
+        AMBIGUITY. The selection rule was `if latest_date is None or when >=
+        latest_date`, so within a date the last line in the FILE won. On the
+        shipped ledger 80 dates carried more than one run and 2026-08-18 carried
+        676 of them recording seven different books. There is no fact of the
+        matter about what was held on such a date, so this raises
+        :class:`AmbiguousLedgerHistory` rather than choosing. Rows that agree
+        about the book -- the ordinary case of an operator pressing SCAN twice
+        -- are not a conflict, and the newest is returned.
+
         Rows whose date will not parse are skipped rather than crashing the
         run: one bad line must not become "the engine holds nothing".
         """
-        latest: Optional[Dict[str, Any]] = None
         latest_date: Optional[dt.date] = None
         for row in self.iter_rows():
-            raw = row.get("date")
-            try:
-                when = dt.date.fromisoformat(str(raw)[:10])
-            except (TypeError, ValueError):
+            when = self._row_date(row)
+            if when is None:
                 continue
             if before is not None and when >= before:
                 continue
-            if latest_date is None or when >= latest_date:
-                latest_date, latest = when, row
-        return latest
+            if mode is not None and str(row.get("mode") or "live") != mode:
+                continue
+            if latest_date is None or when > latest_date:
+                latest_date = when
+        if latest_date is None:
+            return None
 
-    def open_book(self, before: Optional[dt.date] = None) -> List[str]:
+        rows = self._rows_on(latest_date, mode)
+        identities = {self._book_identity(r) for r in rows}
+        if len(identities) > 1:
+            books = sorted({i[0] for i in identities})
+            raise AmbiguousLedgerHistory(
+                f"{len(rows)} runs are recorded for {latest_date.isoformat()} "
+                f"and they disagree about the book: "
+                + "; ".join(
+                    "[" + (", ".join(b) if b else "empty") + "]" for b in books[:6]
+                )
+                + (f" (+{len(books) - 6} more)" if len(books) > 6 else "")
+                + ". The open book is the engine's entire position memory, so "
+                  "there is nothing to fall back to -- resolve the ledger for "
+                  "that date (keep one run, or re-record it) before running "
+                  "against it.",
+                date=latest_date.isoformat(),
+                runs=len(rows),
+                distinct_books=len(books),
+                run_ids=[str(r.get("run_id")) for r in rows[:8]],
+            )
+        return rows[-1]
+
+    def conflicting_dates(self, mode: Optional[str] = "live") -> List[Dict[str, Any]]:
+        """Every date whose recorded runs disagree about the book.
+
+        The diagnostic behind :class:`AmbiguousLedgerHistory`: it answers "which
+        days do I have to clean up" without running an analysis into the wall.
+        """
+        by_date: Dict[dt.date, List[Dict[str, Any]]] = {}
+        for row in self.iter_rows():
+            when = self._row_date(row)
+            if when is None:
+                continue
+            if mode is not None and str(row.get("mode") or "live") != mode:
+                continue
+            by_date.setdefault(when, []).append(row)
+        out: List[Dict[str, Any]] = []
+        for when in sorted(by_date):
+            rows = by_date[when]
+            identities = {self._book_identity(r) for r in rows}
+            if len(identities) > 1:
+                out.append({
+                    "date": when.isoformat(),
+                    "runs": len(rows),
+                    "distinct_books": len({i[0] for i in identities}),
+                    "config_versions": sorted(
+                        {str(r.get("config_version")) for r in rows}),
+                })
+        return out
+
+    def open_book(self, before: Optional[dt.date] = None,
+                  mode: Optional[str] = "live") -> List[str]:
         """Names the most recent recorded run issued as BUY.
 
         Stage 6's exit band needs it: a name is kept while it stays inside the
@@ -143,7 +254,7 @@ class Ledger:
         correct starting state rather than an error -- a first run holds
         nothing.
         """
-        row = self.previous_run(before=before)
+        row = self.previous_run(before=before, mode=mode)
         if not row:
             return []
         book = list(row.get("signals_generated") or [])
@@ -163,7 +274,8 @@ class Ledger:
                 seen.add(ticker)
         return book
 
-    def shown_slate(self, before: Optional[dt.date] = None) -> List[Dict[str, Any]]:
+    def shown_slate(self, before: Optional[dt.date] = None,
+                    mode: Optional[str] = "live") -> List[Dict[str, Any]]:
         """The screen the most recent recorded run produced, in order.
 
         Empty for a run recorded before the slate was part of the record, which
@@ -171,7 +283,7 @@ class Ledger:
         one is chosen fresh. It is not an error and must not be inferred from
         `signals_generated` -- that is the book, which is a different list.
         """
-        row = self.previous_run(before=before)
+        row = self.previous_run(before=before, mode=mode)
         return list(row.get("slate_shown") or []) if row else []
 
     def signals_for(self, ticker: str) -> List[Dict[str, Any]]:

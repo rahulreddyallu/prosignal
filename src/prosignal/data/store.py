@@ -312,8 +312,19 @@ class DataStore:
         self.adjust_prices = bool(adjust_prices)
         self.curated = Path(curated_dir)
         self.snapshots = Path(snapshot_dir)
-        self.curated.mkdir(parents=True, exist_ok=True)
-        self.snapshots.mkdir(parents=True, exist_ok=True)
+        # NO DIRECTORY CREATION HERE. Constructing a store is a READ intent far
+        # more often than a write one -- `/ready`, every stage, every research
+        # command -- and creating two directories as a side effect of naming a
+        # path is a surprise in all of them. Every writer already creates its
+        # own parent: `_atomic_write_parquet` and `_atomic_write_json` both
+        # mkdir before the temp file, `_lock_path` mkdirs the root, and
+        # `reset_universe_snapshots` re-creates what it removed.
+        #
+        # It was not free. `DataStore(Path("/nonexistent-curated"), ...)` --
+        # which is how a test asks "what does this do with no store?" -- tried
+        # to mkdir at the filesystem root and raised OSError on any machine with
+        # a read-only /, taking down `test_adj_factor_without_a_price_column_is
+        # _refused` for a reason unrelated to the guard it was written for.
 
         self._price_cache: Optional[Dict[str, Any]] = None
         self.prices = _PartitionedTable(self.curated, "prices", [SYMBOL, DATE])
