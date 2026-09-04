@@ -137,6 +137,15 @@ class Tunable(BaseModel, Generic[T]):
     note: Optional[str] = None
     validated_by: Optional[str] = None  # research-ledger trial id, e.g. "T-014"
     validated_on: Optional[dt.date] = None
+    #: When a STATUTORY rate was last checked against the circular that sets
+    #: it. NOT the same claim as `validated_on`, which says a CPCV run promoted
+    #: a hypothesis; a tax rate is not a hypothesis and cannot be validated,
+    #: only verified. It matters because statutory rates move on a budget
+    #: cycle: futures STT tripled from 0.02% to 0.05% on 1 April 2026 and any
+    #: cost figure computed before that is wrong by 150% of that leg. An
+    #: undated STATUTORY rate is a rate nobody can tell is stale, so
+    #: `_check_invariants` requires the date.
+    verified_on: Optional[dt.date] = None
 
     #: Explicit optimisation tier. When omitted, :attr:`tier` derives a
     #: conservative one from ``status``.
@@ -195,6 +204,19 @@ class Tunable(BaseModel, Generic[T]):
                     "cannot claim validation without naming the run that "
                     "validated it."
                 )
+        # A STATUTORY rate must say WHEN it was last checked. It is set by SEBI,
+        # an exchange or the Finance Act, which means it is not a hypothesis --
+        # and also that it moves without anything in this repository noticing.
+        # An undated one reads as permanent and is the failure the April 2026
+        # futures-STT change would have caused silently.
+        if self.status is ParamStatus.STATUTORY and not self.verified_on:
+            raise ValueError(
+                "status=STATUTORY requires `verified_on` (YYYY-MM-DD): the date "
+                "this rate was last checked against the circular that sets it. "
+                "Statutory rates change on a budget cycle -- futures STT went "
+                "from 0.02% to 0.05% on 1 April 2026 -- and an undated rate is "
+                "one nobody can tell is stale."
+            )
         # You cannot search a parameter you have not bounded. Requiring the
         # range at the point of opting in stops an unbounded sweep from being
         # one keystroke away.
@@ -1619,6 +1641,65 @@ class StressTestConfig(_Base):
     require_edge_survives_stress: bool = True
 
 
+class DerivativesCostConfig(_Base):
+    """The short leg's cost stack. Priced but NOT TRADED.
+
+    WHY IT EXISTS BEFORE ANY SHORT CODE DOES. `costs:` had no derivatives leg at
+    all, which meant the short side could not be PRICED -- and an unpriceable
+    leg is one whose cost silently reads as zero in any comparison somebody
+    builds later. Declaring the stack first makes the short side arrive with a
+    cost model rather than acquiring one afterwards.
+
+    NOTHING HERE PLACES AN ORDER. docs/EXECUTION_GATE.md governs and is
+    unchanged: these are inputs to a cost model, and the repository still has no
+    broker client, no order object and no execution venue.
+
+    THE STATUTORY RATES ARE NOT A LEGAL SOURCE. They are transcribed from the
+    Finance Act schedule as amended and cross-checked against broker
+    explainers; every one carries `verified_on`. Check them against the live
+    circular before any figure computed from them is quoted. Rates move on a
+    budget cycle and this file has no way to notice when they do.
+    """
+
+    #: 0.05% sell-side, raised from 0.02% effective 1 April 2026 (Budget
+    #: 2026-27). A 150% increase in a cost that lands on EVERY short entry and
+    #: again on every monthly roll, which is why a short leg priced at the old
+    #: rate is not merely stale but wrong in the flattering direction.
+    stt_futures_sell_pct: TF
+    #: 0.15% on premium, sell side, raised from 0.10% on the same date. Carried
+    #: for completeness and UNUSED: options are rejected on design grounds -- a
+    #: 42-63 session cross-sectional forecast is a directional view with no
+    #: volatility view, so buying options pays theta and implied-vol premium for
+    #: a payoff that was never forecast.
+    stt_options_premium_sell_pct: TF
+    #: SLB lending fee, annualised. UNVALIDATED because it is market-determined
+    #: per name per tenure and this repository has no SLB feed; the range is what
+    #: mid-2026 SLB screens showed across an eligible list of roughly 128 names,
+    #: with activity concentrated in a handful of large caps.
+    borrow_fee_annual_pct: TF
+    #: Cost of rolling a single-stock future to the next monthly expiry, in bps
+    #: of notional, over and above the STT leg. UNVALIDATED: it is a spread, and
+    #: this store has no intraday book, so it cannot be estimated here -- it is
+    #: swept, never claimed. Corwin-Schultz and Abdi-Ranaldo were both tried on
+    #: this data and rejected, correlating +0.069 with each other.
+    futures_roll_spread_bps: TF
+    #: Initial margin as a share of notional. OPERATIONAL, not statutory and not
+    #: a hypothesis: the real number is computed by the exchange per contract
+    #: per day (SPAN + Extreme Loss Margin, plus any ad-hoc margin), so no single
+    #: figure is correct. This is a planning proxy for capital adequacy only and
+    #: must never be presented as the margin that will actually be called.
+    futures_margin_pct: TF
+
+    @model_validator(mode="after")
+    def _check(self) -> "DerivativesCostConfig":
+        for name in ("stt_futures_sell_pct", "stt_options_premium_sell_pct",
+                     "borrow_fee_annual_pct", "futures_roll_spread_bps",
+                     "futures_margin_pct"):
+            if float(getattr(self, name).value) < 0:
+                raise ValueError(f"costs.derivatives.{name} cannot be negative")
+        return self
+
+
 class CostsConfig(_Base):
     segment: TS
     stt_delivery_buy_pct: TF
@@ -1634,6 +1715,9 @@ class CostsConfig(_Base):
     dp_charge_per_scrip_sell_inr: TF
     impact_model: ImpactModelConfig
     stress_tests: StressTestConfig
+    #: The short leg's stack. Optional so a configuration written before it
+    #: existed still loads; the shipped file carries it.
+    derivatives: Optional[DerivativesCostConfig] = None
 
     @model_validator(mode="after")
     def _check(self) -> "CostsConfig":
@@ -2131,6 +2215,13 @@ class RootConfig(_Base):
                         "validated_by": node.validated_by,
                         "validated_on": (
                             node.validated_on.isoformat() if node.validated_on else None
+                        ),
+                        # A STATUTORY rate's check date. Exposed here as well as
+                        # on the model because this is what the /config panel
+                        # and the cost tests read, and a field the panel cannot
+                        # see is a field nobody maintains.
+                        "verified_on": (
+                            node.verified_on.isoformat() if node.verified_on else None
                         ),
                     }
                 )

@@ -1,9 +1,9 @@
 {
  "root": "/Users/rahulreddyallu/Desktop/Pro Stock Signal BOT/data/curated",
- "built_at": "2026-09-03T03:54:05+00:00",
- "digest": "75152d895cd25607",
+ "built_at": "2026-09-04T02:46:14+00:00",
+ "digest": "024097d7280e36cc",
  "n_files": 47,
- "total_bytes": 251780615,
+ "total_bytes": 251952702,
  "files": [
   {
    "path": "corporate_actions.parquet",
@@ -117,13 +117,13 @@
   },
   {
    "path": "delivery/year=2026.parquet",
-   "bytes": 5555905,
-   "sha256": "94e902dafe1bda7ce4231b919b4e2a57d2513082e9dd108c97e34637be851c76",
-   "rows": 531297,
+   "bytes": 5585439,
+   "sha256": "a7320c588e23a06bfa20763df0827fe6c0c7cea7c981782531c11d057cc5aca6",
+   "rows": 534787,
    "min_date": "2026-01-01",
-   "max_date": "2026-09-02",
+   "max_date": "2026-09-03",
    "schema_sha": "3c73a17f7f52c981",
-   "mtime_ms": 1788397183775
+   "mtime_ms": 1788487541978
   },
   {
    "path": "earnings_calendar.parquet",
@@ -153,7 +153,7 @@
    "min_date": null,
    "max_date": null,
    "schema_sha": "127e9720b5009b6f",
-   "mtime_ms": 1788397921973
+   "mtime_ms": 1788487634545
   },
   {
    "path": "indices/year=2017.parquet",
@@ -247,13 +247,13 @@
   },
   {
    "path": "indices/year=2026.parquet",
-   "bytes": 1234600,
-   "sha256": "a8d92b44f41572396674ea848a9d4383e9682a2b7b1d419955e73092e16f6a1d",
-   "rows": 24962,
+   "bytes": 1241919,
+   "sha256": "9365af7a8b018d8b7b891c326a34d9bb272cb040843259d77e5e8363d3b1a7e0",
+   "rows": 25127,
    "min_date": "2026-01-01",
-   "max_date": "2026-09-02",
+   "max_date": "2026-09-03",
    "schema_sha": "d0c07531bcab5c29",
-   "mtime_ms": 1788397182544
+   "mtime_ms": 1788487540331
   },
   {
    "path": "prices/year=2017.parquet",
@@ -347,23 +347,23 @@
   },
   {
    "path": "prices/year=2026.parquet",
-   "bytes": 22451944,
-   "sha256": "92901d8841bd561313f02dd77471710bb5aaeee6b3db1e067b2550097a209111",
-   "rows": 558693,
+   "bytes": 22580636,
+   "sha256": "32c340a534d53d62e30d48c8cb46497523a50a46bce83cb5253de350d441c44e",
+   "rows": 562324,
    "min_date": "2026-01-01",
-   "max_date": "2026-09-02",
+   "max_date": "2026-09-03",
    "schema_sha": "07096bc03e077f69",
-   "mtime_ms": 1788397183414
+   "mtime_ms": 1788487541422
   },
   {
    "path": "prices_secondary.parquet",
-   "bytes": 124890,
-   "sha256": "b5ecf3fcaf573139116ca801fe98563a8dcdaed0a394927d274a5a79f2041b70",
-   "rows": 3548,
+   "bytes": 131432,
+   "sha256": "84e91b006d52b6dd5cefb0a9ebd69e786fa41550700d514aa61f9740db175b5e",
+   "rows": 3754,
    "min_date": "2026-08-10",
-   "max_date": "2026-09-02",
+   "max_date": "2026-09-03",
    "schema_sha": "c217ffa8c4502007",
-   "mtime_ms": 1788397197656
+   "mtime_ms": 1788487557730
   },
   {
    "path": "sector_map.parquet",
@@ -373,7 +373,7 @@
    "min_date": null,
    "max_date": null,
    "schema_sha": "a8f25e6f5e8a08a1",
-   "mtime_ms": 1788398531845
+   "mtime_ms": 1788487559327
   },
   {
    "path": "statements.parquet",

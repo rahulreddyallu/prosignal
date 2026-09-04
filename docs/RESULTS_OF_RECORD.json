@@ -1,0 +1,227 @@
+{
+ "stamp": {
+  "generated_at": "2026-09-04T03:09:14+00:00",
+  "config_version": "baseline-v2@3f7297cdb915fb0e",
+  "params_hash": "7283747188af02f5",
+  "store_hash": "00333f4212937563",
+  "train_hash": "4dc2dcfe23298c98",
+  "store_fingerprint": "delivery 1711s/4806n 2019-06-27..2026-09-03; fundamentals 740s/186n 2019-11-14..2025-03-11; indices 2218s/177n 2017-09-08..2026-09-03; prices 2219s/7112n 2017-09-08..2026-09-03",
+  "data_manifest_digest": "024097d7280e36cc",
+  "git_commit": "a047b0cacd55",
+  "git_dirty": true,
+  "engine_version": "0.1.0",
+  "ranking_source": "v3_composite",
+  "panel_first_date": "2018-11-27",
+  "panel_last_date": "2026-08-03",
+  "panel_rows": 204425,
+  "panel_distinct_dates": 380,
+  "independent_observations": 31.1,
+  "cumulative_trials": 119,
+  "trials_by_pass": {
+   "pre-v10": 99
+  },
+  "horizon_sessions": 63,
+  "stride_sessions": 5
+ },
+ "ranking": [
+  {
+   "horizon": 21,
+   "n_dates": 380,
+   "n_rows": 202101,
+   "ic": 0.05751198921620081,
+   "ic_t_naive": 7.950448598151611,
+   "ic_t_corrected": 3.8688164816186643,
+   "spread": 0.013434090677517808,
+   "spread_t_naive": 5.939757499871881,
+   "spread_t_corrected": 2.8903817726291514,
+   "top_decile_excess": 0.006438315434289216,
+   "top_decile_t_corrected": 2.485872675408322,
+   "decile_monotonicity": 0.19971291866028704,
+   "independent_observations": 91.2,
+   "vif": 4.223057644110275
+  },
+  {
+   "horizon": 42,
+   "n_dates": 376,
+   "n_rows": 198107,
+   "ic": 0.06801338024421612,
+   "ic_t_naive": 9.816873998374612,
+   "ic_t_corrected": 3.3939661139858077,
+   "spread": 0.025637289052252436,
+   "spread_t_naive": 8.55538762782065,
+   "spread_t_corrected": 2.9578352238853567,
+   "top_decile_excess": 0.011963827062163403,
+   "top_decile_t_corrected": 2.361685511242627,
+   "decile_monotonicity": 0.2598323662153449,
+   "independent_observations": 45.6,
+   "vif": 8.366261398176293
+  },
+  {
+   "horizon": 63,
+   "n_dates": 371,
+   "n_rows": 193580,
+   "ic": 0.07683537480380329,
+   "ic_t_naive": 10.999970183534499,
+   "ic_t_corrected": 3.114170013676599,
+   "spread": 0.03730729858099818,
+   "spread_t_naive": 9.876965498799326,
+   "spread_t_corrected": 2.796239377859467,
+   "top_decile_excess": 0.01764837658542788,
+   "top_decile_t_corrected": 2.210005082175444,
+   "decile_monotonicity": 0.2870374908110757,
+   "independent_observations": 30.4,
+   "vif": 12.476661104693452
+  }
+ ],
+ "arms": [
+  {
+   "key": "results_of_record",
+   "title": "RESULTS OF RECORD -- the shipped book against its own universe",
+   "configuration": "ranking.source=v3_composite (22 factors in 5 themes); 6 slots, entry rank 6, exit rank 18, horizon 63 sessions; stop 8xATR (armed=True), target 3R (armed=False), invalidation armed=False; absolute floor DISABLED; shipped cost model",
+   "claimed_in": "README.md, 'RESULTS OF RECORD'",
+   "claimed": {
+    "mean_excess_per_period": -0.0423,
+    "ir": -0.83,
+    "alpha_per_period": -0.0067,
+    "periods_beating_benchmark": 0.329
+   },
+   "measured": {
+    "mean_return_per_period": 0.00831222969475072,
+    "bench_return_per_period": 0.052932131512637356,
+    "sharpe": 0.6063856112934563,
+    "bench_sharpe": 0.8751147190215786,
+    "mean_excess_per_period": -0.04461990181788665,
+    "excess_ann": -0.1784796072715466,
+    "gross_excess_ann": -0.17371753842148882,
+    "cost_drag_ann": 0.004762068850057785,
+    "ir": -0.8393870306928157,
+    "alpha_per_period": 0.000928381692188872,
+    "beta_to_benchmark": 0.13949651736202953,
+    "periods_beating_benchmark": 0.3261455525606469,
+    "worst_schedule_drawdown": -0.13456712949992355,
+    "avg_names": 4.822102425876011,
+    "n_periods": 371,
+    "periods_per_year": 4.0,
+    "book_return_ann": 0.03324891877900288,
+    "bench_return_ann": 0.21172852605054943
+   },
+   "status": "REPRODUCED",
+   "reason": "the direction and magnitude of the published headline claim survive a re-run on the current store. Note, and it is reported rather than dropped because it is not a headline figure: alpha / period claimed -0.0067 against +0.0009284 measured (OPPOSITE SIGN). Alpha here is a near-zero residual of two different books with different betas, so its sign is not stable; the headline claim is the underperformance, and that reproduces.",
+   "is_shipped": true,
+   "comparison": [
+    {
+     "figure": "information ratio",
+     "key": "ir",
+     "claimed": -0.83,
+     "measured": -0.8393870306928157,
+     "verdict": "matches",
+     "headline": true
+    },
+    {
+     "figure": "mean excess / period",
+     "key": "mean_excess_per_period",
+     "claimed": -0.0423,
+     "measured": -0.04461990181788665,
+     "verdict": "matches",
+     "headline": true
+    },
+    {
+     "figure": "periods beating the benchmark",
+     "key": "periods_beating_benchmark",
+     "claimed": 0.329,
+     "measured": 0.3261455525606469,
+     "verdict": "matches",
+     "headline": true
+    },
+    {
+     "figure": "alpha / period",
+     "key": "alpha_per_period",
+     "claimed": -0.0067,
+     "measured": 0.000928381692188872,
+     "verdict": "OPPOSITE SIGN",
+     "headline": false
+    }
+   ],
+   "years": 7.682409308692677
+  },
+  {
+   "key": "tuning_pass_2026_08_29",
+   "title": "Tuning pass (2026-08-29) -- sector-neutral 6-1 momentum, 6 names",
+   "configuration": "ranking = sector-neutral rank of mom_6_1 (close[t-21]/close[t-147] - 1), ONE column; 6 slots, entry rank 6, exit rank 18, entries every 21 sessions, held to a 63-session backstop; disaster floor 8xATR clipped to 35% of entry; no profit target, no invalidation exit; shipped cost model. This is `ranking.source=measured_factor`, which is NOT what the engine ships.",
+   "claimed_in": "README.md, 'What changed in the tuning pass (2026-08-29)' (the section appeared twice) and config `expectancy:`",
+   "claimed": {
+    "book_return_ann": 0.426,
+    "alpha_ann": 0.203,
+    "sharpe": 1.59,
+    "excess_sharpe": 1.12,
+    "sample_trades": 258,
+    "positive_alpha_years": "6 of 6",
+    "ir": null,
+    "excess_ann": null
+   },
+   "measured": {
+    "mean_return_per_period": 0.013009607033691984,
+    "bench_return_per_period": 0.05216332535191465,
+    "sharpe": 0.9273338278145793,
+    "bench_sharpe": 0.871307226906877,
+    "mean_excess_per_period": -0.039153718318222654,
+    "excess_ann": -0.15661487327289061,
+    "gross_excess_ann": -0.15324415509520894,
+    "cost_drag_ann": 0.003370718177681675,
+    "ir": -0.7680102409247965,
+    "alpha_per_period": 0.0044086989862607475,
+    "beta_to_benchmark": 0.16488419765047707,
+    "periods_beating_benchmark": 0.35135135135135137,
+    "worst_schedule_drawdown": -0.07705132925032876,
+    "avg_names": 4.813513513513514,
+    "n_periods": 370,
+    "periods_per_year": 4.0,
+    "book_return_ann": 0.05203842813476794,
+    "bench_return_ann": 0.2086533014076586
+   },
+   "status": "WITHDRAWN",
+   "reason": "annualised alpha: claimed +0.203, measured +0.01763; Sharpe: claimed +1.59, measured +0.9273; annualised book return: claimed +0.426, measured +0.05204",
+   "is_shipped": false,
+   "comparison": [
+    {
+     "figure": "annualised alpha",
+     "key": "alpha_ann",
+     "claimed": 0.203,
+     "measured": 0.01763479594504299,
+     "verdict": "outside 0.05",
+     "headline": true
+    },
+    {
+     "figure": "Sharpe",
+     "key": "sharpe",
+     "claimed": 1.59,
+     "measured": 0.9273338278145793,
+     "verdict": "outside 0.5",
+     "headline": true
+    },
+    {
+     "figure": "annualised book return",
+     "key": "book_return_ann",
+     "claimed": 0.426,
+     "measured": 0.05203842813476794,
+     "verdict": "outside 0.1",
+     "headline": true
+    },
+    {
+     "figure": "excess Sharpe",
+     "key": "excess_sharpe",
+     "claimed": 1.12,
+     "measured": null,
+     "verdict": "NOT_TESTABLE",
+     "headline": false
+    }
+   ],
+   "years": 7.682409308692677
+  }
+ ],
+ "notes": [
+  "Both arms are priced with the SHIPPED cost model at the shipped impact coefficient. Gross excess, cost drag and net excess are reported separately on every arm; the cost question and the gross-edge question are different questions and netting them hides which one is binding.",
+  "The book model is the repository's own cohort simulator (`portfolio_sim.simulate` / `phase_summary`), the same one `research portfolio` uses. It is NOT a bit-reproduction of the continuous weekly book the sealed holdouts evaluated, so magnitudes are not comparable to HOLDOUT_V3_A/B. Read the sign and the ordering.",
+  "The panel spans the whole store, which OVERLAPS the surfaces both of these configurations were selected on. Neither arm is out-of-sample evidence; this is a reproduction check, not a validation."
+ ]
+}

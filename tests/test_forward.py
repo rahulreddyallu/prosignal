@@ -82,12 +82,34 @@ def test_both_hypotheses_are_stated_as_pass_conditions(tmp_path):
     assert "fails if" in reg.primary
 
 
-def test_the_primary_test_is_the_one_the_holdout_could_not_settle(tmp_path):
-    """The forward window is sized for the attribution, not for the IC."""
+def test_the_primary_test_is_the_one_the_engine_cannot_answer_for_itself(tmp_path):
+    """UPDATED FOR SCHEME v2, and the change is the point.
+
+    v1's primary regressed the book's monthly excess on six long-short factors
+    built from this engine's OWN ranked columns, and this test asserted its
+    wording ("intercept", "degrees of freedom"). That hypothesis was circular:
+    a momentum-driven strategy regressed on a momentum factor built from its own
+    momentum column shows a high R-squared for arithmetic reasons.
+
+    v2 replaces it with the long-short SPREAD against an EXTERNAL factor model,
+    which is a harder and non-circular question -- and which cannot be graded
+    until that model exists, so the registration says NOT_TESTABLE rather than
+    quietly substituting the self-built regressors.
+
+    The assertions are re-pointed, not relaxed: this still pins the primary to
+    the question the holdout could not settle.
+    """
     reg = open_test(tmp_path)
-    assert "intercept" in reg.primary
-    assert "degrees of freedom" in reg.primary
-    assert "NOT the question at issue" in reg.secondary
+    assert "EXTERNAL" in reg.primary
+    assert "spread" in reg.primary.lower()
+    assert "NOT_TESTABLE" in reg.primary, (
+        "the primary names a regressor set that does not exist yet and must "
+        "say so. An ungradeable hypothesis reported as anything other than "
+        "NOT_TESTABLE is how 'could not check' becomes 'check passed'.")
+    assert "equal-weight" in reg.secondary, (
+        "the secondary is the benchmark-relative question under v2; without it "
+        "the window can be passed by an engine that loses to buying its own "
+        "universe.")
 
 
 def test_acting_on_the_signal_invalidates_the_test(tmp_path):

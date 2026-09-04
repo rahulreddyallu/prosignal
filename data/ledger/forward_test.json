@@ -1,0 +1,38 @@
+{
+  "started_on": "2026-09-04",
+  "config_version": "baseline-v2@3f7297cdb915fb0e",
+  "engine_version": "0.1.0",
+  "git_commit": "51a227ae35fc380a975f60c580986589af7f36cb",
+  "target_sessions": 375,
+  "target_months": 18,
+  "primary": "PRIMARY. Alpha of the LONG-SHORT SPREAD -- top decile minus bottom decile of the shipped composite, within the point-in-time eligible universe -- regressed on an EXTERNAL Indian factor model, over the registered window. The engine passes if that alpha is positive with an overlap-corrected t of at least 2.0. It fails if the alpha is not distinguishable from zero. EXTERNAL IS THE WHOLE POINT: the previous registration regressed on six long-short factors built from this engine's OWN ranked columns, which asks an easier and different question -- a momentum-driven strategy regressed on a momentum factor built from its own momentum column will show a high R-squared for reasons that are arithmetic rather than economic. The regressor set is the IIM Ahmedabad Indian Fama-French + momentum library (survivorship-corrected, maintained outside this repository), plus two in-house controls that library lacks: a low-volatility spread and an illiquidity spread built on this engine's own universe. THIS HYPOTHESIS IS NOT_TESTABLE UNTIL THAT MODEL EXISTS: see `instruments_required`. It is registered now, before any observation, because that is the only time a hypothesis may be written down; it will be graded when the instrument is built and not before, and it is never graded against the self-built regressors as a substitute.",
+  "secondary": "SECONDARY, and the benchmark-relative question. Mean excess return of the LONG LEG over an equal-weight hold of the point-in-time eligible universe it selects from, on the same holding windows. The engine passes if that excess is positive with an overlap-corrected t of at least 2.0. The engine is currently expected to FAIL this and it is registered for exactly that reason. Re-run on the current store, the shipped six-name book loses to an equal-weight hold of its own eligible universe in every window tested, GROSS as well as net -- cost drag is under one point a year at this cadence, so the deficit is not a cost problem. A forward test whose outcome is not in doubt is not a test; this one's is, and it is the hypothesis that asks whether running the engine beats not running it.",
+  "tertiary": "",
+  "invalidation": [
+    "config_version changes during the window -- the observations after the change came from a different model. config_version now covers the DATA and the TRAINING WINDOW as well as the parameters, so a store that grows underneath the window breaks it too, which the previous scheme could not see.",
+    "Any factor, gate or parameter is retuned using data from inside the window.",
+    "The shortlist is acted on with real capital, which introduces a feedback loop the test cannot separate from the signal.",
+    "Fewer than 60% of expected sessions produce a recorded run, which would make the sample a selection rather than a period.",
+    "The benchmark panel is unavailable for any part of the window. The secondary test cannot be evaluated without it, and a book reported without the alternative it is supposed to beat is the defect this registration was rewritten to close."
+  ],
+  "notes": [
+    "Eighteen months adds about six non-overlapping 63-session windows. That is NOT enough to settle either hypothesis and the power statement says so in advance.",
+    "No result may be reported before both targets are met. Reading an interim result and stopping when it looks good is optional stopping, and it invalidates the p-value. The falsification set is the exception and is deliberately monitored throughout: it tests for a broken instrument, not for a favourable one, and stopping early on a falsification is the correct response.",
+    "Nothing here is funded and nothing here places an order. docs/EXECUTION_GATE.md governs."
+  ],
+  "scheme": "v2",
+  "falsification": [
+    "SIGN OF THE ROLLING RANK IC. The composite's rank IC against the forward return, rolling. A sustained negative sign falsifies the ranking outright and needs far fewer observations than an alpha estimate. Reference: +0.049 (window A) and +0.036 (window B).",
+    "DECILE MONOTONICITY. Spearman correlation between decile index and mean forward excess, computed per date and then averaged -- never pooled. A composite whose deciles stop being monotone is ordering noise in the middle of the distribution. Reference: the generated results of record.",
+    "IC DECAY SHAPE. IC measured at 5, 10, 21, 42 and 63 sessions. The shipped horizon is 63 and the themes are oriented at 42/21/21/10/10; a decay curve that peaks somewhere else falsifies the holding period even while the sign holds.",
+    "MODELLED VERSUS REALISED COST. Round-trip cost the model predicted against what the recorded paper fills imply. The impact coefficient ships UNVALIDATED at 0.10 inside a declared range of [0.02, 0.50]; if realised cost sits outside the swept band, every net figure this engine has produced is wrong by a known amount.",
+    "MODELLED VERSUS ACHIEVABLE FILL. Whether the assumed next-session fill was reachable: circuit-limit states, surveillance measures and thin-book names where the assumed participation was not available. A fill that was never achievable falsifies the net figure without saying anything about the signal.",
+    "REALISED BREADTH. Names actually held per period against the book's slots, and entry events actually taken against the cadence. The engine's t-statistic is bounded by IC x sqrt(breadth); a book that runs at four names instead of six has less breadth than the power statement assumed, and the shortfall is measurable immediately."
+  ],
+  "power": "POWER, computed before the first observation so that no interim reading can be mistaken for a verdict. Expected t = IR x sqrt(years). At the only information ratio this engine has ever measured out of sample -- 0.78, on the sealed 2012-2017 window -- the expected t after 18 months is 0.78 x sqrt(1.5) = 0.96, and t = 2.0 arrives after about 6.5 years. THEREFORE THE PRIMARY AND SECONDARY HYPOTHESES ARE REGISTERED TO BE UNDERPOWERED AT THIS HORIZON, and that is stated here rather than discovered later. Failing to reach t >= 2.0 in eighteen months is the EXPECTED outcome under a true effect of this size and is not evidence against the strategy. What this window can decide is the falsification set below. Any report that quotes the primary or secondary result without this paragraph beside it is misreporting the test.",
+  "instruments_required": [
+    "An EXTERNAL Indian factor-return series (IIMA Fama-French + momentum) ingested with its own provenance, plus in-house low-volatility and illiquidity spread controls. Pass 2 builds it. Until it exists the PRIMARY hypothesis is NOT_TESTABLE and must be reported as such -- never as a pass, and never graded against `validation.attribution`'s self-built factors instead.",
+    "A long-short decile portfolio series (`validation/legs.py`). Pass 2 builds it. The engine has no short leg anywhere in `src/`, so the PRIMARY hypothesis currently has no series to regress."
+  ],
+  "fingerprint": "276e8f970949bdcb"
+}

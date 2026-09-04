@@ -38,9 +38,82 @@ from ..core.logging import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["TrialRegistry", "Trial", "registry_path"]
+__all__ = ["TrialRegistry", "Trial", "registry_path",
+           "V10_BUDGET", "V10_TOTAL_BUDGET", "PRE_V10_PASS", "BudgetExceeded"]
 
 FILENAME = "trial_registry.jsonl"
+
+
+# =============================================================================
+# The v10 trial budget
+# =============================================================================
+#
+# WHY A BUDGET AND NOT A COUNTER. The registry already counts trials honestly.
+# Counting is not the same as spending deliberately: the Deflated Sharpe charges
+# every configuration that was looked at, so a campaign that discovers halfway
+# through that it has spent thirty trials has already made whatever ships worse,
+# and no later discipline can give them back. On this engine's own numbers the
+# DSR reads 0.030 against 4,877 trials. The remaining room is small and it is
+# the reason the v10 plan allocates trials per pass in advance instead of
+# letting each pass take what it needs.
+#
+# SO THE REGISTRY REFUSES. A campaign that would take a pass past its allocation
+# raises `BudgetExceeded` and records NOTHING -- not the part that fits, either.
+# Recording a prefix would leave the researcher holding a half-run comparison
+# whose arms are already charged, which is the worst of both.
+#
+# WHAT A PASS IS. The eight passes of the v10 build plan. The allocation below
+# is that document's, unchanged; it sums to V10_TOTAL_BUDGET and a test asserts
+# it. P0 and P1 are zero on purpose -- reconciliation and data ingestion look at
+# no out-of-sample score, so they cost nothing and any trial charged to them is
+# a sign that modelling has leaked into a pass that was meant to have none.
+V10_BUDGET: Dict[str, int] = {
+    "P0": 0,    # reconcile, re-register, freeze -- no research
+    "P1": 0,    # point-in-time evidence expansion -- data, not models
+    "P2": 2,    # the long-short measurement layer
+    "P3": 12,   # independent information
+    "P4": 4,    # expected return, uncertainty, cost
+    "P5": 8,    # breadth and portfolio construction
+    "P6": 4,    # crash control
+    "P7": 6,    # validation and pre-registration
+    "P8": 4,    # paper-trading readiness (cost calibration)
+}
+
+V10_TOTAL_BUDGET = 40
+
+#: Where trials recorded before the budget existed are attributed. They are
+#: real and they are still charged by the DSR through `effective_trials`; what
+#: they are NOT is v10 spending, so they get a bucket with no allocation rather
+#: than being back-dated into a pass that had not been designed when they ran.
+PRE_V10_PASS = "pre-v10"
+
+
+class BudgetExceeded(RuntimeError):
+    """A campaign would take a pass past its pre-registered allocation.
+
+    Carries the arithmetic so the caller can report it rather than re-deriving
+    it: the pass, its allocation, what it has already spent, and how many new
+    configurations the refused campaign contained.
+    """
+
+    def __init__(self, pass_id: str, allocation: int, spent: int,
+                 requested: int) -> None:
+        self.pass_id = pass_id
+        self.allocation = allocation
+        self.spent = spent
+        self.requested = requested
+        self.remaining = max(allocation - spent, 0)
+        super().__init__(
+            f"trial budget exceeded: pass {pass_id} is allocated {allocation} "
+            f"trial(s), has already spent {spent}, and this campaign would add "
+            f"{requested} new configuration(s) -- {self.remaining} remain. "
+            f"Nothing was recorded. Either narrow the campaign to "
+            f"{self.remaining} configuration(s), or re-allocate the budget "
+            f"deliberately and say so on the result: every configuration "
+            f"looked at is charged by the Deflated Sharpe whether or not it "
+            f"was recorded, so spending past the allocation makes whatever "
+            f"ships less credible, not more."
+        )
 
 
 def registry_path(curated: Path) -> Path:
@@ -66,6 +139,12 @@ class Trial:
     #: what they scored is counting the denominator and throwing away the
     #: numerator.
     score: Optional[float] = None
+    #: Which v10 pass spent this trial, or `PRE_V10_PASS` for the trials
+    #: recorded before the budget existed. Absent on every row written before
+    #: this field did, which is why `load` defaults it rather than requiring it:
+    #: a registry that refused to read its own history would be one nobody
+    #: could compare a new campaign against.
+    pass_id: str = PRE_V10_PASS
 
     def as_row(self) -> Dict[str, object]:
         row: Dict[str, object] = {
@@ -73,6 +152,8 @@ class Trial:
             "recorded_at": self.recorded_at}
         if self.score is not None:
             row["score"] = float(self.score)
+        if self.pass_id and self.pass_id != PRE_V10_PASS:
+            row["pass_id"] = self.pass_id
         return row
 
 
@@ -127,13 +208,14 @@ class TrialRegistry:
                     out[at[key]] = Trial(key=prior.key, command=prior.command,
                                          label=prior.label,
                                          recorded_at=prior.recorded_at,
-                                         score=score)
+                                         score=score, pass_id=prior.pass_id)
                 continue
             at[key] = len(out)
             out.append(Trial(key=key, command=str(blob.get("command", "")),
                              label=str(blob.get("label", "")),
                              recorded_at=str(blob.get("recorded_at", "")),
-                             score=score))
+                             score=score,
+                             pass_id=str(blob.get("pass_id") or PRE_V10_PASS)))
         return out
 
     def recorded_scores(self) -> List[float]:
@@ -160,13 +242,63 @@ class TrialRegistry:
             counts[t.command] = counts.get(t.command, 0) + 1
         return counts
 
+    # -- the v10 budget ---------------------------------------------------
+    def by_pass(self) -> Dict[str, int]:
+        """Trials recorded per v10 pass. Includes the `pre-v10` bucket."""
+        counts: Dict[str, int] = {}
+        for t in self.load():
+            counts[t.pass_id] = counts.get(t.pass_id, 0) + 1
+        return counts
+
+    def spent(self, pass_id: str) -> int:
+        return self.by_pass().get(str(pass_id), 0)
+
+    def remaining(self, pass_id: str) -> int:
+        """Allocation minus spend, floored at zero. Raises on an unknown pass."""
+        allocation = self.allocation(pass_id)
+        return max(allocation - self.spent(pass_id), 0)
+
+    @staticmethod
+    def allocation(pass_id: str) -> int:
+        """This pass's v10 allocation.
+
+        An unknown pass is an error rather than an implicit zero or an implicit
+        infinity. A typo'd pass id that silently got no budget would refuse
+        legitimate work; one that silently got unlimited budget would defeat the
+        whole mechanism, and that is the direction mistakes travel in.
+        """
+        key = str(pass_id)
+        if key not in V10_BUDGET:
+            raise KeyError(
+                f"unknown v10 pass {key!r}. The budget is declared for "
+                f"{', '.join(sorted(V10_BUDGET))}; work that belongs to none of "
+                f"them is not v10 work and must not be charged to it."
+            )
+        return V10_BUDGET[key]
+
+    def budget_report(self) -> List[Dict[str, object]]:
+        """One row per pass: allocation, spend, remaining. For the CLI."""
+        counts = self.by_pass()
+        rows: List[Dict[str, object]] = []
+        for pid in sorted(V10_BUDGET):
+            spent = counts.get(pid, 0)
+            rows.append({"pass": pid, "allocated": V10_BUDGET[pid],
+                         "spent": spent,
+                         "remaining": max(V10_BUDGET[pid] - spent, 0),
+                         "over": max(spent - V10_BUDGET[pid], 0)})
+        rows.append({"pass": PRE_V10_PASS, "allocated": None,
+                     "spent": counts.get(PRE_V10_PASS, 0),
+                     "remaining": None, "over": 0})
+        return rows
+
     # -- writing ----------------------------------------------------------
     @staticmethod
     def key_for(command: str, label: str) -> str:
         return hashlib.sha256(f"{command}\x00{label}".encode("utf-8")).hexdigest()[:16]
 
     def record(self, command: str, labels: Sequence[str],
-               scores: Optional[Sequence[Optional[float]]] = None) -> int:
+               scores: Optional[Sequence[Optional[float]]] = None,
+               pass_id: str = PRE_V10_PASS) -> int:
         """Add any configuration not already recorded. Returns how many are new.
 
         Idempotent by (command, label): re-running the same comparison does not
@@ -178,6 +310,20 @@ class TrialRegistry:
         raises rather than being zipped short: a registry whose scores silently
         belong to the wrong arms is worse than one with no scores, because the
         variance computed from it looks like evidence.
+
+        ``pass_id`` charges the campaign against a v10 pass allocation. It is
+        CHECKED BEFORE ANYTHING IS WRITTEN and the check counts only genuinely
+        new configurations, so a re-run of a campaign already recorded costs
+        nothing and cannot be refused for a budget it has already paid. A
+        campaign that would take the pass past its allocation raises
+        `BudgetExceeded` and records NOTHING -- not the prefix that would have
+        fit. Recording part of a comparison charges the DSR for arms the
+        researcher never got to compare.
+
+        The default is `PRE_V10_PASS`, which has no allocation and is never
+        refused: existing callers keep working and their trials stay counted by
+        `effective_trials`, they simply are not v10 spending. A v10 campaign
+        names its pass.
         """
         if scores is not None and len(scores) != len(labels):
             raise ValueError(
@@ -185,6 +331,19 @@ class TrialRegistry:
                 f"they must correspond one to one, or scores must be omitted"
             )
         prior = {t.key: t for t in self.load()}
+        pass_id = str(pass_id or PRE_V10_PASS)
+
+        # THE GATE, and it runs before a single line is written. Only labels
+        # this registry has never seen are charged; `prior` is what makes the
+        # re-run of an already-paid campaign free.
+        if pass_id != PRE_V10_PASS:
+            allocation = self.allocation(pass_id)      # raises on a typo'd pass
+            wanted = len({self.key_for(command, str(l)) for l in labels}
+                         - set(prior))
+            already = self.spent(pass_id)
+            if already + wanted > allocation:
+                raise BudgetExceeded(pass_id, allocation, already, wanted)
+
         now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
         fresh = []
         added = 0
@@ -204,12 +363,16 @@ class TrialRegistry:
                 # a score it never had; `load` merges it without changing the
                 # count, and an arm that already has a score keeps it.
                 if seen.score is None and score is not None:
+                    # The supplementary line keeps the ORIGINAL pass. This trial
+                    # was spent once, by whoever spent it; a later run that
+                    # happens to know its score does not re-charge it to a
+                    # different pass's budget.
                     fresh.append(Trial(key=key, command=command,
                                        label=str(label), recorded_at=now,
-                                       score=score))
+                                       score=score, pass_id=seen.pass_id))
                 continue
             prior[key] = Trial(key=key, command=command, label=str(label),
-                               recorded_at=now, score=score)
+                               recorded_at=now, score=score, pass_id=pass_id)
             fresh.append(prior[key])
             added += 1
         if not fresh:

@@ -536,6 +536,180 @@ REGISTER: Tuple[Finding, ...] = (
         before_after="v1 archived as epoch 2026-08-28-113e70b2dc060afc, VOID",
         moves_coefficients=False, moves_history=False, forces_restart=True,
     ),
+
+    # ---------------------------------------------------------------- v10 P0
+    _f(
+        fid="P0-1", severity="critical",
+        title="README carried two irreconcilable book tables and the wrong one "
+              "was the one a reader met first",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="Two performance sections described the same engine and "
+                   "could not both be true: 'RESULTS OF RECORD' (mean excess "
+                   "-4.23%/period, IR -0.83, alpha -0.67%, 32.9% of periods "
+                   "beating the benchmark) and 'What changed in the tuning "
+                   "pass (2026-08-29)' (+42.6% annualised book return, +20.3% "
+                   "annualised alpha, Sharpe 1.59, positive alpha in 6 of 6 "
+                   "years). The second appeared TWICE, byte-identical, 102 "
+                   "lines each. Neither was generated, so neither could "
+                   "disagree with the other out loud, and nothing in the "
+                   "repository could tell which described the shipped engine. "
+                   "The deeper cause is that the tuning study measured a "
+                   "DIFFERENT RANKER -- sector-neutral mom_6_1, one column -- "
+                   "and its frequencies were nonetheless stamped onto every "
+                   "card the v3 composite issued, through config `expectancy:`.",
+        location="prosignal.validation.results::build",
+        fix="`prosignal research results` GENERATES docs/RESULTS_OF_RECORD.md "
+            "and a JSON twin from the current store, re-running BOTH "
+            "configurations through the repository's own simulator and marking "
+            "whichever fails to reproduce WITHDRAWN with its reason. Neither "
+            "is averaged and the more favourable one is not quoted. The "
+            "duplicated section is deleted; the surviving one is marked. Every "
+            "figure is stamped with config version, params/store/train hashes, "
+            "git commit, panel span and row count, distinct dates, independent "
+            "observations, cumulative trials and the store fingerprint.",
+        regression_test="tests/test_readme_numbers.py",
+        before_after="two ungenerated tables, one duplicated, neither stamped "
+                     "-> one generated record, README held to it by a test "
+                     "that also fails if a WITHDRAWN arm's figures appear "
+                     "outside a withdrawal notice",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+        notes="Reproduction of an already-charged configuration is not a new "
+              "trial: neither arm could be SELECTED by this command, and both "
+              "are already inside the counts the DSR charges. v10 pass P0 is "
+              "budgeted at zero and stays there.",
+    ),
+    _f(
+        fid="P0-2", severity="critical",
+        title="The documented ranker was not the configured ranker, and the "
+              "configured `column` named a different model's feature frame",
+        category=Category.REPRODUCIBILITY, status=Status.FIXED,
+        root_cause="config set `ranking.source: v3_composite` with "
+                   "`ranking.column: mom_6_1_r`, while README's executive "
+                   "summary said the shipped ranking WAS `mom_6_1_r`, one "
+                   "column. `column` is read only when `source` is "
+                   "`measured_factor`, so it was inert -- and `mom_6_1` is not "
+                   "one of the twenty-two v3 factors at all: it belongs to "
+                   "features/crosssec.py, the FITTED model's panel. A stale "
+                   "value that looks like a live setting was being read as the "
+                   "shipped ranker by everything downstream, including the "
+                   "repository's own summary of itself.",
+        location="prosignal.stages.stage4_core_score::_apply_ranking_policy",
+        fix="Measured what actually orders the book by driving stages 1-4 on "
+            "the 2026-09-03 cross-section and correlating the result against "
+            "both candidates: the shipped order IS the v3 composite's order, "
+            "Spearman +1.000000, identical on all 386 names. README's ranking "
+            "row now names `v3_composite`; the inert column is prefixed "
+            "`UNUSED:` so it cannot be misread again, and using "
+            "`measured_factor` now requires setting both fields deliberately.",
+        regression_test="tests/test_shipped_ranker.py",
+        before_after="README 'mom_6_1_r, one column' vs config v3_composite "
+                     "-> both name v3_composite, 22 factors in 5 themes, and a "
+                     "test fails if either moves without the other",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+    ),
+    _f(
+        fid="P0-3", severity="high",
+        title="A data-depth change left config_version identical while moving "
+              "the fitted coefficients",
+        category=Category.REPRODUCIBILITY, status=Status.FIXED,
+        root_cause="`config_version` hashed parameters.yaml and nothing else. "
+                   "The model refits from stored history on every run, so the "
+                   "store IS the training set: a store that grew produced "
+                   "different coefficients under an identical hash. The "
+                   "forward test's entire integrity check is 'did "
+                   "config_version change', so the one instrument that "
+                   "depended on it could not see the change -- which is how "
+                   "the last window recorded FIVE distinct model fingerprints "
+                   "against one config version.",
+        location="prosignal.config.identity::identify",
+        fix="config_version = label @ (H(params) XOR H(store_fingerprint) XOR "
+            "H(train_window)), where the store fingerprint carries first "
+            "session, last session, session count and symbol count per feed, "
+            "and the training window carries the span actually fitted plus the "
+            "cap, horizon, purge and embargo. `AppConfig.bind_store` resolves "
+            "it; `params_version` keeps the parameters-only question "
+            "answerable, because 'did the knobs move' is a real and different "
+            "question.",
+        regression_test="tests/test_config_identity.py",
+        before_after="identical parameters + 250 more sessions of prices used "
+                     "to give an identical version; they now give different "
+                     "ones",
+        moves_coefficients=False, moves_history=False, forces_restart=True,
+        notes="Forces a restart because every prior window was graded against "
+              "an identity that could not see its own training set moving.",
+    ),
+    _f(
+        fid="P0-4", severity="high",
+        title="The forward test's tamper check had an unreachable branch",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`Registration._payload` wrote `tertiary` into the payload "
+                   "unconditionally AND again under `if not legacy`, so the "
+                   "legacy and current payloads were byte-identical. "
+                   "`fingerprint(legacy=True)` therefore equalled "
+                   "`fingerprint()`, `verify(allow_legacy=True)` added "
+                   "nothing, and `fingerprint_scheme` could never return "
+                   "'legacy'. A tamper check with a branch that cannot execute "
+                   "is a tamper check nobody has tested.",
+        location="prosignal.validation.forward::Registration._payload",
+        fix="The legacy payload now reproduces the v1 shape exactly -- without "
+            "`tertiary`, which is what 'before the benchmark-relative "
+            "hypothesis joined the hash' means. The two fingerprints are now "
+            "genuinely distinct and the scheme is reported honestly.",
+        regression_test="tests/test_forward_registration_v2.py",
+        before_after="fingerprint() == fingerprint(legacy=True) for every "
+                     "registration -> distinct, and 'legacy' is reachable",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+    ),
+    _f(
+        fid="P0-5", severity="high",
+        title="The short side could not be priced at all",
+        category=Category.EXECUTION, status=Status.FIXED,
+        root_cause="The `costs:` block had no derivatives leg. A leg with no "
+                   "cost model does not read as UNKNOWN in a later comparison "
+                   "-- it reads as FREE. Separately, futures STT tripled from "
+                   "0.02% to 0.05% on 1 April 2026 and nothing in the "
+                   "repository could notice a statutory rate going stale, "
+                   "because STATUTORY values carried no verification date.",
+        location="prosignal.config.schema::DerivativesCostConfig",
+        fix="Added `costs.derivatives` with futures STT 0.05% sell-side "
+            "(STATUTORY, verified 2026-09-03), options premium 0.15% "
+            "(STATUTORY, carried and unused), borrow fee and futures roll "
+            "spread (both UNVALIDATED with declared search ranges, swept never "
+            "claimed) and futures margin (OPERATIONAL, a planning proxy for "
+            "an exchange-computed SPAN+ELM number). `Tunable.verified_on` is "
+            "now REQUIRED on every STATUTORY parameter. Nothing here places an "
+            "order; docs/EXECUTION_GATE.md is unchanged.",
+        regression_test="tests/test_derivatives_costs.py",
+        before_after="no derivatives leg and seven undated STATUTORY rates -> "
+                     "a priced short stack and a loader that refuses an "
+                     "undated statutory rate",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+    ),
+    _f(
+        fid="P0-6", severity="high",
+        title="The trial budget was countable but not enforceable",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="The registry counted trials honestly and could not refuse "
+                   "one. Counting is not the same as spending deliberately: "
+                   "the Deflated Sharpe already reads 0.030 against 4,877 "
+                   "trials, so a campaign that discovers halfway through that "
+                   "it has spent thirty has already made whatever ships less "
+                   "credible, and nothing can give them back.",
+        location="prosignal.validation.registry::TrialRegistry.record",
+        fix="The v10 budget of 40 is declared per pass (P0=0, P1=0, P2=2, "
+            "P3=12, P4=4, P5=8, P6=4, P7=6, P8=4) and `record(pass_id=...)` "
+            "raises `BudgetExceeded` and writes NOTHING when a campaign would "
+            "exceed its allocation -- not even the prefix that would fit, "
+            "because recording part of a comparison charges the DSR for arms "
+            "the researcher never got to compare. Idempotent re-runs stay "
+            "free; trials recorded before the budget existed keep a `pre-v10` "
+            "bucket with no allocation and are still charged by "
+            "`effective_trials`.",
+        regression_test="tests/test_trial_budget.py",
+        before_after="an unbudgeted campaign was silently counted -> it is "
+                     "refused, with the arithmetic on the exception",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+    ),
 )
 
 

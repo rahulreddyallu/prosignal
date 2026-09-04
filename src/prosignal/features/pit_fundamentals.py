@@ -28,6 +28,55 @@ import numpy as np, pandas as pd
 
 
 
+#: NSE's regular-session close, IST. Not a hypothesis -- it is the moment the
+#: decision this engine supports is taken, so it is the line between "the market
+#: knew this" and "it did not".
+MARKET_CLOSE = pd.Timestamp("15:30:00").time()
+
+
+def availability_date(filing_ts) -> pd.Series:
+    """The first SESSION DATE on which a filing could have been acted upon.
+
+    THE ONE-SESSION LOOKAHEAD THIS CLOSES. NSE stamps filings with a time --
+    '16-Jan-2025 20:20' for RELIANCE's Q3 -- and the provider used to do
+    `str(value).split(" ")[0]`, keeping the date and throwing the time away,
+    with a docstring saying "Date is what we gate on". Stored as a midnight
+    date, that 20:20 filing became visible to the as-of join on 16 January: a
+    session whose decision is taken at the 15:30 close, nearly five hours
+    before the filing existed.
+
+    Measured 2026-09-04 over 1,204 filings across ten symbols, **59.1% are
+    stamped after the close**, the modal filing hour being 17:00-19:00. So this
+    was not an edge case, it was the majority of the feed, and it leaked in the
+    flattering direction where no backtest could see it.
+
+    THE RULE. A filing at or before the close is actionable that same session;
+    one after the close is not actionable until the next. Returns a DATE, and
+    the caller's `searchsorted(side="left")` over session dates then lands on
+    the first session at or after it.
+
+    AN UNKNOWN TIME IS TREATED AS AFTER THE CLOSE. Rows already in the store
+    carry a date with no time, and there is no way to recover which side of
+    15:30 they fell on. Delaying them by one session costs a day of staleness;
+    admitting them costs a lookahead on three fifths of them. This engine
+    already prices unknown liquidity at the worst case the model allows, and
+    the same reasoning applies to an unknown hour.
+    """
+    ts = pd.to_datetime(pd.Series(filing_ts), errors="coerce")
+    day = ts.dt.normalize()
+    # Seconds into the day rather than `.dt.time`: an all-NaT input leaves
+    # `.dt.time` as datetime64 rather than object, and comparing that to a
+    # `datetime.time` raises. This form is also cheaper on a long column.
+    into_day = (ts - day).dt.total_seconds()
+    close_s = MARKET_CLOSE.hour * 3600 + MARKET_CLOSE.minute * 60 + MARKET_CLOSE.second
+    # A midnight stamp is a date with the time discarded, not a filing lodged at
+    # 00:00 -- treat it as unknown, therefore as after the close.
+    known_intraday = ts.notna() & (into_day > 0)
+    before_close = known_intraday & (into_day <= close_s)
+    out = day + pd.to_timedelta((~before_close).astype("int64"), unit="D")
+    return out.where(ts.notna())
+
+
 #: Measured p99 of the real filing lag, by quarter-end month, floored at 60d.
 DISCLOSURE_LAG_DAYS = {3: 112, 6: 104, 9: 60, 12: 60}
 DEFAULT_LAG_DAYS = 112
@@ -80,8 +129,14 @@ def build_records(store=None, D=None) -> pd.DataFrame:
     g = f.groupby("symbol", sort=False)
     for c in flow:
         f["ttm_" + c] = g[c].transform(lambda s: s.rolling(4, min_periods=4).sum())
+    # THE AVAILABILITY DATE, not the filing date. `filing_ts` carries the time
+    # where the store has it; where it does not, `availability_date` treats the
+    # hour as unknown and therefore as after the close. Either way this is the
+    # first session that could have acted on the filing.
+    _ts = f["filing_ts"] if "filing_ts" in f.columns else f["filing_date"]
     a = pd.DataFrame({
-        "symbol": f["symbol"], "effective_date": f["filing_date"],
+        "symbol": f["symbol"],
+        "effective_date": availability_date(_ts).to_numpy(),
         "period_end": f["period_end"], "src": "filed",
         "ttm_revenue": f["ttm_revenue"], "ttm_net_profit": f["ttm_net_profit"],
         "ttm_pbt": f["ttm_profit_before_tax"],

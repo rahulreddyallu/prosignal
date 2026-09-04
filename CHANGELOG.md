@@ -1,5 +1,128 @@
 # CHANGELOG
 
+## v10 Pass 0: one truth per number — 2026-09-04
+
+Reconciliation only. **No model changed, no coefficient moved, no factor was
+added or removed.** Trial charge: **0** — see "what is not a trial" below.
+
+### The two book tables, arbitrated by code
+
+README carried two performance tables that could not both describe the same
+engine, and the second appeared **twice, byte-identical, 102 lines each**.
+`prosignal research results` now GENERATES `docs/RESULTS_OF_RECORD.md` and a
+JSON twin by re-running **both** configurations against the current store,
+through the repository's own simulator, with the shipped cost model.
+
+| arm | verdict |
+|---|---|
+| **RESULTS OF RECORD** — the shipped `v3_composite` six-name book | **REPRODUCED** |
+| **Tuning pass (2026-08-29)** — sector-neutral `mom_6_1`, one column | **WITHDRAWN** |
+
+The shipped book reproduces closely: IR **−0.84** against a published −0.83,
+mean excess **−4.46%** per period against −4.23%, **32.6%** of periods beating
+the benchmark against 32.9%. The tuning pass does not: annualised alpha
+**+1.8%** against a claimed **+20.3%**, book return **+5.2%** against **+42.6%**,
+Sharpe **0.93** against **1.59**.
+
+**And the withdrawn study never described the shipped engine.** It ranked on
+`mom_6_1` — one column, and one belonging to `features/crosssec.py`, the
+*fitted* model's panel. It is not among the twenty-two v3 factors. Its
+frequencies are nonetheless still stamped onto every card the v3 composite
+issues, through `expectancy:`; that block is now flagged WITHDRAWN in config.
+Re-measuring it on the shipped composite is a Pass 4 (calibration) job, because
+removing it changes what the engine outputs and that belongs in a new epoch.
+
+**The deficit is gross, not cost.** Cost drag is **0.5%** a year against a net
+excess of **−17.8%**. This cannot be fixed by trading more cheaply.
+
+### What actually ranks
+
+Measured, not read: stages 1–4 were driven on the 2026-09-03 cross-section and
+the resulting order correlated against both candidates. The shipped ordering is
+the v3 composite's ordering at Spearman **+1.000000**, identical on all 386
+names. README's executive summary said `mom_6_1_r`, one column; it was wrong,
+and `ranking.column` was an inert reference to another model's feature frame.
+It is now `UNUSED:mom_6_1_r`, and `tests/test_shipped_ranker.py` fails if the
+documented and configured rankers ever diverge again.
+
+### config_version now covers the data
+
+`config_version = label @ (H(params) XOR H(store_fingerprint) XOR
+H(train_window))`. The store fingerprint carries first session, last session,
+session count and symbol count per feed; the training window carries the span
+actually fitted plus cap, horizon, purge and embargo. Identical parameters over
+a store 250 sessions deeper now produce a different version. Previously they did
+not, which is how the last forward window recorded **five** distinct model
+fingerprints against one config version.
+
+### The forward test, re-registered as v2
+
+- **PRIMARY** — long-short spread alpha against an **external** factor model.
+  The v1 primary regressed on six long-short factors built from this engine's
+  own ranked columns, which is circular. Marked **NOT_TESTABLE** and listed in
+  `instruments_required` until Pass 2 builds the model; it is never graded
+  against the self-built regressors as a substitute.
+- **SECONDARY** — long-leg excess over the equal-weight eligible universe. The
+  engine is registered to FAIL it.
+- **FALSIFICATION SET** — IC sign, decile monotonicity, IC decay shape, modelled
+  vs realised cost, modelled vs achievable fill, realised breadth. This is what
+  eighteen months can actually decide.
+- **POWER STATEMENT** — at the sealed window's IR of 0.78, t = 2.0 arrives after
+  **6.5 years**. Both hypotheses are registered as underpowered *in advance*.
+
+**A correction to the audit's own account.** The previous registration was
+reported INVALID partly because "the pre-registration file no longer matches its
+hash". It was never edited. `_payload` wrote `tertiary` into both the current
+and the legacy branch, so the two fingerprints were byte-identical, the legacy
+branch was dead code and `fingerprint_scheme` could never return `legacy`. The
+file predates the contract; it does not fail it. Fixed, and the distinction is
+now reachable and tested.
+
+### Trial budget, enforced
+
+The v10 budget of 40 is declared per pass in `validation/registry.py` (P0=0,
+P1=0, P2=2, P3=12, P4=4, P5=8, P6=4, P7=6, P8=4) and `record(pass_id=...)` now
+**refuses** a campaign that would exceed its allocation, writing nothing — not
+even the prefix that would have fit, because recording part of a comparison
+charges the Deflated Sharpe for arms nobody got to compare.
+
+**What is not a trial.** Re-running an already-charged configuration to find out
+whether its published number reproduces is not a new look at the data: neither
+arm could be *selected* by this command, and both sit inside the counts the DSR
+already charges. P0 is budgeted at zero and stays there.
+
+### The short side can now be priced
+
+`costs.derivatives` adds futures STT **0.05%** sell-side (STATUTORY, verified
+2026-09-03 — **raised from 0.02% on 1 April 2026**, a 150% increase landing on
+every short entry and every roll), options premium 0.15% (carried, unused,
+options rejected on design grounds), borrow fee and roll spread (UNVALIDATED
+with declared ranges — swept, never claimed) and futures margin (OPERATIONAL, a
+planning proxy for an exchange-computed SPAN+ELM figure).
+
+`Tunable.verified_on` is now **required** on every STATUTORY parameter. Seven
+existing rates were undated and now carry their check date.
+
+**No execution capability arrived with it.** `docs/EXECUTION_GATE.md` is
+unchanged and `tests/test_derivatives_costs.py` fails if an order, fill, ticket
+or broker client appears anywhere in `src/`.
+
+### Also
+
+- Local `main` and `origin/main` had diverged (8 behind, 5 ahead) and neither
+  was a superset. Reconciled, restoring `docs/MODEL_v9R.md`, `features/v9r.py`,
+  `features/families.py` and `book_sim.py` while keeping the K-6 cost work.
+  **That merge carries a traded change**: `absolute_floor.enabled` moves
+  true → false, disabled on origin/main on 2026-09-02 against a CPCV treatment
+  effect of −2.2% (95% CI [−3.2%, −1.4%]) whose working, `research/v9/`, the
+  same cleanup deleted.
+- `test_adj_factor_without_a_price_column_is_refused` constructed a `DataStore`
+  at `/nonexistent-curated`; `DataStore.__init__` calls `mkdir(parents=True)`,
+  which the read-only macOS filesystem root refuses. It had been erroring rather
+  than asserting.
+
+---
+
 ## Cleanup: one engine, not five — 2026-09-03
 
 The repository carried every generation it had ever built. This removes the ones

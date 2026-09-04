@@ -399,18 +399,23 @@ class TestBookIsBenchmarked:
 # =============================================================================
 # N1 -- adj_factor is never served as a placeholder
 # =============================================================================
-def test_adj_factor_without_a_price_column_is_refused():
+def test_adj_factor_without_a_price_column_is_refused(tmp_path):
     """The stored column is 1.0 for every row; the meaningful factor is computed
     only when prices are adjusted. A caller that asked for adj_factor alone got
     all-ones and, using it to recover the quoted price, recovered the ADJUSTED
     price -- the exact look-ahead the quoted-price floor exists to remove. Found
-    by walking into it while verifying F4."""
-    import datetime as dt
-    from pathlib import Path
+    by walking into it while verifying F4.
+
+    USES tmp_path, NOT "/nonexistent-curated". `DataStore.__init__` calls
+    `curated.mkdir(parents=True, exist_ok=True)`, so the old paths tried to
+    create a directory at the filesystem root -- which macOS mounts read-only,
+    making this test fail with OSError before it reached its assertion. It was
+    testing nothing on this platform and erroring on it.
+    """
     from prosignal.core.errors import IntegrityError
     from prosignal.data.store import DataStore
 
-    store = DataStore(Path("/nonexistent-curated"), Path("/nonexistent-snapshots"))
+    store = DataStore(tmp_path / "curated", tmp_path / "snapshots")
     frame = pd.DataFrame({
         "date": pd.to_datetime(["2024-01-01", "2024-01-02"]),
         "symbol": ["A", "A"], "adj_factor": [1.0, 1.0], "turnover": [1e8, 1e8],
@@ -1207,7 +1212,16 @@ class TestForwardTestIsBenchmarkRelative:
     conclusion was stated against zero. Adding one is legitimate only because
     the window has not opened."""
 
-    def test_a_tertiary_benchmark_hypothesis_exists(self):
+    def test_a_benchmark_relative_hypothesis_exists(self):
+        """RE-POINTED FOR SCHEME v2, and deliberately at the PROPERTY.
+
+        This used to assert `reg.tertiary` was non-empty. Under v2 the
+        benchmark-relative question is the SECONDARY -- in v1 it was a
+        `tertiary` bolted on after the fact, which is itself what the finding
+        was about. Asserting a field name pinned the accident; asserting that
+        SOME registered hypothesis compares the book against holding its own
+        universe pins the thing that must never be lost.
+        """
         import datetime as dt
         import tempfile
         from pathlib import Path
@@ -1216,10 +1230,15 @@ class TestForwardTestIsBenchmarkRelative:
             reg = register(Path(d), config_version="v", engine_version="e",
                            git_commit="c", started_on=dt.date(2026, 1, 1),
                            unchecked_reason="unit test: no config in scope")
-        assert reg.tertiary, "there is no benchmark-relative hypothesis"
-        t = reg.tertiary.upper()
-        assert "EQUAL-WEIGHT" in t and "EXCESS" in t
-        assert "expected to FAIL" in reg.tertiary, (
+        hypotheses = [h for h in (reg.primary, reg.secondary, reg.tertiary) if h]
+        benchmark = [h for h in hypotheses
+                     if "EQUAL-WEIGHT" in h.upper() and "EXCESS" in h.upper()]
+        assert benchmark, (
+            "no registered hypothesis compares the book against an "
+            "equal-weight hold of the universe it selects from. Without one "
+            "the window can be passed by an engine that loses to buying "
+            "everything -- which on the selection period it does.")
+        assert any("expected to FAIL" in h for h in benchmark), (
             "the registration must state the prior honestly; a forward test "
             "whose outcome is not in doubt is not a test")
 

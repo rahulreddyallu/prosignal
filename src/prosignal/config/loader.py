@@ -34,7 +34,12 @@ __all__ = [
 ]
 
 #: Keys that are prose, not settings. Editing them must not change the hash.
-_HASH_IGNORED_KEYS = frozenset({"note", "description", "validated_by", "validated_on"})
+#:
+#: `verified_on` joins them because re-checking a statutory rate that has NOT
+#: moved is not a change to the model. If the rate itself moves, `value` moves
+#: and the hash moves with it -- which is the behaviour that matters.
+_HASH_IGNORED_KEYS = frozenset({"note", "description", "validated_by",
+                                "validated_on", "verified_on"})
 
 _lock = threading.Lock()
 _cache: Dict[Tuple[str, Optional[str]], "AppConfig"] = {}
@@ -103,7 +108,8 @@ def _render_validation_error(exc: ValidationError, config_path: Path) -> str:
 class AppConfig:
     """The validated parameter set plus everything derived from it."""
 
-    __slots__ = ("params", "paths", "hash", "source_file", "_tunable_index")
+    __slots__ = ("params", "paths", "hash", "source_file", "_tunable_index",
+                 "_identity", "_bound_store")
 
     def __init__(self, params: RootConfig, root: Path, source_file: Path) -> None:
         self.params = params
@@ -111,11 +117,94 @@ class AppConfig:
         self.paths = ProjectPaths(root, params.runtime.paths)
         self.hash = config_hash(params)
         self._tunable_index: Optional[Dict[str, Dict[str, Any]]] = None
+        self._identity: Optional[Any] = None
+        self._bound_store: Optional[Any] = None
 
     # -- identity -----------------------------------------------------------
+    def bind_store(self, store: Any) -> "AppConfig":
+        """Resolve the FULL identity -- parameters AND data AND training window.
+
+        WHY THIS EXISTS. A hash over parameters.yaml cannot identify a model.
+        The fit reads history from the store on every run, so a store that grew
+        produces different coefficients from identical code and identical knobs
+        -- and the README has carried exactly that as a known limitation, while
+        the forward test's whole integrity check is "did `config_version`
+        change". `config/identity.py` sets out the three components.
+
+        IT IS A SEPARATE STEP because loading a config must not require a store.
+        `config show`, `config validate` and most of the schema tests have no
+        data at all, and a loader that opened parquet to tell you whether your
+        YAML parses would be the wrong shape entirely.
+
+        UNBOUND IS HONEST, NOT WRONG. Until a store is bound, `version` is the
+        parameters-only string it has always been, and `identity` is None so a
+        caller can tell which one it is holding. What changes is that a run
+        WITH a store now stamps the fuller identity, so two runs trained on
+        different data can no longer quote the same version.
+
+        RESOLVED LAZILY. Binding only records the store; the fingerprint is
+        computed on first access to `version` or `identity`. Reading the
+        coverage of every feed costs a couple of seconds even now that it reads
+        parquet columns directly rather than adjusted frames, and the CLI binds
+        on every invocation -- so `config show`, `config validate` and
+        `data status`, none of which ask what the version is, should not pay
+        for an answer they never read.
+
+        Returns self, so it can be chained at the call site.
+        """
+        # RE-BINDING THE SAME STORE MUST NOT RE-RESOLVE. `load_config` caches
+        # the AppConfig process-wide, and `run_analysis` binds on every call --
+        # so clearing the cached identity unconditionally made every analysis in
+        # a process pay the fingerprint again. Identity by object, because two
+        # DataStore instances over the same directory are the same store for
+        # this purpose and a test that constructs one per call should not be
+        # charged for it.
+        if store is self._bound_store:
+            return self
+        same_dir = (self._bound_store is not None
+                    and getattr(store, "curated", None) is not None
+                    and getattr(store, "curated", None)
+                    == getattr(self._bound_store, "curated", object()))
+        self._bound_store = store
+        if not same_dir:
+            self._identity = None
+        return self
+
+    @property
+    def identity(self) -> Optional[Any]:
+        """The resolved `ConfigIdentity`, or None when no store is bound.
+
+        Computes it on first access and caches it. A store does not change
+        underneath a running process -- and if it did, two stages within one
+        run seeing different identities would be worse than either answer.
+        """
+        if self._identity is None and self._bound_store is not None:
+            from .identity import identify
+
+            self._identity = identify(self, self._bound_store)
+        return self._identity
+
     @property
     def version(self) -> str:
-        """The string written to every ledger row, e.g. ``baseline-v1@3f9c...``."""
+        """The string written to every ledger row, e.g. ``baseline-v1@3f9c...``.
+
+        With a store bound this is
+        ``label@ H(params) XOR H(store_fingerprint) XOR H(train_window)``;
+        without one it is ``label@H(params)``.
+        """
+        ident = self.identity                    # resolves lazily, then caches
+        if ident is not None:
+            return ident.version
+        return f"{self.params.meta.config_label}@{self.hash}"
+
+    @property
+    def params_version(self) -> str:
+        """``label@H(params)`` -- parameters only, whatever store is bound.
+
+        Kept reachable because "did the knobs move" is a real question with a
+        real answer, and it is not the same question as "is this the same
+        model".
+        """
         return f"{self.params.meta.config_label}@{self.hash}"
 
     # -- convenience accessors ---------------------------------------------

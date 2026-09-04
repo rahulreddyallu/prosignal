@@ -50,12 +50,26 @@ from typing import Any, Dict, List, Optional
 
 __all__ = [
     "Registration", "Progress", "REGISTRATION_NAME", "fingerprint_scheme",
-    "MIN_SESSION_COVERAGE", "COVERAGE_GRACE_SESSIONS",
+    "MIN_SESSION_COVERAGE", "COVERAGE_GRACE_SESSIONS", "SCHEME",
     "register", "load_registration", "verify", "progress",
     "sessions_in_window",
 ]
 
 REGISTRATION_NAME = "forward_test.json"
+
+#: The contract this file is written under. It is INSIDE the fingerprint, so a
+#: registration cannot be silently reinterpreted under a later contract than
+#: the one it was written to.
+#:
+#: v1  primary = attribution intercept on SELF-BUILT factors; secondary = pooled
+#:     rank IC; tertiary = excess over the equal-weight universe, bolted on
+#:     after the fact.
+#: v2  primary = long-short SPREAD alpha against an EXTERNAL factor model;
+#:     secondary = long-leg excess over the equal-weight eligible universe; plus
+#:     a FALSIFICATION set, which is the part an eighteen-month window can
+#:     actually decide, and a POWER statement, which says in advance that the
+#:     primary cannot be decided in that time.
+SCHEME = "v2"
 
 #: Target length. Trading sessions rather than calendar days, because the
 #: observation count is what matters and holidays do not produce observations.
@@ -115,10 +129,55 @@ class Registration:
     #: buying everything.
     #:
     #: Optional only so that registrations written before it existed still
-    #: load. A NEW registration that omits it is refused by `register`.
+    #: load. Empty under scheme v2, where `secondary` carries the
+    #: benchmark-relative question instead.
     tertiary: str = ""
 
+    #: Which contract this registration was written under. See `SCHEME`.
+    scheme: str = "v1"
+
+    #: WHAT AN EIGHTEEN-MONTH WINDOW CAN ACTUALLY DECIDE.
+    #:
+    #: The primary hypothesis cannot be settled here and the power statement
+    #: says so in advance. What this window CAN do is falsify: a sign that
+    #: flips, an ordering that stops being monotone, a cost model that turns
+    #: out to be wrong by a factor, a fill that was never achievable, a breadth
+    #: that never materialised. Each of these is decidable on far fewer
+    #: observations than an alpha estimate, and any one of them failing is
+    #: informative on its own.
+    #:
+    #: Registering only a hypothesis the window cannot decide is how a test
+    #: gets read as a verdict on the strategy when it was a verdict on the
+    #: sample size.
+    falsification: List[str] = field(default_factory=list)
+
+    #: `expected t = IR x sqrt(years)` at the achieved IR over this window,
+    #: computed and written BEFORE the first observation. Its purpose is to
+    #: stop an early positive stretch being read as confirmation, and to stop
+    #: the eventual failure to reach t=2.0 being read as a fact about the
+    #: strategy rather than about the horizon.
+    power: str = ""
+
+    #: Instruments the hypotheses need that DO NOT EXIST YET. Named rather than
+    #: assumed: the primary regresses on an external factor model that Pass 2
+    #: builds, and grading it before that exists would mean substituting the
+    #: self-built regressors this registration was rewritten to get away from.
+    #: While this list is non-empty the corresponding hypothesis is
+    #: NOT_TESTABLE -- which is a distinct outcome from a failure, and is never
+    #: upgraded to a pass.
+    instruments_required: List[str] = field(default_factory=list)
+
     def _payload(self, *, legacy: bool) -> Dict[str, Any]:
+        """The fields that must not change after the first observation.
+
+        ``legacy`` reproduces the v1 payload EXACTLY -- which means WITHOUT
+        `tertiary`, because v1 is by definition the scheme from before the
+        benchmark-relative hypothesis joined the hash. The previous version of
+        this method wrote `tertiary` into both branches, so the two
+        fingerprints were byte-identical, `fingerprint(legacy=True)` was dead
+        code and `fingerprint_scheme` could never return "legacy". A tamper
+        check with an unreachable branch is a tamper check nobody has tested.
+        """
         out: Dict[str, Any] = {
             "started_on": self.started_on,
             "config_version": self.config_version,
@@ -126,13 +185,18 @@ class Registration:
             "target_months": self.target_months,
             "primary": self.primary,
             "secondary": self.secondary,
-            "tertiary": self.tertiary,
             "invalidation": sorted(self.invalidation),
         }
-        if not legacy:
-            # Inside the hash, so a hypothesis cannot be added, softened or
-            # deleted once observations have started landing.
-            out["tertiary"] = self.tertiary
+        if legacy:
+            return out
+        # Everything below is inside the hash, so no hypothesis, falsification
+        # criterion or power claim can be added, softened or deleted once
+        # observations have started landing.
+        out["tertiary"] = self.tertiary
+        out["scheme"] = self.scheme
+        out["falsification"] = sorted(self.falsification)
+        out["power"] = self.power
+        out["instruments_required"] = sorted(self.instruments_required)
         return out
 
     def fingerprint(self, *, legacy: bool = False) -> str:
@@ -311,46 +375,110 @@ def register(
         git_commit=git_commit,
         target_sessions=TARGET_SESSIONS,
         target_months=TARGET_MONTHS,
+        scheme=SCHEME,
         primary=(
-            "PRIMARY. Regress the paper portfolio's monthly excess return on "
-            "the six long-short factors built by validation.attribution, over "
-            "the 18 forward months. The engine passes if the intercept is "
-            "positive with an overlap-corrected t of at least 2.0. It fails if "
-            "the intercept is not distinguishable from zero. On the holdout "
-            "this test gave alpha -1.01% at t -0.38 with only 15 observations "
-            "against 6 factors; 18 monthly observations leave 11 degrees of "
-            "freedom rather than 8."
+            "PRIMARY. Alpha of the LONG-SHORT SPREAD -- top decile minus bottom "
+            "decile of the shipped composite, within the point-in-time eligible "
+            "universe -- regressed on an EXTERNAL Indian factor model, over the "
+            "registered window. The engine passes if that alpha is positive "
+            "with an overlap-corrected t of at least 2.0. It fails if the alpha "
+            "is not distinguishable from zero. "
+            "EXTERNAL IS THE WHOLE POINT: the previous registration regressed "
+            "on six long-short factors built from this engine's OWN ranked "
+            "columns, which asks an easier and different question -- a "
+            "momentum-driven strategy regressed on a momentum factor built from "
+            "its own momentum column will show a high R-squared for reasons "
+            "that are arithmetic rather than economic. The regressor set is the "
+            "IIM Ahmedabad Indian Fama-French + momentum library (survivorship-"
+            "corrected, maintained outside this repository), plus two in-house "
+            "controls that library lacks: a low-volatility spread and an "
+            "illiquidity spread built on this engine's own universe. "
+            "THIS HYPOTHESIS IS NOT_TESTABLE UNTIL THAT MODEL EXISTS: see "
+            "`instruments_required`. It is registered now, before any "
+            "observation, because that is the only time a hypothesis may be "
+            "written down; it will be graded when the instrument is built and "
+            "not before, and it is never graded against the self-built "
+            "regressors as a substitute."
         ),
         secondary=(
-            "SECONDARY. Pooled rank IC of the daily shortlist against the "
-            "63-session forward return, over every forward date with a "
-            "complete label. The engine passes if the IC is positive with an "
-            "overlap-corrected t of at least 2.0. This is expected to pass on "
-            "the holdout evidence and is NOT the question at issue -- it is "
-            "recorded so that a failure here would be visible rather than "
-            "assumed away."
+            "SECONDARY, and the benchmark-relative question. Mean excess return "
+            "of the LONG LEG over an equal-weight hold of the point-in-time "
+            "eligible universe it selects from, on the same holding windows. "
+            "The engine passes if that excess is positive with an "
+            "overlap-corrected t of at least 2.0. "
+            "The engine is currently expected to FAIL this and it is registered "
+            "for exactly that reason. Re-run on the current store, the shipped "
+            "six-name book loses to an equal-weight hold of its own eligible "
+            "universe in every window tested, GROSS as well as net -- cost drag "
+            "is under one point a year at this cadence, so the deficit is not a "
+            "cost problem. A forward test whose outcome is not in doubt is not "
+            "a test; this one's is, and it is the hypothesis that asks whether "
+            "running the engine beats not running it."
         ),
-        tertiary=(
-            "TERTIARY. Mean excess return of the paper book over an "
-            "equal-weight hold of the eligible universe it selects from, on "
-            "the same holding windows, over the 18 forward months. The engine "
-            "passes if that excess is positive with an overlap-corrected t of "
-            "at least 2.0. The engine is currently expected to FAIL this "
-            "test and it is registered for exactly that reason. On the "
-            "selection period this test gives mean excess -4.23% per "
-            "63-session period, information ratio -0.83, alpha -0.67% and "
-            "32.9% of periods beating the benchmark. The book "
-            "returns roughly 3.9 points per 63-session period LESS than its "
-            "own universe: the ranking earns about +2.0 and the execution "
-            "layer -- sizing, the 2.5x ATR stop, the 3R target, the "
-            "invalidation exit and costs -- gives back about 5.9. A forward "
-            "test whose outcome is not in doubt is not a test; this one's is, "
-            "and it is the only hypothesis here that asks whether running the "
-            "engine beats not running it."
+        instruments_required=[
+            "An EXTERNAL Indian factor-return series (IIMA Fama-French + "
+            "momentum) ingested with its own provenance, plus in-house "
+            "low-volatility and illiquidity spread controls. Pass 2 builds it. "
+            "Until it exists the PRIMARY hypothesis is NOT_TESTABLE and must "
+            "be reported as such -- never as a pass, and never graded against "
+            "`validation.attribution`'s self-built factors instead.",
+            "A long-short decile portfolio series (`validation/legs.py`). Pass "
+            "2 builds it. The engine has no short leg anywhere in `src/`, so "
+            "the PRIMARY hypothesis currently has no series to regress.",
+        ],
+        power=(
+            "POWER, computed before the first observation so that no interim "
+            "reading can be mistaken for a verdict. Expected t = IR x "
+            "sqrt(years). At the only information ratio this engine has ever "
+            "measured out of sample -- 0.78, on the sealed 2012-2017 window -- "
+            "the expected t after 18 months is 0.78 x sqrt(1.5) = 0.96, and "
+            "t = 2.0 arrives after about 6.5 years. "
+            "THEREFORE THE PRIMARY AND SECONDARY HYPOTHESES ARE REGISTERED TO "
+            "BE UNDERPOWERED AT THIS HORIZON, and that is stated here rather "
+            "than discovered later. Failing to reach t >= 2.0 in eighteen "
+            "months is the EXPECTED outcome under a true effect of this size "
+            "and is not evidence against the strategy. What this window can "
+            "decide is the falsification set below. Any report that quotes the "
+            "primary or secondary result without this paragraph beside it is "
+            "misreporting the test."
         ),
+        falsification=[
+            "SIGN OF THE ROLLING RANK IC. The composite's rank IC against the "
+            "forward return, rolling. A sustained negative sign falsifies the "
+            "ranking outright and needs far fewer observations than an alpha "
+            "estimate. Reference: +0.049 (window A) and +0.036 (window B).",
+            "DECILE MONOTONICITY. Spearman correlation between decile index "
+            "and mean forward excess, computed per date and then averaged -- "
+            "never pooled. A composite whose deciles stop being monotone is "
+            "ordering noise in the middle of the distribution. Reference: the "
+            "generated results of record.",
+            "IC DECAY SHAPE. IC measured at 5, 10, 21, 42 and 63 sessions. The "
+            "shipped horizon is 63 and the themes are oriented at 42/21/21/10/"
+            "10; a decay curve that peaks somewhere else falsifies the holding "
+            "period even while the sign holds.",
+            "MODELLED VERSUS REALISED COST. Round-trip cost the model "
+            "predicted against what the recorded paper fills imply. The impact "
+            "coefficient ships UNVALIDATED at 0.10 inside a declared range of "
+            "[0.02, 0.50]; if realised cost sits outside the swept band, every "
+            "net figure this engine has produced is wrong by a known amount.",
+            "MODELLED VERSUS ACHIEVABLE FILL. Whether the assumed next-session "
+            "fill was reachable: circuit-limit states, surveillance measures "
+            "and thin-book names where the assumed participation was not "
+            "available. A fill that was never achievable falsifies the net "
+            "figure without saying anything about the signal.",
+            "REALISED BREADTH. Names actually held per period against the "
+            "book's slots, and entry events actually taken against the cadence. "
+            "The engine's t-statistic is bounded by IC x sqrt(breadth); a book "
+            "that runs at four names instead of six has less breadth than the "
+            "power statement assumed, and the shortfall is measurable "
+            "immediately.",
+        ],
         invalidation=[
             "config_version changes during the window -- the observations "
-            "after the change came from a different model.",
+            "after the change came from a different model. config_version now "
+            "covers the DATA and the TRAINING WINDOW as well as the "
+            "parameters, so a store that grows underneath the window breaks it "
+            "too, which the previous scheme could not see.",
             "Any factor, gate or parameter is retuned using data from inside "
             "the window.",
             "The shortlist is acted on with real capital, which introduces a "
@@ -358,20 +486,22 @@ def register(
             "Fewer than 60% of expected sessions produce a recorded run, "
             "which would make the sample a selection rather than a period.",
             "The benchmark panel is unavailable for any part of the window. "
-            "The tertiary test cannot be evaluated without it, and a book "
+            "The secondary test cannot be evaluated without it, and a book "
             "reported without the alternative it is supposed to beat is the "
             "defect this registration was rewritten to close.",
         ],
         notes=[
             "Eighteen months adds about six non-overlapping 63-session "
-            "windows. That is NOT enough to settle the ranking question and "
-            "the secondary test is reported with that stated.",
-            "The primary test uses monthly portfolio returns precisely "
-            "because they are numerous enough to leave the attribution with "
-            "degrees of freedom.",
-            "No result may be reported before both targets are met. Reading "
-            "an interim result and stopping when it looks good is optional "
-            "stopping, and it invalidates the p-value.",
+            "windows. That is NOT enough to settle either hypothesis and the "
+            "power statement says so in advance.",
+            "No result may be reported before both targets are met. Reading an "
+            "interim result and stopping when it looks good is optional "
+            "stopping, and it invalidates the p-value. The falsification set "
+            "is the exception and is deliberately monitored throughout: it "
+            "tests for a broken instrument, not for a favourable one, and "
+            "stopping early on a falsification is the correct response.",
+            "Nothing here is funded and nothing here places an order. "
+            "docs/EXECUTION_GATE.md governs.",
         ],
     )
     payload = asdict(reg)
@@ -519,10 +649,29 @@ def progress(
             "the pre-registration predates the benchmark-relative hypothesis "
             "and was written under the earlier fingerprint -- it has not been "
             "edited, but it cannot be graded under the current contract")
-    if not str(reg.tertiary or "").strip():
-        # A registration carrying only `primary` and `secondary` can be passed
-        # by an engine that loses to holding its own universe, because nothing
-        # in it compares the two. Such a window is not graded silently.
+    # THE BENCHMARK-RELATIVE HYPOTHESIS, wherever this scheme keeps it. A
+    # registration that cannot compare the book against holding its own
+    # universe can be passed by an engine that loses to doing nothing, and such
+    # a window is never graded silently.
+    if str(reg.scheme or "v1") == "v2":
+        if "equal-weight" not in str(reg.secondary or ""):
+            broken.append(
+                "the v2 registration's secondary hypothesis is not "
+                "benchmark-relative, so passing it would say nothing about "
+                "whether running the engine beats holding the universe it "
+                "selects from -- re-register")
+        if not reg.falsification:
+            broken.append(
+                "the v2 registration carries no falsification set. An "
+                "eighteen-month window cannot settle an alpha estimate at this "
+                "information ratio, so a registration with nothing falsifiable "
+                "in it is registered to produce no evidence at all")
+        if not str(reg.power or "").strip():
+            broken.append(
+                "the v2 registration carries no power statement, so its "
+                "eventual failure to reach t >= 2.0 could be read as a fact "
+                "about the strategy rather than about the horizon")
+    elif not str(reg.tertiary or "").strip():
         broken.append(
             "the registration carries no benchmark-relative hypothesis, so "
             "passing it would say nothing about whether running the engine "

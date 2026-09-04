@@ -290,13 +290,30 @@ def test_the_shipped_registration_text_names_the_benchmark():
     from prosignal.validation import forward
 
     src = inspect.getsource(forward.register)
-    assert "tertiary=" in src
     low = src.lower()
+    # Under scheme v2 the benchmark-relative hypothesis is the SECONDARY, not
+    # a `tertiary` bolted on after the fact. What must not change is that one
+    # of the registered hypotheses compares the book against holding the
+    # universe it selects from -- so this asserts the property, not the field.
+    assert "secondary=" in src
     assert "equal-weight" in low and "eligible universe" in low
     assert "expected to fail" in low, (
         "a forward test whose outcome is not in doubt is not a test; the "
         "registration should say which way it is expected to go"
     )
+    # v2 additions, each fixing something the previous window got wrong.
+    assert "falsification=" in src, (
+        "an eighteen-month window cannot settle an alpha estimate at this "
+        "engine's information ratio, so a registration with nothing "
+        "falsifiable in it is registered to produce no evidence at all")
+    assert "power=" in src and "sqrt" in low, (
+        "without a power statement written before the first observation, the "
+        "registered failure to reach t >= 2.0 reads as a verdict on the "
+        "strategy rather than on the horizon")
+    assert "instruments_required=" in src, (
+        "the primary regresses on an external factor model that does not "
+        "exist yet; naming it keeps the hypothesis NOT_TESTABLE instead of "
+        "silently graded against a substitute")
 
 
 def test_run_cpcv_records_the_date_of_every_score():
