@@ -1051,7 +1051,25 @@ stage4_core_score:
     #: measured_factor -- rank on `column`, a sector-neutral rank already.
     #: fitted_composite / family_average -- older behaviours, kept for comparison.
     source: "v3_composite"
-    column: "mom_6_1_r"
+    # READ ONLY WHEN `source` IS `measured_factor`. Under every other source --
+    # including the shipped `v3_composite` -- this value is INERT, and it spent
+    # a generation of this repository being read as the shipped ranker because
+    # it looks like a live setting. README.md's executive summary said the
+    # engine ranked on "`mom_6_1_r`, one column"; it does not, and has not since
+    # the v3 deploy.
+    #
+    # Worse, `mom_6_1` is not one of the twenty-two v3 factors at all. It
+    # belongs to `features/crosssec.py` -- the FITTED model's panel -- so this
+    # named a column of a different model's feature frame. Measured on the
+    # 2026-09-03 cross-section by driving stages 1-4 and comparing orderings,
+    # the shipped order is the v3 composite's order at Spearman +1.000000,
+    # identical on all 386 names.
+    #
+    # The UNUSED: prefix is deliberate and `tests/test_shipped_ranker.py`
+    # enforces it. To use `measured_factor`, set BOTH this to a real column of
+    # the live feature frame AND `source` to `measured_factor` -- which is the
+    # point: it can no longer happen by leaving a stale value lying here.
+    column: "UNUSED:mom_6_1_r"
     v3_min_themes:
       value: 3
       status: MEASURED
@@ -2620,31 +2638,40 @@ costs:
   stt_delivery_buy_pct:
     value: 0.1
     status: STATUTORY
-    note: "0.1% on BOTH legs for equity delivery."
+    verified_on: 2026-09-03
+    note: >-
+      0.1% on BOTH legs for equity delivery. Unchanged in Budget 2026-27.
   stt_delivery_sell_pct:
     value: 0.1
     status: STATUTORY
+    verified_on: 2026-09-03
   stt_intraday_sell_pct:
     value: 0.025
     status: STATUTORY
+    verified_on: 2026-09-03
+    note: "Sell side only. Unchanged in Budget 2026-27."
 
   stamp_duty_buy_pct:
     value: 0.015
     status: STATUTORY
+    verified_on: 2026-09-03
     note: "Buy side only, delivery. State-linked; 0.015% is the standard rate."
 
   exchange_transaction_charge_pct:
     value: 0.00297
     status: STATUTORY
+    verified_on: 2026-09-03
     note: "NSE cash segment. Both legs."
 
   sebi_turnover_fee_pct:
     value: 0.0001
     status: STATUTORY
+    verified_on: 2026-09-03
 
   gst_pct_on_charges:
     value: 18.0
     status: STATUTORY
+    verified_on: 2026-09-03
     note: "18% on (brokerage + exchange txn charge + SEBI fee), NOT on trade value."
 
   brokerage_flat_per_order_inr:
@@ -2704,6 +2731,93 @@ costs:
         names at all (universe/liquidity gate, R13); this exists so that a cost
         model asked an unanswerable question answers pessimistically rather than
         optimistically.
+
+  # ---------------------------------------------------------------------------
+  # THE SHORT LEG'S COST STACK.  PRICED, NOT TRADED.
+  # ---------------------------------------------------------------------------
+  # NOTHING HERE PLACES AN ORDER, and docs/EXECUTION_GATE.md is unchanged: this
+  # repository has no broker client, no order object and no execution venue. A
+  # cost model is not an execution capability.
+  #
+  # WHY IT EXISTS BEFORE ANY SHORT CODE DOES. This block had no derivatives leg
+  # at all, which meant the short side could not be PRICED -- and a leg with no
+  # cost model does not read as "unknown", it reads as FREE in any comparison
+  # somebody builds later. Declaring the stack first means the short side
+  # arrives already carrying its costs instead of acquiring them afterwards.
+  #
+  # WHY FUTURES AND NOT THE CASH MARKET. SEBI prohibits naked short selling:
+  # every investor must deliver at settlement, so a 42-63 session cash-market
+  # short is not available without a borrow. SLB exists but is thin -- roughly
+  # 128 eligible names on mid-2026 screens with activity in a handful of large
+  # caps -- so it is modelled as a cost and an availability constraint, not
+  # planned on as the route for a systematic multi-name short book.
+  #
+  # THESE RATES ARE NOT A LEGAL SOURCE. Transcribed from the Finance Act
+  # schedule as amended and cross-checked against broker explainers. Every
+  # STATUTORY entry carries `verified_on`. CHECK THEM AGAINST THE LIVE CIRCULAR
+  # before any figure computed from them is quoted: rates move on a budget
+  # cycle and nothing in this file can notice when they do.
+  derivatives:
+    stt_futures_sell_pct:
+      value: 0.05
+      status: STATUTORY
+      verified_on: 2026-09-03
+      note: >-
+        Sell side, equity futures. RAISED FROM 0.02% EFFECTIVE 1 APRIL 2026
+        (Budget 2026-27 amendments to the Finance (No. 2) Act, 2004). That is a
+        150% increase in a cost that lands on the SELL leg -- which for a short
+        is the ENTRY -- and again on every monthly roll. Any short-side figure
+        computed at the old rate is not merely stale, it is wrong in the
+        flattering direction. The prior increase (0.0125% -> 0.02%) took effect
+        1 October 2024.
+    stt_options_premium_sell_pct:
+      value: 0.15
+      status: STATUTORY
+      verified_on: 2026-09-03
+      note: >-
+        On premium, sell side. Raised from 0.10% on 1 April 2026. CARRIED FOR
+        COMPLETENESS AND UNUSED -- no code path reads it. Options are rejected
+        on design grounds, not on cost: a 42-63 session cross-sectional forecast
+        is a directional view with NO volatility view, so buying options pays
+        theta and implied-vol premium for a payoff that was never forecast, and
+        selling them takes a short-gamma tail this engine has not modelled.
+        Single-stock option books outside the largest names are also thin enough
+        that a fill assumption there would be fiction. Revisit only if a
+        separately validated volatility signal ever exists.
+    borrow_fee_annual_pct:
+      value: 3.0
+      status: UNVALIDATED
+      search_range: [0.5, 12.0]
+      note: >-
+        SLB lending fee, annualised, plus GST. UNVALIDATED and it cannot be
+        otherwise here: the fee is market-determined per name per tenure and
+        this repository has no SLB feed, so the value is a placeholder inside a
+        swept range rather than an estimate. The range is what mid-2026 SLB
+        screens showed. Borrower margin runs around 125% of borrowed value; no
+        STT and no SEBI turnover fee apply on SLB legs. Any net short figure
+        must report the fee it assumed.
+    futures_roll_spread_bps:
+      value: 8.0
+      status: UNVALIDATED
+      search_range: [2.0, 40.0]
+      note: >-
+        Cost of rolling a single-stock future to the next monthly expiry, in bps
+        of notional, OVER AND ABOVE the STT leg. UNVALIDATED: it is a spread,
+        and this store has no intraday book, so it is SWEPT, never claimed --
+        the same discipline the cash half-spread already follows. Corwin-Schultz
+        and Abdi-Ranaldo were both tried on this data and rejected, correlating
+        +0.069 with each other.
+    futures_margin_pct:
+      value: 20.0
+      status: OPERATIONAL
+      note: >-
+        Initial margin as a share of notional, for CAPITAL PLANNING ONLY. Not
+        statutory and not a hypothesis: the real number is computed by the
+        exchange per contract per day as SPAN + ELM (Extreme Loss Margin), plus
+        any ad-hoc margin, so no single figure is correct and this one must
+        never be presented as the margin that will actually be called. It exists
+        so a book can be checked for capital adequacy before anyone discovers at
+        the clearing corporation that it cannot be carried.
 
   # Mandatory stress tests (research program section 9).
   stress_tests:
@@ -2776,6 +2890,36 @@ costs:
 # The honest summary: this is the best-supported hypothesis the search found,
 # it is not statistically established, and the forward paper-trading record is
 # what would establish it. That is what these fields are for.
+#
+# ===========================================================================
+# WITHDRAWN 2026-09-04.  THIS BLOCK DESCRIBES A RANKER THE ENGINE DOES NOT RUN.
+# ===========================================================================
+# Read the study line below: "Sector-neutral 6-1 momentum rank, six names". That
+# is `mom_6_1` -- ONE column, and a column from `features/crosssec.py`, the
+# FITTED model's panel. It is not one of the twenty-two v3 factors. The engine
+# ships `ranking.source: v3_composite`, and the ordering it produces was
+# measured on the 2026-09-03 cross-section as identical to the v3 composite's
+# at Spearman +1.000000 across all 386 names.
+#
+# So every frequency below was measured on a DIFFERENT MODEL from the one whose
+# cards they are stamped onto. Re-run against the current store through the
+# repository's own simulator (`prosignal research results`), the study does not
+# reproduce either:
+#
+#     annualised alpha         claimed +20.3%   measured  +1.8%
+#     annualised book return   claimed +42.6%   measured  +5.2%
+#     Sharpe                   claimed   1.59   measured   0.93
+#
+# WHY IT IS STILL HERE AND STILL ENABLED. Deleting it would silently drop
+# `probability_of_profit` and `expected_return_pct` from every card and ledger
+# row, which is a change to what the engine outputs and belongs in a new epoch,
+# not in a reconciliation pass. Until then the honest state is recorded here and
+# in README.md: THE STAMPED FREQUENCIES DESCRIBE A DIFFERENT RANKER AND MUST NOT
+# BE READ AS THIS ENGINE'S EXPECTED OUTCOMES. Re-measuring them on the shipped
+# composite is a Pass 4 job (calibration), where the whole idea of a per-name
+# expected return gets built properly.
+#
+# Live figures: docs/RESULTS_OF_RECORD.md, which is generated.
 expectancy:
   #: Set false to stop stamping plans. The fields become null on the card and
   #: the ledger; nothing else changes.

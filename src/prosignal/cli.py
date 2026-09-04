@@ -20,7 +20,7 @@ import datetime as dt
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from .config.loader import AppConfig, load_config
 from .core.errors import ConfigError, DataError, ProSignalError
@@ -2094,6 +2094,10 @@ def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .ledger import Ledger
     from .validation.forward import load_registration, progress, verify
 
+    # The store is bound in `main`, once per invocation, so `cfg.version` here
+    # is the same identity `epoch` and `readiness` see. Binding it per command
+    # would make them disagree permanently.
+
     if getattr(args, "start", False) or getattr(args, "restart", False):
         import subprocess
 
@@ -2275,6 +2279,80 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
            "embargo applied, so a cohort never runs through a training block. "
            "The spread is the report; no t-statistic is quoted, because splits "
            "share training data and calendar and are not independent trials.")
+    return 0
+
+
+def cmd_research_results(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """GENERATE the results of record. Prose stops being authoritative.
+
+    The README carried two book tables that cannot both describe the same
+    engine, and no amount of reading could decide between them because reading
+    is what produced them. This re-runs both configurations against the current
+    store and writes the answer to a file that says, in its own header, that it
+    is generated and must not be edited.
+    """
+    from pathlib import Path as _P
+
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .validation import results as res
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    # `main` has already bound the store, so the identity stamped on this
+    # document is the same one the epoch and the forward test compare against.
+
+    panel = None
+    cache = _P(args.panel_cache) if args.panel_cache else None
+    if cache is not None and cache.is_file():
+        _print(f"  reading the cached v3 panel from {cache}")
+        panel = pd.read_parquet(cache)
+        panel["date"] = pd.to_datetime(panel["date"])
+
+    _rule("Regenerating the results of record")
+    # The panel is the slow part -- roughly twenty-five minutes over the whole
+    # store -- and it does not depend on which arm is being priced. `built`
+    # receives it so the cache can be WRITTEN, not only read; the first version
+    # of this only read the cache and so never populated it, which made
+    # --panel-cache useless on exactly the run that needed it.
+    built: Dict[str, Any] = {}
+    record = res.build(cfg, store, panel=panel, built=built,
+                       progress=lambda m: _print(f"  {m}"))
+
+    if cache is not None and panel is None and built.get("panel") is not None:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        built["panel"].to_parquet(cache, index=False)
+        _print(f"  cached the v3 panel to {cache}")
+
+    body = res.render(record)
+    target = cfg.paths.root / res.DOC_RELPATH
+    if args.check:
+        current = target.read_text(encoding="utf-8") if target.is_file() else ""
+        if current == body:
+            _print(f"  {res.DOC_RELPATH} is up to date")
+            return 0
+        _print(f"  {res.DOC_RELPATH} DIFFERS from what the current store and "
+               f"configuration generate. Run `prosignal research results` to "
+               f"regenerate it.")
+        return 1
+
+    res.write(record, cfg.paths.root)
+    _print(f"  wrote {res.DOC_RELPATH}")
+
+    _rule("Summary")
+    s = record.stamp
+    _print(f"  config          {s.config_version}")
+    _print(f"  shipped ranker  {s.ranking_source}")
+    _print(f"  panel           {s.panel_rows:,} rows over "
+           f"{s.panel_distinct_dates} dates, "
+           f"{s.panel_first_date}..{s.panel_last_date}")
+    _print(f"  independent     {s.independent_observations} "
+           f"{s.horizon_sessions}-session windows")
+    _print(f"  trials charged  {s.cumulative_trials:,}")
+    _print()
+    for a in record.arms:
+        _print(f"  {a.status:14s} {a.title}")
+        _print(f"                 {a.reason}")
     return 0
 
 
@@ -2543,6 +2621,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="the operating record, partitioned by the engine that produced it")
     rec_p.set_defaults(func=cmd_research_record)
 
+    res_p = research_sub.add_parser(
+        "results",
+        help="GENERATE docs/RESULTS_OF_RECORD.md from the ledger and the panel")
+    res_p.add_argument(
+        "--check", action="store_true",
+        help="regenerate in memory and diff against the committed document "
+             "without writing. Exit 1 if they differ -- for CI")
+    res_p.add_argument(
+        "--panel-cache", default=None,
+        help="parquet to read the v3 score panel from, or write it to. "
+             "Building the panel is the slow part and it does not depend on "
+             "which arm is being priced")
+    res_p.set_defaults(func=cmd_research_results)
+
     return parser
 
 
@@ -2624,6 +2716,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         backup_count=cfg.params.runtime.logging.backup_count,
         force=True,
     )
+
+    # ONE IDENTITY PER INVOCATION, resolved here rather than per command.
+    #
+    # `config_version` covers the data and the training window as well as the
+    # parameters (see `config/identity.py`), and that only works if every
+    # command in a session agrees on which one it is holding. Binding it inside
+    # individual commands was the first shape of this and it was wrong: `epoch
+    # open` would have recorded the parameters-only version while `research
+    # forward` compared against the composite one, and the two would have read
+    # as permanent drift that no amount of re-registering could clear.
+    #
+    # A store that cannot be read leaves the version parameters-only. That is
+    # the honest fallback -- `identity` stays None and every caller can tell --
+    # and it is reported rather than silently applied.
+    try:
+        from .data.store import DataStore as _DataStore
+
+        cfg.bind_store(_DataStore(cfg.paths.curated, cfg.paths.snapshots))
+    except Exception as exc:                       # noqa: BLE001
+        log.warning("config identity covers parameters only; the store could "
+                    "not be read", extra={"error": str(exc)})
 
     try:
         return int(args.func(cfg, args))

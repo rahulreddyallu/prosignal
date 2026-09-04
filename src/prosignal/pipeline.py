@@ -135,6 +135,12 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
             ["the local store has no price sessions; run `prosignal data ingest --full`"],
             stage="stage0_data",
         )
+    # THE VERSION STAMPED ON THIS RUN COVERS THE DATA, NOT ONLY THE KNOBS.
+    # Bound here, before anything reads `config.version`, because the model is
+    # refitted from stored history on every run: an unbound version would let
+    # two runs trained on different depths of store quote the same identity,
+    # which is the hole the forward test's integrity check could not see.
+    config.bind_store(store)
     calendar = TradingCalendar(sessions)
 
     step(0)
