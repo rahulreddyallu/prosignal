@@ -426,28 +426,34 @@ REGISTER: Tuple[Finding, ...] = (
         fid="W2", severity="high",
         title="Every traded coefficient is a survivor of a selection on its "
               "own t-statistic",
-        category=Category.MODEL, status=Status.BUILT_OFF,
+        category=Category.MODEL, status=Status.DISCLOSED,
         root_cause="`gated_shrink` zeroes any theme below `significance_floor` "
                    "and prices the rest, so the surviving estimate is biased "
                    "away from zero by exactly the amount the gate removed. The "
                    "overstatement is largest for the themes that only just "
                    "cleared, which are the ones the decision turns on.",
-        location="prosignal.validation.selection::correct_t",
+        location="prosignal.validation.selection::correct_t (module removed 2026-09-03)",
         fix="One-sided truncated-normal MLE of the true non-centrality. Six "
             "acceptance criteria were fixed before it was written; five hold "
             "and the sixth -- that it recover the truth in simulation -- does "
             "not, so the number is REPORTED and NOT TRADED. "
             "`assert_not_traded` makes wiring it into a score fail a test "
             "rather than pass a review.",
-        regression_test="tests/test_selection_correction.py",
+        regression_test=None,
         before_after="mom_f t +2.87 -> +2.20 implied true; delivery_f +2.63 -> "
                      "+1.44, i.e. one of the two traded coefficients does not "
                      "clear the floor it was selected by once selection is "
                      "priced. On this tree's post-R9 refit both clear.",
         moves_coefficients=False, moves_history=False, forces_restart=False,
-        notes="The criterion it fails is asserted AS a failure in the test "
-              "suite, so improving the correction forces the disposition to be "
-              "re-decided in the open rather than drifting.",
+        notes="CLOSED BY REMOVAL, 2026-09-03. The finding is about coefficients "
+              "selected on their own t-statistic and then TRADED. The fitted "
+              "cross-sectional model that produced them was removed in the "
+              "engine cleanup, so there are no such coefficients any more and "
+              "nothing for the correction to correct. `validation/selection.py` "
+              "and its guard test went with it. If a fitted ranker is ever "
+              "restored, this finding comes back with it and the correction has "
+              "to be rebuilt -- it is recorded here rather than deleted so that "
+              "restoring the model cannot quietly restore the bias.",
     ),
     _f(
         fid="C3", severity="medium",

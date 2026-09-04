@@ -23,7 +23,7 @@ import pytest
 from prosignal.config.loader import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTE = ROOT / "research" / "PHASE13_HORIZON.md"
+NOTE = ROOT / "docs" / "findings" / "PHASE13_HORIZON.md"
 
 #: Horizons whose annualised net return is within half a point of the best.
 PLATEAU = range(21, 85)

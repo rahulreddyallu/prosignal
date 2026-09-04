@@ -1,5 +1,11 @@
 # Quant-audit remediation — 2026-09
 
+> **Base:** rebased onto `main` after PR #94 ("consolidate v3-v9 / new epoch")
+> landed. Verified #94 did **not** touch the v3 core — `features/v3.py` THEMES,
+> signs and weights are unchanged — so every finding and result below still
+> describes the shipped scorer. The experiment result JSONs were computed on the
+> identical v3 code and remain valid.
+
 End-to-end tracker for the adversarial quant review. Every item maps a finding to
 a concrete action, a type, and a status. **The governing rule:** the shipped
 model's signs and weights are frozen in `features/v3.py`, hashed into
@@ -25,7 +31,9 @@ holdouts. Fixes therefore split into:
 | P1-5 | "quality" sign may be a 2020–21 artifact (§K-4) | EXP-A sign-stability across halves/thirds | SAFE harness | ✅ run — **stable, REFUTED**; keep+relabel |
 | P1-6 | Uncalibrated impact coeff gates net-of-cost (§H, K-6) | `cost_sensitivity.py` — exact cost model on real selected names, swept | SAFE harness | ✅ cost side done; full book P&L still gated |
 | P2-7 | Delivery may be a liquidity/vol proxy (§K-3) | EXP-B incremental IC after controls | SAFE harness | ✅ run — **not a proxy, REFUTED** |
-| P2-8 | Residual panel survivorship inflates OOS IC (§E, K-5) | Survivorship-bounding run (needs delisted names) | DATA-gated | ⏳ data required |
+| P2-8 | Residual panel survivorship inflates OOS IC (§E, K-5) | `survivorship_bound.py` — stress delisting-within-horizon rows | SAFE harness | ✅ run — inflation ~2.4% of IC, **negligible** |
+| P2-11 | Book underperforms the universe net of cost (§I, K-1/K-2) | `book_sim.py` — repo's own simulator on v3 rankings | SAFE harness | ✅ run — book loses to EW universe everywhere (sign robust) |
+| BUG | `research portfolio` crashes: `cfg.params.stage1_universe` | fix to `cfg.params.universe` in `cli._portfolio_inputs` | code fix | ✅ fixed |
 | P2-9 | Momentum factor theatre — prox/voladj dupes (§D, F) | Prune experiment → new epoch if it holds | EPOCH-gated | ⏳ after EXP results |
 | P3-10 | Doc contradictions / withdrawn-number consistency | Config note done; README/CHANGELOG sweep | SAFE | 🔄 partial |
 
@@ -103,16 +111,53 @@ on the gross edge, so the net-of-cost verdict is undetermined until the forward
 test settles which gross number is real.** (Caveat: uses the 10-name book's gross
 as a proxy for the 6-name book's; it is a cost-side bound, not a re-simulated P&L.)
 
-### What remains genuinely unresolved (all BOOK / validation level)
+### Book P&L (`book_sim.py`, run 2026-09-03)
 
-- **K-1** clean-window book test — forward-gated (`recheck_status.py`).
-- **K-6 full book P&L** — the *cost side* is now bounded (above); a faithful
-  re-simulation of the 6-name book's *gross* edge (floor + cadence, validated
-  against the sealed book) is the remaining piece.
-- **DSR failure** (0.030 / 0.97) and **holdout-overlap book selection** — these
-  are about the traded book and multiple testing, not the ranking, and stand.
-- **Gross-edge instability across windows** (A +2.2% vs B +15.6%) — the single
-  biggest open question; only forward data resolves it.
+The v3 rankings (+ entries-only absolute floor) run through the repository's OWN
+`simulate`/`phase_summary` with the shipped cost model, swept over book size,
+window and impact coefficient:
+
+| window | book | excess/yr | IR | gross/yr | maxDD |
+|---|---|---|---|---|---|
+| A 2025-26 | live 6 | −9.6% | −0.79 | −9.2% | −16.8% |
+| A 2025-26 | holdout 10 | −8.5% | −0.80 | −7.9% | −24.3% |
+| B 2021-22 | live 6 | −3.6% | −0.31 | −3.3% | −12.2% |
+| full | live 6 | −17.6% | −0.83 | −17.3% | −27.2% |
+
+And every single theme's 6-name book (full window) is negative too: momentum
+−16.8%, quality −18.6%, ownership −19.9%, risk −18.3%, reversal −20.4%.
+
+**The book underperforms the equal-weight eligible universe in every window, at
+every book size, at every cost level, and for every single theme — GROSS as well
+as net.** This corroborates the repo's own `DEPLOY_REFERENCE` (−2.83%) and
+`HOLDOUT_A` (−7.25%) and the audit's central thesis: **the ranking has IC; the
+concentrated long-only book does not beat the universe it selects from.** The
+gap is selection + the 200-DMA floor + stops sitting in cash through the
+2019-21 small-cap rally, not costs (cost drag here is 0.3-1.6%/yr at this low
+cohort turnover). **Caveat:** repo cohort model (63-session hold), NOT the sealed
+weekly book, so magnitudes are not comparable to the holdout; windows overlap the
+378-cell selection surface (in-sample). Read the SIGN (robust, corroborated), not
+the magnitude.
+
+### K-5 survivorship bound (`survivorship_bound.py`, run 2026-09-03)
+
+The panel INCLUDES 841 of 3,552 names (23.7%) that stopped printing — it is
+survivorship-free for the collection period. Only 438 rows (0.22%) have a name
+delisting within the 21-session horizon; stressing them at −30% moves composite
+IC +0.0580 → +0.0566 (**2.4% inflation, negligible**). Unquantifiable residual:
+names that delisted before data collection are absent from the store entirely.
+
+### What remains genuinely unresolved
+
+- **K-1 clean-window book** — forward-gated (`recheck_status.py`); only data past
+  2026-08 clears the 378-cell-surface overlap.
+- **DSR failure** (0.030 / 0.97) and **holdout-overlap book selection** — about
+  the traded book and multiple testing, not the ranking; they stand.
+- **Gross-edge instability across windows** — the single biggest open question;
+  only forward data resolves it.
+- **The book-vs-universe gap** — `book_sim` shows the concentrated book losing to
+  the EW universe gross; whether that is the 200-DMA floor, the concentration, or
+  the cohort-model artifact is worth isolating (the floor is the prime suspect).
 
 ## Epoch-gated decisions (do NOT hand-edit; require a re-fit + re-seal)
 

@@ -37,16 +37,6 @@ def test_A_unadjusted_is_still_available_when_asked_for_explicitly(live_cfg):
                                  start=sessions[-30], end=sessions[-1]).empty
 
 
-def test_B_model_failure_is_not_silently_scored_by_the_retired_composite(live_cfg):
-    """The composite measured -0.047%/month excess at t = -0.11. A model failure
-    must not hand the run to it while looking healthy."""
-    from prosignal.stages.stage4_core_score import _is_model_failure
-
-    # An exception is a failure.
-    assert _is_model_failure("RuntimeError: model down") is True
-    # Too little history is an expected state, not a failure.
-    assert _is_model_failure("340 sessions of history; needs 417") is False
-    assert _is_model_failure("120 usable training rows; 600 required") is False
 
 
 def test_C_horizon_must_match_the_holding_cap(live_cfg):
@@ -93,25 +83,8 @@ def test_E_zero_atr_reports_not_testable_instead_of_dividing(live_cfg):
     assert out is not None  # did not raise ZeroDivisionError
 
 
-def test_G_a_gap_through_the_stop_fills_at_the_open():
-    """Filling at the stop credits a price that was never available."""
-    import inspect
-
-    from prosignal import backtest as bt
-
-    src = inspect.getsource(bt)
-    assert "min(bar_open, stop)" in src
-    assert "stop_gap" in src
 
 
-def test_H_backtest_respects_the_live_concurrent_position_cap():
-    import inspect
-
-    from prosignal import backtest as bt
-
-    src = inspect.getsource(bt)
-    assert "max_concurrent" in src
-    assert "max_signals_per_run" in src
 
 
 def test_K_dsr_refuses_a_degenerate_return_series():

@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-NOTE = ROOT / "research" / "PHASE14_MOMENTUM.md"
+NOTE = ROOT / "docs" / "findings" / "PHASE14_MOMENTUM.md"
 
 
 def _pc1_signed(X: np.ndarray) -> np.ndarray:

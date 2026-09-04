@@ -31,7 +31,7 @@ import pandas as pd
 
 from ..features import v3, v3_factors
 from ..features.crosssec import liquidity_mask
-from .v2_panel import quintile_spread, rank_ic
+from .metrics import quintile_spread, rank_ic
 
 __all__ = ["build_v3_panel", "recheck", "V3Recheck",
            "SIGNAL_STRIDE_SESSIONS", "LABEL_HORIZON_SESSIONS",

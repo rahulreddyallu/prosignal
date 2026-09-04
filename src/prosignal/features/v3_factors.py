@@ -1,6 +1,6 @@
 """The twenty-two shipped factors, computed exactly as the search measured them.
 
-Every window here matches `work/v3/factors.py` and `work/v3/themes.py` to
+Every window here matches the v3 search code (removed 2026-09-03; the windows are frozen here) to
 machine precision -- `tests/test_v3_score.py` checks it on real data across five
 dates. A scorer that earned a sealed-holdout number has to compute what it was
 measured computing, and the failure mode is silent: an off-by-one in a skip

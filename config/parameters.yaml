@@ -1024,7 +1024,7 @@ stage4_core_score:
   # concentrated BOOK did not: on window B it earned roughly 15.7% gross and
   # paid 13.7% of it away in transaction costs. That cost was 9.9% in
   # validation too, so it was visible before the holdout and was selected past.
-  # `research/V3_SEARCH.md` carries the cost curve; turnover and cost drag are
+  # CHANGELOG.md carries the cost curve; turnover and cost drag are
   # reported on every run rather than left to be discovered.
   #
   # THEMES WITH NO VALIDATED FACTOR, and each was built in full first:
@@ -1036,6 +1036,17 @@ stage4_core_score:
   #   seasonality  0 of 2 clear; placebo |t| threshold 9.9 against a real 1.2.
   ranking:
     #: v3_composite    -- the shipped scorer, `features/v3.py`.
+    #: v9r_core        -- the v9R model, `features/v9r.py`. NINE factors, equal
+    #:                    risk contribution, unneutralised, no coverage
+    #:                    renormalisation. It is the only model in this engine
+    #:                    with an out-of-sample number: +9.50% net active on a
+    #:                    sealed 2012-2017 window at Newey-West t +1.87 against
+    #:                    a PRE-REGISTERED bar of 2.0. That is a FAILED ship
+    #:                    gate -- positive and underpowered -- and it is
+    #:                    selectable here so it can be shadow-run beside the
+    #:                    incumbent, NOT because the evidence supports switching.
+    #:                    Switching on this evidence would be reading a failure
+    #:                    as a pass. docs/MODEL_v9R.md has the full table.
     #: v2_composite    -- the previous answer, kept so it can be re-run.
     #: measured_factor -- rank on `column`, a sector-neutral rank already.
     #: fitted_composite / family_average -- older behaviours, kept for comparison.
@@ -1048,11 +1059,6 @@ stage4_core_score:
         Three of five. A name scored on two themes is not the same measurement
         as one scored on five. Validated across 2, 3 and 4; the ranking is flat
         in this parameter and 3 keeps the widest population.
-    v2_min_factors:
-      value: 7
-      status: MEASURED
-      note: >-
-        Seven of ten, for the retained v2 scorer.
     note: >-
       The factor definitions, signs, theme membership and blend weights live in
       `src/prosignal/features/v3.py` rather than here: they are what two sealed
@@ -1077,8 +1083,36 @@ stage4_core_score:
   # measured on the training window, cost drag falls from 8.8% a year to 5.6%
   # when the same floor applies to purchases only.
   absolute_floor:
+    # DISABLED ON MEASUREMENT, 2026-09-02. Full working in research/v9/.
+    #
+    # Measured the way THIS FILE applies it -- applies_to: "entries", so the floor
+    # blocks new opens and leaves the name ranked and holdable, which is what
+    # stage4_core_score.py means by "The rest stay ranked and holdable."
+    #
+    # Treatment effect on the v3 composite, the score this engine actually ranks
+    # on, across 66 purged and embargoed CPCV folds, bootstrap 95% CI from 10,000
+    # resamples of the fold-level effects:
+    #
+    #     floor OFF        median CPCV excess +6.5%,  71% of paths positive, Sharpe p5 +0.02
+    #     floor ENTRIES    median CPCV excess +3.9%,  65% of paths positive, Sharpe p5 -0.12
+    #     ATE of the floor  -2.2%   95% CI [-3.2%, -1.4%]
+    #
+    # The interval sits clear of zero, so this is a removal rather than a re-tune.
+    # It is a modest effect, not a large one: an earlier draft of this note claimed
+    # -14.3%, which measured the floor as a POPULATION screen applied before ranking.
+    # This engine does not do that. The 2.2% figure is the one that describes it.
+    #
+    # WHAT IS LOST, and it is real. The floor was a genuine no-trade rule: it left
+    # 11 names above water at the COVID trough against a ten-slot book, and the
+    # cash state was reached by names failing a test rather than by a view on the
+    # market. Setting this false gives that up. If a no-trade rule is wanted, it
+    # should be re-derived as a BOOK-level cash rule -- hold cash when fewer than N
+    # names clear a stated bar -- which keeps the property without paying for it on
+    # every ordinary date.
+    #
+    # TO REVERT: set enabled back to true. Nothing else in this block changed.
     enabled:
-      value: true
+      value: false
       status: MEASURED
     above_ma_sessions:
       value: 200
@@ -1158,10 +1192,10 @@ stage4_core_score:
     # signs from data (`features/v3.py:THEMES`), and on 2018-2024 that fit came
     # out INVERTED: net_margin sign -1, margin_stability sign -1 -- the shipped
     # model rewards LOW, UNSTABLE margins, on the ~19% of names that carry
-    # fundamentals. Treat the v3 "quality" theme as a low-margin tilt, not a
-    # quality factor, until EXP-A (research/v3/experiments/audit_2026_09.py)
-    # shows the negative sign is stable across sub-periods rather than a
-    # 2020-2021 rebound artifact. See audit sections D and K-4.
+    # fundamentals. EXP-A (research/v3/experiments/audit_2026_09.py) confirmed
+    # the negative sign is STABLE across sub-periods (not a 2020-21 artifact),
+    # so it is kept and RELABELLED "Low-margin tilt" on the card rather than
+    # dropped. See audit sections D and K-4.
     quality:
       enabled: true
       weight_band: [0.20, 0.35]
@@ -1541,15 +1575,6 @@ stage4_core_score:
     # here comes from a published paper, so a theme merely MEETING its haircut
     # expectation is behaving as the literature predicts, not underperforming.
     post_publication_haircut: 0.58
-
-  metalabel:
-    enabled: false
-    shortlist_top_k: 50
-    # The veto's THRESHOLD lives in stage8_final_signal.scarcity, which is
-    # where the gate runs. A second copy here was read by nothing and passed
-    # the liveness check only because the leaf name exists elsewhere -- so
-    # setting it looked like enabling the veto and did nothing at all.
-    l2: 1.0
 
   model_horizon_sessions: 63
   model_ridge_alpha: 20000.0

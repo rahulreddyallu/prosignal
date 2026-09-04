@@ -93,3 +93,15 @@ data/ledger/**/*.parquet
 work/cache/
 work/cache_v1/
 work/*.log
+
+# --- Build and audit artifacts. These were committed once and should not be
+# again: a tarball of the source, a git bundle of the same history, and a PDF
+# render of a report that lives in docs/ are three copies of things the repo
+# already holds, and they are 1.1 MB that every clone pays for.
+*.tar.gz
+*.bundle
+ProSignal-Audit.pdf
+
+# Audit experiment caches (large, regenerable)
+research/v3/experiments/*.pkl
+research/v3/experiments/panel_*.parquet

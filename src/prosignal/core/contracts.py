@@ -377,7 +377,8 @@ class CoreScoreReport(_Contract):
     typical_dispersion: Optional[float] = None
     #: P(target barrier before stop barrier) per ticker, from the meta-label
     #: veto. None when the veto is disabled or could not be fitted -- which is
-    #: the shipped default; see MetaLabelConfig for why.
+    #: the shipped default. The meta-label veto was removed in the 2026-09-03
+    #: cleanup on its own measurement -- per-date AUC 0.4996, a coin flip.
     win_probability: Optional[Dict[str, float]] = None
     #: Why the veto is inert, when it is. An absent probability with no reason
     #: is indistinguishable from a veto that ran and approved everything.

@@ -180,49 +180,5 @@ def test_a_short_benchmark_is_cut_to_the_overlap_not_broadcast():
     assert "beta_120" in out.columns
 
 
-# ------------------------------------------------- the callers must not undo it
-def test_the_production_fit_reads_the_store_unrestricted_on_a_refit():
-    """The defect was in the CALLER, not the panel builder. Restricting the read
-    to today's universe makes the mask a no-op: names that were eligible then
-    and are not now have no column to be admitted from."""
-    import inspect
-
-    from prosignal.stages import stage4_core_score as s4
-
-    src = inspect.getsource(s4._cross_sectional_model)
-    assert "refitting = cached is None" in src
-    assert "symbols=None if refitting else list(symbols)" in src, (
-        "a refit must span every name that was ever eligible"
-    )
-    assert "liquidity_mask(" in src and "eligible=eligible" in src
-    assert "score_symbols=list(symbols)" in src, (
-        "today's ranking still covers today's eligible universe"
-    )
 
 
-def test_both_research_entry_points_build_a_point_in_time_panel():
-    """The holdout claim and the portfolio CPCV both came through these. Either
-    one left restricted would keep publishing a survivorship-biased number."""
-    import inspect
-
-    from prosignal import cli
-
-    from prosignal.validation import research_panel
-
-    # Both now reach the mask through the shared builder. The guard follows the
-    # indirection rather than being relaxed: the mask must still exist, still be
-    # applied, and the read must still be unrestricted.
-    shared = inspect.getsource(research_panel.build_research_panel)
-    assert "liquidity_mask(" in shared
-    assert "eligible=eligible" in shared
-
-    for fn in (cli.cmd_research_cpcv, cli.cmd_research_portfolio,
-               cli.cmd_research_factors, cli.cmd_research_estimator):
-        src = inspect.getsource(fn)
-        direct = "liquidity_mask(" in src and "eligible=eligible" in src
-        assert direct or "build_research_panel(" in src, (
-            f"{fn.__name__} builds no per-date mask and does not delegate"
-        )
-        assert "symbols=symbols" not in src, (
-            f"{fn.__name__} still restricts the panel read to today's universe"
-        )

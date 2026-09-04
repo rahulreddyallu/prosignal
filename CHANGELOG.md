@@ -1,9 +1,91 @@
 # CHANGELOG
 
+## Cleanup: one engine, not five — 2026-09-03
+
+The repository carried every generation it had ever built. This removes the ones
+that no longer choose anything, and wires in the one model with an out-of-sample
+number. **Net −22,000 lines. No change to what the shipped scorer ranks on.**
+
+### The daily signal path no longer fits a model nobody ranks on
+
+Stage 4 fitted a Fama-MacBeth cross-sectional model on **every run**, attributed it
+on the card, and then ordered the book by the v3 composite anyway. Roughly 3,000
+lines across `crossmodel`, `famamacbeth`, `linear`, `metalabel` and `refit_gate`
+executed daily to produce a diagnostic.
+
+`composite_raw` — the scoreable universe every ranking reindexes against — is built
+from the FAMILY factors and never depended on the fit, so removing it leaves the
+universe untouched. Verified by running the pipeline end to end: modules loaded
+during a real signal generation fell from **85 to 80**, and `crossmodel`,
+`famamacbeth` and `metalabel` are no longer among them.
+
+`FAMILIES`, `UNSCORED_CONTROLS` and `UNSCORED_DIAGNOSTICS` moved to
+`features/families.py`. They are about a hundred lines of data the signal card
+reads, and living inside `crossmodel.py` meant rendering a card imported the whole
+fitting stack.
+
+### Removed
+
+| | lines | why |
+|---|---|---|
+| `features/v2.py`, `v2_monitor.py`, `validation/v2_panel.py`, the `v2_composite` ranking source | ~800 | superseded by v3, which was itself measured against it |
+| `features/metalabel.py` and its integration | ~350 | the no-trade veto shipped DISABLED on its own measurement: per-date AUC **0.4996** |
+| `features/refit_gate.py` | 153 | nothing imported it once the refit went |
+| `backtest.py`, `portfolio.py`, `monitor.py`, `sla.py`, `config/liveness.py`, `validation/{attribution,baseline,selection}.py` | 1,704 | **nothing in `src/` imported any of them.** Each had passing tests, which is why it went unnoticed — a test proves code runs, not that anything calls it |
+| `research/`, `work/`, `_to_delete/` | ~76,000 | nine generations of one-shot research scripts and 1.6 GB of regenerable panels |
+| `*.tar.gz`, `*.bundle`, `ProSignal-Audit.pdf`, `PR_BODY.md`, `PUSH_*.md` | — | build artifacts and merge instructions, committed once, now gitignored |
+
+Five `research` CLI subcommands went with the fitted model: `estimator`, `spread`,
+`metalabel`, `volscale`, `v2`. `research cpcv`, `factors`, `decay`, `forward`,
+`portfolio`, `epoch`, `findings`, `readiness` and `v3` remain — the credibility
+machinery is kept, because that is the part that makes a number worth quoting.
+
+`rank_ic` and `quintile_spread` moved from `v2_panel.py` into `validation/metrics.py`.
+They are generic cross-sectional statistics and were only in a version-named module
+because that is where they were written first.
+
+### Added
+
+- **`features/v9r.py`** — the v9R CORE scorer, selectable as
+  `stage4_core_score.ranking.source: v9r_core`. Nine factors, equal risk
+  contribution, unneutralised, no coverage renormalisation. **Not the default.**
+  It returned +9.50% net active on a sealed 2012-2017 window at Newey-West t
+  **+1.87** against a pre-registered bar of 2.0 — a FAILED ship gate. It is
+  selectable so it can be shadow-run beside the incumbent. `docs/MODEL_v9R.md`
+  carries the full table, including the four other gates it fails.
+- **`tests/test_no_dead_modules.py`** — fails if any module in `src/` has nothing
+  importing it, and carries a second test proving the check can actually fire.
+- **`tests/test_corporate_action_coverage.py`** — the corporate-action table must
+  explain the large price jumps in the store, and coverage must not differ by era.
+- **`tests/test_v9r_score.py`** — holds the production scorer to the research
+  implementation to machine precision.
+
+### Corporate actions repaired
+
+The shipped table (yfinance-sourced) covered **34.6%** of split-like price moves in
+2010-2017 and **83.1%** in 2018-2026. HDFC's 1:5, Tata Motors' 1:5, Infibeam's
+1:10, Bajaj Finance's 10x and Vedanta's demerger were all absent. An unadjusted
+1:10 split reads as a −90% session and corrupts momentum, volatility, kurtosis and
+drawdown across every window spanning the ex-date — for every generation, not just
+the new ones.
+
+Rebuilt from BSE's own record (31,491 rows, 2010-2026), mapped to NSE symbols by
+ISIN and, where renames break that, by matching on date and ratio. **909 → 1,629
+split/bonus events; coverage 90.3% / 90.2%, equal across eras.** Inference was
+tried first and rejected on calibration: volume ratio does not separate a split
+from a crash (2.8x against 3.26x), and an ISIN change fires on only 26% of known
+splits.
+
+### Fixed
+
+- `data manifest --verify` raised `AttributeError: 'Drift' object has no attribute
+  'what'` — the drift report crashed exactly when there was drift to report, so the
+  failure branch had never run. Fixed and exercised against a deliberately
+  corrupted store.
+
 ## v3 signal engine — the two-level thematic composite — 2026-08-30
 
-Full search record in `research/V3_SEARCH.md`; search code in `work/v3/`;
-sealed artefacts and result tables in `research/v3/`.
+Search record summarised below; the 2026-09-03 cleanup removed the research and work trees; docs/MODEL_v9R.md and CHANGELOG.md carry what they recorded.
 
 v3 replaces the v2 **combination step**, not the engine. The universe screen,
 execution model, cost model, holdout machinery and UI contract are unchanged.
@@ -186,7 +268,7 @@ absolute 55%). Pinned by `tests/test_v3_monitor.py`.
 
 Both sealed windows are spent, so neither could be validated. One is a screen
 under the same bar the other 93 factors faced; the other predicts no return and
-so spends no evidence. Full tables in `research/V3_SEARCH.md` SS13.
+so spends no evidence. Full tables in CHANGELOG.md SS13.
 
 - **Dividend yield: built, screened, REJECTED.** The value theme is empty
   because balance-sheet history starts in 2023, but a dividend needs only a
@@ -207,7 +289,7 @@ so spends no evidence. Full tables in `research/V3_SEARCH.md` SS13.
   - The obvious comparison is wrong and flattered the answer threefold:
     earnings sessions against *all* sessions in the store gives 1.6×, because
     the names with calendars are large caps calmer than the universe around
-    them. `work/v3/earnings_gap.py` controls for it.
+    them. the v3 earnings-gap study controlled for it (removed 2026-09-03).
 
 ### What the engine is actually running on, measured
 

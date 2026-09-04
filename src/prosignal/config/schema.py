@@ -927,49 +927,6 @@ class EstimatorConfig(_Base):
     taper_hard_floor: float = Field(1.0, ge=0.0, le=6.0)
 
 
-class MetaLabelConfig(_Base):
-    """The NO TRADE veto: a second model that decides whether to act.
-
-    DISABLED, and the reason is measured. Meta-labelling (Lopez de Prado ch. 3)
-    fits a binary classifier on the trades the primary model would actually have
-    taken, predicting whether one reaches its profit barrier before its stop.
-    Evaluated here on 1,432 out-of-sample shortlist rows over 40 dates:
-
-        pooled AUC                     0.5698
-        mean per-date AUC              0.4996   t vs 0.5   -0.02
-        dates above 0.5                50%
-        top-half minus bottom-half    -0.16% per period   t -0.15
-
-    The pooled figure is the pooled-N illusion in a new place. Pooling across
-    dates lets "this was a good period" masquerade as "this was a good name":
-    within a date, which is the only question a per-name veto can answer, the
-    classifier is a coin. Its calibration is also wrong in the direction that
-    matters -- the top bucket predicts 0.817 and realises 0.547.
-
-    Read as a DATE-level gate the pooled signal does reappear (trading only the
-    higher-probability half of dates returns +8.62% against +0.86%), but that is
-    market timing rather than trade selection; it rests on ~13 independent
-    windows once the 63-session overlap is counted, not 40; and it was found by
-    looking a second time after the first look failed. It is not enabled on that
-    basis.
-
-    The machinery is here, tested and wired, because the constraint is DATA:
-    eight positions over seventy rebalances is roughly 370 decided trades in the
-    whole history. Re-run `research metalabel` when the panel is longer.
-    """
-
-    enabled: bool = False
-    #: How far down the primary ranking counts as a trade the engine would
-    #: consider. Eight rows a date cannot support a classifier.
-    shortlist_top_k: int = Field(50, ge=8, le=200)
-    #: NO THRESHOLD HERE. The veto's floor is
-    #: `stage8_final_signal.scarcity.min_win_probability`, which is where the
-    #: gate actually runs. A second field of the same name lived here, was read
-    #: by nothing, and survived the liveness check precisely because the leaf
-    #: name is consumed elsewhere -- so the check that exists to catch a
-    #: parameter stating behaviour the engine does not have was blind to it.
-    #: See `liveness.SHARED_LEAF_NAMES` for the guard that now covers this.
-    l2: float = Field(1.0, gt=0.0, le=1000.0)
 
 
 class VolatilityScalingConfig(_Base):
@@ -1074,14 +1031,12 @@ class RankingConfig(_Base):
     (+0.0338 at H=63) while its top-decile excess is negative (-0.35%, t -0.28).
     """
 
-    #: v2_composite | measured_factor | fitted_composite | family_average.
+    #: v3_composite -- the shipped scorer. v9r_core -- the sealed-window model,
+    #: selectable for shadow running; see docs/MODEL_v9R.md for why it is not
+    #: the default.
     source: str = Field("measured_factor",
-                        pattern="^(v3_composite|v2_composite|measured_factor"
+                        pattern="^(v3_composite|v9r_core|measured_factor"
                                 "|fitted_composite|family_average)$")
-    #: v2_composite only: how many of the ten v2 factors a name must have before
-    #: it is scored at all. A name ranked on four of ten is not comparable with
-    #: one ranked on ten, and median-filling the gap ranks it by a number nobody
-    #: computed for it.
     #: v3_composite only: how many of the five themes a name must have before it
     #: is scored. A name scored on two themes is not the same measurement as one
     #: scored on five, and blending them into one ranking hides that.
@@ -1089,10 +1044,6 @@ class RankingConfig(_Base):
         value=3, status="MEASURED",
         note="Three of five. Validated across 2 and 4; the ranking is flat in "
              "this parameter and 3 keeps the widest population."))
-    v2_min_factors: TI = Field(default_factory=lambda: Tunable[int](
-        value=7, status="MEASURED",
-        note="Seven of ten. Below it a name is ranked on a minority of the "
-             "model and is not comparable with one ranked on all of it."))
     #: The column to rank on when `source` is not `fitted_composite`. Must be a
     #: ranked feature column (`_r`) or a family column (`_f`) the model builds;
     #: Stage 4 refuses a name it cannot find rather than falling back silently,
@@ -1162,7 +1113,6 @@ class Stage4Config(_Base):
     model_min_train_rows: int = Field(600, ge=100)
     labels: LabelConfig = Field(default_factory=LabelConfig)
     estimator: EstimatorConfig = Field(default_factory=EstimatorConfig)
-    metalabel: MetaLabelConfig = Field(default_factory=MetaLabelConfig)
     decay_monitor: DecayMonitorConfig = Field(default_factory=DecayMonitorConfig)
 
     @model_validator(mode="after")
@@ -1610,7 +1560,7 @@ class ScarcityConfig(_Base):
     min_dispersion_ratio: TF
     #: A NEW entry whose modelled probability of reaching target before stop
     #: falls below this is refused. 0.0 vetoes nothing, which is the shipped
-    #: default -- see MetaLabelConfig for the measurement behind that. Held
+    #: default -- the veto was removed on its measurement (AUC 0.4996). Held
     #: positions are exempt: they are governed by the Stage 6 exit band, and a
     #: classifier refitted every 21 sessions must not be able to close a trade
     #: it was not consulted about opening.
