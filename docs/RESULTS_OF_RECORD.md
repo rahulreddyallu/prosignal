@@ -7,16 +7,16 @@
 
 | | |
 |---|---|
-| generated at | `2026-09-04T02:46:20+00:00` |
-| config version | `baseline-v2@f0e9824a441d0f18` |
+| generated at | `2026-09-04T03:09:14+00:00` |
+| config version | `baseline-v2@3f7297cdb915fb0e` |
 | — parameters hash | `7283747188af02f5` |
-| — store hash | `cfa82ac5ef9b8175` |
+| — store hash | `00333f4212937563` |
 | — training-window hash | `4dc2dcfe23298c98` |
 | shipped ranker | `v3_composite` |
-| git commit | `afe217b32c3e` **(working tree dirty)** |
+| git commit | `a047b0cacd55` **(working tree dirty)** |
 | engine version | `0.1.0` |
 | data manifest digest | `024097d7280e36cc` |
-| store fingerprint | delivery 1711s/4806n 2019-06-27..2026-09-03; fundamentals 22s/186n 2019-09-30..2024-12-31; indices 2218s/177n 2017-09-08..2026-09-03; prices 2219s/3554n 2017-09-08..2026-09-03 |
+| store fingerprint | delivery 1711s/4806n 2019-06-27..2026-09-03; fundamentals 740s/186n 2019-11-14..2025-03-11; indices 2218s/177n 2017-09-08..2026-09-03; prices 2219s/7112n 2017-09-08..2026-09-03 |
 | panel span | 2018-11-27 → 2026-08-03 |
 | panel rows | 204,425 |
 | distinct signal dates | 380 |

@@ -215,51 +215,92 @@ def _iso(day: Any) -> Optional[str]:
         return None
 
 
+#: Where each feed's parquet lives under `curated/`, and the two columns that
+#: describe its coverage. `index_name` is the indices feed's series key and has
+#: to be here: NSE publishes India VIX in the same frame as the price indices,
+#: so a feed that gained or lost a series would otherwise leave the fingerprint
+#: untouched while changing both the benchmark and the regime read.
+_FEED_LAYOUT = {
+    "prices": ("prices", "date", "symbol"),
+    "delivery": ("delivery", "date", "symbol"),
+    "indices": ("indices", "date", "index_name"),
+    "fundamentals": ("fundamentals.parquet", "filing_date", "symbol"),
+}
+
+
+def _feed_paths(curated, spec: str) -> List[Any]:
+    from pathlib import Path
+
+    root = Path(curated)
+    if spec.endswith(".parquet"):
+        p = root / spec
+        return [p] if p.is_file() else []
+    d = root / spec
+    return sorted(d.glob("*.parquet")) if d.is_dir() else []
+
+
 def _coverage(store, feed: str) -> FeedCoverage:
-    """Sessions and symbols for one feed, or an explicit UNAVAILABLE."""
-    readers = {
-        "prices": ("price_sessions", "read_prices"),
-        "delivery": (None, "read_delivery"),
-        "indices": (None, "read_indices"),
-        "fundamentals": (None, "read_fundamentals"),
-    }
-    sess_attr, read_attr = readers.get(feed, (None, None))
-    if read_attr is None or not hasattr(store, read_attr):
+    """Sessions and symbols for one feed, or an explicit UNAVAILABLE.
+
+    READS THE PARQUET COLUMNS DIRECTLY rather than going through
+    `store.read_*`. That is not an optimisation for its own sake -- the first
+    version of this called `read_prices()`, which APPLIES CORPORATE ACTIONS to
+    every row before returning, and it cost 10.8 seconds on this store. Since
+    the identity is resolved once per CLI invocation, every command in the
+    repository became eleven seconds slower to compute a count of dates and
+    symbols.
+
+    It is also the more correct reading. Coverage is a question about what data
+    is PRESENT, not about what the adjusted values are; an adjustment pass
+    cannot change which sessions or which symbols the store holds, so running
+    one to find out was answering a cheap question with an expensive tool.
+    """
+    spec = _FEED_LAYOUT.get(feed)
+    if spec is None:
         return FeedCoverage(feed, None, None, 0, 0,
-                            unavailable=f"the store exposes no {read_attr!r}")
-    try:
-        frame = getattr(store, read_attr)()
-    except Exception as exc:                       # noqa: BLE001 -- see below
-        # An unreadable feed is UNKNOWN, never empty. Returning a zero-coverage
-        # record with no marker would give a broken read the same digest as a
-        # genuinely absent feed.
-        return FeedCoverage(feed, None, None, 0, 0, unavailable=str(exc)[:200])
-    if frame is None or getattr(frame, "empty", True):
+                            unavailable=f"no layout declared for {feed!r}")
+    rel, date_col, sym_col = spec
+    curated = getattr(store, "curated", None)
+    if curated is None:
+        return FeedCoverage(feed, None, None, 0, 0,
+                            unavailable="the store exposes no curated path")
+    paths = _feed_paths(curated, rel)
+    if not paths:
+        # Genuinely absent. NOT the same as unreadable -- see below.
         return FeedCoverage(feed, None, None, 0, 0)
 
-    date_col = next((c for c in ("date", "DATE", "session_date", "period_end",
-                                 "filing_date") if c in frame.columns), None)
-    # `index_name` is the indices feed's series key, and it has to be here: NSE
-    # publishes India VIX in the same frame as the price indices, so a feed that
-    # gained or lost a series would otherwise leave the fingerprint untouched
-    # while changing both the benchmark and the regime read.
-    sym_col = next((c for c in ("symbol", "SYMBOL", "ticker", "index_name",
-                                "index") if c in frame.columns), None)
-    first = last = None
-    n_sessions = 0
-    if date_col is not None:
+    try:
         import pandas as pd
-        s = pd.to_datetime(frame[date_col], errors="coerce").dropna()
-        if len(s):
-            first, last = _iso(s.min()), _iso(s.max())
-            n_sessions = int(s.dt.normalize().nunique())
-    if sess_attr and hasattr(store, sess_attr):
-        try:
-            n_sessions = len(getattr(store, sess_attr)()) or n_sessions
-        except Exception:                          # noqa: BLE001
-            pass
-    n_symbols = int(frame[sym_col].nunique()) if sym_col is not None else 0
-    return FeedCoverage(feed, first, last, n_sessions, n_symbols)
+        import pyarrow.parquet as pq
+
+        dates: List[Any] = []
+        symbols = set()
+        for p in paths:
+            names = set(pq.ParquetFile(p).schema_arrow.names)
+            want = [c for c in (date_col, sym_col) if c in names]
+            if not want:
+                continue
+            tbl = pq.read_table(p, columns=want)
+            if date_col in names:
+                s = pd.to_datetime(tbl[date_col].to_pandas(),
+                                   errors="coerce").dropna()
+                if len(s):
+                    dates.append(s.dt.normalize())
+            if sym_col in names:
+                symbols.update(tbl[sym_col].to_pandas().dropna().unique())
+    except Exception as exc:                       # noqa: BLE001
+        # An unreadable feed is UNKNOWN, never empty. A zero-coverage record
+        # with no marker would give a broken read the same digest as a
+        # genuinely absent feed, which is the failure the NOT_TESTABLE
+        # convention exists to prevent.
+        return FeedCoverage(feed, None, None, 0, 0, unavailable=str(exc)[:200])
+
+    if not dates:
+        return FeedCoverage(feed, None, None, 0, len(symbols))
+    import pandas as pd
+    alld = pd.concat(dates, ignore_index=True)
+    return FeedCoverage(feed, _iso(alld.min()), _iso(alld.max()),
+                        int(alld.nunique()), len(symbols))
 
 
 def store_fingerprint(store, feeds: Optional[Tuple[str, ...]] = None

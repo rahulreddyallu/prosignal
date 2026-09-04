@@ -2328,8 +2328,14 @@ def cmd_research_results(cfg: AppConfig, args: argparse.Namespace) -> int:
     target = cfg.paths.root / res.DOC_RELPATH
     if args.check:
         current = target.read_text(encoding="utf-8") if target.is_file() else ""
-        if current == body:
-            _print(f"  {res.DOC_RELPATH} is up to date")
+        # Compare the RESULT, not the generation event. `generated at` and
+        # `git commit` are normalised out: a document is always written before
+        # the commit that contains it, so comparing those verbatim would fail
+        # on every repository forever. The store hash, the config version, the
+        # panel and every figure are all still compared.
+        if res.normalise_for_check(current) == res.normalise_for_check(body):
+            _print(f"  {res.DOC_RELPATH} is up to date "
+                   f"(generation timestamp and commit ignored)")
             return 0
         _print(f"  {res.DOC_RELPATH} DIFFERS from what the current store and "
                f"configuration generate. Run `prosignal research results` to "

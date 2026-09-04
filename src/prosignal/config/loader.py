@@ -109,7 +109,7 @@ class AppConfig:
     """The validated parameter set plus everything derived from it."""
 
     __slots__ = ("params", "paths", "hash", "source_file", "_tunable_index",
-                 "_identity")
+                 "_identity", "_bound_store")
 
     def __init__(self, params: RootConfig, root: Path, source_file: Path) -> None:
         self.params = params
@@ -118,6 +118,7 @@ class AppConfig:
         self.hash = config_hash(params)
         self._tunable_index: Optional[Dict[str, Dict[str, Any]]] = None
         self._identity: Optional[Any] = None
+        self._bound_store: Optional[Any] = None
 
     # -- identity -----------------------------------------------------------
     def bind_store(self, store: Any) -> "AppConfig":
@@ -141,16 +142,32 @@ class AppConfig:
         WITH a store now stamps the fuller identity, so two runs trained on
         different data can no longer quote the same version.
 
+        RESOLVED LAZILY. Binding only records the store; the fingerprint is
+        computed on first access to `version` or `identity`. Reading the
+        coverage of every feed costs a couple of seconds even now that it reads
+        parquet columns directly rather than adjusted frames, and the CLI binds
+        on every invocation -- so `config show`, `config validate` and
+        `data status`, none of which ask what the version is, should not pay
+        for an answer they never read.
+
         Returns self, so it can be chained at the call site.
         """
-        from .identity import identify
-
-        self._identity = identify(self, store)
+        self._bound_store = store
+        self._identity = None
         return self
 
     @property
     def identity(self) -> Optional[Any]:
-        """The resolved `ConfigIdentity`, or None when no store is bound."""
+        """The resolved `ConfigIdentity`, or None when no store is bound.
+
+        Computes it on first access and caches it. A store does not change
+        underneath a running process -- and if it did, two stages within one
+        run seeing different identities would be worse than either answer.
+        """
+        if self._identity is None and self._bound_store is not None:
+            from .identity import identify
+
+            self._identity = identify(self, self._bound_store)
         return self._identity
 
     @property
@@ -161,8 +178,9 @@ class AppConfig:
         ``label@ H(params) XOR H(store_fingerprint) XOR H(train_window)``;
         without one it is ``label@H(params)``.
         """
-        if self._identity is not None:
-            return self._identity.version
+        ident = self.identity                    # resolves lazily, then caches
+        if ident is not None:
+            return ident.version
         return f"{self.params.meta.config_label}@{self.hash}"
 
     @property

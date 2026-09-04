@@ -214,3 +214,34 @@ def test_pass_zero_spent_no_trials():
         f"of 0. Reconciliation looks at no out-of-sample score; a trial "
         f"charged here means modelling leaked into a pass designed to have "
         f"none.")
+
+
+# ------------------------------------------------------------------- --check
+def test_check_ignores_the_generation_event_but_not_the_result():
+    """`--check` must be keepable green, and must still catch drift.
+
+    A document is always written BEFORE the commit that contains it, so its
+    `git commit` row names the parent and its dirty flag reflects the tree
+    mid-edit. Comparing those verbatim would fail on every repository forever,
+    and a check nobody can keep green is a check nobody keeps.
+    """
+    a = ("| generated at | `2026-09-04T02:46:20+00:00` |\n"
+         "| config version | `baseline-v2@f0e9824a441d0f18` |\n"
+         "| git commit | `afe217b32c3e` **(working tree dirty)** |\n"
+         "| store hash | `cfa82ac5ef9b8175` |\n"
+         "| information ratio | -0.84 |")
+    b = a.replace("2026-09-04T02:46:20+00:00", "2026-09-05T09:00:00+00:00") \
+         .replace("`afe217b32c3e` **(working tree dirty)**", "`a047b0cacd55`")
+    assert R.normalise_for_check(a) == R.normalise_for_check(b), (
+        "a different generation timestamp or commit made --check fail; it "
+        "would then fail on every commit forever")
+
+    moved = a.replace("-0.84", "-0.51")
+    assert R.normalise_for_check(a) != R.normalise_for_check(moved), (
+        "--check did not notice a figure moving. Normalising the stamp must "
+        "not normalise away the result.")
+
+    restored = a.replace("cfa82ac5ef9b8175", "0000000000000000")
+    assert R.normalise_for_check(a) != R.normalise_for_check(restored), (
+        "--check did not notice the STORE changing, which is the whole reason "
+        "the store hash is in the stamp")

@@ -937,6 +937,24 @@ def render(rec: ResultsOfRecord) -> str:
     return "\n".join(L) + "\n"
 
 
+#: Stamp rows that describe the GENERATION EVENT rather than the result, and
+#: are therefore normalised out of `--check`.
+#:
+#: WHY. A document is always generated BEFORE the commit that contains it, so
+#: its `git commit` row names the parent and its dirty flag reflects the tree
+#: mid-edit. Comparing those verbatim would make `--check` fail on every
+#: repository forever, which is a check nobody can keep green and therefore a
+#: check nobody keeps. What `--check` must catch is the SUBSTANCE moving: the
+#: store, the config, the panel, the numbers. Those are all still compared.
+_VOLATILE_STAMP_ROWS = ("| generated at |", "| git commit |")
+
+
+def normalise_for_check(body: str) -> str:
+    """Drop the generation-event rows so `--check` compares the result."""
+    return "\n".join(line for line in body.splitlines()
+                     if not line.startswith(_VOLATILE_STAMP_ROWS))
+
+
 def write(rec: ResultsOfRecord, root: Path) -> Path:
     """Write the document and its machine-readable twin."""
     path = Path(root) / DOC_RELPATH
