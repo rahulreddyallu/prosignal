@@ -72,15 +72,28 @@ data/jobs.sqlite3
 .claude/
 data/curated/.store.lock
 
-# --- Provenance: the three files that must be committed -----------------------
+# --- Provenance: the files that must be committed -----------------------------
 # `data/curated/` and `data/ledger/` are excluded above and must stay excluded:
-# they hold a quarter of a gigabyte of market data and the run ledger. But three
+# they hold a quarter of a gigabyte of market data and the run ledger. But a few
 # small files under them are the whole point of the reproducibility work, and an
 # ignore rule that swallowed them would leave every result unable to name its
 # own inputs -- which is finding D1.
 !data/curated/MANIFEST.json
 !data/curated/trial_registry.jsonl
 !data/ledger/epochs.jsonl
+# THE PRE-REGISTRATION AND ITS ARCHIVE. A forward test is only a test because
+# its criteria were fixed before the first observation and hashed; that claim is
+# worth exactly as much as the file is auditable, and a file nobody else can see
+# is not auditable. It was untracked, which meant `test_the_shipped_
+# registration_is_v2_and_intact` -- the CI assertion on the hash -- would SKIP
+# silently on any fresh clone. A gate that skips is a gate nobody calls, which
+# is how `holdout.sacred` came to be read by no code at all (R12).
+#
+# The archived void windows are here for the same reason findings are kept: a
+# failed pre-registration is evidence about the engine, and deleting it would
+# remove the only account of why the current contract has the shape it has.
+!data/ledger/forward_test.json
+!data/ledger/forward_test.v*-void-*.json
 # Belt and braces: a stray parquet under either must never be re-included by
 # one of the negations above.
 data/curated/**/*.parquet

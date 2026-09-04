@@ -243,8 +243,23 @@ def test_a_config_change_still_breaks_the_window(tmp_path):
 
 
 # ------------------------------------------------------ the shipped ledger, in CI
-@pytest.mark.skipif(not (LEDGER / REGISTRATION_NAME).is_file(),
-                    reason="no forward test registered in this checkout")
+def test_the_registration_is_committed_so_ci_can_check_it():
+    """NOT skipped when absent. A skipping gate is a gate nobody calls.
+
+    `data/ledger/*` is gitignored, and `forward_test.json` was swallowed by it.
+    A pre-registration is only evidence because it was fixed before the first
+    observation and hashed -- and that claim is worth exactly as much as the
+    file is auditable. Untracked, the CI assertion below would SKIP silently on
+    every fresh clone while appearing to pass, which is how `holdout.sacred`
+    came to be read by no code at all (R12). The .gitignore now negates it.
+    """
+    assert (LEDGER / REGISTRATION_NAME).is_file(), (
+        f"{LEDGER / REGISTRATION_NAME} is missing. Either no forward test is "
+        f"registered -- run `prosignal research forward --start` -- or it is "
+        f"being excluded from the repository again, in which case nothing in "
+        f"CI can check that its criteria were frozen.")
+
+
 def test_the_shipped_registration_is_v2_and_intact():
     """The assertion the brief asks CI to carry."""
     assert verify(LEDGER), (
