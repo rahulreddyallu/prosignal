@@ -224,29 +224,39 @@ def cap_weights(raw: Dict[str, float], cap: float = 0.40, floor: float = 0.06,
 
 
 def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
-                min_themes: int = MIN_THEMES) -> pd.DataFrame:
+                min_themes: int = MIN_THEMES,
+                themes: Optional[Dict[str, Theme]] = None) -> pd.DataFrame:
     """Rank, combine within theme, blend. One row per symbol.
 
     Weights renormalise over the themes a name actually has, and `n_themes`
     records how many that was -- a name scored on three of five is not the same
     measurement as one scored on five and the card says so.
+
+    `themes` exists so a DERIVED specification can reuse this blend instead of
+    copying it. It defaults to the frozen `THEMES` and the default path is
+    byte-identical to what the sealed holdouts measured; `features/v4.py` passes
+    its own pruned table. The alternative was a second implementation of the
+    two-level blend, and a scorer that drifts from the one that earned the
+    out-of-sample numbers is the failure this module exists to prevent.
     """
     if raw is None or raw.empty:
         return pd.DataFrame()
+    themes = THEMES if themes is None else themes
+    factors = tuple(f for th in themes.values() for f in th.names)
     sec = pd.Series(sectors).reindex(raw.index) if sectors else None
-    cols = [c for c in ALL_FACTORS if c in raw.columns]
+    cols = [c for c in factors if c in raw.columns]
     ranks = pd.DataFrame({c: sector_neutral_rank(raw[c], sec) for c in cols},
                          index=raw.index)
     out = pd.DataFrame(index=raw.index)
-    for c in ALL_FACTORS:
+    for c in factors:
         out[c + "_r"] = ranks[c] if c in ranks else np.nan
     subs = {}
-    for tname, th in THEMES.items():
+    for tname, th in themes.items():
         s = theme_subscore(ranks, th)
         subs[tname] = s
         out[tname + "_sub"] = s
-    M = np.column_stack([subs[t].to_numpy("float64") for t in THEMES])
-    W = np.array([THEMES[t].weight for t in THEMES])
+    M = np.column_stack([subs[t].to_numpy("float64") for t in themes])
+    W = np.array([themes[t].weight for t in themes])
     ok = np.isfinite(M)
     num = np.nansum(np.where(ok, M * W, 0.0), axis=1)
     den = np.where(ok, W, 0.0).sum(axis=1)
@@ -256,7 +266,7 @@ def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
     out["score"] = np.where((den > 0) & (cnt >= min_themes),
                             num / np.maximum(den, 1e-12), np.nan)
     # per-theme contribution, which sums to the score by construction
-    for i, tname in enumerate(THEMES):
+    for i, tname in enumerate(themes):
         contrib = np.where(ok[:, i] & np.isfinite(out["score"].to_numpy()),
                            M[:, i] * W[i] / np.maximum(den, 1e-12), np.nan)
         out[tname + "_contrib"] = contrib

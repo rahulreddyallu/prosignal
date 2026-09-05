@@ -1066,7 +1066,43 @@ stage4_core_score:
     #: v2_composite    -- the previous answer, kept so it can be re-run.
     #: measured_factor -- rank on `column`, a sector-neutral rank already.
     #: fitted_composite / family_average -- older behaviours, kept for comparison.
-    source: "v3_composite"
+    #: v4_composite    -- THE SHIPPED SCORER since the 2026-09-05 epoch.
+    #:                    v3 MINUS SEVEN FACTORS and nothing else: same five
+    #:                    themes, same frozen weights, same signs, same blend.
+    #:                    Removed: mom_2_0 (own rank IC +0.0001 at t 0.02 --
+    #:                    absent, not weak: 2-month momentum with no skip, so the
+    #:                    reversal window sits inside it), mom_3_1, mom_accel,
+    #:                    voladj_mom_6_1, ulcer_120 (a momentum factor filed
+    #:                    under `risk`, correlating +0.69..+0.78 oriented with
+    #:                    prox_52w, where the per-theme 40% cap could not see
+    #:                    it), resid_rev_21 and deliv_chg_5.
+    #:
+    #:                    EVIDENCE, stated as narrowly as it deserves. An
+    #:                    independent split-half selection nominated exactly
+    #:                    these seven in BOTH halves, and re-deriving it after
+    #:                    the research panel was rebuilt -- different date range,
+    #:                    16 more dates, quality coverage 21% -> 49% -- returned
+    #:                    the same seven with no additions or removals. Over 45
+    #:                    purged, embargoed CPCV folds: composite rank IC
+    #:                    +0.0541 -> +0.0607, delta +0.0066 at Newey-West t
+    #:                    +2.37, 96% of folds improved, fifth percentile still
+    #:                    positive.
+    #:
+    #:                    WHAT IT IS NOT. Not a sealed-holdout result. v3's two
+    #:                    sealed windows were earned by the 22-factor set, do NOT
+    #:                    transfer, and are both spent. CPCV measures stability
+    #:                    across sub-periods, not selection out-of-sample, and
+    #:                    the seven were chosen on this panel. The forward test
+    #:                    re-registered with this epoch is what grades it.
+    #:
+    #:                    AND IT DOES NOT FIX THE BOOK. At six names on a
+    #:                    21-session cadence the change is inside the noise. The
+    #:                    ranking has an edge; the concentrated book does not
+    #:                    inherit it. That finding is untouched.
+    #:
+    #:                    TO REVERT: set this back to "v3_composite". v4 removes
+    #:                    nothing from v3 and v3 stays selectable.
+    source: "v4_composite"
     column: "mom_6_1_r"
     v3_min_themes:
       value: 3

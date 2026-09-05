@@ -44,6 +44,7 @@ from ..data.types import DATE, SYMBOL
 from ..features import compute_features
 from ..features.crosssec import liquidity_mask
 from ..features import v3 as v3feat
+from ..features import v4 as v4feat
 from ..features import v3_factors as v3fac
 from ..features.exits import rules_from_config
 from ..features.labels import BarrierSpec
@@ -122,6 +123,58 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
                 f"the v9R composite covers {len(covered)} of "
                 f"{len(composite_raw)} scoreable names, under the {floor} floor.")
         return covered, "v9r_core"
+
+    if source == "v4_composite":
+        # THE SHIPPED SCORER since the 2026-09-05 epoch. v3 minus seven factors
+        # that an independent split-half nominated in BOTH halves of the panel;
+        # weights, signs, themes and blend are otherwise v3's, untouched.
+        # dIC +0.0066 at Newey-West t +2.37 over 45 purged, embargoed CPCV folds,
+        # 96% of folds improved, fifth percentile still positive. That is
+        # STABILITY evidence, not a sealed holdout -- v3's two windows were
+        # earned by the 22-factor set and do not transfer. See features/v4.py.
+        if v3_scored is None or "score" not in getattr(v3_scored, "columns", []):
+            raise RankingUnavailable(
+                "stage4_core_score.ranking.source is 'v4_composite' and the v4 "
+                "block did not build. Falling back to another scorer would "
+                "issue signals from a model that was not the one measured.")
+        ranked = v3_scored["score"].dropna()
+        covered = ranked.reindex(composite_raw.index).dropna()
+        floor = max(int(0.6 * len(composite_raw)), 20)
+        if len(covered) < floor:
+            raise RankingUnavailable(
+                f"the v4 composite covers {len(covered)} of "
+                f"{len(composite_raw)} scoreable names, under the {floor} "
+                f"floor. A ranking built on a minority of the universe is a "
+                f"ranking of that minority.")
+        nth = v3_scored["n_themes"].reindex(covered.index)
+        eff = theme_effective_weights(v3_scored.loc[covered.index])
+        notes.append(
+            f"Book ordered by the v4 composite: {len(v4feat.ALL_FACTORS)} factors "
+            f"in {len(v4feat.THEMES)} themes -- v3 minus "
+            f"{', '.join(v4feat.REMOVED)}. WEIGHTS AS APPLIED TODAY "
+            f"(declared -> effective, coverage): "
+            f"{', '.join(f'{t} {v4feat.THEMES[t].weight:.0%}->{eff[t][0]:.0%} ({eff[t][1]:.0%})' for t in v4feat.THEMES)}. "
+            f"Median name scored on {nth.median():.0f} of {len(v4feat.THEMES)} "
+            f"themes. THE EVIDENCE IS STABILITY, NOT A SEALED HOLDOUT: composite "
+            f"rank IC +0.0541 -> +0.0607, delta +0.0066 at Newey-West t +2.37 "
+            f"across 45 purged and embargoed CPCV folds, 96% of folds improved. "
+            f"v3's two sealed windows were earned by the 22-factor set and do "
+            f"NOT transfer to this one. The forward test re-registered with this "
+            f"epoch is what will grade it. The RANKING is what improved; the "
+            f"concentrated book is unchanged and still unevidenced.")
+        try:
+            from .. import v3_monitor as v3mon
+            notes.extend(v3mon.review_cross_section(v3_scored.loc[covered.index]))
+        except Exception as exc:
+            log.warning("theme influence check did not run",
+                        extra={"error": str(exc)})
+        _resid = v3_scored.attrs.get("sector_residual_share")
+        if isinstance(_resid, float) and _resid == _resid:
+            notes.append(
+                f"Sector neutralisation covers {1.0 - _resid:.0%} of the ranked "
+                f"names; the other {_resid:.0%} are ranked inside ONE residual "
+                f"group against each other, which is not neutralisation.")
+        return covered, source
 
     if source == "v3_composite":
         # THE SHIPPED SCORER. Twenty-two factors in five themes, combined within
@@ -245,7 +298,8 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
 
 
 
-def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False):
+def build_v3_block(store, calendar, symbols, as_of, sectors, cfg,
+                   v9r_mode=False, v4_mode=False):
     """The v3 two-level thematic score for ``as_of``.
 
     Returns (raw factor values, scored frame, error). Reads only sessions at or
@@ -319,7 +373,14 @@ def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False
         # inside one residual bucket that is not a sector.
         from ..features import v9r as v9rfeat
         return raw, v9rfeat.score_frame(raw), None
-    scored = v3feat.score_frame(raw, sectors, min_themes=int(iv(cfg.ranking.v3_min_themes)))
+    if v4_mode:
+        # v4 IS v3 MINUS SEVEN FACTORS and shares its blend, so everything
+        # downstream -- the card, the monitor, the ledger -- reads the same
+        # columns. `features/v4.py` carries what the seven were and why.
+        scored = v4feat.score_frame(raw, sectors,
+                                    min_themes=int(iv(cfg.ranking.v3_min_themes)))
+    else:
+        scored = v3feat.score_frame(raw, sectors, min_themes=int(iv(cfg.ranking.v3_min_themes)))
     # THE RESIDUAL BUCKET, MEASURED WHERE IT BITES. `sector_neutral_rank` sends
     # every name with no usable sector -- and every name in a sector too small
     # to rank inside -- to one `__RESID__` group and ranks it against the other
@@ -542,15 +603,21 @@ def run(
 
     v3_raw = v3_scored = None
     _src = str(getattr(cfg.ranking, "source", ""))
-    if _src in ("v3_composite", "v9r_core"):
+    if _src in ("v3_composite", "v4_composite", "v9r_core"):
         v3_raw, v3_scored, v3_err = build_v3_block(
             store, calendar, symbols, as_of, sectors, cfg,
-            v9r_mode=(_src == "v9r_core"))
+            v9r_mode=(_src == "v9r_core"), v4_mode=(_src == "v4_composite"))
         if v3_err:
             notes.append(f"v3 block unavailable: {v3_err}")
 
     composite_raw, ranking_source = _apply_ranking_policy(
         composite_raw, model_features, cfg, notes, v3_scored=v3_scored)
+
+    # WHICH THEME TABLE THE CARD AND THE MONITOR READ. v4 is v3 minus seven
+    # factors, so the removed factors have no `_r` column and iterating v3's
+    # table would raise on the first name. One lookup, used everywhere below.
+    active_themes = (v4feat.THEMES if ranking_source == "v4_composite"
+                     else v3feat.THEMES)
 
     # THE ABSOLUTE FLOOR, computed here and enforced at entry. Names that fail
     # it stay in the ranking -- they are holdable and they belong on a watchlist
@@ -574,7 +641,8 @@ def run(
     scores: List[StockScore] = []
     for rank, sym in enumerate(order.index, start=1):
         factors = {}
-        if ranking_source == "v3_composite" and v3_scored is not None \
+        if ranking_source in ("v3_composite", "v4_composite") \
+                and v3_scored is not None \
                 and sym in v3_scored.index:
             # THE CARD EXPLAINS THE NUMBER IT PRINTS, AT BOTH LEVELS. Theme rows
             # carry the sub-score and the weight it was blended at and sum to
@@ -586,11 +654,11 @@ def run(
             # declared number and the reader had no way to see the difference;
             # `contribution` was already correct, which made the two printed
             # numbers fail to multiply out. Both are carried now.
-            _present = [t for t in v3feat.THEMES
+            _present = [t for t in active_themes
                         if pd.notna(v3_scored.at[sym, t + "_sub"])]
-            _den = sum(v3feat.THEMES[t].weight for t in _present) or 1.0
+            _den = sum(active_themes[t].weight for t in _present) or 1.0
             for tname, th in sorted(
-                    v3feat.THEMES.items(),
+                    active_themes.items(),
                     key=lambda kv: -(abs(_f(v3_scored.at[sym, kv[0] + "_contrib"]) or 0.0))):
                 _eff = (th.weight / _den) if tname in _present else 0.0
                 factors[tname] = FactorScore(
@@ -761,8 +829,8 @@ def run(
     # since the fitted ranker was removed, so the old call fell through to the
     # legacy `frame` and never saw a factor the book is ordered by.
     redundancy = None
-    if ranking_source in ("v3_composite", "v9r_core"):
-        redundancy = _v3_redundancy(v3_scored, cfg)
+    if ranking_source in ("v3_composite", "v4_composite", "v9r_core"):
+        redundancy = _v3_redundancy(v3_scored, cfg, themes=active_themes)
     if redundancy is None:
         redundancy = _redundancy(model_block if model_block is not None else frame,
                                  cfg, members=member_block)
@@ -1007,8 +1075,9 @@ def theme_effective_weights(v3_scored: pd.DataFrame) -> Dict[str, Tuple[float, f
     return out
 
 
-def _v3_blocks(v3_scored: pd.DataFrame) -> Tuple[Optional[pd.DataFrame],
-                                                 Optional[pd.DataFrame]]:
+def _v3_blocks(v3_scored: pd.DataFrame,
+               themes: Optional[dict] = None) -> Tuple[Optional[pd.DataFrame],
+                                                       Optional[pd.DataFrame]]:
     """The two levels of the shipped scorer, ready for the redundancy check.
 
     Returns ``(themes, factors)``: the five theme sub-scores, which are what the
@@ -1022,21 +1091,24 @@ def _v3_blocks(v3_scored: pd.DataFrame) -> Tuple[Optional[pd.DataFrame],
     """
     if v3_scored is None or getattr(v3_scored, "empty", True):
         return None, None
-    themes = pd.DataFrame(index=v3_scored.index)
-    for tname in v3feat.THEMES:
+    table = v3feat.THEMES if themes is None else themes
+    theme_block = pd.DataFrame(index=v3_scored.index)
+    for tname in table:
         col = tname + "_sub"
         if col in v3_scored.columns:
-            themes[tname] = v3_scored[col]
+            theme_block[tname] = v3_scored[col]
     factors = pd.DataFrame(index=v3_scored.index)
-    for fname, tname in v3feat.FACTOR_THEME.items():
-        col = fname + "_r"
-        if col in v3_scored.columns:
-            factors[fname] = v3_scored[col] * v3feat.THEMES[tname].signs[fname]
-    return (themes if themes.shape[1] >= 2 else None,
+    for tname, th in table.items():
+        for fname, sign in th.factors:
+            col = fname + "_r"
+            if col in v3_scored.columns:
+                factors[fname] = v3_scored[col] * sign
+    return (theme_block if theme_block.shape[1] >= 2 else None,
             factors if factors.shape[1] >= 2 else None)
 
 
-def _v3_redundancy(v3_scored: pd.DataFrame, cfg) -> Optional[RedundancyReport]:
+def _v3_redundancy(v3_scored: pd.DataFrame, cfg,
+                   themes: Optional[dict] = None) -> Optional[RedundancyReport]:
     """Redundancy for the scorer that actually orders the book.
 
     WHY THIS EXISTS SEPARATELY. `_redundancy` was written for the fitted model
@@ -1059,13 +1131,15 @@ def _v3_redundancy(v3_scored: pd.DataFrame, cfg) -> Optional[RedundancyReport]:
     pairs are reported as absorbed, and the theme sub-scores are checked in
     their own right because they are what the weights multiply.
     """
-    themes, factors = _v3_blocks(v3_scored)
-    if themes is None and factors is None:
+    table = v3feat.THEMES if themes is None else themes
+    theme_of = {f: t for t, th in table.items() for f in th.names}
+    theme_block, factors = _v3_blocks(v3_scored, themes=table)
+    if theme_block is None and factors is None:
         return None
     cutoff = fv(cfg.redundancy.max_abs_spearman)
     notes: List[str] = []
 
-    theme_pairs = spearman_pairs(themes) if themes is not None else {}
+    theme_pairs = spearman_pairs(theme_block) if theme_block is not None else {}
     breaches = [(k.split("|")[0], k.split("|")[1], round(rho, 4))
                 for k, rho in theme_pairs.items() if abs(rho) > cutoff]
 
@@ -1075,14 +1149,14 @@ def _v3_redundancy(v3_scored: pd.DataFrame, cfg) -> Optional[RedundancyReport]:
         a, b = key.split("|")
         if abs(rho) <= cutoff:
             continue
-        same = v3feat.FACTOR_THEME.get(a) == v3feat.FACTOR_THEME.get(b)
+        same = theme_of.get(a) == theme_of.get(b)
         (within if same else cross).append((a, b, round(rho, 4)))
 
     for a, b, rho in sorted(cross, key=lambda r: -abs(r[2])):
         breaches.append((a, b, rho))
         notes.append(
-            f"CROSS-THEME OVERLAP: {a} ({v3feat.FACTOR_THEME[a]}) and {b} "
-            f"({v3feat.FACTOR_THEME[b]}) correlate {rho:+.2f} oriented. The 40% "
+            f"CROSS-THEME OVERLAP: {a} ({theme_of[a]}) and {b} "
+            f"({theme_of[b]}) correlate {rho:+.2f} oriented. The 40% "
             f"cap is applied per theme and cannot see this; the exposure is "
             f"carried twice.")
     if within:
