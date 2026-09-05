@@ -915,9 +915,10 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
             if eligibility.not_testable.get(sym) else []
         ),
         factor_detail=dict(score.factors),
+        # Two numbers, not a sentence about two numbers.
         cost_note=(
-            f"Round-trip cost {plan.estimated_round_trip_cost_bps:.0f} bps, of which "
-            f"~{plan.estimated_impact_bps:.0f} bps is modelled impact."
+            f"Cost {plan.estimated_round_trip_cost_bps:.0f} bps round-trip"
+            f" \u00b7 {plan.estimated_impact_bps:.0f} bps impact"
             if plan and plan.estimated_round_trip_cost_bps else None
         ),
     )

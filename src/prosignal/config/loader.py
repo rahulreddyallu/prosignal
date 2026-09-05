@@ -254,11 +254,17 @@ def load_config(
 
 
 def get_config(**kwargs: Any) -> AppConfig:
-    """Process-wide accessor. Honours ``$PROSIGNAL_CONFIG`` if set."""
-    if "config_path" not in kwargs:
+    """Process-wide accessor. Honours ``$PROSIGNAL_CONFIG`` if set.
+
+    An explicit path wins; ``config_path=None`` does NOT. Callers forward an
+    optional CLI flag straight through -- ``get_config(config_path=args.config)``
+    -- and with `not in kwargs` the key was present-but-None on every run
+    without ``--config``, so the environment was skipped exactly when it was the
+    only thing that could have been consulted.
+    """
+    if kwargs.get("config_path") is None:
         env = os.environ.get("PROSIGNAL_CONFIG")
-        if env:
-            kwargs["config_path"] = Path(env)
+        kwargs["config_path"] = Path(env) if env else None
     return load_config(**kwargs)
 
 

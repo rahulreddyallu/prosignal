@@ -135,6 +135,19 @@ class Ledger:
         return sorted(out, key=lambda r: (str(r.get("logged_at") or ""),
                                           str(r.get("run_id") or "")))
 
+    def newest_on(self, when: dt.date,
+                  mode: Optional[str] = "live") -> Optional[Dict[str, Any]]:
+        """The last row recorded for one date and lineage.
+
+        The ledger is the record; the run-detail file is a display cache that
+        is allowed to fail. When it does, the newest payload on disk is an
+        EARLIER run for the same date -- same `as_of`, so the staleness check
+        passes -- and the screen shows a slate the record does not name, with
+        nothing saying so. `/today` compares against this.
+        """
+        rows = self._rows_on(when, mode)
+        return rows[-1] if rows else None
+
     @staticmethod
     def _row_date(row: Dict[str, Any]) -> Optional[dt.date]:
         try:

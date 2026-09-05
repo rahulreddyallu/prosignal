@@ -275,6 +275,15 @@ button { font: inherit; color: inherit; }
 .box-note p { color: var(--ink-2); font-size: 14px; line-height: 1.6;
               max-width: 62ch; }
 
+/* Pointers, used wherever a paragraph used to be. Tight leading and a hanging
+   marker so three facts read as three facts and not as a block of text. */
+.pts { list-style: none; margin: 0; padding: 0; }
+.pts li { color: var(--ink-2); font-size: 13.5px; line-height: 1.5;
+          padding: 1px 0 1px 14px; position: relative; max-width: 76ch; }
+.pts li::before { content: "\2013"; position: absolute; left: 0;
+                  color: var(--ink-3); }
+
+
 .slate-head { display: flex; align-items: center; gap: var(--sp-3);
               margin: var(--sp-7) 0 var(--sp-4); flex-wrap: wrap; }
 .slate-head h2 { font-size: 20px; letter-spacing: -0.02em; }
@@ -354,6 +363,12 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
    figure takes the line below it. */
 @media (max-width: 460px) {
   .figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* The name column is `minmax(0, 1fr)` beside an `auto` price, so at 375px a
+     long company name gets ~150px and breaks over four lines while the price
+     sits alone. Give the name the full width and let the price take the row
+     under it. */
+  .card-top .name { grid-column: 1 / -1; }
+  .card-top .p    { grid-column: 1 / -1; justify-self: start; }
 }
 .fig { min-width: 0; }
 .fl { display: block; font-size: 10.5px; letter-spacing: .04em;
@@ -411,7 +426,10 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
          line-height: 1.6; color: var(--ink-2); }
 .clock-d { font-weight: 600; color: var(--ink); }
 .clock.open .clock-d { color: var(--buy); }
-.clock-d::after { content: " \00b7 "; color: var(--ink-3); font-weight: 450; }
+/* Non-breaking either side. A plain space collapses at a line wrap, so on a
+   narrow screen the strip read "Not a buying session \00b7Next on ...". */
+.clock-d::after { content: "\00a0\00b7\00a0"; color: var(--ink-3);
+                  font-weight: 450; }
 .clock-t { color: var(--ink-2); }
 .ftab { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 /* NO BAND BEHIND THE HEADER. Nothing here set one, which is why it was hard to
@@ -1764,6 +1782,13 @@ function renderSettings() {
                return "v3 composite \u00b7 22 factors in 5 themes, weights frozen";
              })(),
              "") +
+      /* The standing disclosure, off the shortlist and next to the
+         configuration it describes. */
+      (((state.view || {}).scorer || {}).points || [])
+        .map((t) => setRow("", esc(t), "")).join("") +
+      /* Which payload is on screen, when it is not the one the ledger
+         recorded. Renders nothing in the normal case. */
+      (state.runMismatch ? setRow("Run", esc(state.runMismatch), "") : "") +
     '</div>' +
 
     /* RECORDING PERIOD IS GONE. It was opened by the Daily signals switch and
@@ -2069,7 +2094,7 @@ function renderChrome(v) {
   // only place that said a run had incomplete data, and that is not
   // redundant with anything. It moves to the subtitle, in words.
   const titles = {
-    overview: ["Today's opportunities", "The names the engine ranks highest, and the case for each."],
+    overview: ["Today", "Ranked shortlist."],
     // "Every name surfaced so far" was true of a page that pooled every
     // configuration the ledger has ever run. It does not, now: the figures are
     // scoped to the engine that is running, and the subtitle has to say which
@@ -2102,7 +2127,7 @@ function renderChrome(v) {
       : (state.latestSession ? "Scan " + state.latestSession : "Scan Market");
   }
   $("#page-sub").textContent = onResults && isCurrent(v)
-    ? "Ranked from the close of " + esc(v.as_of) + "."
+    ? "Close of " + esc(v.as_of)
     : sub;
 
 }
@@ -2184,8 +2209,7 @@ function viewOverview(v) {
     return marketBlock(v) + alerts +
       '<div class="box empty" style="margin-top:var(--sp-5)">' +
       '<h3>Nothing met the bar today</h3>' +
-      '<p>No name qualified, and none came close enough to be worth monitoring. ' +
-      'That is a result, not a failure to find one.</p></div>' +
+      '<p>No name qualified, and none came close enough to monitor.</p></div>' +
       gone;
   }
 
@@ -2203,13 +2227,21 @@ function viewOverview(v) {
      reported validated=true on every v3 run because a theme named `reversal`
      collided with a family of the same name in the deleted fitted model, so
      this branch was unreachable. */
+  /* THE STANDING DISCLOSURE IS OFF THIS PAGE.
+     It was a ninety-word paragraph above the shortlist; shortened to three
+     pointers it was still three lines of the same thing on every run of every
+     day, which is the definition of furniture. It is a property of the shipped
+     configuration, not of today's cross-section, so it belongs where the
+     configuration is read: Settings -> Scorer.
+
+     `severity: "alarm"` is different -- it means the model did NOT rank this
+     run -- and that one still renders, because it is about this run. */
   const sev = scorer.severity || (scorer.validated === false ? "alarm" : null);
-  const unscored = (scorer.validated === false && scorer.note)
-    ? (sev === "note"
-        ? '<div class="box-note"><b>What is evidenced here, and what is not</b>' +
-          '<p>' + esc(scorer.note) + '</p></div>'
-        : '<div class="box-warn"><b>This shortlist is not from the model</b>' +
-          '<p>' + esc(scorer.note) + '</p></div>')
+  const pts = (scorer.points || []).map((t) => '<li>' + esc(t) + '</li>').join("");
+  const unscored = (sev === "alarm" && (pts || scorer.note))
+    ? '<div class="box-warn"><b>Not ranked by the model</b>' +
+      (pts ? '<ul class="pts">' + pts + '</ul>'
+           : '<p>' + esc(scorer.note) + '</p>') + '</div>'
     : "";
 
   const counts = [];
@@ -2228,9 +2260,20 @@ function viewOverview(v) {
   const clk = v.entry_clock || {};
   const blocked = (v.new_entries_blocked && clk.is_entry_date !== false)
     ? '<div class="box-warn"><b>New positions are not being opened</b>' +
-      '<p>' + esc(v.new_entries_blocked) + '</p></div>'
+      /* The engine's sentence ran to forty words and repeated the clock strip
+         directly above it. The numbers are the message. */
+      '<ul class="pts"><li>Session ' + esc(String(clk.sessions_since_anchor != null ? clk.sessions_since_anchor : "\u2014")) +
+      ' of ' + esc(String(clk.cadence_sessions != null ? clk.cadence_sessions : "\u2014")) +
+      ' in the entry cycle</li>' +
+      (clk.next_entry_date
+        ? '<li>Next entry ' + esc(day(clk.next_entry_date)) + '</li>' : "") +
+      '<li>Held positions unaffected \u2014 rank band, floor and time limit run daily</li>' +
+      '</ul></div>'
     : "";
 
+  /* The run-identity mismatch moved to Settings -> Run. It fires only when the
+     display cache could not be written, and it is a machine fact about which
+     payload is on screen, not a fact about the market. */
   return unscored + marketBlock(v) + clockHTML(v) + blocked + alerts +
     '<div class="slate-head">' +
       '<h2>Shortlist</h2>' +
@@ -2238,7 +2281,7 @@ function viewOverview(v) {
       (function () {
         const b = v.book || {}, e = v.expectancy || {};
         const bits = [];
-        if (b.exit_rank) bits.push("held while inside the top " + b.exit_rank);
+        if (b.exit_rank) bits.push("Hold to rank " + b.exit_rank);
         /* "up to 63 sessions" read as a holding period and is not one -- it is
            the backstop that force-closes a position, identical on every name in
            every run. The number a reader wants beside it is what a trade
@@ -2283,20 +2326,21 @@ function clockHTML(v) {
     // a schedule is running that has not begun.
     head = "Any session can open a position";
     body = (c.anchor
-      ? "The " + c.cadence_sessions + "-session entry schedule begins " +
-        esc(day(c.anchor)) + "."
-      : "The entry schedule has not started.");
+      ? c.cadence_sessions + "-session cadence begins " + esc(day(c.anchor))
+      : "Entry schedule not started");
   } else if (c.is_entry_date === true) {
     head = "Buying session"; open = true;
-    body = "New positions open at today\u2019s close \u00b7 every " +
-           c.cadence_sessions + " sessions.";
+    body = "Opens at today\u2019s close \u00b7 every " + c.cadence_sessions +
+           " sessions";
   } else {
     head = "Not a buying session";
+    /* Dates and counts. The sentence here restated the cadence rule on every
+       one of the twenty days it does not apply. */
     const when = c.next_entry_date ? day(c.next_entry_date) : null;
     const until = c.sessions_until_next;
-    body = "The scan runs daily; entries open every " + c.cadence_sessions +
-      " sessions. Next " + (when ? esc(when) : "on the scheduled session") +
-      (until ? " (" + until + (until === 1 ? " session" : " sessions") + ")" : "") + ".";
+    body = "Next " + (when ? esc(when) : "on the scheduled session") +
+      (until ? " \u00b7 " + until + (until === 1 ? " session" : " sessions") : "") +
+      " \u00b7 every " + c.cadence_sessions + " sessions";
   }
   /* ONE LINE, NOT A BOX. The scan runs every weekday; this says which of those
      days may OPEN a position, which is a different rule and the only reason it
@@ -2484,7 +2528,7 @@ function cardHTML(p) {
      What replaces it is the thing that does decide the position: its rank
      against the band it is held inside. */
   const rank = p.rank != null
-    ? fig("Rank", "#" + p.rank, "of the eligible universe", "")
+    ? fig("Rank", "#" + p.rank, "", "")
     : "";
 
   return '<button class="card ' + (isBuy ? "is-buy" : "is-watch") + '" ' +
@@ -2825,17 +2869,12 @@ function viewHistory(v) {
     const dropped = open.excluded_open || 0;
     return '<div class="box empty">' +
       '<h3>No calls yet</h3>' +
-      '<p>Every call lands here the day it is issued, and is marked to the ' +
-      'latest close and to the index over the same days from its first full ' +
-      'session on. Run a scan, or wait for the daily job.</p>' +
+      '<p>Run a scan, or wait for the daily job.</p>' +
       (dropped
         ? '<p class="fine">' + dropped + ' open ' +
-          (dropped === 1 ? 'position was' : 'positions were') +
-          ' issued by an earlier configuration and are not counted as this ' +
-          'engine\u2019s book. Calls made from here will appear as they are ' +
-          'made, and again when they close.</p>'
-        : '<p class="fine">A call made on today\u2019s close shows here at ' +
-          'once, without a return, because it has not been filled yet.</p>') +
+          (dropped === 1 ? 'position' : 'positions') +
+          ' from an earlier configuration \u2014 not counted here.</p>'
+        : "") +
       '</div>' + excluded;
   }
 
@@ -2932,9 +2971,7 @@ function viewHistory(v) {
   const closed = nClosed
     ? '<div class="cols">' + list("Paid off", won, "up") +
       list("Went against", lost, "dn") + '</div>'
-    : '<p class="fine">Nothing has closed yet. A call joins the realised ' +
-      'figures the day the market takes it to its stop, its rank band or its ' +
-      'holding limit \u2014 until then it is above, marked and uncounted.</p>';
+    : '<p class="fine">Nothing has closed yet.</p>';
 
   return '<div class="stack">' + reg + chart + openHTML(open) +
          closed + excluded + '</div>';
@@ -3131,12 +3168,12 @@ function panelHTML(p) {
   const gate = (function () {
     if (!p.what_would_change) return "";
     if (p.status !== "BUY") {
-      return '<div class="gate"><span>What would move this to Buy</span>' +
+      return '<div class="gate"><span>To qualify</span>' +
         esc(p.what_would_change) + '</div>';
     }
     const route = (p.what_would_change.match(/The most likely route[^.]*\./) || [])[0];
     return route
-      ? '<div class="gate"><span>Weakest part of the case</span>' + esc(route) + '</div>'
+      ? '<div class="gate"><span>Weakest link</span>' + esc(route) + '</div>'
       : "";
   })();
 
@@ -3150,19 +3187,23 @@ function panelHTML(p) {
       '</div>'
     : "";
 
-  const lead = themes.length
-    ? '<div class="gate lead"><span>Why it is here</span>Ranked #' +
-      (p.rank != null ? p.rank : "\u2014") + ' by the v3 composite \u2014 ' +
-      themes.length + ' theme' + (themes.length === 1 ? "" : "s") +
-      ', blended under a 40% cap.</div>'
-    : "";
+  /* "Why it is here: Ranked #1 by the v3 composite -- 5 themes, blended under
+     a 40% cap." The rank is already at the top of this panel and the themes and
+     the cap are the table immediately below. A sentence that repeats the two
+     things either side of it is not an explanation. */
+  const lead = "";
 
   /* THE TABLE IS THE EXPLANATION. Two paragraphs under it explaining
      percentiles and weight renormalisation were longer than the table and said
      less; the numbers carry it. */
   const themeTable = themes.length
+    /* "sums to the score" -- and the score was on no surface of this card, so
+       the one claim the reader might have checked was the one they could not.
+       Print the total. */
     ? '<h4 class="ph">What ordered it' +
-      '<span class="ph-s">sums to the score</span></h4>' +
+      '<span class="ph-s">sums to ' +
+      themes.reduce((n, r) => n + (r.contribution || 0), 0).toFixed(3) +
+      '</span></h4>' +
       '<div class="tw"><table class="ftab drv"><thead><tr><th>Theme</th>' +
       '<th class="num">Pct</th><th class="num">Adds</th></tr></thead><tbody>' +
       themes.map((r) =>
@@ -3173,14 +3214,21 @@ function panelHTML(p) {
         (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(3) +
         '</td></tr>').join("") +
       '</tbody></table></div>' +
-      '<p class="fam-lede">Pct is its percentile in its sector. ' +
-      (themes.length < 5 ? 'Scored on ' + themes.length + ' of 5 themes.' : '') +
+      '<p class="fam-lede">Pct = percentile in sector' +
+      (themes.length < 5 ? ' \u00b7 ' + themes.length + ' of 5 themes' : '') +
       '</p>'
     : "";
 
+  /* MEASURED, not declared. The card said "22 factors behind them" on a name
+     where four of the twenty-two had no value -- the theme still carried its
+     full weight and nothing said the inputs were missing. */
   const nFac = themes.reduce((n, r) => n + ((r.members || []).length), 0);
+  const nSeen = themes.reduce((n, r) =>
+    n + (r.members || []).filter((m) => m.rank != null).length, 0);
   const themeMembers = nFac
-    ? '<details class="adv"><summary>' + nFac + ' factors behind them</summary>' +
+    ? '<details class="adv"><summary>' +
+        (nSeen < nFac ? nSeen + ' of ' + nFac + ' factors measured'
+                      : nFac + ' factors behind them') + '</summary>' +
         '<div class="adv-body">' +
         themes.map((r) => {
           const ms = r.members || [];
@@ -3405,6 +3453,11 @@ async function boot() {
         state.view = t.view;
         state.run = t.run_id || null;
         state.viewAsOf = t.as_of_date || null;
+        // The ledger is the record; this payload is a display cache that is
+        // allowed to fail. When it does, the newest file on disk is an EARLIER
+        // run for the SAME date -- so the staleness check passes and the screen
+        // shows a slate the record does not name. The server compares the two.
+        state.runMismatch = t.note || "";
         return;
       }
     }

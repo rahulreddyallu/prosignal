@@ -125,6 +125,7 @@ def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                 tiers.add(str(tier))
     if not seen:
         return {"model": "unknown", "validated": False,
+                "points": ["No factor detail was recorded for this run"],
                 "note": "No factor detail was recorded for this run."}
 
     # DECIDED ON THE TIER, WHICH STAGE 4 STAMPS, not on the factor NAMES.
@@ -151,45 +152,76 @@ def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             # drawn from it is not, and that is true on every run.
             "severity": "note",
             "factors": sorted(seen),
-            "note": (
-                "Ranked by the v3 composite: 22 factors in 5 themes, re-capped "
-                "at 40% per name. The RANKING carries two sealed-holdout "
-                "evaluations (rank IC +0.049 and +0.036, both t > 3.6) and they "
-                "measured the blend before the cap was repaired. NO BOOK is "
-                "validated at this size: top-ten excess on the 2025-26 window "
-                "was +0.38% at t 0.81, indistinguishable from zero, and a "
-                "six-name book leans on exactly that statistic. Read the "
-                "shortlist as drawn from an evidenced ranking; the "
-                "concentration is a risk choice, not a measured one."
-            ),
+            # POINTERS, NOT PROSE. This was a ninety-word paragraph at the top
+            # of the screen; every number in it is kept and the sentences
+            # around them are gone. A caveat nobody finishes reading is not a
+            # caveat.
+            "points": [
+                "v3 composite \u00b7 22 factors \u00b7 5 themes \u00b7 40% cap per name",
+                "Ranking: rank IC +0.049 and +0.036, both t > 3.6, two sealed holdouts",
+                "Six-name book: top-ten excess +0.38%, t 0.81 \u2014 not validated",
+            ],
+            "note": "The ranking is evidenced. A book this concentrated is not.",
         }
+    # THE CERTIFICATION IS GONE. The IDENTIFICATION IS NOT.
+    #
+    # This branch used to return:
+    #     {"model": "cross-sectional", "validated": True, "note": None}
+    #
+    # and every one of those three fields was wrong in a different way. The
+    # model was deleted on 2026-09-03. `validated: True` suppresses the
+    # interface's caveat, which renders only when it is false. `note: None`
+    # leaves nothing to render even if it did.
+    #
+    # Keying the live path on `evidence_tier` fixed the run in front of you and
+    # left this reachable for every payload written before tiers existed --
+    # `MODEL_KEYS - COMPOSITE_KEYS` is {beta, delivery, drawdown, lottery, mom,
+    # reversal, skew}, which ANY stored pre-v3 run matches. Rendered on the day
+    # the code is upgraded and the newest stored run predates it: today's date,
+    # five BUY badges, "Lottery-like payoff shape leads at -1.94 sd" as the
+    # reason, and no caveat anywhere.
+    #
+    # Naming it is still right -- "unknown" tells a reader less than "the model
+    # we retired" -- so the name stays and the certification goes.
     if "model" in tiers or (seen & (MODEL_KEYS - COMPOSITE_KEYS)):
-        return {"model": "cross-sectional", "validated": True, "note": None}
+        return {
+            "model": "cross-sectional",
+            "validated": False,
+            "severity": "alarm",
+            "factors": sorted(seen),
+            "points": [
+                "Ranked by the fitted cross-sectional model, retired 2026-09-03",
+                "Not the engine running now \u2014 this run predates it",
+                "Re-scan before acting on these names",
+            ],
+            "note": ("Ranked by the fitted cross-sectional model, which was "
+                     "retired on 2026-09-03. Re-scan before acting."),
+        }
     if not (seen & (COMPOSITE_KEYS - MODEL_KEYS)):
         return {
             "model": "unknown",
             "validated": False,
             "severity": "alarm",
             "factors": sorted(seen),
-            "note": (
-                "This run's factor names match neither the fitted model nor the "
-                "hand-weighted composite, so which scorer produced the ranking "
-                "cannot be established from the payload. Treat the shortlist as "
-                "unattributed until that is resolved."
-            ),
+            "points": [
+                "Scorer cannot be identified from this run\u2019s factor names",
+                "Treat the shortlist as unattributed",
+            ],
+            "note": "Which model ranked this is not established.",
         }
     return {
         "model": "composite",
         "validated": False,
         "severity": "alarm",
         "factors": sorted(seen),
-        "note": (
-            "The cross-sectional model could not fit this run, so the ranking "
-            "came from the hand-weighted composite instead. That composite was "
-            "measured at -0.047% excess per month against an equal-weight "
-            "benchmark, t = -0.11 -- it is a placeholder, not a signal. Treat "
-            "this shortlist as unscored."
-        ),
+        "points": [
+            "Ranked by the hand-weighted composite, not the fitted model",
+            "That composite measured \u22120.047% excess per month, t \u22120.11",
+            "Treat this shortlist as unscored",
+        ],
+        "note": ("The hand-weighted composite ranked this run, not the model. "
+                 "It measured -0.047% excess per month, t = -0.11 -- a "
+                 "placeholder, not a signal."),
     }
 
 

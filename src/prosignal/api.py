@@ -21,7 +21,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .config.loader import AppConfig, load_config
+from .config.loader import AppConfig, get_config
 from .stages._cfg import v as v_
 from .core.clock import market_today
 from .core.logging import get_logger, setup_logging
@@ -59,8 +59,43 @@ def _in_outcome_basis(record: Dict[str, Any], outcome) -> Dict[str, Any]:
     return merged
 
 
+def _served_run_is_the_recorded_run(cfg, payload) -> str:
+    """Empty when the screen shows the run the ledger recorded, else why not.
+
+    `rundetail.save` never raises -- a display cache that fails must not fail
+    the run that produced it, and the run IS in the ledger. But nothing told
+    anyone. Forced by making the run-detail directory unwritable: the ledger
+    took the new row and the screen went on serving the previous run for the
+    same date, indistinguishable from a fresh one.
+    """
+    from .ledger import Ledger
+    try:
+        when = dt.date.fromisoformat(str(payload.get("as_of_date")))
+        newest = Ledger(cfg.paths.ledger).newest_on(when, mode="live")
+    except Exception:
+        return ""
+    if not newest:
+        return ""
+    recorded = str(newest.get("run_id") or "")
+    served = str(payload.get("run_id") or "")
+    if not recorded or recorded == served:
+        return ""
+    return (
+        f"Showing run {served} \u00b7 the record for {when.isoformat()} ends at "
+        f"{recorded} \u00b7 these are not the names it ranked"
+    )
+
+
 def create_app(config: Optional[AppConfig] = None) -> FastAPI:
-    cfg = config or load_config()
+    # `get_config`, NOT `load_config`. Only the accessor reads
+    # $PROSIGNAL_CONFIG, and this called the loader directly -- so the server
+    # ignored the variable and served the production config while the operator
+    # believed they had pointed it somewhere else. `outcomes.py` DID honour it,
+    # which made the failure worse than an inert switch: outcomes resolved
+    # against the store you asked for while the pipeline read and WROTE the one
+    # you did not. It is how an audit put a `live` row in the production ledger
+    # from a session it had sandboxed.
+    cfg = config or get_config()
     log_cfg = cfg.params.runtime.logging
     setup_logging(
         level=str(log_cfg.level),
@@ -862,7 +897,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "run_id": payload.get("run_id"),
             "as_of_date": payload.get("as_of_date"),
             "generated_at": payload.get("generated_at"),
-            "note": "",
+            "note": _served_run_is_the_recorded_run(cfg, payload),
         }
 
     # =====================================================================

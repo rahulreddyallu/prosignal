@@ -18,8 +18,10 @@ from source. This pass renders the interface and interrogates the host.
 | **host every measurement was taken on** | `Rahuls-MacBook-Air.local` — macOS 15.0.1, arm64 **T8103 (M1)**, TZ `Asia/Kolkata`, Python **3.9.6** |
 | UI measurements | Chromium against `uvicorn` on `127.0.0.1:8932`, served from a 923 MB copy of `data/` in a scratch directory |
 
-**There is no second host.** Everything below was measured on the development
-machine because that is the only machine that exists. See D-102.
+**Everything below was measured on the development machine.** The engine is
+deployed separately on AWS EC2 and nothing here reached it — which is exactly
+the mistake D-102 records. Read every host-level finding as scoped to this
+checkout unless it says otherwise.
 
 ---
 
@@ -54,67 +56,57 @@ a `live` row into the production ledger while explicitly trying not to.
 
 ---
 
-**D-102 · P0 · VERIFIED · no scheduler exists on any host**
+**D-102 · P0 · CORRECTED · the deploy host is an EC2 instance this audit could not see**
 
-**Address:** `scripts/cloud-init.sh:170-176` (the only cron definition in the
-repo), `render.yaml:11-20` (the only deployed service definition), and the
-absence of any scheduler on the measured host.
+**Correction, 2026-09-05.** This entry originally read "no scheduler exists on
+any host" and concluded the system was not automated at all. **That was wrong,
+and the error is worth naming precisely because the evidence looked airtight.**
+The engine is deployed on AWS EC2 via `scripts/cloud-init.sh`, which installs
+`/etc/cron.d/prosignal` at `30 20 * * 1-5` under `timedatectl set-timezone
+Asia/Kolkata`. The daily loop runs there.
 
-**How I found it.** Enumerated from the machine rather than from `scripts/`:
-
-```
-crontab -l                        -> "no crontab for rahulreddyallu"
-/etc/cron.d, /etc/crontab         -> do not exist
-~/Library/LaunchAgents            -> Google, Microsoft, MathWorks. Nothing else.
-launchctl list | grep -i prosignal-> no match (rc=1)
-.github/workflows                 -> directory does not exist
-render.yaml                       -> one `type: web` service, no cron service
-```
-
-`scripts/cloud-init.sh` *does* define the job — `30 20 * * 1-5` under
-`timedatectl set-timezone Asia/Kolkata`, which is correct: 20:30 IST leaves five
-hours after the 15:30 close for the bhavcopy. But it is AWS "user data", a
-first-boot template still carrying its `__DOMAIN__` and `__TOKEN__`
-placeholders, and no instance has run it. `render.yaml`, the other deployment
-path, defines a web service only — **Render has no cron here at all**, so the
-two deployment paths in this repo are not merely different, they disagree about
-whether the system has a daily job.
-
-**Blast radius.** Everything the daily job is for. The forward test accumulates
-no observations. Outcomes are resolved only when somebody opens the page. Prices,
-delivery and corporate actions age until a human runs `data ingest`. The store
-is one session behind as of this audit and would be behind by however long
-nobody looks.
-
-**Evidence it has never run on a schedule.** The script's own log is the record:
+**What the evidence actually supported.** Every measurement was taken in the
+development checkout on the M1 laptop:
 
 ```
-$ grep -n "observation start" data/ledger/forward.log
-1:[2026-08-23T05:43:38Z]     -> 11:13 IST
-707:[2026-08-23T05:59:16Z]   -> 11:29 IST
-1413:[2026-08-24T02:57:16Z]  ->  8:27 IST
-2118:[2026-08-24T03:03:27Z]  ->  8:33 IST
-total: 4        last write: 2026-08-24 08:34 IST (12 days ago)
+crontab -l, /etc/cron.d, launchctl, .github/workflows   -> nothing   [true, of THIS host]
+render.yaml has no cron service                          -> true      [and it is not the deploy path]
+cloud-init.sh still holds __DOMAIN__ / __TOKEN__         -> true      [it is the TEMPLATE; the
+                                                                       instance was launched from a
+                                                                       filled-in copy pasted into the
+                                                                       launch wizard, which never comes back]
+data/ledger/forward.log: 4 runs, none at 20:30 IST       -> true      [of the LAPTOP's log]
 ```
 
-Four runs, in a two-day window, at four times of day, **none within nine hours
-of 20:30 IST**. These are hand-runs. And this log lives in the development
-checkout — if a deploy host were running the job, the file would be there, not
-here.
+The last line is the one that did the damage. `forward_run.sh` writes
+`$ROOT/data/ledger/forward.log` — the log of whichever checkout ran it. This
+checkout's log records four hand-runs because four hand-runs happened *here*.
+The EC2 instance keeps its own, and nothing in this repository is a window onto
+it. I read a local file as though it were a global fact.
 
-**Which host it would run on if it ran.** The M1 laptop. That is the P0 the
-prompt anticipated, and it is worse than anticipated: it does not run there
-either. A laptop cron would stop when the lid closed; this one does not start.
+**What remains true and still needs fixing:**
 
-**Fix.** Two decisions, in order: (1) choose one of the two deployment paths and
-delete the other, because keeping both guarantees that whichever one is read is
-the wrong one; (2) stand the chosen one up. If Render: add a `type: cron`
-service, and note that Render cron services do not share the web service's disk,
-so the job needs its own access to the store — this is a design change, not a
-config line. If EC2/cloud-init: run it, fill the placeholders, and set
-`PROSIGNAL_ALERT_CMD` in `/etc/prosignal.env` (D-105).
-**Estimate: 3 agent-hours to make the repo state coherent; standing up a host is
-an operator action with a card and a domain, not an agent-hour.**
+| finding | status |
+|---|---|
+| the repo describes two deployment paths, and only one has a cron | **stands** — `render.yaml` defines a web service with no cron; keeping both guarantees the wrong one gets read |
+| nothing re-manifested after ingest | **stands** — D-106, now fixed in `forward_run.sh` |
+| `PROSIGNAL_ALERT_CMD` is never set by `cloud-init.sh`, so the alert path is inert on the deployed instance | **stands** — D-105, now fixed |
+| a failure alarm cannot report that the job never started | **stands** — needs a dead-man's switch, which is an external service |
+| the store on the instance is unbounded | **stands** — D-108 |
+
+**The general lesson, recorded because it cost a P0.** "I looked and found
+nothing" is a claim about where I looked. Enumerating `crontab`, `launchctl`,
+`/etc/cron.d` and `systemctl` on one machine establishes the state of that
+machine and nothing else, and the local log that seemed to corroborate it was
+the same machine reporting on itself twice. The check that would have settled
+it is now `scripts/check_schedule.sh`, which is written to be run **on the host
+that runs the job** and says so in its first line.
+
+**Fix.** `scripts/check_schedule.sh` on the instance answers this in one
+command: whether anything schedules the job, whether the last ten runs fired at
+one hour (a schedule) or several (a person), how long since the log moved, and
+whether a failure can reach anybody.
+**Estimate: 0 agent-hours — run the check.**
 
 ---
 
@@ -564,7 +556,7 @@ Things this prompt or V10 asserted that did not survive contact with the code.
 
 | # | claim | what is true | address |
 |---|---|---|---|
-| 1 | "fundamentals now ingest on a daily cron" | no cron exists anywhere; fundamentals are **543 days old** | D-102, D-104 |
+| 1 | "fundamentals now ingest on a daily cron" | the cron exists on the EC2 instance and `data ingest` does refresh both statements and NSE fundamentals. But `fundamentals.parquet` in this checkout is **543 days old**, and `/ready` reports it green — so whatever is or is not running, the staleness is not gated | D-104 |
 | 2 | `run_kind` labels ledger rows | **there is no `run_kind` field.** All 1,942 rows carry `mode` ∈ {live, replay, quarantine}. The Part C gate as written filters to zero rows and `max()` raises on an empty Counter | `ledger.py`, `pipeline.py:176` |
 | 3 | "a cron that writes `run_kind: live` on a catch-up re-creates D-008 one row at a time" | the caller does not label the row. `pipeline.py:176` derives `mode = "live" if as_of is None else "replay"` from a single append site (`pipeline.py:451`). A catch-up with `--as-of` is `replay`; the nightly without it is `live`. The derivation is correct | `pipeline.py:176,451` |
 | 4 | "the honest trial count feeds the Deflated Sharpe directly" from ledger rows | `n_trials` comes from `trial_registry.jsonl` via `reg.count()` (`cli.py:1384`), **not** from the ledger. The 200 duplicate live rows on 2026-08-18 do not inflate the DSR | `cli.py:1362-1384`, `validation/registry.py:154` |
@@ -597,7 +589,7 @@ Things this prompt or V10 asserted that did not survive contact with the code.
 | `model_fingerprint` populated on new rows | **PASS** — new scratch row carries `14f75e5621a8/8`. Historical: still null on 1,733 of 1,942 |
 | `pytest tests/test_restart_gate.py tests/test_data_manifest.py` | **FAIL**, deliberately deferred; `data manifest --verify` reports DRIFTED with 10 discrepancies |
 | `research ready` — every dimension its own number | **PASS on reporting, FAIL on the verdict** — `ready: true` with `fundamentals_stale: true` (D-104) |
-| egress probe from the deploy host | **BLOCK** — there is no deploy host (D-102) |
+| egress probe from the deploy host | **UNVERIFIED** — run `probe_d012.py` on the EC2 instance |
 | full suite | **1,702 passed · 2 failed · 4 skipped** — the two above |
 
 ---
@@ -609,7 +601,7 @@ V10's 29 items are unchanged except where a measurement moved them:
 | item | was | now |
 |---|---|---|
 | 12 — the client renders correctly | UNVERIFIED | **VERIFIED PASS** — desktop and 375 px, both tabs, scan driven end to end |
-| 15 — D-012 egress probe on the deploy host | UNVERIFIED | **BLOCK** — no deploy host exists |
+| 15 — D-012 egress probe on the deploy host | UNVERIFIED | **still UNVERIFIED** — the host is the EC2 instance; run it there |
 | 20 — IC decay monitored with a threshold | "no number, decoration" | **threshold VERIFIED to exist and be pre-registered; scheduling BLOCK** |
 | 22 — `/ready` gates on what the live path uses | CLOSED | **REOPENED** — reports every dimension, gates on none of the stale ones (D-104) |
 
@@ -632,11 +624,11 @@ V10's 29 items are unchanged except where a measurement moved them:
 
 | what | why | the one command that would confirm it |
 |---|---|---|
-| behaviour on an NSE holiday (26 January) | no scheduler to observe; `--skip-if-recorded` is the designed answer and is VERIFIED idempotent, but never observed on a real holiday | `prosignal analyse run --skip-if-recorded` on the next NSE holiday, then `data lineage` |
-| reboot survival and missed-window catch-up | no scheduler | reboot the deploy host, then `grep "observation start" forward.log` |
+| behaviour on an NSE holiday (26 January) | not observable from this checkout; `--skip-if-recorded` is the designed answer and is VERIFIED idempotent, but never observed on a real holiday | `prosignal analyse run --skip-if-recorded` on the next NSE holiday, then `data lineage` |
+| reboot survival and missed-window catch-up | not reachable from this checkout | reboot the deploy host, then `grep "observation start" forward.log` |
 | the 409 on a job of a *different* kind | would require starting a real NSE ingest against the network mid-scan | `POST /analysis/run` then `POST /admin/run-now`; expect 409 |
 | ingest vs read-path lock contention (B5) | scoped out after D-102 made it moot — a lock cannot be contended by a job that never runs | hold `store_lock(curated, exclusive=True)` and `curl /today`; expect block or 503, not a partial read |
-| D-012 egress from the deploy host | no deploy host | `ssh <host> 'python probe_d012.py'` |
+| D-012 egress from the deploy host | not reachable from this checkout | `ssh <ec2-host> 'cd prosignal && .venv/bin/python probe_d012.py'` |
 | whether cache eviction is broken or merely lagging | measured the overage (505 MB vs 384 MB cap), not the mechanism | `du -sm data/cache` before and after `prosignal data ingest` |
 | NO TRADE / cash rule rendered | the rule is behind `blocked_reason is None` and the live cross-section does not trip it (309 of 386 above the bar against a floor of 18). Forcing it needs a fixture date, and the plan sequences that after Phase 6 | replay 2020-03-23 through the pipeline with the cash rule enabled, then render |
 
@@ -665,3 +657,72 @@ Dependencies first.
 
 **Total: 18.5 agent-hours**, plus one operator action that no agent can perform
 (standing up a host, and re-registering the forward test on it).
+
+---
+
+## 9. Fixes applied — 2026-09-05
+
+### The screen
+
+The Today page carried three blocks of prose that rendered on every run of every
+day. All three are gone.
+
+| was | is |
+|---|---|
+| a 90-word "What is evidenced here, and what is not" box above the shortlist | **off Today entirely.** It describes the shipped configuration, not today's cross-section, so it is three lines in Settings → Scorer. Every number survives: 22 factors, 5 themes, 40% cap, IC +0.049/+0.036, t > 3.6, +0.38%, t 0.81 |
+| "The scan runs daily; entries open every 21 sessions. Next on the scheduled session." | `Not a buying session · Next on the scheduled session · every 21 sessions` |
+| "No name qualified, and none came close enough to be worth monitoring. That is a result, not a failure to find one." | "No name qualified, and none came close enough to monitor." |
+| "Every call lands here the day it is issued, and is marked to the latest close and to the index over the same days from its first full session on." | "Run a scan, or wait for the daily job." |
+| "Nothing has closed yet. A call joins the realised figures the day the market takes it to its stop, its rank band or its holding limit — until then it is above, marked and uncounted." | "Nothing has closed yet." |
+| panel: "Why it is here — Ranked #1 by the v3 composite — 5 themes, blended under a 40% cap." | **deleted.** The rank is at the top of the same panel and the themes and the cap are the table directly below it |
+| "Today's opportunities" / "The names the engine ranks highest, and the case for each." | **Today** / **Close of 2026-09-03** |
+| `RANK #1 · of the eligible universe` | `RANK #1` |
+| "held while inside the top 18" | "Hold to rank 18" |
+| "What would move this to Buy" | "To qualify" |
+| "Weakest part of the case" | "Weakest link" |
+| "Round-trip cost 65 bps, of which ~10 bps is modelled impact." | "Cost 65 bps round-trip · 10 bps impact" |
+| `sums to the score` — and the score was on no surface of the card | **`sums to 0.707`** (D-110 closed) |
+| `22 factors behind them` on a name where four had no value | **`21 of 22 factors measured`** (D-107 closed) |
+
+Two layout fixes found by rendering at 375 px: the clock separator collapsed at
+a line wrap (`Not a buying session ·Next on…`), now non-breaking; and a long
+company name broke over four lines beside the price, now full-width with the
+price under it.
+
+### The defects
+
+| ref | fix | verified by |
+|---|---|---|
+| **D-101** | `api.create_app` and the CLI both resolve through `get_config`. And `get_config` now treats `config_path=None` as *not specified* — it tested `"config_path" not in kwargs`, and the CLI forwards its optional flag straight through, so the environment was skipped on every run without `--config`, which is every run | `PROSIGNAL_CONFIG` alone now sandboxes the server; the audit harness that passed the config explicitly is no longer needed |
+| **D-103** | the certification is gone, the identification stays. `{"model": "cross-sectional", "validated": True, "note": None}` → `validated: False`, `severity: "alarm"`, and a note naming the retirement date. Naming it tells a reader more than "unknown"; certifying a model retired on 2026-09-03 is the defect | a pre-v3 payload now renders the alarm branch instead of five silent BUY badges |
+| **D-113** | `Ledger.newest_on()` plus a comparison in `/today`. When the display cache could not be written, the screen served the previous run for the same date — same `as_of`, so the staleness check passed | forced by making the run-detail directory read-only: ledger `e03df4e43e14`, screen `c37d69837621`, and the mismatch is now reported |
+| **D-106** | `data manifest --write` runs in `forward_run.sh` between the ingest and the analysis | the restart gate can pass on a store the nightly just changed |
+| **D-105** | `cloud-init.sh` writes `PROSIGNAL_ALERT_CMD` into `/etc/prosignal.env`, and warns at provisioning time when it is left empty | — |
+| — | `forward_run.sh` no longer alarms when there is simply no API to warm. It curled `/today` unconditionally and alerted "the screen may be empty" on every healthy run of a host that ingests but does not serve | — |
+
+`tests/test_audit_v11_fixes.py` — 19 tests, one per finding.
+
+**Two shipped tests asserted the defect and were corrected**, not weakened:
+`test_a_real_model_run_is_not_flagged` and
+`test_the_model_and_the_composite_are_told_apart_by_their_own_keys` both
+asserted `validated is True` and `note is None` for a run from the fitted model.
+That was right while the model was live and evidenced. It was retired on
+2026-09-03, and `validated: True` is what suppressed the caveat — the interface
+renders it only when the flag is false. Both now assert the corrected contract,
+with the reason in the test.
+
+### The daily loop
+
+`scripts/check_schedule.sh` — run it **on the host that runs the job**. It
+answers, with thresholds rather than prose: whether anything schedules
+`forward_run.sh`, whether the host clock is IST, whether the last ten runs fired
+at one hour (a schedule) or several (a person), how long since the log moved,
+whether the manifest still describes the store, and whether a failure can reach
+anybody.
+
+`scripts/install_schedule.sh` installs the job as a **launchd agent** for a
+macOS host that runs the engine locally — not the EC2 deployment, and it must
+not be installed alongside it: two hosts both recording `live` observations
+produce two divergent records of the same market. macOS cron is the wrong tool
+there anyway (it needs Full Disk Access granted by hand and does not run a
+window that passed while the lid was shut; launchd fires on wake).

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from .config.loader import AppConfig, load_config
+from .config.loader import AppConfig, get_config
 from .core.errors import ConfigError, DataError, ProSignalError
 from .core.logging import get_logger, setup_logging
 from .version import ENGINE_NAME, ENGINE_VERSION, SCHEMA_VERSION
@@ -196,7 +196,7 @@ def cmd_config_show(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 
 def cmd_config_validate(cfg: AppConfig, args: argparse.Namespace) -> int:
-    # Reaching this point means load_config() already validated everything.
+    # Reaching this point means get_config() already validated everything.
     _rule("Configuration valid")
     _print(f"config version : {cfg.version}")
     _print(f"project root   : {cfg.paths.root}")
@@ -2680,7 +2680,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     try:
-        cfg = load_config(config_path=args.config)
+        # `get_config` prefers an explicit --config and falls back to
+        # $PROSIGNAL_CONFIG. `load_config` saw neither the variable nor its
+        # absence -- see create_app.
+        cfg = get_config(config_path=args.config)
     except ProSignalError as exc:
         _print(f"[red]{exc.message}[/red]" if _console else exc.message)
         return 1
