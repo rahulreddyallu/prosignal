@@ -1,8 +1,8 @@
 {
-  "started_on": "2026-09-04",
-  "config_version": "baseline-v2@3f7297cdb915fb0e",
+  "started_on": "2026-09-05",
+  "config_version": "baseline-v2@25d9176dacd25857",
   "engine_version": "0.1.0",
-  "git_commit": "51a227ae35fc380a975f60c580986589af7f36cb",
+  "git_commit": "df6ed22ba3c3a757c50a501f35f8a6b00320afe7",
   "target_sessions": 375,
   "target_months": 18,
   "primary": "PRIMARY. Alpha of the LONG-SHORT SPREAD -- top decile minus bottom decile of the shipped composite, within the point-in-time eligible universe -- regressed on an EXTERNAL Indian factor model, over the registered window. The engine passes if that alpha is positive with an overlap-corrected t of at least 2.0. It fails if the alpha is not distinguishable from zero. EXTERNAL IS THE WHOLE POINT: the previous registration regressed on six long-short factors built from this engine's OWN ranked columns, which asks an easier and different question -- a momentum-driven strategy regressed on a momentum factor built from its own momentum column will show a high R-squared for reasons that are arithmetic rather than economic. The regressor set is the IIM Ahmedabad Indian Fama-French + momentum library (survivorship-corrected, maintained outside this repository), plus two in-house controls that library lacks: a low-volatility spread and an illiquidity spread built on this engine's own universe. THIS HYPOTHESIS IS NOT_TESTABLE UNTIL THAT MODEL EXISTS: see `instruments_required`. It is registered now, before any observation, because that is the only time a hypothesis may be written down; it will be graded when the instrument is built and not before, and it is never graded against the self-built regressors as a substitute.",
@@ -34,5 +34,5 @@
     "An EXTERNAL Indian factor-return series (IIMA Fama-French + momentum) ingested with its own provenance, plus in-house low-volatility and illiquidity spread controls. Pass 2 builds it. Until it exists the PRIMARY hypothesis is NOT_TESTABLE and must be reported as such -- never as a pass, and never graded against `validation.attribution`'s self-built factors instead.",
     "A long-short decile portfolio series (`validation/legs.py`). Pass 2 builds it. The engine has no short leg anywhere in `src/`, so the PRIMARY hypothesis currently has no series to regress."
   ],
-  "fingerprint": "276e8f970949bdcb"
+  "fingerprint": "298ef5bfb964440e"
 }
