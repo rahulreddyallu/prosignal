@@ -434,6 +434,22 @@ providers:
       "NIFTY 500": "/content/indices/ind_nifty500list.csv"
       "NIFTY MIDCAP 150": "/content/indices/ind_niftymidcap150list.csv"
       "NIFTY SMALLCAP 250": "/content/indices/ind_niftysmallcap250list.csv"
+      # ADDED 2026-09-05 after the factor audit measured the residual bucket.
+      # The sector map feeds `v3.sector_neutral_rank`, and every symbol NSE has
+      # no Industry for lands in ONE pseudo-sector that is ranked within itself.
+      # Measured on the live map that was 23.8% of scored rows.
+      #
+      # These four were probed live (HTTP 200, all carry the `Industry` column).
+      # Their union with the lists above is only ~755 symbols TODAY -- NIFTY
+      # TOTAL MARKET subsumes most of them -- so they buy little on any single
+      # day. They earn their place because index membership ROTATES and the
+      # map now accumulates: a name that drops out of NIFTY 500 keeps the
+      # sector it was last seen with instead of falling into the residual
+      # bucket, and a name that enters any of these lists is picked up for good.
+      "NIFTY TOTAL MARKET": "/content/indices/ind_niftytotalmarket_list.csv"
+      "NIFTY MICROCAP 250": "/content/indices/ind_niftymicrocap250_list.csv"
+      "NIFTY MIDSMALLCAP 400": "/content/indices/ind_niftymidsmallcap400list.csv"
+      "NIFTY LARGEMIDCAP 250": "/content/indices/ind_niftylargemidcap250list.csv"
 
   # ---- Secondary: Yahoo Finance via yfinance --------------------------------
   # Role: (a) the SECOND source required by the Stage 1 cross-source agreement

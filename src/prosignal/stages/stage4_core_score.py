@@ -21,7 +21,7 @@ current-vintage fundamentals would be lookahead.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -57,7 +57,7 @@ from ..indicators import (
     winsorise,
 )
 
-__all__ = ["run", "STAGE_NAME"]
+__all__ = ["run", "STAGE_NAME", "theme_effective_weights"]
 
 STAGE_NAME = "stage4_core_score"
 
@@ -145,18 +145,37 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
                 f"floor. A ranking built on a minority of the universe is a "
                 f"ranking of that minority.")
         nth = v3_scored["n_themes"].reindex(covered.index)
+        # WHAT THE BLEND ACTUALLY APPLIED, measured on this cross-section. The
+        # note used to print the DECLARED weights, which no name is scored at:
+        # weights renormalise over the themes a name has, so a theme covering a
+        # fifth of the universe donates four fifths of its weight to its
+        # neighbours. Declared 40/19/19/11/11 runs at roughly 48/4/21/13/13.
+        eff = theme_effective_weights(v3_scored.loc[covered.index])
         notes.append(
             f"Book ordered by the v3 composite: {len(v3feat.ALL_FACTORS)} factors "
-            f"in {len(v3feat.THEMES)} themes "
-            f"({', '.join(f'{t} {th.weight:.0%}' for t, th in v3feat.THEMES.items())}), "
-            f"each theme combined on its own and blended with weights capped at "
-            f"40%, floored at 6% and additionally capped at the theme's "
-            f"coverage. Median name scored on {nth.median():.0f} of "
-            f"{len(v3feat.THEMES)} themes. Sealed holdouts, one run each: rank IC "
-            f"+0.049 (t 3.69) on 2025-03..2026-08 and +0.036 (t 3.83) on "
-            f"2021-07..2022-12, with every theme positive out of sample on both. "
-            f"The RANKING is what generalised; a ten-name book at these "
-            f"transaction costs did not -- see CHANGELOG.md.")
+            f"in {len(v3feat.THEMES)} themes. WEIGHTS AS APPLIED TODAY "
+            f"(declared -> effective, coverage): "
+            f"{', '.join(f'{t} {v3feat.THEMES[t].weight:.0%}->{eff[t][0]:.0%} ({eff[t][1]:.0%})' for t in v3feat.THEMES)}. "
+            f"Effective is the population average after weights renormalise over "
+            f"the themes each name has; it is what ranked the book, and the "
+            f"declared number is not. Each theme is combined on its own and "
+            f"blended with weights capped at 40%, floored at 6% and additionally "
+            f"capped at the theme's coverage. Median name scored on "
+            f"{nth.median():.0f} of {len(v3feat.THEMES)} themes. Sealed holdouts, "
+            f"one run each: rank IC +0.049 (t 3.69) on 2025-03..2026-08 and "
+            f"+0.036 (t 3.83) on 2021-07..2022-12, with every theme positive out "
+            f"of sample on both. The RANKING is what generalised; a ten-name book "
+            f"at these transaction costs did not -- see CHANGELOG.md.")
+        _resid = v3_scored.attrs.get("sector_residual_share")
+        if isinstance(_resid, float) and _resid == _resid:
+            notes.append(
+                f"Sector neutralisation covers {1.0 - _resid:.0%} of the ranked "
+                f"names. The other {_resid:.0%} -- no NSE Industry, or a sector "
+                f"holding fewer than {v3feat.MIN_SECTOR_NAMES} of today's names "
+                f"-- are ranked inside ONE residual group against each other, "
+                f"which is not neutralisation. Widening the sector map shrinks "
+                f"this; changing how the residual is ranked would be a model "
+                f"change and is not done here.")
         # THE DOMINANCE CHECK RUNS ON EVERY RUN, not only when somebody types a
         # research command. A theme that has taken over the ranking is a
         # property of today's scores and needs no forward outcome to see, so
@@ -301,7 +320,30 @@ def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False
         from ..features import v9r as v9rfeat
         return raw, v9rfeat.score_frame(raw), None
     scored = v3feat.score_frame(raw, sectors, min_themes=int(iv(cfg.ranking.v3_min_themes)))
+    # THE RESIDUAL BUCKET, MEASURED WHERE IT BITES. `sector_neutral_rank` sends
+    # every name with no usable sector -- and every name in a sector too small
+    # to rank inside -- to one `__RESID__` group and ranks it against the other
+    # residuals. That is not neutralisation, and the share it covers is a
+    # property of the sector map on the day, so it is measured per run rather
+    # than quoted. Stage 4 attaches it to the frame for the note to read.
+    scored.attrs["sector_residual_share"] = _residual_share(raw.index, sectors)
     return raw, scored, None
+
+
+def _residual_share(index, sectors) -> float:
+    """Share of scored names that `sector_neutral_rank` cannot neutralise.
+
+    Counts both halves of the problem: names the map has no sector for, and
+    names whose sector holds fewer than `MIN_SECTOR_NAMES` of today's
+    cross-section, because both land in the same residual group.
+    """
+    if not sectors:
+        return 1.0
+    sec = pd.Series({s: sectors.get(s) for s in index}, dtype="object")
+    bad = sec.isna() | sec.astype(str).isin(("", "Unknown", "nan", "None"))
+    counts = sec[~bad].value_counts()
+    small = set(counts[counts < v3feat.MIN_SECTOR_NAMES].index)
+    return float((bad | sec.isin(small)).mean()) if len(sec) else 1.0
 
 
 
@@ -538,14 +580,25 @@ def run(
             # carry the sub-score and the weight it was blended at and sum to
             # the composite; factor rows carry the ranks the theme was built
             # from. "momentum +0.42" does not say which momentum moved.
+            # EFFECTIVE WEIGHT, NOT DECLARED. The blend renormalises over the
+            # themes THIS name actually has, so a name missing `quality` runs
+            # momentum at 40/(1-0.1899) = 49.4%, not 40%. The card printed the
+            # declared number and the reader had no way to see the difference;
+            # `contribution` was already correct, which made the two printed
+            # numbers fail to multiply out. Both are carried now.
+            _present = [t for t in v3feat.THEMES
+                        if pd.notna(v3_scored.at[sym, t + "_sub"])]
+            _den = sum(v3feat.THEMES[t].weight for t in _present) or 1.0
             for tname, th in sorted(
                     v3feat.THEMES.items(),
                     key=lambda kv: -(abs(_f(v3_scored.at[sym, kv[0] + "_contrib"]) or 0.0))):
+                _eff = (th.weight / _den) if tname in _present else 0.0
                 factors[tname] = FactorScore(
                     name=tname,
                     raw_value=None,
                     standardised=_f(v3_scored.at[sym, tname + "_sub"]),
-                    weight=round(th.weight, 5),
+                    weight=round(_eff, 5),
+                    nominal_weight=round(th.weight, 5),
                     contribution=_f(v3_scored.at[sym, tname + "_contrib"]),
                     available=pd.notna(v3_scored.at[sym, tname + "_sub"]),
                     evidence_tier="v3_theme",
@@ -704,8 +757,15 @@ def run(
         if len(cols) >= 2:
             member_block = model_features[cols].rename(columns=lambda c: c[:-2])
 
-    redundancy = _redundancy(model_block if model_block is not None else frame,
-                             cfg, members=member_block)
+    # THE MONITOR FOLLOWS THE SCORER. `model_features` is None on every run
+    # since the fitted ranker was removed, so the old call fell through to the
+    # legacy `frame` and never saw a factor the book is ordered by.
+    redundancy = None
+    if ranking_source in ("v3_composite", "v9r_core"):
+        redundancy = _v3_redundancy(v3_scored, cfg)
+    if redundancy is None:
+        redundancy = _redundancy(model_block if model_block is not None else frame,
+                                 cfg, members=member_block)
     if redundancy.breaches:
         pairs = ", ".join(f"{a}/{b} {r:+.2f}" for a, b, r in redundancy.breaches[:4])
         notes.append(
@@ -911,6 +971,138 @@ def _weights(cfg, surviving: List[str]) -> Dict[str, float]:
     return {n: v / total for n, v in mids.items()} if total > 0 else {
         n: 1.0 / len(surviving) for n in surviving
     }
+
+
+def theme_effective_weights(v3_scored: pd.DataFrame) -> Dict[str, Tuple[float, float]]:
+    """``{theme: (effective weight, coverage)}`` averaged over the scored names.
+
+    The v3 blend divides each theme's weight by the total weight of the themes
+    the NAME has, so a theme that is absent does not score zero -- it hands its
+    weight to its neighbours. Averaged over the cross-section that makes the
+    declared weight vector wrong in both directions at once: thin themes read
+    far lower than declared and thick ones far higher.
+
+    Reported per run rather than quoted from a study, because coverage moves
+    with the fundamentals feed and the number is only true of the day it was
+    measured on.
+    """
+    out: Dict[str, Tuple[float, float]] = {}
+    if v3_scored is None or getattr(v3_scored, "empty", True):
+        return {t: (th.weight, float("nan")) for t, th in v3feat.THEMES.items()}
+    present = {t: v3_scored[t + "_sub"].notna().to_numpy()
+               for t in v3feat.THEMES if t + "_sub" in v3_scored.columns}
+    if not present:
+        return {t: (th.weight, float("nan")) for t, th in v3feat.THEMES.items()}
+    names = list(present)
+    M = np.column_stack([present[t] for t in names])
+    W = np.array([v3feat.THEMES[t].weight for t in names], dtype="float64")
+    den = (M * W).sum(axis=1)
+    ok = den > 0
+    for j, t in enumerate(names):
+        eff = np.where(M[:, j] & ok, W[j] / np.maximum(den, 1e-12), 0.0)
+        out[t] = (float(eff[ok].mean()) if ok.any() else float("nan"),
+                  float(M[:, j].mean()))
+    for t, th in v3feat.THEMES.items():
+        out.setdefault(t, (th.weight, float("nan")))
+    return out
+
+
+def _v3_blocks(v3_scored: pd.DataFrame) -> Tuple[Optional[pd.DataFrame],
+                                                 Optional[pd.DataFrame]]:
+    """The two levels of the shipped scorer, ready for the redundancy check.
+
+    Returns ``(themes, factors)``: the five theme sub-scores, which are what the
+    blend weights are applied to, and the twenty-two factor ranks underneath
+    them, SIGN-ORIENTED so a -1 factor lining up with a +1 factor reads as the
+    positive alignment it is rather than a spurious negative.
+
+    Orientation is the whole point. Unoriented, `ulcer_120` (sign -1) against
+    `prox_52w` (sign +1) reports -0.78 and looks like diversification; oriented,
+    it reports +0.78 and is the same bet twice.
+    """
+    if v3_scored is None or getattr(v3_scored, "empty", True):
+        return None, None
+    themes = pd.DataFrame(index=v3_scored.index)
+    for tname in v3feat.THEMES:
+        col = tname + "_sub"
+        if col in v3_scored.columns:
+            themes[tname] = v3_scored[col]
+    factors = pd.DataFrame(index=v3_scored.index)
+    for fname, tname in v3feat.FACTOR_THEME.items():
+        col = fname + "_r"
+        if col in v3_scored.columns:
+            factors[fname] = v3_scored[col] * v3feat.THEMES[tname].signs[fname]
+    return (themes if themes.shape[1] >= 2 else None,
+            factors if factors.shape[1] >= 2 else None)
+
+
+def _v3_redundancy(v3_scored: pd.DataFrame, cfg) -> Optional[RedundancyReport]:
+    """Redundancy for the scorer that actually orders the book.
+
+    WHY THIS EXISTS SEPARATELY. `_redundancy` was written for the fitted model
+    and is fed `model_features`, which has been `None` on every run since the
+    fitted ranker was removed -- so it fell through to the legacy standardised
+    frame and NO SHIPPED v3 FACTOR PAIR HAS EVER BEEN CHECKED. A monitor that
+    inspects an empty frame reports no breaches, which reads exactly like a
+    clean bill of health.
+
+    WHAT COUNTS AS A BREACH HERE IS NOT WHAT COUNTS THERE. Two factors inside
+    one theme are SUPPOSED to overlap: the theme averages them, and the average
+    is what carries a weight. Two factors in DIFFERENT themes are a different
+    matter -- the 40% cap is applied per theme, so a momentum factor sitting in
+    the `risk` theme is momentum exposure the cap cannot see. Measured on the
+    research panel, `prox_52w`/`ulcer_120` correlate +0.78 across the
+    momentum/risk boundary, which makes real momentum exposure 48% of the blend
+    plus most of risk's 13%.
+
+    So: cross-theme factor pairs above the cutoff are BREACHES, within-theme
+    pairs are reported as absorbed, and the theme sub-scores are checked in
+    their own right because they are what the weights multiply.
+    """
+    themes, factors = _v3_blocks(v3_scored)
+    if themes is None and factors is None:
+        return None
+    cutoff = fv(cfg.redundancy.max_abs_spearman)
+    notes: List[str] = []
+
+    theme_pairs = spearman_pairs(themes) if themes is not None else {}
+    breaches = [(k.split("|")[0], k.split("|")[1], round(rho, 4))
+                for k, rho in theme_pairs.items() if abs(rho) > cutoff]
+
+    factor_pairs = spearman_pairs(factors) if factors is not None else {}
+    cross, within = [], []
+    for key, rho in factor_pairs.items():
+        a, b = key.split("|")
+        if abs(rho) <= cutoff:
+            continue
+        same = v3feat.FACTOR_THEME.get(a) == v3feat.FACTOR_THEME.get(b)
+        (within if same else cross).append((a, b, round(rho, 4)))
+
+    for a, b, rho in sorted(cross, key=lambda r: -abs(r[2])):
+        breaches.append((a, b, rho))
+        notes.append(
+            f"CROSS-THEME OVERLAP: {a} ({v3feat.FACTOR_THEME[a]}) and {b} "
+            f"({v3feat.FACTOR_THEME[b]}) correlate {rho:+.2f} oriented. The 40% "
+            f"cap is applied per theme and cannot see this; the exposure is "
+            f"carried twice.")
+    if within:
+        worst = sorted(within, key=lambda r: -abs(r[2]))[:4]
+        notes.append(
+            "Within-theme overlap (absorbed by the theme average, not a "
+            "breach): " + ", ".join(f"{a}/{b} {rho:+.2f}" for a, b, rho in worst))
+    if not theme_pairs and not factor_pairs:
+        notes.append("fewer than two v3 columns carried enough values to "
+                     "correlate; overlap not measurable this run")
+
+    combined = {f"theme:{k}": round(v, 4) for k, v in theme_pairs.items()}
+    combined.update({k: round(v, 4) for k, v in factor_pairs.items()})
+    return RedundancyReport(
+        pairwise_spearman=combined,
+        breaches=breaches,
+        cutoff=cutoff,
+        action_taken=str(v(cfg.redundancy.on_breach)),
+        notes=notes,
+    )
 
 
 def _redundancy(frame: pd.DataFrame, cfg,

@@ -611,6 +611,7 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None,
         weight = detail.get("weight")
         if not isinstance(sd, (int, float)) or not isinstance(weight, (int, float)):
             continue
+        nominal = detail.get("nominal_weight")
         served = detail.get("contribution")
         contribution = (round(float(served), 5)
                         if isinstance(served, (int, float))
@@ -632,6 +633,15 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None,
             "category": fam[0] if fam else (mapped[0] if mapped else None),
             "z": round(float(sd), 3),
             "coefficient": round(float(weight), 5),
+            # WHAT THE THEME WAS DECLARED AT, beside what it ran at. The v3
+            # blend renormalises over the themes a name has, so `quality` is
+            # declared 18.99% and applied at 0% to the ~79% of names with no
+            # fundamentals, while momentum's declared 40% runs at about 48%.
+            # Showing only the declared figure states a weight the model did
+            # not use; showing only the effective one hides that it moved.
+            "nominal_coefficient": (round(float(nominal), 5)
+                                    if isinstance(nominal, (int, float))
+                                    else None),
             "contribution": contribution,
             "raw": detail.get("raw"),
             # The measured factors this theme averages, so the panel can show

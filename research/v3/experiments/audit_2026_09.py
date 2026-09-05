@@ -50,8 +50,17 @@ from prosignal.config.loader import load_config          # noqa: E402
 from prosignal.data.store import DataStore                # noqa: E402
 from prosignal.features import v3                          # noqa: E402
 from prosignal.validation.v3_panel import build_v3_panel   # noqa: E402
-from prosignal.validation.v2_panel import rank_ic, quintile_spread  # noqa: E402
+# `validation.v2_panel` was removed in the 2026-09-03 cleanup and this import
+# went with it -- so this harness has been unrunnable since, and the EXP-A..D
+# results recorded in docs/AUDIT_REMEDIATION_2026_09.md cannot currently be
+# reproduced by running it. Both functions live in `validation.metrics`, which
+# is where `v3_panel` already reads them from.
+from prosignal.validation.metrics import rank_ic, quintile_spread  # noqa: E402
 from prosignal import v3_monitor as vm                     # noqa: E402
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _panel_guard import require_fresh, stamp                # noqa: E402
 
 OUT = Path(__file__).resolve().parent
 PANEL_CACHE = OUT / "panel_2026_09.parquet"
@@ -264,11 +273,21 @@ def exp_d_equal_weight(panel: pd.DataFrame) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild", action="store_true")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="use the cached panel even though the store has "
+                         "moved under it; every number then describes the "
+                         "OLD store, including the theme coverages.")
     ap.add_argument("--start", default="2018-01-01")
     ap.add_argument("--end", default=None)
     args = ap.parse_args()
 
     if PANEL_CACHE.exists() and not args.rebuild:
+        # A CACHED PANEL IS A CLAIM ABOUT A STORE. On 2026-09-05 this cache was
+        # two days older than the fundamentals ingest, so its `quality` theme
+        # covered 25% of scored names against the live engine's ~85%, and EXP-A
+        # -- which is entirely about the quality sign -- was measuring a theme
+        # three-quarters absent. Nothing said so, because a parquet cannot.
+        require_fresh(PANEL_CACHE, allow_stale=args.allow_stale)
         print(f"[panel] loading cache {PANEL_CACHE.name}", flush=True)
         panel = pd.read_parquet(PANEL_CACHE)
     else:
@@ -285,6 +304,8 @@ def main() -> None:
                   "data/curated.", flush=True)
             sys.exit(2)
         panel.to_parquet(PANEL_CACHE)
+        stamp(PANEL_CACHE, extra={"rows": int(len(panel)),
+                                  "built_by": "audit_2026_09.py"})
         print(f"[panel] cached {len(panel):,} rows -> {PANEL_CACHE.name}", flush=True)
 
     dts = pd.to_datetime(panel["date"])

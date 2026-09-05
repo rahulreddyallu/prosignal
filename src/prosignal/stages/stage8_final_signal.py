@@ -593,19 +593,37 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 if config is not None else None)
     source = str(rank_cfg.source) if rank_cfg is not None else "fitted_composite"
     if source == "v3_composite":
+        # WHAT IS EVIDENCED AND WHAT IS NOT, in that order. The RANKING carries
+        # two sealed holdouts. The concentrated BOOK carries none, and the
+        # 2026-09-05 factor audit measured what it does carry: over 380 weekly
+        # dates the top-six gross excess over the equal-weight eligible universe
+        # is +6.4%/yr at Newey-West t +1.32, and NO sub-period reaches |t| 1.5 --
+        # +13.0% (t 1.41) in 2019-21, -4.9% (t -0.61) in 2022-23, +7.2%
+        # (t 1.15) in 2024-26, +2.5% (t 0.53) among liquid names. The rank IC
+        # holds through all of that at NW t +4.52, so the ranking is not what
+        # fails; concentrating it into six names is. A card that quotes the
+        # holdout t-statistics and stops implies the six names inherited them.
+        #
+        # These figures are from the REBUILT panel. An earlier draft of this
+        # paragraph quoted +0.13%/yr for 2024-26 and +0.5% for the liquid half,
+        # both computed on a panel two days older than the fundamentals ingest;
+        # they are withdrawn. See docs/AUDIT_REMEDIATION_2026_09.md.
         why.append(
             f"Ranked #{score.rank} of {scores.universe_size} eligible names by the "
             f"v3 composite -- 22 factors in 5 themes, each theme combined on its "
             f"own and then blended with weights capped at 40%, floored at 6% and "
             f"capped again at the share of names the theme can speak about. The "
             f"THEME rows below sum to the score; the factor rows under each are "
-            f"what that theme is made of. On two sealed windows the ranking's "
-            f"quintile spread was +1.1% and +0.9% per 21 sessions (t 2.9, 3.1) "
-            f"and every theme carried positive information out of sample -- but "
-            f"the ten-name BOOK lost to its benchmark on one window and beat it "
-            f"on the other, in both cases inside the transaction costs. Read the "
-            f"position as a shortlist from an evidenced ranking, not as an "
-            f"ordering you can trust between #1 and #10.")
+            f"what that theme is made of. THE RANKING IS EVIDENCED: on two sealed "
+            f"windows its quintile spread was +1.1% and +0.9% per 21 sessions "
+            f"(t 2.9, 3.1), every theme carried positive information out of "
+            f"sample on both, and rank IC holds in every liquidity tercile. THIS "
+            f"SHORTLIST IS NOT. No book has a sealed holdout, and measured over "
+            f"380 weekly dates the concentrated book's gross excess is +6.4%/yr "
+            f"at t +1.32 -- indistinguishable from zero -- with no sub-period "
+            f"reaching |t| 1.5 in either direction. The ranking earns the "
+            f"shortlist; holding only a few of it is an operator's risk choice, "
+            f"taken by you and not validated by anything here.")
     elif rank_cfg is not None and source != "fitted_composite":
         why.append(
             f"Ranked #{score.rank} of the eligible universe by {rank_cfg.column} "

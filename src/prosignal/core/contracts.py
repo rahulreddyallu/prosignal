@@ -316,6 +316,15 @@ class FactorScore(_Contract):
     #: multiply, because the renormalisation over available factors means the
     #: product of the two printed numbers is not always the term that was used.
     contribution: Optional[float] = None
+    #: The weight this theme was declared at, before coverage renormalisation.
+    #: `weight` above is the EFFECTIVE weight -- what this name's blend actually
+    #: applied -- and the two differ whenever the name is missing a theme. On the
+    #: v3 composite that is most names: `quality` covers 21% of the universe, so
+    #: its declared 18.99% is the effective weight for a fifth of names and 0%
+    #: for the rest, which pushes momentum's declared 40% to 48% on average.
+    #: Printing the declared number as though it were the applied one told the
+    #: reader a weight the model did not use.
+    nominal_weight: Optional[float] = None
     available: bool = True
     horizon_note: Optional[str] = None
     evidence_tier: Optional[str] = None

@@ -1,0 +1,250 @@
+{
+  "spec_sha256": "4e5cc72b2f4c8df3cbe8e69efcd9204b438bb97195acd182a888ffb2ffd4228c",
+  "panel_provenance": {
+    "panel": "panel_2026_09.parquet",
+    "built_at": "2026-09-05T05:59:52+00:00",
+    "store_manifest_digest": "75152d895cd25607",
+    "rows": 204425,
+    "dates": 380,
+    "start": "2018-11-27",
+    "end": "2026-08-03",
+    "theme_coverage_on_scored_rows": {
+      "momentum": 0.9994107826770107,
+      "quality": 0.4904792300893646,
+      "ownership": 0.9368997348522047,
+      "risk": 0.9960718845134047,
+      "reversal": 0.9997053913385053
+    }
+  },
+  "round2_spec_sha256": "15e0daa5942cde09ab5545a18bbca2476328eb018356a07a644931a21b9e8f3c",
+  "round2_is_not_pre_registered": "ROUND2_SPECS were written after round 1's results were visible. Their t-statistics carry that multiplicity and must not be read as pre-registered evidence.",
+  "what_cpcv_does_and_does_not_buy_here": "The specifications have NO FITTED PARAMETERS -- signs, weights and membership are fixed by hand -- so there is nothing to re-estimate per fold and CPCV cannot make a selection out-of-sample. What it measures is STABILITY: whether the advantage holds across 45 purged, embargoed sub-periods rather than resting on one stretch. `cpcv_folds_positive` and `cpcv_delta_p5` are the columns that carry information the full-window delta does not. Specs A, C, F and H additionally inherit the split-half selection that chose the seven factors from THIS panel; B, D, E and G do not, which makes B and G the cleaner reads.",
+  "label": "y21",
+  "panel": {
+    "rows": 204425,
+    "dates": 380,
+    "start": "2018-11-27",
+    "end": "2026-08-03"
+  },
+  "cpcv": {
+    "n_groups": 10,
+    "n_test_groups": 2,
+    "n_splits": 45,
+    "purge_obs": 5,
+    "embargo_obs": 5,
+    "paths_per_observation": 9
+  },
+  "newey_west_lag": 4,
+  "baseline_reproduces_shipped_score": true,
+  "results": {
+    "incumbent": {
+      "note": "features/v3.py as shipped. The baseline every delta is against.",
+      "drop_factors": [],
+      "move": {},
+      "equal_theme_weights": false,
+      "full_ic": 0.05406088015917104,
+      "full_ic_nw_t": 4.520734004138923,
+      "full_delta": 0.0,
+      "full_delta_nw_t": NaN,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.05583862456523427,
+      "cpcv_delta_mean": 0.0,
+      "cpcv_delta_median": 0.0,
+      "cpcv_folds_positive": 0.0,
+      "cpcv_delta_p5": 0.0,
+      "coverage_of_incumbent_population": 1.0,
+      "round": 1
+    },
+    "A_prune7": {
+      "note": "Audit item 4. Remove the seven factors both halves independently nominated. Four of them are cost-infeasible regardless of IC.",
+      "drop_factors": [
+        "mom_2_0",
+        "mom_3_1",
+        "mom_accel",
+        "voladj_mom_6_1",
+        "ulcer_120",
+        "resid_rev_21",
+        "deliv_chg_5"
+      ],
+      "move": {},
+      "equal_theme_weights": false,
+      "full_ic": 0.060638798271882524,
+      "full_ic_nw_t": 4.848142602572133,
+      "full_delta": 0.006577918112711486,
+      "full_delta_nw_t": 2.367163100468717,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.06097884868137199,
+      "cpcv_delta_mean": 0.0065779181127114845,
+      "cpcv_delta_median": 0.007844721908297053,
+      "cpcv_folds_positive": 0.9555555555555556,
+      "cpcv_delta_p5": 0.00023728676469064402,
+      "coverage_of_incumbent_population": 0.9998134145143868,
+      "round": 1
+    },
+    "B_ulcer_to_momentum": {
+      "note": "Audit item 5, variant 1. `ulcer_120` correlates +0.74..+0.78 oriented with prox_52w across the momentum/risk boundary, so the 40% momentum cap does not bind what it is meant to bind. Move it into momentum and let the cap see it. Nothing is deleted.",
+      "drop_factors": [],
+      "move": {
+        "ulcer_120": "momentum"
+      },
+      "equal_theme_weights": false,
+      "full_ic": 0.05558736597806844,
+      "full_ic_nw_t": 4.6896822429745555,
+      "full_delta": 0.0015264858188974012,
+      "full_delta_nw_t": 2.365386069531736,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.056726031257968476,
+      "cpcv_delta_mean": 0.001526485818897401,
+      "cpcv_delta_median": 0.0015859875083600516,
+      "cpcv_folds_positive": 0.8888888888888888,
+      "cpcv_delta_p5": -0.00038162236498670836,
+      "coverage_of_incumbent_population": 0.9999901797112836,
+      "round": 1
+    },
+    "C_prune7_no_ulcer": {
+      "note": "Audit item 5, variant 2. The prune already removes ulcer_120; kept as a named spec so 'move it' and 'drop it' are compared against the same baseline rather than against each other.",
+      "drop_factors": [
+        "mom_2_0",
+        "mom_3_1",
+        "mom_accel",
+        "voladj_mom_6_1",
+        "ulcer_120",
+        "resid_rev_21",
+        "deliv_chg_5"
+      ],
+      "move": {},
+      "equal_theme_weights": false,
+      "full_ic": 0.060638798271882524,
+      "full_ic_nw_t": 4.848142602572133,
+      "full_delta": 0.006577918112711486,
+      "full_delta_nw_t": 2.367163100468717,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.06097884868137199,
+      "cpcv_delta_mean": 0.0065779181127114845,
+      "cpcv_delta_median": 0.007844721908297053,
+      "cpcv_folds_positive": 0.9555555555555556,
+      "cpcv_delta_p5": 0.00023728676469064402,
+      "coverage_of_incumbent_population": 0.9998134145143868,
+      "round": 1
+    },
+    "D_cost_only": {
+      "note": "The conservative alternative to A: remove ONLY the four factors whose own turnover exceeds any plausible gross edge. This needs no IC evidence to justify -- it is an execution constraint -- so it is the spec to prefer if A's advantage does not survive CPCV.",
+      "drop_factors": [
+        "rev_1w",
+        "deliv_chg_5",
+        "price_vs_vwap_20",
+        "resid_rev_21"
+      ],
+      "move": {},
+      "equal_theme_weights": false,
+      "full_ic": 0.0539447998203937,
+      "full_ic_nw_t": 4.129650066260823,
+      "full_delta": -0.00011608033877734782,
+      "full_delta_nw_t": -0.05427159459608003,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.05400051546309942,
+      "cpcv_delta_mean": -0.00011608033877734798,
+      "cpcv_delta_median": 0.00020082115769317808,
+      "cpcv_folds_positive": 0.5333333333333333,
+      "cpcv_delta_p5": -0.00413664625211968,
+      "coverage_of_incumbent_population": 0.9989394088186193,
+      "round": 1
+    },
+    "E_equal_theme": {
+      "note": "Audit item 2 follow-up. Declared weights run at 48/4/21/13/13 after coverage renormalisation, nothing like the declared 40/19/19/11/11. Equal declared weight is the neutral alternative to a weight vector nobody chose. EXP-D previously found frozen beats equal on the full sample; this re-asks it out of sample.",
+      "drop_factors": [],
+      "move": {},
+      "equal_theme_weights": true,
+      "full_ic": 0.05915388891802007,
+      "full_ic_nw_t": 5.623816223953576,
+      "full_delta": 0.00509300875884903,
+      "full_delta_nw_t": 1.4115054952296124,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.05875438339953901,
+      "cpcv_delta_mean": 0.00509300875884903,
+      "cpcv_delta_median": 0.004614002160758358,
+      "cpcv_folds_positive": 0.8222222222222222,
+      "cpcv_delta_p5": -0.0038558542451392255,
+      "coverage_of_incumbent_population": 1.0,
+      "round": 1
+    },
+    "F_prune7_equal_theme": {
+      "note": "A and E together, because they interact: pruning changes what each theme contains, which changes what an equal weight buys.",
+      "drop_factors": [
+        "mom_2_0",
+        "mom_3_1",
+        "mom_accel",
+        "voladj_mom_6_1",
+        "ulcer_120",
+        "resid_rev_21",
+        "deliv_chg_5"
+      ],
+      "move": {},
+      "equal_theme_weights": true,
+      "full_ic": 0.061889294220677356,
+      "full_ic_nw_t": 6.028097536258998,
+      "full_delta": 0.007828414061506316,
+      "full_delta_nw_t": 1.2737415880428262,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.06168962009830641,
+      "cpcv_delta_mean": 0.007828414061506316,
+      "cpcv_delta_median": 0.008360312732646787,
+      "cpcv_folds_positive": 0.8,
+      "cpcv_delta_p5": -0.010087996674966645,
+      "coverage_of_incumbent_population": 0.9998134145143868,
+      "round": 1
+    },
+    "G_ulcer_move_plus_cost": {
+      "note": "B and D together. This is the epoch to prefer if the goal is the smallest change that is defensible on grounds other than a number selected on this panel: moving ulcer_120 is forced by the correlation structure, and the four removals are forced by turnover. Neither was chosen by an IC search.",
+      "drop_factors": [
+        "rev_1w",
+        "deliv_chg_5",
+        "price_vs_vwap_20",
+        "resid_rev_21"
+      ],
+      "move": {
+        "ulcer_120": "momentum"
+      },
+      "equal_theme_weights": false,
+      "full_ic": 0.055070972956874256,
+      "full_ic_nw_t": 4.227485135279753,
+      "full_delta": 0.0010100927977032186,
+      "full_delta_nw_t": 0.39059925298623277,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.05400906997378337,
+      "cpcv_delta_mean": 0.0010100927977032181,
+      "cpcv_delta_median": 0.001463530799137133,
+      "cpcv_folds_positive": 0.6222222222222222,
+      "cpcv_delta_p5": -0.004855731829601284,
+      "coverage_of_incumbent_population": 0.9989099479524698,
+      "round": 2
+    },
+    "H_prune7_plus_ulcer_move": {
+      "note": "A already deletes ulcer_120, so this asks the opposite: prune the other six and MOVE ulcer_120 rather than dropping it. If H matches A, the prune's gain is not about ulcer_120 at all.",
+      "drop_factors": [
+        "mom_2_0",
+        "mom_3_1",
+        "mom_accel",
+        "voladj_mom_6_1",
+        "resid_rev_21",
+        "deliv_chg_5"
+      ],
+      "move": {
+        "ulcer_120": "momentum"
+      },
+      "equal_theme_weights": false,
+      "full_ic": 0.060417668886276615,
+      "full_ic_nw_t": 4.683574537289348,
+      "full_delta": 0.006356788727105569,
+      "full_delta_nw_t": 2.0511977238603736,
+      "cpcv_folds": 45,
+      "cpcv_ic_median": 0.060374387586251806,
+      "cpcv_delta_mean": 0.0063567887271055706,
+      "cpcv_delta_median": 0.006128663046891868,
+      "cpcv_folds_positive": 0.8888888888888888,
+      "cpcv_delta_p5": -0.0017393964255097833,
+      "coverage_of_incumbent_population": 0.9998134145143868,
+      "round": 2
+    }
+  }
+}

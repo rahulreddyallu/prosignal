@@ -696,8 +696,21 @@ class DataStore:
         """symbol -> sector, pooled from the NSE index constituent files.
 
         Current vintage: NSE publishes only today's membership. That is exactly
-        right for a live decision and mildly forward-looking in a backtest, but
-        it feeds the Stage 8 diversification cap alone and never the score, so
+        right for a live decision and mildly forward-looking in a backtest.
+
+        THIS NOW FEEDS THE SCORE. The line that used to follow -- "it feeds the
+        Stage 8 diversification cap alone and never the score" -- stopped being
+        true when the v3 composite shipped: `v3.score_frame` takes this map and
+        ranks within sector, so a missing or stale classification changes the
+        rank a name receives, not just which cap it counts against. The map is
+        accumulated rather than replaced for that reason (see
+        `ingest._refresh_sector_map`), and every symbol still outside it lands
+        in one residual bucket that is ranked within itself, which is not
+        neutralisation. That residual is reported per run; shrinking it is a
+        data problem, and changing how it is ranked would be a model change.
+
+        The forward-looking part is bounded: membership tells you which index a
+        name is in TODAY, and it selects the bucket a name is ranked inside, so
         it cannot manufacture predictability the way a survivorship-biased
         universe does.
         """

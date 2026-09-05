@@ -47,6 +47,12 @@ data/curated/*
 data/ledger/*
 logs/
 *.parquet
+# The panel's provenance sidecar records size and MTIME of every curated
+# input it was built from, which are properties of one machine's store and
+# not of the code. Committing it would make every fresh clone read as stale.
+# The traceable part -- build time, row/date span, per-theme coverage, store
+# digest -- is embedded in each harness's result JSON, and those ARE tracked.
+*.provenance.json
 *.duckdb
 *.sqlite
 *.sqlite3

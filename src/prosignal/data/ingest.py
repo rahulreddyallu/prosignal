@@ -818,13 +818,27 @@ class DataIngestor:
         return written
 
     def _refresh_sector_map(self) -> int:
-        """Pool sectors from every configured index constituent file.
+        """Pool sectors from every configured index constituent file, and KEEP
+        what earlier refreshes found.
 
-        NIFTY 500 subsumes the midcap and smallcap lists, so the union is about
-        500 names. The point-in-time universe is wider than that and is never
-        filtered to this list -- intersecting it would reintroduce exactly the
+        The point-in-time universe is wider than any index list and is never
+        filtered to it -- intersecting would reintroduce exactly the
         survivorship bias the liquidity screen exists to remove. Names outside
-        it simply have no sector, and Stage 8 says so.
+        every list simply have no sector.
+
+        THE MAP ACCUMULATES, and that is the fix rather than an optimisation.
+        NSE publishes only TODAY's membership, so a replace-every-refresh map
+        forgets a name the day it drops out of NIFTY 500 -- and the name does
+        not stop trading, it just stops having a sector. Since the sector map
+        feeds `v3.sector_neutral_rank`, forgetting a sector silently moves the
+        name into the one residual bucket that is ranked within itself, which
+        is not neutralisation. Measured after the 2026-09 factor audit, 23.8%
+        of scored rows sat in that bucket. A union keeps every classification
+        the exchange has ever published to us, and rotation makes coverage
+        monotonically better instead of churning.
+
+        A symbol NSE has RECLASSIFIED takes the new sector: today's lists win
+        over the stored value for any symbol present in both.
         """
         files = dict(self.config.params.providers.nse_archives.index_constituent_files)
         frames = []
@@ -840,15 +854,34 @@ class DataIngestor:
         if not frames:
             log.warning("no sector sources reachable; Stage 8 sector cap will report unknown")
             return 0
-        pooled = (
+        fresh = (
             pd.concat(frames, ignore_index=True)
             .dropna(subset=["symbol", "sector"])
             .drop_duplicates(subset=["symbol"], keep="first")
             .reset_index(drop=True)
         )
+        fresh["symbol"] = fresh["symbol"].astype(str).str.strip()
+        fresh["sector"] = fresh["sector"].astype(str).str.strip()
+        try:
+            stored = self.store.read_sector_map()
+        except Exception:
+            stored = None
+        before = 0 if stored is None or stored.empty else len(stored)
+        if stored is not None and not stored.empty:
+            # TODAY'S LISTS FIRST so a reclassification wins; the stored rows
+            # only fill symbols today's lists do not mention.
+            pooled = (pd.concat([fresh, stored[["symbol", "sector"]]],
+                                ignore_index=True)
+                      .dropna(subset=["symbol", "sector"])
+                      .drop_duplicates(subset=["symbol"], keep="first")
+                      .reset_index(drop=True))
+        else:
+            pooled = fresh
         written = self.store.write_sector_map(pooled)
         log.info("sector map refreshed",
-                 extra={"symbols": written, "sectors": int(pooled["sector"].nunique())})
+                 extra={"symbols": written, "sectors": int(pooled["sector"].nunique()),
+                        "from_lists_today": len(fresh), "carried_forward": written - len(fresh),
+                        "previous": before})
         return written
 
     def _refresh_nse_fundamentals(self, as_of: dt.date, opts: "IngestOptions") -> None:

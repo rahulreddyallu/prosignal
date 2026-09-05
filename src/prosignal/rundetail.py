@@ -217,7 +217,12 @@ def card(rec) -> Dict[str, Any]:
                 # `v2`/`model` are what earlier rankings used.
                 "tier": getattr(f, "evidence_tier", None),
                 "standardised": f.standardised,
+                # THE WEIGHT THIS NAME WAS SCORED AT, not the declared one.
+                # v3 renormalises over the themes a name has, so the two differ
+                # for any name missing a theme -- which is most of them, because
+                # `quality` covers about a fifth of the universe.
                 "weight": f.weight,
+                "nominal_weight": getattr(f, "nominal_weight", None),
                 # THE FOURTH COLUMN OF THE PER-STOCK TABLE. `standardised x
                 # weight` is not always the term that was used -- the v2
                 # composite renormalises its weights over the factors a name

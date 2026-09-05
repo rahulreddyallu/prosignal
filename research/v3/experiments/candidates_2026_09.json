@@ -1,0 +1,93 @@
+{
+  "label": "y21",
+  "newey_west_lag": 4,
+  "prior_signs": {
+    "beta_120": -1,
+    "idio_vol_120": -1,
+    "idio_skew_120": -1,
+    "max_dd_120": 1,
+    "deliv_pct_252": 1,
+    "deliv_val_z_60": 1
+  },
+  "panel_provenance": {
+    "panel": "panel_2026_09.parquet",
+    "built_at": "2026-09-05T05:59:52+00:00",
+    "store_manifest_digest": "75152d895cd25607",
+    "rows": 204425,
+    "dates": 380,
+    "start": "2018-11-27",
+    "end": "2026-08-03",
+    "theme_coverage_on_scored_rows": {
+      "momentum": 0.9994107826770107,
+      "quality": 0.4904792300893646,
+      "ownership": 0.9368997348522047,
+      "risk": 0.9960718845134047,
+      "reversal": 0.9997053913385053
+    }
+  },
+  "dates": 380,
+  "results": {
+    "beta_120": {
+      "sign": -1,
+      "coverage": 0.9896395954041048,
+      "own_ic": 0.03230175434156575,
+      "own_nw_t": 1.6599666851796124,
+      "delta_10": 0.0021244290486617115,
+      "delta_10_nw_t": 0.7689533957478936,
+      "delta_15": 0.00245878995084309,
+      "delta_15_nw_t": 0.5914455216580019
+    },
+    "idio_vol_120": {
+      "sign": -1,
+      "coverage": 0.9766522635765491,
+      "own_ic": 0.03839222924523752,
+      "own_nw_t": 2.709435234864576,
+      "delta_10": 0.003700050007611519,
+      "delta_10_nw_t": 1.7116688614814966,
+      "delta_15": 0.005065308207921218,
+      "delta_15_nw_t": 1.535466203742839
+    },
+    "idio_skew_120": {
+      "sign": -1,
+      "coverage": 0.9766522635765491,
+      "own_ic": 0.02004853232858026,
+      "own_nw_t": 2.331508778367966,
+      "delta_10": 0.002107956909292967,
+      "delta_10_nw_t": 1.4563081834483236,
+      "delta_15": 0.0024960304377950977,
+      "delta_15_nw_t": 1.1056361571445847
+    },
+    "max_dd_120": {
+      "sign": 1,
+      "coverage": 0.9900962388294215,
+      "own_ic": 0.02919638976660142,
+      "own_nw_t": 2.278957686469449,
+      "delta_10": 0.0005649122598803945,
+      "delta_10_nw_t": 0.41630334477545844,
+      "delta_15": 0.00043189513967903967,
+      "delta_15_nw_t": 0.2174753971511811
+    },
+    "deliv_pct_252": {
+      "sign": 1,
+      "coverage": 0.9042718255916724,
+      "own_ic": 0.015676244797721294,
+      "own_nw_t": 1.4657647612240294,
+      "delta_10": 0.0014692602807453244,
+      "delta_10_nw_t": 0.9877802166200035,
+      "delta_15": 0.0016741484887758974,
+      "delta_15_nw_t": 0.7468653326018063
+    },
+    "deliv_val_z_60": {
+      "sign": 1,
+      "coverage": 0.899597368162624,
+      "own_ic": 0.006418987817531535,
+      "own_nw_t": 0.587978695342072,
+      "delta_10": -0.001025599259578724,
+      "delta_10_nw_t": -0.7098940032689277,
+      "delta_15": -0.001830865512763493,
+      "delta_15_nw_t": -0.8329835601756522
+    }
+  },
+  "verdict": "NO candidate adds to the composite at NW t >= 2.0. Best is idio_vol_120 (dIC +0.0037, NW t +1.71 at 10% weight). 3 carry a real STANDALONE edge and add nothing once blended (idio_vol_120, idio_skew_120, max_dd_120), which is what a factor already spanned by the shipped set looks like. Read with the correlations against the incumbents: the question a candidate has to answer is not whether it predicts, but whether it predicts something the twenty-two do not already carry.",
+  "pead_not_buildable": "statements x results_calendar yields 1,325 rows / 664 symbols; a standardised unexpected earnings needs 4 quarters of lag and 8 for scaling. PEAD is unmeasurable from this store, not refuted."
+}
