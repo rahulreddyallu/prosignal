@@ -31,6 +31,52 @@ Phases 0, 1 and 2 have been implemented on branch `build-plan-v10-phase0-2`.
 | D-018 `effective_weights` from dead path | P1 | **CLOSED** — `_reported_weights` |
 | D-038 regime note that moves nothing | P2 | **CLOSED** — emitted only on the path where it is true |
 
+### Round 2 — 2026-09-05, ledger contamination and the store's write key
+
+| defect | was | now |
+|---|---|---|
+| D-008 five contaminated dates | PARTIAL | **CLOSED** — `Ledger.repair_lineage`; 5 conflicts → 0, 1,942 rows in and 1,942 out, trial count unchanged |
+| D-013 T0 sessions lost | P1 | **CLOSED for recurrence** — the cause was the price table's write key, not the series filter. Recovering the 235 already-lost rows needs a re-ingest |
+| D-032 store constructor mkdir | P2 | **CLOSED** — and `test_adj_factor_without_a_price_column_is_refused` passes for the right reason |
+
+**The ledger was not contaminated in five places. It was mislabelled in 1,365.**
+`lineage_audit` reads what the rows' own timestamps prove: of **253 market dates,
+6 were ever recorded on the day** — 2026-08-17, 08-18, 08-21, 08-25, 08-28 and
+09-02. The other 247 were backfilled later, and every one of them said
+`mode: "live"`. The engine's "live record" is six sessions.
+
+Nothing was deleted. Deleting the 1,365 contaminated rows was the obvious move
+and the wrong one: the honest trial count feeds the Deflated Sharpe directly and
+`Ledger.append` is fatal-on-failure precisely so that count cannot be corrupted.
+Rows are relabelled from evidence already in them, backed up first, and
+`prosignal data lineage [--repair]` makes it reviewable and re-runnable.
+
+Two of the six live dates disagree with themselves — 2026-08-17 (2 books) and
+2026-08-25 (8 books, 8 config versions). Those are **quarantined, not guessed
+at**. Adding `config_version` to the lineage key makes it *worse* (6 conflicts,
+not 5): the same date under one config produced up to five books, so the code
+moved underneath, and `model_fingerprint` — the field that exists to catch
+exactly that — is null on 1,733 of 1,942 rows. No recorded property
+reconstructs which book was real.
+
+**A third correction to this document.** D-013 said NSE's `T0` rows were
+dropped by the store's equity-series *read* filter. The filter is right; the
+defect was one level down. `_PartitionedTable` deduplicated the price table on
+`(symbol, date)` while NSE publishes several series per symbol per session —
+the EQ line, the T0 same-day line, and an issuer's ND/N7 debenture lines, which
+`read_prices`' own docstring is about. So two lines for one symbol on one day
+collapsed at WRITE time to whichever sorted last, and the read filter could
+only choose among the survivors. 235 (symbol, date) pairs are held under T0
+with no EQ row, across 59 symbols including SBIN, RELIANCE, HDFCBANK and INFY.
+The key is now `(symbol, date, series)`.
+
+The related claim that **61 of the last 305 sessions were partial ingests is
+also withdrawn.** It compared each session against a 305-session median while
+the listed universe grew from 2,025 names to 2,641. Against a trailing median
+the worst session in nine years is 0.923 and none breaches a 0.90 floor. A
+completeness check ships anyway, calibrated to that measurement and documented
+as never having fired, because a truncated ingest remains a real failure mode.
+
 **Remaining P0 count: 2** — D-006 (NO TRADE unreachable, Phase 4) and D-007
 (two populations in one ordering, partly mitigated: the blend no longer
 mis-weights them and the frame now reports per-name weights, but the 8.8%
@@ -1360,7 +1406,7 @@ Binary. Every item passes or blocks.
 | 5 | The screen names the scorer that ran and does not claim it is validated | **PASS** — reports `v3_composite`, `validated: false`, as a disclosure not an alarm |
 | 6 | No card carries frequencies measured on a different model | **PASS** — `expectancy.enabled: false` until re-measured |
 | 7 | NO TRADE is reachable on evidence quality, and a test demonstrates it firing | **BLOCK** (D-006) |
-| 8 | One live run per market date in the ledger; open book is unambiguous | **PARTIAL** — the reader now refuses ambiguity and scopes by lineage (D-008); the 5 contaminated historical dates still need resolving |
+| 8 | One live run per market date in the ledger; open book is unambiguous | **PASS** — 0 conflicts after `data lineage --repair`; 2 irreconcilable dates quarantined, 0 rows deleted |
 | 9 | A forward test is registered and reports VALID | **BLOCK** (none registered, D-009) |
 | 10 | `fundamentals.parquet` newest filing ≤ 120 days old | **BLOCK** (541 days, D-011) |
 | 11 | Prices are total-return adjusted | **BLOCK** (all dividend ratios 1.0, D-014) |

@@ -473,6 +473,63 @@ def cmd_data_status(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_data_lineage(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Report -- and optionally repair -- which recorded runs were live.
+
+    `mode` has been on the ledger row since v1 and every path wrote the literal
+    "live", so the field carries no information and the engine could not tell a
+    session the market produced from a re-derivation of one. The row's own
+    timestamps can: `logged_at` against `date`.
+    """
+    from .ledger import Ledger
+
+    led = Ledger(cfg.paths.ledger)
+    audit = led.lineage_audit()
+
+    _rule("Ledger lineage")
+    _print(f"  rows recorded              {audit['rows']}")
+    _print(f"  market dates               {audit['market_dates']}")
+    _print(f"  recorded ON the session    {len(audit['recorded_on_the_day'])}"
+           f"  {', '.join(audit['recorded_on_the_day'][:8])}")
+    _print(f"  backfilled later only      {audit['backfilled_only']}")
+    if audit["undatable_rows"]:
+        _print(f"  rows whose dates will not parse  {audit['undatable_rows']}")
+
+    conflicts = audit["live_dates_that_conflict"]
+    if conflicts:
+        _print("")
+        _print("  DATES RECORDED ON THE DAY THAT DISAGREE WITH THEMSELVES:")
+        for c in conflicts:
+            _print(f"    {c['date']}  {c['runs']} runs, {c['distinct_books']} "
+                   f"different books, {len(c['config_versions'])} config versions")
+        _print("  Nothing recorded says which book was real -- the same date")
+        _print("  under one config produced several, and model_fingerprint is")
+        _print("  null on most rows. These are set aside, not guessed at.")
+
+    if not args.repair:
+        summary = led.repair_lineage(dry_run=True)
+        _print("")
+        _print(f"  would mark: live {summary['live']}, replay "
+               f"{summary['replay']}, quarantine {summary['quarantine']} "
+               f"({summary['unchanged']} already correct)")
+        _print("  nothing written. Pass --repair to apply.")
+        return 0
+
+    summary = led.repair_lineage(dry_run=False)
+    _print("")
+    _print(f"  live {summary['live']} / replay {summary['replay']} / "
+           f"quarantine {summary['quarantine']}")
+    _print(f"  quarantined dates: {', '.join(summary['quarantined_dates']) or 'none'}")
+    for f in summary["files"]:
+        if f["rewritten"]:
+            _print(f"    {f['file']}: {f['rewritten']} row(s) relabelled "
+                   f"(backup written alongside)")
+    remaining = led.conflicting_dates(mode="live")
+    _print("")
+    _print(f"  live lineage conflicts remaining: {len(remaining)}")
+    return 0 if not remaining else 1
+
+
 def cmd_data_check(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .data.corporate_actions import detect_unexplained_jumps
     from .data.store import DataStore
@@ -2350,6 +2407,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     purge = data_sub.add_parser("purge-cache", help="delete cached HTTP payloads")
     purge.set_defaults(func=cmd_data_purge_cache)
+
+    lin_p = data_sub.add_parser(
+        "lineage",
+        help="which recorded runs were live and which were backfills, and "
+             "repair the label when it was never written")
+    lin_p.add_argument(
+        "--repair", action="store_true",
+        help=("stamp each row with the lineage its own timestamps prove. "
+              "Deletes nothing: every row keeps its measurements and its trial "
+              "id, and a backup is written beside each file. Same-day runs that "
+              "disagree about the book are quarantined rather than guessed at."))
+    lin_p.set_defaults(func=cmd_data_lineage)
 
     man_p = data_sub.add_parser(
         "manifest",

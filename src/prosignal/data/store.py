@@ -246,7 +246,11 @@ class _PartitionedTable:
             out = out[out[DATE] >= pd.Timestamp(start)]
         if end is not None:
             out = out[out[DATE] <= pd.Timestamp(end)]
-        return out.sort_values(self.key_columns).reset_index(drop=True)
+        # Sort on whatever part of the key survived the projection. `columns`
+        # exists so a caller can ask for three columns instead of eighteen, and
+        # a key column it did not ask for must not turn that into a KeyError.
+        order = [c for c in self.key_columns if c in out.columns]
+        return (out.sort_values(order) if order else out).reset_index(drop=True)
 
     def max_date(self) -> Optional[dt.date]:
         years = self.years()
@@ -327,7 +331,28 @@ class DataStore:
         # _refused` for a reason unrelated to the guard it was written for.
 
         self._price_cache: Optional[Dict[str, Any]] = None
-        self.prices = _PartitionedTable(self.curated, "prices", [SYMBOL, DATE])
+        # KEYED ON SERIES TOO, and this is not a detail.
+        #
+        # NSE publishes several lines per symbol per session: the EQ line, the
+        # T0 same-day-settlement line, and for an issuer with listed debt the
+        # ND / N7 / ... debenture lines. `read_prices` knows this -- its
+        # docstring is about exactly that, and it filters to the cash equity
+        # series so no stage prices an equity off its issuer's bond.
+        #
+        # But the read filter can only choose among rows that survived the
+        # WRITE, and the write deduplicated on (symbol, date) alone. Two lines
+        # for one symbol on one day therefore collapsed to whichever sorted
+        # last, silently. Measured on the shipped store: 235 (symbol, date)
+        # pairs are held under series T0 -- at volume 1, a single share in the
+        # T+0 segment -- with NO EQ row, across 59 symbols including SBIN,
+        # RELIANCE, HDFCBANK and INFY. SBIN lost 19 of its last 305 sessions
+        # that way, which took it to 286 sessions of history against a
+        # 300-session floor and out of the universe altogether.
+        #
+        # The rows already lost are not recoverable by a key change; they need
+        # a re-ingest. What this stops is losing more of them.
+        self.prices = _PartitionedTable(self.curated, "prices",
+                                        [SYMBOL, DATE, "series"])
         self.indices = _PartitionedTable(self.curated, "indices", ["index_name", DATE])
         self.delivery = _PartitionedTable(self.curated, "delivery", [SYMBOL, DATE])
         self._state_path = self.curated / _STATE_FILE
@@ -927,9 +952,25 @@ class DataStore:
         prices = self.prices.read()
         if prices.empty:
             return
-        dupes = int(prices.duplicated(subset=[SYMBOL, DATE]).sum())
+        # WITHIN ONE SERIES. A symbol legitimately has an EQ line and a T0 line
+        # on the same date, so (symbol, date) alone is not a key -- asserting it
+        # was is the same mistake that made the write drop one of them. What
+        # must never happen is two rows for one symbol, one date and one series.
+        subset = [SYMBOL, DATE] + (["series"] if "series" in prices.columns else [])
+        dupes = int(prices.duplicated(subset=subset).sum())
         if dupes:
             raise DataError(
-                f"price store contains {dupes} duplicate (symbol, date) rows -- "
-                f"this corrupts volume sums and cross-sectional ranks"
+                f"price store contains {dupes} duplicate "
+                f"({', '.join(subset)}) rows -- this corrupts volume sums and "
+                f"cross-sectional ranks"
             )
+        # And the equity series, which is what every stage reads, must still be
+        # one row per name per session.
+        if "series" in prices.columns and self.equity_series:
+            eq = prices[prices["series"].isin(self.equity_series)]
+            eq_dupes = int(eq.duplicated(subset=[SYMBOL, DATE]).sum())
+            if eq_dupes:
+                raise DataError(
+                    f"price store contains {eq_dupes} duplicate (symbol, date) "
+                    f"rows WITHIN the equity series {list(self.equity_series)}"
+                )

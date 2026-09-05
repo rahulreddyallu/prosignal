@@ -214,6 +214,176 @@ class Ledger:
             )
         return rows[-1]
 
+    #: A run recorded this many calendar days after the session it scores is
+    #: still the live run for it. One, not zero: the cron fires in the evening
+    #: and a run that starts at 23:50 finishes tomorrow.
+    LIVE_RECORDING_LAG_DAYS = 1
+
+    @classmethod
+    def _observed_mode(cls, row: Dict[str, Any]) -> Optional[str]:
+        """What the row's own timestamps say it was, or None if they cannot say.
+
+        The ONLY evidence in the record that separates a session the market
+        produced from a re-derivation of one. `mode` was written as the literal
+        "live" on every path, so it carries no information; `logged_at` against
+        `date` carries all of it. A run recorded weeks after the session it
+        scores is a backfill whatever its `mode` field claims.
+        """
+        market = cls._row_date(row)
+        try:
+            logged = dt.date.fromisoformat(str(row.get("logged_at"))[:10])
+        except (TypeError, ValueError):
+            return None
+        if market is None:
+            return None
+        lag = (logged - market).days
+        if lag < 0:
+            return None              # recorded before the session: unreadable
+        return "live" if lag <= cls.LIVE_RECORDING_LAG_DAYS else "replay"
+
+    def lineage_audit(self) -> Dict[str, Any]:
+        """What the ledger actually contains, before anything is changed.
+
+        Read-only. Answers the question `mode` was supposed to answer and
+        could not: how much of this record is the engine running, and how much
+        is the engine being re-run.
+        """
+        live_dates: Dict[dt.date, List[Dict[str, Any]]] = {}
+        replay_dates: set = set()
+        unknown = 0
+        for row in self.iter_rows():
+            observed = self._observed_mode(row)
+            when = self._row_date(row)
+            if observed is None or when is None:
+                unknown += 1
+                continue
+            if observed == "live":
+                live_dates.setdefault(when, []).append(row)
+            else:
+                replay_dates.add(when)
+        conflicted = []
+        for when, rows in sorted(live_dates.items()):
+            identities = {self._book_identity(r) for r in rows}
+            if len(identities) > 1:
+                conflicted.append({
+                    "date": when.isoformat(),
+                    "runs": len(rows),
+                    "distinct_books": len({i[0] for i in identities}),
+                    "config_versions": sorted({str(r.get("config_version"))
+                                               for r in rows}),
+                })
+        return {
+            "rows": sum(1 for _ in self.iter_rows()),
+            "market_dates": len(set(live_dates) | replay_dates),
+            "recorded_on_the_day": sorted(d.isoformat() for d in live_dates),
+            "backfilled_only": len(replay_dates - set(live_dates)),
+            "undatable_rows": unknown,
+            "live_dates_that_conflict": conflicted,
+        }
+
+    def repair_lineage(self, *, dry_run: bool = True) -> Dict[str, Any]:
+        """Stamp each row with the lineage its own timestamps prove, once.
+
+        NOTHING IS DELETED. Every row keeps its measurements, its trial id and
+        its place in the file; what changes is one label that was never
+        populated with anything but the constant "live". Deleting the
+        contaminated rows was the obvious move and it is the wrong one: the
+        honest trial count feeds the Deflated Sharpe directly, `Ledger.append`
+        is fatal-on-failure precisely so that count cannot be corrupted, and
+        removing 1,365 rows to tidy a lineage field would corrupt it far more
+        thoroughly than a wrong label ever did.
+
+        THREE OUTCOMES, and the third is the one that matters.
+
+        `live`    -- recorded within LIVE_RECORDING_LAG_DAYS of the session it
+                     scores. This is the engine running.
+        `replay`  -- recorded later. A re-derivation of a past session, which
+                     is a legitimate and useful thing to do and is not a
+                     forward observation of anything.
+        `quarantine` -- recorded on the day, and DISAGREEING with another run
+                     recorded on the same day about what was held. These cannot
+                     be resolved and this method does not try: the same date
+                     under the SAME config_version produced up to five different
+                     books, so the code moved underneath, and
+                     `model_fingerprint` -- the field that exists to catch
+                     exactly that -- is null on 1,733 of 1,942 rows. There is no
+                     recorded property that reconstructs which book was real.
+                     Guessing would put a fabricated position history under
+                     every hysteresis decision that reads it, so they are set
+                     aside instead: still counted, still readable, out of the
+                     lineage.
+
+        Returns the summary either way; `dry_run=False` writes. A backup of
+        every file is written beside it first.
+        """
+        import shutil
+
+        summary = {"live": 0, "replay": 0, "quarantine": 0, "unchanged": 0,
+                   "undatable": 0, "files": [], "quarantined_dates": [],
+                   "dry_run": dry_run}
+
+        # Which same-day dates disagree with themselves. Decided BEFORE any row
+        # is rewritten, so the classification is a function of the file as it
+        # stands rather than of the order rows happen to be visited in.
+        by_day: Dict[dt.date, List[Dict[str, Any]]] = {}
+        for row in self.iter_rows():
+            if self._observed_mode(row) == "live":
+                when = self._row_date(row)
+                if when is not None:
+                    by_day.setdefault(when, []).append(row)
+        quarantined = {
+            when for when, rows in by_day.items()
+            if len({self._book_identity(r) for r in rows}) > 1
+        }
+        summary["quarantined_dates"] = sorted(d.isoformat() for d in quarantined)
+
+        for path in sorted(self.dir.glob("runs-*.jsonl")):
+            out_lines: List[str] = []
+            changed = 0
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    out_lines.append(line)          # keep what cannot be parsed
+                    continue
+                observed = self._observed_mode(row)
+                if observed is None:
+                    summary["undatable"] += 1
+                    out_lines.append(line)
+                    continue
+                when = self._row_date(row)
+                target = ("quarantine"
+                          if observed == "live" and when in quarantined
+                          else observed)
+                summary[target] += 1
+                if str(row.get("mode") or "live") == target:
+                    summary["unchanged"] += 1
+                    out_lines.append(line)
+                    continue
+                row["mode"] = target
+                # Why, on the row, so the change explains itself to the next
+                # reader without reference to this docstring.
+                row["mode_source"] = (
+                    "repair_lineage: logged_at vs date"
+                    + ("; same-day runs disagree about the book"
+                       if target == "quarantine" else "")
+                )
+                changed += 1
+                out_lines.append(json.dumps(row, separators=(",", ":"),
+                                            sort_keys=True))
+            summary["files"].append({"file": path.name, "rewritten": changed})
+            if not dry_run and changed:
+                backup = path.with_suffix(".jsonl.pre-lineage-repair")
+                if not backup.exists():                  # never clobber a backup
+                    shutil.copy2(path, backup)
+                tmp = path.with_suffix(".jsonl.tmp")
+                tmp.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+                os.replace(str(tmp), str(path))
+        return summary
+
     def conflicting_dates(self, mode: Optional[str] = "live") -> List[Dict[str, Any]]:
         """Every date whose recorded runs disagree about the book.
 

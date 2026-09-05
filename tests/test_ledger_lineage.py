@@ -189,3 +189,117 @@ def test_selection_does_not_depend_on_position_in_the_file(tmp_path):
     a = forward.previous_run(before=dt.date(2026, 8, 18))
     b = backward.previous_run(before=dt.date(2026, 8, 18))
     assert a["run_id"] == b["run_id"] == "r3"
+
+
+# =============================================================================
+# repairing a lineage that was never recorded
+# =============================================================================
+
+def _at(when: dt.date, hour: int = 18) -> dt.datetime:
+    return dt.datetime.combine(when, dt.time(hour, 0))
+
+
+def test_the_repair_classifies_by_when_the_row_was_written(tmp_path):
+    """`mode` was the constant "live" on every path, so it carries no
+    information. `logged_at` against `date` carries all of it: a run recorded
+    weeks after the session it scores is a backfill whatever its mode says."""
+    led = Ledger(tmp_path)
+    led.append(_row(dt.date(2026, 8, 18), ["AAA"], "onthenight",
+                    logged_at=_at(dt.date(2026, 8, 18), 20)))
+    led.append(_row(dt.date(2026, 8, 19), ["BBB"], "nextmorning",
+                    logged_at=_at(dt.date(2026, 8, 20), 1)))
+    led.append(_row(dt.date(2026, 6, 30), ["CCC"], "backfill",
+                    logged_at=_at(dt.date(2026, 8, 22), 13)))
+
+    s = led.repair_lineage(dry_run=False)
+    assert s["live"] == 2 and s["replay"] == 1
+    modes = {r["run_id"]: r["mode"] for r in led.iter_rows()}
+    assert modes == {"onthenight": "live", "nextmorning": "live",
+                     "backfill": "replay"}
+
+
+def test_the_repair_deletes_nothing(tmp_path):
+    """The honest trial count feeds the Deflated Sharpe directly and `append`
+    is fatal-on-failure precisely so it cannot be corrupted. Removing rows to
+    tidy a lineage field would corrupt it far more thoroughly than a wrong
+    label ever did."""
+    led = Ledger(tmp_path)
+    for i in range(5):
+        led.append(_row(dt.date(2026, 6, 30), [f"S{i}"], f"r{i}",
+                        logged_at=_at(dt.date(2026, 8, 22), 10 + i)))
+    before = [r["run_id"] for r in led.iter_rows()]
+    trials_before = led.trial_count()
+
+    led.repair_lineage(dry_run=False)
+
+    assert [r["run_id"] for r in led.iter_rows()] == before
+    assert led.trial_count() == trials_before
+
+
+def test_a_dry_run_changes_nothing_on_disk(tmp_path):
+    led = Ledger(tmp_path)
+    led.append(_row(dt.date(2026, 6, 30), ["AAA"], "r1",
+                    logged_at=_at(dt.date(2026, 8, 22))))
+    path = led._path(dt.date(2026, 6, 30))
+    before = path.read_text(encoding="utf-8")
+    s = led.repair_lineage(dry_run=True)
+    assert s["replay"] == 1
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_same_day_runs_that_disagree_are_quarantined_not_guessed(tmp_path):
+    """The 2026-08-25 case: eight books, eight config versions, all recorded on
+    the day. Nothing in the record says which was real -- the code moved under
+    a fixed config and `model_fingerprint` is null -- so the repair sets them
+    aside rather than inventing a position history for the hysteresis to read."""
+    led = Ledger(tmp_path)
+    led.append(_row(dt.date(2026, 8, 25), ["AAA"], "a", logged_at=_at(dt.date(2026, 8, 25), 18)))
+    led.append(_row(dt.date(2026, 8, 25), ["ZZZ"], "b", logged_at=_at(dt.date(2026, 8, 25), 19)))
+    led.append(_row(dt.date(2026, 8, 28), ["QQQ"], "c", logged_at=_at(dt.date(2026, 8, 28), 18)))
+
+    s = led.repair_lineage(dry_run=False)
+    assert s["quarantined_dates"] == ["2026-08-25"]
+    assert s["quarantine"] == 2 and s["live"] == 1
+    modes = {r["run_id"]: r["mode"] for r in led.iter_rows()}
+    assert modes == {"a": "quarantine", "b": "quarantine", "c": "live"}
+
+
+def test_the_repair_makes_the_live_lineage_readable(tmp_path):
+    """The point of the exercise: after it, `previous_run` returns an answer
+    instead of raising, and the answer is a date that really was recorded on
+    the day."""
+    led = Ledger(tmp_path)
+    led.append(_row(dt.date(2026, 8, 25), ["AAA"], "a", logged_at=_at(dt.date(2026, 8, 25), 18)))
+    led.append(_row(dt.date(2026, 8, 25), ["ZZZ"], "b", logged_at=_at(dt.date(2026, 8, 25), 19)))
+    led.append(_row(dt.date(2026, 8, 28), ["QQQ"], "c", logged_at=_at(dt.date(2026, 8, 28), 18)))
+
+    with pytest.raises(AmbiguousLedgerHistory):
+        led.previous_run(before=dt.date(2026, 8, 26))
+
+    led.repair_lineage(dry_run=False)
+    assert led.conflicting_dates(mode="live") == []
+    assert led.open_book(before=dt.date(2026, 9, 1)) == ["QQQ"]
+
+
+def test_the_repair_backs_up_before_it_writes(tmp_path):
+    led = Ledger(tmp_path)
+    led.append(_row(dt.date(2026, 6, 30), ["AAA"], "r1",
+                    logged_at=_at(dt.date(2026, 8, 22))))
+    original = led._path(dt.date(2026, 6, 30)).read_text(encoding="utf-8")
+    led.repair_lineage(dry_run=False)
+    backup = led._path(dt.date(2026, 6, 30)).with_suffix(".jsonl.pre-lineage-repair")
+    assert backup.exists()
+    assert backup.read_text(encoding="utf-8") == original
+
+
+def test_running_the_repair_twice_is_a_no_op(tmp_path):
+    """It has to be safe to re-run: an operator who is unsure whether it has
+    already been applied must not be punished for finding out."""
+    led = Ledger(tmp_path)
+    led.append(_row(dt.date(2026, 6, 30), ["AAA"], "r1",
+                    logged_at=_at(dt.date(2026, 8, 22))))
+    led.repair_lineage(dry_run=False)
+    after_first = led._path(dt.date(2026, 6, 30)).read_text(encoding="utf-8")
+    second = led.repair_lineage(dry_run=False)
+    assert second["unchanged"] == 1
+    assert led._path(dt.date(2026, 6, 30)).read_text(encoding="utf-8") == after_first

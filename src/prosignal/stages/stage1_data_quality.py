@@ -165,6 +165,28 @@ def run(
             log.error("universe-wide data failure", extra={"fraction": round(fraction, 4)})
             raise MarketWideHalt([reason], stage=STAGE_NAME)
 
+    # -- 5b. was this session fully ingested? -------------------------------
+    #
+    # A PARTIAL BHAVCOPY IS INVISIBLE PER STOCK. Every name that did land looks
+    # perfect, and every name that did not simply has one fewer row -- which
+    # `session_continuity` reports one stock at a time, as N unrelated stock
+    # problems rather than one feed problem.
+    #
+    # THIS HAS NEVER FIRED ON THE SHIPPED STORE, and that is recorded here
+    # rather than left for the next reader to rediscover. It was written to
+    # explain why SBIN, RELIANCE, HDFCBANK and INFY are missing sessions --
+    # SBIN 19 of its last 305, which put it under the history floor and out of
+    # the universe. Measured against a 305-session median those looked like 61
+    # partial sessions; measured against a TRAILING median, which is the only
+    # fair comparison while the listed universe grows from 2,025 names to
+    # 2,641, no session drops below 92% and none below the floor here.
+    #
+    # The real cause was the store's write key -- see `DataStore.__init__`.
+    # The check stays because a truncated ingest is a real failure mode that
+    # simply has not happened yet, and it is one groupby.
+    market_soft_flags.extend(
+        _check_session_completeness(store, calendar, as_of))
+
     # -- 6. point-in-time audit ---------------------------------------------
     pit_audit, pit_failures, pit_soft = _pit_audit(manifest, universe, params)
     market_soft_flags.extend(pit_soft)
@@ -197,6 +219,70 @@ def run(
 # market-wide checks
 # =============================================================================
 
+
+
+#: A session printing fewer than this share of the trailing median name count
+#: was probably ingested from a partial file. Not a hard gate: NSE really does
+#: have short sessions (muhurat trading, a mid-session halt), and refusing to
+#: run on one would be worse than saying so.
+#:
+#: Calibrated on the shipped store, where the trailing ratio bottoms out at
+#: 0.923 across 2,219 sessions -- so this fires on a truncated ingest and not on
+#: anything the exchange has actually done in nine years.
+SESSION_COMPLETENESS_FLOOR = 0.90
+
+#: Sessions of context for the median. Long enough that a run of partial days
+#: cannot drag the baseline down to meet them.
+SESSION_COMPLETENESS_LOOKBACK = 60
+
+
+def _check_session_completeness(store, calendar, as_of) -> List[str]:
+    """Did the decision session print as many names as its neighbours?
+
+    COUNTED OVER THE WHOLE STORE, not over the universe. Counting inside the
+    universe is self-censoring and measurably useless here: a name missing on
+    enough sessions falls under the history floor and LEAVES the universe, so
+    the very symbols the check exists to find are the ones excluded from its
+    sample. Measured on the shipped store, the within-universe count never
+    drops below 98.8% of its trailing median while the whole-bhavcopy count
+    drops to 85%.
+
+    One extra read of two columns over a short window. `_prefetch_prices`
+    already decodes an order of magnitude more.
+    """
+    try:
+        window = calendar.trailing_window(as_of, SESSION_COMPLETENESS_LOOKBACK + 1)
+        if not window or len(window) < 10:
+            return []
+        frame = store.read_prices(start=window[0], end=as_of,
+                                  columns=[DATE, SYMBOL])
+        if frame is None or frame.empty:
+            return []
+        frame = frame.copy()
+        frame[DATE] = pd.to_datetime(frame[DATE]).dt.normalize()
+        per = frame.groupby(DATE, observed=True)[SYMBOL].nunique().sort_index()
+        if len(per) < 10:
+            return []
+        today = int(per.iloc[-1])
+        baseline = per.iloc[:-1]
+        median = float(baseline.median())
+        if median <= 0:
+            return []
+        share = today / median
+        if share >= SESSION_COMPLETENESS_FLOOR:
+            return []
+        return [
+            f"{as_of} printed {today} of the {int(median)} names its last "
+            f"{len(baseline)} sessions typically carry ({share:.0%}). A session "
+            f"ingested from a partial file looks perfect name by name and shows "
+            f"up only as history that is one session short -- which is how a "
+            f"name falls under the history floor and leaves the universe. "
+            f"Re-ingest this session before trusting a ranking built on it."
+        ]
+    except Exception as exc:                       # never fail a run to report
+        log.warning("session completeness check did not run",
+                    extra={"error": str(exc)})
+        return []
 
 def _check_required_feeds(manifest: RawDataManifest) -> List[str]:
     """Missing or stale REQUIRED feeds. Optional feeds degrade, never halt."""
