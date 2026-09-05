@@ -1747,7 +1747,7 @@ function renderSettings() {
                const sc = (state.view || {}).scorer || {};
                const t = ((((state.view || {}).picks || [])[0] || {}).themes || []).length;
                if (sc.name) return esc(sc.name) + (t ? " \u00b7 scored on " + t + " themes" : "");
-               return "v3 composite \u00b7 22 factors in 5 themes, weights frozen";
+               return "composite \u00b7 15 factors in 5 themes, weights frozen";
              })(),
              "") +
     '</div>' +
@@ -2176,11 +2176,15 @@ function viewOverview(v) {
   }
 
   state.slateSize = v.picks.length;
-  // A run the model could not score must not render as one it did. The
-  // composite behind it measured t = -0.11 against equal weight.
+  // A run the engine could not attribute must not render as one it did.
+  // This keyed on `validated === false`, which since the single-engine
+  // consolidation is the ordinary state -- the evidence is CPCV stability, not
+  // a sealed holdout -- so the banner would have fired on every run. An alarm
+  // that is always on is not an alarm. `alert` is set only when the run cannot
+  // say what ranked it.
   const scorer = v.scorer || {};
-  const unscored = scorer.validated === false
-    ? '<div class="box-warn"><b>This shortlist is not from the model</b>' +
+  const unscored = scorer.alert
+    ? '<div class="box-warn"><b>This shortlist is not attributed</b>' +
       '<p>' + esc(scorer.note || "") + '</p></div>'
     : "";
 
@@ -2393,41 +2397,36 @@ function downside(p) {
 
 /* WHY THIS NAME IS IN THE BOOK -- which is not what this used to say.
 
-   It named the largest contributor to the fitted composite. The composite does
-   not choose: the book is ordered by `mom_6_1_r` alone, and the composite is
-   fitted, recorded and monitored beside it as a diagnostic. So the old line
-   answered "what moved a score nothing acts on" while the reader was asking
-   "why is this on my screen". The run states the real reason itself, in
+   It named the largest contributor to a fitted composite that did not choose
+   anything, so the old line answered "what moved a score nothing acts on" while
+   the reader was asking "why is this on my screen". Both that composite and the
+   single-column ranking that briefly replaced it are gone; one engine orders the
+   book now. The run states the real reason itself, in
    `technical.why_raw[0]`; this trims it to the clause that carries it. */
 function whyLine(p) {
   /* WHAT PUT THIS NAME HERE, in the terms of the model that put it here.
 
-     This tested for `mom_6_1_r` -- the single column that ordered the book two
-     rankings ago -- and fell through to "<theme> leads at +0.98 sd" for
-     everything else, which described the FITTED model on a book the v3
-     composite orders. Under v3 the honest line names the theme that carried
-     the most of THIS name's composite, and says how much of it. */
+     THE TWO FALLBACKS BELOW THIS ARE GONE. One tested for `mom_6_1_r`, the
+     single column that ordered the book two rankings ago; the other described
+     the fitted cross-sectional model. Both scorers were deleted in the
+     2026-09-05 consolidation, so those branches could only ever have fired on a
+     payload no current run produces -- and if one had fired it would have
+     explained the book in the vocabulary of a model that did not order it.
+
+     One engine orders the book, so there is one line: the theme that carried
+     the most of THIS name's composite, and how much of it. A name with no theme
+     rows is a name the run could not attribute, and saying nothing is the
+     honest answer to that. */
   const th = p.themes || [];
-  if (th.length) {
-    const lead = th[0];
-    const total = th.reduce((n, r) => n + Math.abs(r.contribution || 0), 0);
-    const share = total > 0 ? Math.abs(lead.contribution) / total : null;
-    const pct = Math.round((lead.z + 1) / 2 * 100);
-    return esc(lead.label) + " " + pct + ordinal(pct) + " in its sector" +
-      (share != null ? " \u00b7 " + Math.round(share * 100) + "% of the score"
-                     : "") +
-      (th.length < 5 ? " \u00b7 " + th.length + " of 5 themes" : "");
-  }
-  const raw = ((p.technical || {}).why_raw || [])[0];
-  if (raw && /mom_6_1_r/.test(raw)) {
-    const m = raw.match(/^Ranked #(\d+) of the eligible universe/);
-    const where = m ? "Ranked #" + m[1] + " on 6-1 momentum" : "Ranked on 6-1 momentum";
-    const mom = (p.contributions || []).find((c) => c.factor === "mom");
-    return where + (mom ? " \u00b7 " + (mom.z > 0 ? "+" : "") + mom.z.toFixed(2) +
-                          " sd vs the universe" : "");
-  }
-  const c = (p.contributions || [])[0];
-  return c ? esc(c.label) + " leads at " + (c.z > 0 ? "+" : "") + c.z.toFixed(2) + " sd" : "";
+  if (!th.length) return "";
+  const lead = th[0];
+  const total = th.reduce((n, r) => n + Math.abs(r.contribution || 0), 0);
+  const share = total > 0 ? Math.abs(lead.contribution) / total : null;
+  const pct = Math.round((lead.z + 1) / 2 * 100);
+  return esc(lead.label) + " " + pct + ordinal(pct) + " in its sector" +
+    (share != null ? " \u00b7 " + Math.round(share * 100) + "% of the score"
+                   : "") +
+    (th.length < 5 ? " \u00b7 " + th.length + " of 5 themes" : "");
 }
 
 /* 1st, 2nd, 3rd, 4th ... 11th, 21st. The card printed a bare "th". */
@@ -3091,13 +3090,14 @@ function panelHTML(p) {
       money(L.entry[1]) + (p.cost_note ? ' \u00b7 ' + esc(p.cost_note) : "") +
       '</div>' : "");
 
-  /* THE FITTED 26-FACTOR MODEL IS NOT ON THIS CARD.
-     It ordered nothing, gated nothing and sized nothing -- the v3 composite
-     does all three -- so on a per-name card it was six rows of "0.0000" under
-     a heading explaining that they did not matter. A diagnostic belongs where
-     diagnostics are read: `prosignal research estimator` and the model row in
-     Settings. It is still fitted and still monitored; it is just not evidence
-     for THIS name, and printing it here asked the reader to weigh something
+  /* THE FITTED 26-FACTOR MODEL IS NOT ON THIS CARD, and no longer exists.
+     It ordered nothing, gated nothing and sized nothing -- the composite does
+     all three -- so on a per-name card it was six rows of "0.0000" under a
+     heading explaining that they did not matter. It was deleted outright in the
+     2026-09-05 single-engine consolidation, along with four other selectable
+     scorers. This comment stays because the reasoning is the same one that
+     keeps any diagnostic off a per-name card: printing it asked the reader to
+     weigh something
      the engine had already set aside. */
 
   const gate = (function () {
@@ -3124,7 +3124,7 @@ function panelHTML(p) {
 
   const lead = themes.length
     ? '<div class="gate lead"><span>Why it is here</span>Ranked #' +
-      (p.rank != null ? p.rank : "\u2014") + ' by the v3 composite \u2014 ' +
+      (p.rank != null ? p.rank : "\u2014") + ' by the composite \u2014 ' +
       themes.length + ' theme' + (themes.length === 1 ? "" : "s") +
       ', blended under a 40% cap.</div>'
     : "";

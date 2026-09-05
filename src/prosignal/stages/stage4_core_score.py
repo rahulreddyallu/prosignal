@@ -103,12 +103,25 @@ def _rank_by_engine(composite_raw, cfg, notes, scored):
             "not the one measured.")
     ranked = scored["score"].dropna()
     covered = ranked.reindex(composite_raw.index).dropna()
-    floor = max(int(0.6 * len(composite_raw)), 20)
+    # COVERAGE, NOT HEADCOUNT. This was `max(int(0.6 * n), 20)`, which asks for
+    # twenty names however small the universe is -- so a cross-section of three
+    # scoreable names failed at "covers 3 of 3, under the 20 floor". The two
+    # conditions answer different questions and only one of them was intended:
+    # the note says "a ranking built on a MINORITY of the universe is a ranking
+    # of that minority", which is a share. The absolute term is a sanity check
+    # against a near-empty cross-section and must never exceed what exists.
+    #
+    # It bites in production exactly where refusing is worst. `absolute_floor`'s
+    # own note records 11 names clearing at the COVID trough and 8 in the 2022
+    # drawdown; on such a day the engine would have refused to rank at all
+    # rather than ranking the names that survived.
+    universe = len(composite_raw)
+    floor = min(max(int(0.6 * universe), 20), universe)
     if len(covered) < floor:
         raise RankingUnavailable(
-            f"the composite covers {len(covered)} of {len(composite_raw)} "
-            f"scoreable names, under the {floor} floor. A ranking built on a "
-            f"minority of the universe is a ranking of that minority.")
+            f"the composite covers {len(covered)} of {universe} scoreable "
+            f"names, under the {floor} floor. A ranking built on a minority of "
+            f"the universe is a ranking of that minority.")
     nth = scored["n_themes"].reindex(covered.index)
     eff = theme_effective_weights(scored.loc[covered.index])
     notes.append(

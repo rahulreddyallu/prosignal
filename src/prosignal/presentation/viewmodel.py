@@ -83,65 +83,55 @@ def _tidy_company(name: str) -> str:
 
 
 def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Which scorer actually produced this ranking.
+    """What ranked this run. There is one answer, so this reports rather than
+    detects.
 
-    Stage 4 falls back to a hand-weighted composite when the cross-sectional
-    model cannot fit -- an insufficient store is treated as a benign reason, so
-    the run proceeds rather than failing. That is a defensible degraded mode
-    and the engine records it in a note. The note never reached this payload,
-    so the composite's output rendered identically to the model's: same cards,
-    same green contributions, same BUY.
+    THIS USED TO GUESS, AND AFTER 2026-09-05 IT GUESSED WRONG. It decided between
+    the fitted cross-sectional model and the hand-weighted composite by looking
+    at which factor keys a pick carried, because Stage 4 could silently fall back
+    from one to the other and the interface had to say which had happened. Both
+    of those scorers are deleted. Run against a current payload the old function
+    returned `{"model": "cross-sectional", "validated": True}` -- attributing the
+    ranking to a model that no longer exists and marking it validated, which its
+    own docstring called "the single most misleading thing this interface could
+    do".
 
-    The composite was measured at -0.047%/month excess against an equal-weight
-    benchmark, t = -0.11. Presenting it as the validated model is the single
-    most misleading thing this interface could do, so it is detected here from
-    the factor names themselves rather than trusted to arrive as a flag.
-
-    DETECTED BY THE COMPOSITE'S OWN KEYS, not by failing to recognise the
-    model's. This read `seen & FACTOR_MAP` while FACTOR_MAP still held the
-    pre-family factor names, so the fitted model's family keys matched nothing
-    and every healthy run was reported as "the cross-sectional model could not
-    fit this run ... treat this shortlist as unscored". That is the exact
-    misrepresentation this function exists to prevent, inverted. Keying on the
-    composite's four names makes the failure direction safe: an unrecognised
-    key set reports UNKNOWN rather than asserting either scorer.
+    There is nothing left to detect. `features/engine.py` is the scorer, Stage 4
+    raises rather than falling back, and the honest report is what the engine is
+    and what its evidence actually is.
     """
-    from .evidence import COMPOSITE_KEYS, MODEL_KEYS
+    from ..features import engine
 
     seen: set = set()
     for pick in picks:
         seen.update((pick.get("factors") or {}).keys())
+    themes = [t for t in engine.THEMES if t in seen]
     if not seen:
-        return {"model": "unknown", "validated": False,
-                "note": "No factor detail was recorded for this run."}
-    # Decided on the keys only ONE scorer can emit. `value` and `quality` are
-    # both fitted families and hand-weighted composite factors -- the engine
-    # genuinely uses the same two words for both -- so a shared key identifies
-    # nothing and matching on it would call a composite run a model run.
-    if seen & (MODEL_KEYS - COMPOSITE_KEYS):
-        return {"model": "cross-sectional", "validated": True, "note": None}
-    if not (seen & (COMPOSITE_KEYS - MODEL_KEYS)):
-        return {
-            "model": "unknown",
-            "validated": False,
-            "factors": sorted(seen),
-            "note": (
-                "This run's factor names match neither the fitted model nor the "
-                "hand-weighted composite, so which scorer produced the ranking "
-                "cannot be established from the payload. Treat the shortlist as "
-                "unattributed until that is resolved."
-            ),
-        }
+        return {"model": "engine", "alert": True, "themes": [],
+                "note": ("No factor detail was recorded for this run, so what "
+                         "ranked it cannot be shown. Treat the shortlist as "
+                         "unattributed until that is resolved.")}
     return {
-        "model": "composite",
-        "validated": False,
-        "factors": sorted(seen),
+        "model": "engine",
+        "name": f"{len(engine.ALL_FACTORS)} factors in {len(engine.THEMES)} themes",
+        "themes": themes,
+        # `alert` REPLACES `validated`, which meant two things at once. The
+        # interface renders a red "This shortlist is not from the model" banner
+        # on a falsy value, and that was right when the flag meant "Stage 4 fell
+        # back to a scorer measured at t -0.11". It is wrong now: there is no
+        # fallback, and the honest statement -- that the evidence is CPCV
+        # stability rather than a sealed holdout -- is a caveat, not an alarm.
+        # Raising an alarm every single run is how a reader learns to ignore it.
+        "alert": False,
         "note": (
-            "The cross-sectional model could not fit this run, so the ranking "
-            "came from the hand-weighted composite instead. That composite was "
-            "measured at -0.047% excess per month against an equal-weight "
-            "benchmark, t = -0.11 -- it is a placeholder, not a signal. Treat "
-            "this shortlist as unscored."
+            "Ranked by the composite: "
+            f"{len(engine.ALL_FACTORS)} factors in {len(engine.THEMES)} themes. "
+            "Its evidence is out-of-sample STABILITY, not a sealed holdout -- "
+            "rank IC improved by +0.0066 at Newey-West t +2.37 across 45 purged, "
+            "embargoed folds when seven factors were removed, and 96% of folds "
+            "improved. The two sealed windows were earned by the earlier "
+            "22-factor set and do not transfer. The forward test registered with "
+            "the current epoch is what will grade this one."
         ),
     }
 

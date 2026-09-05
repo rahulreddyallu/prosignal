@@ -1100,7 +1100,10 @@ class Stage4Config(_Base):
     #: cannot run. Default false: that composite measured -0.047%/month excess
     #: at t = -0.11, so a silent fallback issues signals from a scorer known
     #: not to work.
-    allow_composite_fallback: bool = False
+    #: DELETED. It chose whether Stage 4 could fall back to the hand-weighted
+    #: composite when the fitted model would not run; both scorers are gone and
+    #: no code has read it since. Kept out of the model entirely rather than
+    #: left as an ignored key, so setting it is an error and not a no-op.
     #: Cross-sectional model. These lived as module constants, exempt from the
     #: one-config-file rule and from the search-budget accounting.
     model_horizon_sessions: int = Field(63, ge=5, le=252)

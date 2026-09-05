@@ -1859,7 +1859,7 @@ def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 
 def cmd_research_model(cfg: AppConfig, args: argparse.Namespace) -> int:
-    """Live health of the shipped v3 thematic composite, and its re-check.
+    """Live health of the shipped composite, and its re-check.
 
     THREE READS, and the second is the one v2 could not give. `--monitor`
     reports the rolling IC of every FACTOR against its shipped sign, of every
@@ -1876,6 +1876,7 @@ def cmd_research_model(cfg: AppConfig, args: argparse.Namespace) -> int:
     the deploy -- and refuses a verdict until the window holds as much
     independent evidence as the sealed holdouts did.
     """
+    from .features import engine as eng
     import json
 
     from .data.store import DataStore
@@ -1892,7 +1893,7 @@ def cmd_research_model(cfg: AppConfig, args: argparse.Namespace) -> int:
     if args.years:
         start = end - dt.timedelta(days=int(365.25 * float(args.years)))
 
-    _rule("Building the v3 themed panel")
+    _rule("Building the themed panel")
     panel = vp.build_panel(store, start=start, end=end)
     if panel.empty:
         _print("the panel came back empty; nothing to report")

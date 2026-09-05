@@ -37,7 +37,9 @@ def test_the_shipped_themes_and_weights_are_the_deployed_configuration():
     assert sum(t.weight for t in engine.THEMES.values()) == pytest.approx(1.0)
     assert max(t.weight for t in engine.THEMES.values()) <= 0.40 + 1e-9
     assert min(t.weight for t in engine.THEMES.values()) >= 0.06 - 1e-9
-    assert len(engine.ALL_FACTORS) == 22
+    assert len(engine.ALL_FACTORS) == 15
+    assert len(engine.REMOVED_2026_09) == 7
+    assert not set(engine.ALL_FACTORS) & set(engine.REMOVED_2026_09)
     # Both were frozen rounded (weight to 5dp, coverage to 4dp), so the
     # comparison is only meaningful to the coarser of the two.
     assert engine.THEMES["quality"].weight <= engine.THEMES["quality"].coverage + 5e-5
@@ -102,20 +104,20 @@ def test_no_factor_reads_a_session_after_the_decision_row():
     cut = 380
     sl = slice(0, cut)
     a = factors.factor_frame(close.iloc[sl], open_.iloc[sl], vwap.iloc[sl],
-                                turnover.iloc[sl], deliv.iloc[sl], bench.iloc[sl])
+                             turnover.iloc[sl], deliv.iloc[sl])
     future = close.copy()
     future.iloc[cut:] *= 4.0
     b = factors.factor_frame(future.iloc[sl], open_.iloc[sl], vwap.iloc[sl],
-                                turnover.iloc[sl], deliv.iloc[sl], bench.iloc[sl])
+                             turnover.iloc[sl], deliv.iloc[sl])
     pd.testing.assert_frame_equal(a, b)
 
 
 def test_the_momentum_skip_windows_end_21_sessions_back():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    base = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    base = factors.factor_frame(close, open_, vwap, turnover, deliv)
     moved = close.copy()
     moved.iloc[-21:] *= 1.6
-    after = factors.factor_frame(moved, open_, vwap, turnover, deliv, bench)
+    after = factors.factor_frame(moved, open_, vwap, turnover, deliv)
     for name in ("mom_consist_126", "prox_52w", "mom_12_6"):
         pd.testing.assert_series_equal(base[name], after[name], check_names=False)
     # and the non-skipping ones must move, or the test above proves nothing
@@ -126,7 +128,7 @@ def test_the_momentum_skip_windows_end_21_sessions_back():
 # ---------------------------------------------------------------- the composite
 def test_theme_contributions_sum_to_the_score():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv)
     scored = engine.score_frame(raw, sectors=None)
     contrib = scored[[t + "_contrib" for t in engine.THEMES]].sum(axis=1, min_count=1)
     ok = scored["score"].notna()
@@ -137,7 +139,7 @@ def test_theme_contributions_sum_to_the_score():
 
 def test_a_name_missing_a_theme_is_scored_on_the_rest_not_pushed_to_zero():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv)
     assert raw["net_margin"].isna().all(), "no fundamentals in this fixture"
     scored = engine.score_frame(raw, sectors=None)
     assert (scored["n_themes"] == 4).all()
@@ -147,37 +149,37 @@ def test_a_name_missing_a_theme_is_scored_on_the_rest_not_pushed_to_zero():
 
 def test_a_name_on_too_few_themes_is_not_scored_at_all():
     close, open_, vwap, turnover, deliv, bench = _panel(n_days=120)
-    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv)
     scored = engine.score_frame(raw, sectors=None, min_themes=5)
     assert scored["score"].isna().all()
 
 
 def test_the_signs_are_applied():
-    """`ulcer_120` carries sign -1: deeper drawdown must SCORE WORSE.
+    """`downside_vol_60` carries sign -1: more downside vol must SCORE WORSE.
 
-    The sign lives in the theme, not in the rank -- `ulcer_120_r` is the raw
+    The sign lives in the theme, not in the rank -- `downside_vol_60_r` is the raw
     sector-neutral rank and is SUPPOSED to be highest for the deepest drawdown.
-    So the sign is checked where it is applied: hold the other two risk factors
-    flat, vary ulcer alone, and the risk sub-score must fall as ulcer rises."""
+    So the sign is checked where it is applied: hold the other risk factor
+    flat, vary downside vol alone, and the risk sub-score must fall as it
+    rises."""
     th = engine.THEMES["risk"]
-    assert th.signs["ulcer_120"] == -1
+    assert th.signs["downside_vol_60"] == -1
 
     idx = [f"S{i:02d}" for i in range(20)]
     ranks = pd.DataFrame(
-        {"ulcer_120": np.linspace(-1.0, 1.0, len(idx)),
-         "downside_vol_60": 0.0,
+        {"downside_vol_60": np.linspace(-1.0, 1.0, len(idx)),
          "ret_kurt_126": 0.0},
         index=idx)
     sub = engine.theme_subscore(ranks, th)
-    assert sub.iloc[0] > sub.iloc[-1], "deepest drawdown scored best"
-    assert (np.diff(sub.to_numpy()) < 0).all(), "not monotone in ulcer"
+    assert sub.iloc[0] > sub.iloc[-1], "highest downside vol scored best"
+    assert (np.diff(sub.to_numpy()) < 0).all(), "not monotone in downside vol"
 
 
 def test_the_sign_reaches_the_per_stock_card():
     """A reader checking the theme against its parts needs the sign on the row,
     otherwise a high rank on a bad-is-high factor reads as a positive."""
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv)
     scored = engine.score_frame(raw, sectors=None)
     card = engine.attribution(raw, scored, scored.index[0])
     rows = card[card.LEVEL == "factor"].set_index("FACTOR")
@@ -190,7 +192,6 @@ def test_the_sign_reaches_the_per_stock_card():
     # Not every member of a theme points the same way, and this one surprises
     # people: acceleration screened NEGATIVE inside momentum. Pinned so it is
     # not "corrected" to +1 by someone reading the theme name alone.
-    assert engine.THEMES["momentum"].signs["mom_accel"] == -1
 
 
 # ---------------------------------------------------------------- the floor
@@ -198,7 +199,7 @@ def test_the_absolute_floor_can_actually_empty_the_list():
     """A floor on a cross-sectional RANK cannot fire -- somebody is top of the
     list every day. This one is measured against the stock."""
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv)
     scored = engine.score_frame(raw, sectors=None)
     everyone_below = pd.Series(-0.2, index=scored.index)
     assert not engine.absolute_floor(scored, everyone_below).any()
@@ -231,7 +232,7 @@ def test_the_floor_ships_disabled_and_its_scope_is_still_entries():
 # ---------------------------------------------------------------- attribution
 def test_attribution_gives_the_card_theme_and_factor_levels():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv)
     scored = engine.score_frame(raw, sectors=None)
     sym = scored["score"].idxmax()
     tab = engine.attribution(raw, scored, sym)

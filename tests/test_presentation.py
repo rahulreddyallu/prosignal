@@ -75,19 +75,18 @@ def test_a_live_shaped_factor_block_populates_the_panel():
     assert judged > 0, "confirmation_count reported nothing judgeable"
 
 
-def test_the_model_and_the_composite_are_told_apart_by_their_own_keys():
-    """`_scorer_used` warns the reader when the hand-weighted composite ranked
-    instead of the model. Keyed on the model's names it reported the composite
-    on every healthy run -- the same misrepresentation, inverted."""
-    live = {_bare(c): {} for c in FAMILY_COLUMNS}
-    assert _scorer_used([{"factors": live}])["model"] == "cross-sectional"
-    assert _scorer_used([{"factors": live}])["validated"] is True
+def test_the_scorer_report_does_not_guess_at_a_fork_that_no_longer_exists():
+    """`_scorer_used` used to tell the fitted model and the hand-weighted
+    composite apart by their factor keys. Both are deleted; the detector then
+    reported "cross-sectional / validated" on every healthy run, which is the
+    misrepresentation it existed to prevent, inverted a second time."""
+    from prosignal.features import engine
 
-    composite = {k: {} for k in COMPOSITE_KEYS}
-    assert _scorer_used([{"factors": composite}])["model"] == "composite"
-
-    # Neither: the honest answer is that it cannot be established.
-    assert _scorer_used([{"factors": {"something_else": {}}}])["model"] == "unknown"
+    got = _scorer_used([{"factors": {t: {} for t in engine.THEMES}}])
+    assert got["model"] == "engine"
+    assert got["alert"] is False
+    # No key set can produce any other model, because there is no other model.
+    assert _scorer_used([{"factors": {"something_else": {}}}])["model"] == "engine"
 
 
 def test_no_category_claims_an_indicator_this_engine_does_not_compute():

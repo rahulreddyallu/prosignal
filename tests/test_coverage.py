@@ -156,73 +156,62 @@ def test_a_503_from_ready_is_read_not_discarded():
 
 
 # ------------------------------------------------- which scorer actually ran
-def test_a_composite_run_is_not_presented_as_a_model_run():
-    """Stage 4 falls back to a hand-weighted composite when the
-    cross-sectional model cannot fit, and treats an insufficient store as a
-    benign reason -- so the run proceeds. The engine records that in a note.
-    The note never reached the payload, so on a real deployment the composite
-    rendered five confident BUY cards indistinguishable from the model's.
+def test_the_scorer_report_names_the_one_engine():
+    """These five tests used to pin `_scorer_used`'s DETECTION: it decided
+    between the fitted cross-sectional model and a hand-weighted composite by
+    inspecting which factor keys a pick carried, because Stage 4 could silently
+    fall back from one to the other.
 
-    The composite was measured at -0.047% excess per month against equal
-    weight, t = -0.11.
+    Both scorers were deleted on 2026-09-05, and the detector then reported
+    `{"model": "cross-sectional", "validated": True}` on a current payload --
+    attributing the ranking to a model that does not exist and marking it
+    validated, which its own docstring called the single most misleading thing
+    the interface could do. There is nothing left to detect, so the function
+    reports instead, and these check what it reports.
     """
+    from prosignal.features import engine
     from prosignal.presentation.viewmodel import _scorer_used
 
-    # What the live server actually produced on 88 sessions.
-    got = _scorer_used([{"factors": {"momentum_12_1": {},
-                                     "sector_relative_strength": {}}}])
-    assert got["model"] == "composite"
-    assert got["validated"] is False
-    assert "t = -0.11" in got["note"]
+    got = _scorer_used([{"factors": {t: {} for t in engine.THEMES}}])
+    assert got["model"] == "engine"
+    assert got["alert"] is False
+    assert f"{len(engine.ALL_FACTORS)} factors" in got["name"]
+    assert sorted(got["themes"]) == sorted(engine.THEMES)
 
 
-def test_a_real_model_run_is_not_flagged():
-    """Keyed on the FAMILY columns, because that is what a fitted model emits.
-
-    This fixture used to name individual factors -- `resid_mom`, `deliv_pct`,
-    `prox_52w` -- which no code path has produced since the fit moved to
-    families. The detection was keyed on the same stale names, so test and code
-    agreed with each other while every healthy run was reported to the operator
-    as 'the cross-sectional model could not fit this run ... treat this
-    shortlist as unscored'. The warning was inverted, on every run.
-    """
-    from prosignal.features.crossmodel import FAMILY_COLUMNS, _bare
+def test_the_note_says_the_evidence_is_stability_not_a_sealed_holdout():
+    """The two sealed windows were earned by the 22-factor ancestor and do not
+    transfer. A card that implies otherwise is the old misrepresentation in a
+    new direction."""
+    from prosignal.features import engine
     from prosignal.presentation.viewmodel import _scorer_used
 
-    got = _scorer_used([{"factors": {_bare(c): {} for c in FAMILY_COLUMNS}}])
-    assert got["model"] == "cross-sectional"
-    assert got["validated"] is True
-    assert got["note"] is None
+    note = _scorer_used([{"factors": {t: {} for t in engine.THEMES}}])["note"]
+    assert "STABILITY" in note
+    assert "not a sealed holdout" in note
+    assert "do not transfer" in note
 
 
-def test_an_unrecognised_factor_block_reports_unknown_rather_than_guessing():
-    """The failure direction has to be safe. Naming neither scorer is the
-    honest answer; asserting either one is how a wrong claim ships."""
+def test_a_run_with_no_factor_detail_is_flagged_not_described():
+    """The one remaining alarm: a run that cannot say what ranked it."""
     from prosignal.presentation.viewmodel import _scorer_used
 
-    got = _scorer_used([{"factors": {"something_the_engine_no_longer_emits": {}}}])
-    assert got["model"] == "unknown"
-    assert got["validated"] is False
+    got = _scorer_used([])
+    assert got["alert"] is True
+    assert "unattributed" in got["note"]
 
 
-def test_the_scorer_is_detected_from_the_factors_not_trusted_as_a_flag():
-    """Nothing upstream sets a 'this was the fallback' field. Reading the
-    factor names is the only signal that cannot be forgotten."""
-    from pathlib import Path
-
-    src = (Path(__file__).resolve().parents[1] / "src" / "prosignal"
-           / "presentation" / "viewmodel.py").read_text(encoding="utf-8")
-    fn = src[src.index("def _scorer_used"):src.index("def build_view")]
-    assert "MODEL_KEYS" in fn and "COMPOSITE_KEYS" in fn
-
-
-def test_the_interface_renders_the_unscored_warning():
+def test_the_interface_renders_the_unattributed_warning():
+    """It keyed on `scorer.validated === false`, which since the consolidation is
+    the ORDINARY state -- so the red banner would have fired on every run. An
+    alarm that is always on is not an alarm."""
     from pathlib import Path
 
     ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
           / "index.html").read_text(encoding="utf-8")
-    assert "This shortlist is not from the model" in ui
-    assert "scorer.validated === false" in ui
+    assert "This shortlist is not attributed" in ui
+    assert "scorer.alert" in ui
+    assert "scorer.validated === false" not in ui
 
 
 def test_the_empty_state_does_not_flash_before_the_data_arrives():

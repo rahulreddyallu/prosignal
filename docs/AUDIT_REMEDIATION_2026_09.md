@@ -846,3 +846,81 @@ is that the book's provenance is now a fact rather than a draw from a bag of 676
 This is the "~1,600 contaminated rows" that has been on the record for weeks,
 cleared.
 
+### Correction: the single-engine commit shipped with 21 failing tests
+
+The consolidation commit was pushed on the reasoning that the suite was running
+against exactly that tree, and the last CLEAN number (1,663 passed) was reported
+as though it described it. It did not. The suite came back **21 failed**.
+
+Nineteen were tests pinning machinery that no longer exists — the six-way
+`ranking.source` switch, removed factors, the scorer-detection fork. Two were
+**real bugs the consolidation introduced**, and both were caught by tests rather
+than by review:
+
+- **`NameError`s on the live card path.** `stage8._card` still read `rank_cfg`
+  and `source`, and `cli.cmd_research_model` read an unimported `eng`, all left
+  behind when the six-way branch collapsed. `test_session_completeness` — a
+  static check that no function reads a name it never receives — found them.
+  They would have raised at runtime on a real card.
+- **The ranking coverage floor could demand more names than exist.** It was
+  `max(int(0.6 * n), 20)`, which asks for twenty names however small the universe
+  is, so a three-name cross-section failed at *"covers 3 of 3, under the 20
+  floor"*. The two conditions answer different questions and only the share was
+  intended. It bites where refusing is worst: `absolute_floor`'s own note records
+  11 names clearing at the COVID trough and 8 in the 2022 drawdown, and on such a
+  day the engine would have refused to rank at all rather than ranking the
+  survivors. Now `min(max(int(0.6 * n), 20), n)`, with a test.
+
+**Final state: 1,640 passed, 2 failed.** Both expected and neither from this
+work — `test_restart_gate` reports the epoch drift these uncommitted changes
+create, and `test_remediation_guards` constructs `DataStore(Path("/nonexistent-curated"))`
+which macOS refuses on a read-only root.
+
+## The UI now matches the engine
+
+`viewmodel._scorer_used()` existed to decide which of two scorers had ranked a
+run, by inspecting factor keys, because Stage 4 could silently fall back between
+them. Both are deleted. Run against a current payload it returned:
+
+```python
+{'model': 'cross-sectional', 'validated': True, 'note': None}
+```
+
+— attributing the ranking to a model that does not exist **and marking it
+validated**, which its own docstring calls *"the single most misleading thing
+this interface could do"*.
+
+It reports rather than detects now, and **`alert` replaces `validated`**. That
+flag carried two meanings: *"Stage 4 fell back to a scorer measured at t −0.11"*
+(an alarm) and *"no sealed holdout"* (a caveat). Keeping it would have fired the
+red **"This shortlist is not from the model"** banner on every single run, and an
+alarm that is always on is not an alarm. `alert` is set only when a run cannot
+say what ranked it. One of the deleted tests had been pinning that banner in
+place; the replacement asserts `scorer.validated === false` is *absent* from the
+interface.
+
+Also removed from the card: two dead `whyLine` fallbacks that would have
+explained the book in the vocabulary of `mom_6_1_r` or the fitted 26-factor
+model. Settings' scorer fallback read `v3 composite · 22 factors`; it reads
+`composite · 15 factors in 5 themes`.
+
+## Settings
+
+`allow_composite_fallback` was **defined in the schema and read by no code** — a
+dead switch the test fixture set to no effect. Removed from config, schema and
+fixture, replaced by a note saying what it did and why it went, so the absence is
+a decision rather than a gap. Config notes still citing `ranking.source:
+v3_composite` and `features/v3.py` corrected.
+
+**Still not cut, and it is the largest remaining waste.** Stage 4 computes the
+entire legacy hand-weighted composite on every run — winsorise, standardise,
+sector-neutralise, weight, blend — and then line 441 replaces it. Its values are
+used nowhere; only its INDEX survives, as the "scoreable" set that gates the
+engine's universe. So the engine's universe is screened by the data coverage of
+factors the engine does not use: a name carrying all fifteen engine factors can
+be dropped for lacking a legacy `value` factor. That is ~119 lines of live
+`factors:` config plus `weighting_mode`, `standardisation`, `winsorize_pct` and
+`sector_neutral`, all feeding a discarded number. Measured on 2026-08-21 it
+removed nothing (458 eligible → 458 scored), but one date is not a measurement.
+It is the right next cut and it needs the panel, not a guess.
+

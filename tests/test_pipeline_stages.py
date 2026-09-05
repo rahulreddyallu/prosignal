@@ -64,24 +64,19 @@ def _clean_quality():
 
 
 def _composite_only(config):
-    """Opt these tests into the hand-weighted composite.
+    """Let the LEGACY hand-weighted block run on a short fixture.
 
-    They exercise composite behaviour -- factor ranking, the quality drop, the
-    redundancy report -- on fixtures with nowhere near enough history to fit
-    the cross-sectional model. Stage 4 refuses to fall back silently, which is
-    the point of allow_composite_fallback, so a composite test has to say so.
+    The tests below pin that block's own bookkeeping -- `dropped_factors`,
+    `effective_weights`, the redundancy report -- which stage 4 still computes
+    and which the engine does not rank on. It runs unconditionally now.
 
-    TWO SWITCHES NOW, and the second one is the interesting half. Since the book
-    is ordered by a single measured column rather than by the fitted composite,
-    "run the composite path" also means "and let it decide the order". Without
-    this, these tests fail with RankingUnavailable -- which is the ranking policy
-    working exactly as designed: there is no live feature frame on a fixture with
-    120 sessions, so there is no `mom_6_1_r` to rank by, and the engine refuses
-    to quietly reach for the scorer it has retired. Saying so here keeps that
-    refusal intact everywhere else.
+    IT NO LONGER SETS `ranking.source`. That field selected between six scorers
+    and was deleted on 2026-09-05 along with five of them; setting it now raises,
+    because a config that silently ignored an unknown key would let someone
+    believe they had switched models. The engine ranks these fixtures for real,
+    which N = 340 sessions is enough history to do (`factors.FRAME_SESSIONS` is
+    316).
     """
-    config.params.stage4_core_score.allow_composite_fallback = True
-    config.params.stage4_core_score.ranking.source = "fitted_composite"
     return config
 
 

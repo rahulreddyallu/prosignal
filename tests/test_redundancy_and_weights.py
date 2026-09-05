@@ -43,6 +43,12 @@ def _scored(n=200, seed=7, drop_quality=False, clone=None):
 
     `clone` copies one factor's rank into another with the OPPOSITE shipped sign,
     which is how a genuine cross-theme duplicate looks once oriented.
+
+    The original clone used `prox_52w` -> `ulcer_120`, the real leak this check
+    was built for. `ulcer_120` was REMOVED from the engine on 2026-09-05 for
+    exactly that reason, so the pair no longer exists to test with and the
+    synthetic clone moved to another cross-theme pair. The check is the same;
+    what it caught in production is now gone by construction.
     """
     rng = np.random.default_rng(seed)
     idx = [f"S{i:03d}" for i in range(n)]
@@ -75,22 +81,23 @@ def test_the_check_sees_the_twenty_two_factors_that_order_the_book():
 
 def test_factor_ranks_are_oriented_before_they_are_correlated():
     """Unoriented, a -1 factor duplicating a +1 factor reports a NEGATIVE rho and
-    reads as diversification. That is exactly the `ulcer_120` / `prox_52w` case
-    the live check now flags, and it is the reason orientation is not cosmetic."""
-    scored = _scored(clone=("prox_52w", "ulcer_120"))
+    reads as diversification. That was exactly the `ulcer_120` / `prox_52w` case,
+    and it is the reason orientation is not cosmetic."""
+    scored = _scored(clone=("prox_52w", "downside_vol_60"))
     _, factors = _v3_blocks(scored)
-    rho = factors["prox_52w"].corr(factors["ulcer_120"], method="spearman")
+    rho = factors["prox_52w"].corr(factors["downside_vol_60"], method="spearman")
     assert rho == pytest.approx(1.0, abs=1e-9)
-    raw = scored["prox_52w_r"].corr(scored["ulcer_120_r"], method="spearman")
+    raw = scored["prox_52w_r"].corr(scored["downside_vol_60_r"], method="spearman")
     assert raw == pytest.approx(-1.0, abs=1e-9)
 
 
 def test_a_cross_theme_duplicate_is_a_breach_because_the_cap_cannot_see_it():
-    """`ulcer_120` sits in `risk` and moves with momentum. The 40% cap is applied
-    per theme, so the exposure is carried twice and no cap notices."""
-    report = _v3_redundancy(_scored(clone=("prox_52w", "ulcer_120")), _Cfg())
+    """A momentum factor living in `risk` moves with momentum. The 40% cap is
+    applied per theme, so the exposure is carried twice and no cap notices --
+    which is what `ulcer_120` did before it was removed."""
+    report = _v3_redundancy(_scored(clone=("prox_52w", "downside_vol_60")), _Cfg())
     pairs = {tuple(sorted((a, b))) for a, b, _ in report.breaches}
-    assert ("prox_52w", "ulcer_120") in pairs
+    assert ("downside_vol_60", "prox_52w") in pairs
     assert any("CROSS-THEME" in n for n in report.notes)
 
 
@@ -137,3 +144,28 @@ def test_the_residual_bucket_counts_unmapped_and_too_small_sectors_alike():
     share = _residual_share(pd.Index(index), sectors)
     assert share == pytest.approx(0.40, abs=1e-9)
     assert _residual_share(pd.Index(index), {}) == 1.0
+
+
+# ------------------------------------------------- the coverage floor
+def test_the_coverage_floor_can_never_demand_more_names_than_exist():
+    """It was `max(int(0.6 * n), 20)`, which asks for twenty names however small
+    the universe is -- so a three-name cross-section failed at "covers 3 of 3,
+    under the 20 floor".
+
+    The two conditions answer different questions and only one was intended: the
+    error says a ranking built on a MINORITY of the universe is a ranking of that
+    minority, which is a share. The absolute term is a guard against a near-empty
+    cross-section and must not exceed what exists.
+
+    It bit exactly where refusing is worst. `absolute_floor`'s own note records
+    11 names clearing at the COVID trough and 8 in the 2022 drawdown; on such a
+    day the engine would have refused to rank at all rather than ranking the
+    names that survived.
+    """
+    for universe in (1, 3, 11, 19, 20, 50, 500):
+        floor = min(max(int(0.6 * universe), 20), universe)
+        assert floor <= universe, f"floor {floor} exceeds a universe of {universe}"
+        if universe >= 34:                      # 0.6 * 34 > 20
+            assert floor == int(0.6 * universe)
+    assert min(max(int(0.6 * 3), 20), 3) == 3
+    assert min(max(int(0.6 * 500), 20), 500) == 300

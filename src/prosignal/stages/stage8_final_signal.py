@@ -618,13 +618,6 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
             f"reaching |t| 1.5 in either direction. The ranking earns the "
             f"shortlist; holding only a few of it is an operator's risk choice, "
             f"taken by you and not validated by anything here.")
-    elif rank_cfg is not None and source != "fitted_composite":
-        why.append(
-            f"Ranked #{score.rank} of the eligible universe by {rank_cfg.column} "
-            f"-- sector-neutral 6-1 momentum, the single column that orders this "
-            f"book. The themes below are the fitted model's separate reading of "
-            f"the same name; they are recorded and monitored, and they did not "
-            f"choose it.")
     model_tier = [f for f in score.factors.values() if f.evidence_tier == "model"]
     if model_tier:
         # Attribution from the fit. raw_value is this factor's contribution to

@@ -76,23 +76,23 @@ def test_a_healthy_factor_reads_positive_and_is_not_flagged():
 def test_an_inverted_factor_is_caught():
     """The failure this exists for: a factor still computing, still weighted,
     now pointing the wrong way. Aggregate composite IC will not say which."""
-    p = _panel(invert={"ulcer_120"})
+    p = _panel(invert={"downside_vol_60"})
     ic = mon.rolling_factor_ic(p, "fwd")
     health = {h.name: h for h in mon.review_factors(ic)}
-    assert health["ulcer_120"].inverted
-    assert health["ulcer_120"].ic_t < -mon.IC_ALERT_T
-    assert "check before acting" in health["ulcer_120"].note
-    others = [h for n, h in health.items() if n != "ulcer_120"]
+    assert health["downside_vol_60"].inverted
+    assert health["downside_vol_60"].ic_t < -mon.IC_ALERT_T
+    assert "check before acting" in health["downside_vol_60"].note
+    others = [h for n, h in health.items() if n != "downside_vol_60"]
     assert not any(h.inverted for h in others), "flagged a healthy factor too"
 
 
 def test_a_short_history_gets_no_verdict_rather_than_a_wrong_one():
-    p = _panel(n_dates=mon.MIN_PERIODS - 5, invert={"ulcer_120"})
+    p = _panel(n_dates=mon.MIN_PERIODS - 5, invert={"downside_vol_60"})
     ic = mon.rolling_factor_ic(p, "fwd")
     health = {h.name: h for h in mon.review_factors(ic)}
-    assert not health["ulcer_120"].inverted, "verdict on too little data"
-    assert "no verdict" in health["ulcer_120"].note
-    assert health["ulcer_120"].ic_t is None
+    assert not health["downside_vol_60"].inverted, "verdict on too little data"
+    assert "no verdict" in health["downside_vol_60"].note
+    assert health["downside_vol_60"].ic_t is None
 
 
 def test_a_factor_missing_from_the_panel_is_reported_not_skipped():
@@ -246,7 +246,7 @@ def test_the_monitor_changes_no_state():
     to prevent."""
     before_themes = copy.deepcopy(engine.THEMES)
     before_factors = copy.deepcopy(engine.FACTOR_THEME)
-    p = _panel(invert={"ulcer_120", "mom_12_6"}, flatten={"quality", "risk"})
+    p = _panel(invert={"downside_vol_60", "mom_12_6"}, flatten={"quality", "risk"})
     snapshot = p.copy(deep=True)
 
     mon.review_factors(mon.rolling_factor_ic(p, "fwd"))
@@ -263,7 +263,7 @@ def test_the_monitor_changes_no_state():
 
 def test_every_flag_is_serialisable_for_the_run_record():
     """A flag nobody can persist is a flag nobody sees the next morning."""
-    p = _panel(invert={"ulcer_120"})
+    p = _panel(invert={"downside_vol_60"})
     f = mon.review_factors(mon.rolling_factor_ic(p, "fwd"))[0].to_dict()
     t = mon.review_themes(mon.rolling_theme_ic(p, "fwd"), p)[0].to_dict()
     d = mon.review_drawdown([1.0, 0.7], [dt.date(2026, 1, 1),
@@ -368,16 +368,15 @@ def test_the_scoring_notes_reach_the_run_and_the_persisted_payload(runnable_cfg)
     assert run.scoring_notes, "stage 4 said nothing about how it ranked"
 
     joined = " ".join(run.scoring_notes)
-    # NAMES THE CONFIGURED SCORER, whichever it is. This asserted the literal
-    # "v3 composite" and broke the day `ranking.source` moved to v4 -- which is
-    # the test failing for the one reason it should not: the note was still
-    # doing its job, it just named a different model. What matters is that a run
-    # records WHICH model ordered it, so that is what is checked.
-    source = str(runnable_cfg.params.stage4_core_score.ranking.source)
-    expected = source.replace("_", " ").replace("composite", "composite")
-    assert expected in joined, (
-        f"the run does not record which model ranked it; expected {expected!r} "
-        f"for ranking.source={source!r}")
+    # THE RUN RECORDS WHICH MODEL ORDERED IT. This asserted the literal string
+    # "v3 composite" and broke when the scorer was renamed; it was then rewritten
+    # to read `ranking.source`, which broke again when that field was deleted
+    # along with the six-way switch. Both times the note was doing its job and
+    # the test was pinning an incidental detail of how it said so. There is one
+    # scorer now, so what matters is that the run states what ranked it and how
+    # many factors that scorer carries.
+    assert "Book ordered by the composite" in joined
+    assert f"{len(engine.ALL_FACTORS)} factors" in joined
     assert "Theme influence on this cross-section" in joined, \
         "the dominance check did not run on this run"
 

@@ -1194,16 +1194,17 @@ stage4_core_score:
     # gated on filing_date. Evidence: the profitability factor in Fama-French
     # five-factor replications on Indian data (CNX 500, NSE 500).
     #
-    # SIGN WARNING (2026-09 quant audit). `higher_is_better: true` below is the
-    # THEORY prior and governs the v2/fitted paths. It is NOT what the SHIPPED
-    # scorer does. `ranking.source: v3_composite` fits the "quality" theme's
-    # signs from data (`features/v3.py:THEMES`), and on 2018-2024 that fit came
-    # out INVERTED: net_margin sign -1, margin_stability sign -1 -- the shipped
-    # model rewards LOW, UNSTABLE margins, on the ~19% of names that carry
-    # fundamentals. EXP-A (research/v3/experiments/audit_2026_09.py) confirmed
-    # the negative sign is STABLE across sub-periods (not a 2020-21 artifact),
-    # so it is kept and RELABELLED "Low-margin tilt" on the card rather than
-    # dropped. See audit sections D and K-4.
+    # SIGN WARNING. `higher_is_better: true` below is the THEORY prior. It is NOT
+    # what the shipped scorer does: `features/engine.py:THEMES` fits the
+    # "quality" theme's signs from data, and that fit came out INVERTED --
+    # net_margin -1, margin_stability -1 -- so the engine rewards LOW, UNSTABLE
+    # margins on the names that carry fundamentals. Measured across sub-periods
+    # the negative sign is STABLE, so it is kept and relabelled "Low-margin
+    # tilt" on the card rather than dropped.
+    #
+    # THIS BLOCK NO LONGER GOVERNS THE RANKING. It feeds the legacy
+    # hand-weighted composite, whose values Stage 4 computes and then discards;
+    # only its index survives, as the scoreable set. See the note on `factors`.
     quality:
       enabled: true
       weight_band: [0.20, 0.35]
@@ -1314,11 +1315,12 @@ stage4_core_score:
   # stability estimate.
   fundamental_quarters: 12
 
-  # Scoring from the hand-weighted composite when the fitted model cannot run.
-  # Measured, that composite returns -0.047%/month excess over an equal-weight
-  # benchmark at t = -0.11. Leaving this false means a model failure produces
-  # NO TRADE rather than a signal that looks healthy and is not.
-  allow_composite_fallback: false
+  # `allow_composite_fallback` WAS HERE and is deleted. It chose whether Stage 4
+  # could fall back to the hand-weighted composite when the fitted model would
+  # not run. Both of those scorers are gone, no code has read the switch since,
+  # and a config key nothing reads is a promise the engine cannot keep.
+  # `_rank_by_engine` raises instead: there is one scorer, so a run that cannot
+  # rank has not produced a ranking.
 
   # Cross-sectional model. model_horizon_sessions must equal
   # stage7_risk.max_holding_sessions -- the loader enforces it -- or the model
