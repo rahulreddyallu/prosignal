@@ -101,6 +101,10 @@ class AnalysisRun:
     #: persisted, not in the ledger. A monitor that flags into a field nobody
     #: reads is not a monitor, so the notes are carried out of the run here.
     scoring_notes: List[str] = field(default_factory=list)
+    #: Set when the inherited open book was issued by a different config. The
+    #: engine has no position ledger, so this is the only place the reader can
+    #: learn that this generation's exit band is governing another's positions.
+    book_provenance: Optional[str] = None
 
 
 def run_analysis(
@@ -200,6 +204,39 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     previous = ledger.previous_run(before=resolved)
     open_book = list(previous.get("signals_generated") or []) if previous else []
     previous_slate = list(previous.get("slate_shown") or []) if previous else []
+
+    # WHOSE BOOK IS THIS. The engine holds no position state: `previous_run` is
+    # its entire memory, and among rows sharing a date it takes whichever was
+    # appended last. On this ledger that is not a thin assumption -- 2026-08-21
+    # carries 642 rows and 2026-08-18 carries 676, written across several
+    # config versions, because every dev and backfill invocation appends beside
+    # the real one.
+    #
+    # So the book a run inherits can have been produced by a DIFFERENT MODEL,
+    # and nothing said so. Stage 6's exit band then applies this generation's
+    # ranking to last generation's positions, which is a defensible thing to do
+    # and an indefensible thing to do silently.
+    #
+    # This reports; it does not re-select. Changing which row wins would change
+    # what the book holds, which is an epoch-gated decision and not one to make
+    # inside a monitoring fix.
+    book_provenance = None
+    if previous and open_book:
+        prev_cfg = str(previous.get("config_version") or "unknown")
+        if prev_cfg != str(config.version):
+            book_provenance = (
+                f"The {len(open_book)} open position(s) were issued by a "
+                f"different configuration: {prev_cfg} against this run's "
+                f"{config.version}. The exit band being applied to them is this "
+                f"generation's, not the one that opened them. The engine keeps "
+                f"no position ledger -- the book is inherited from the last "
+                f"recorded run before {resolved}, and that row is its only "
+                f"memory."
+            )
+            log.warning("open book inherited from another configuration",
+                        extra={"previous_config": prev_cfg,
+                               "current_config": str(config.version),
+                               "positions": len(open_book)})
 
     # ---- Stage 3 ----------------------------------------------------------
     step(3)
@@ -435,8 +472,17 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     except Exception as exc:                        # never fail a run to report
         log.warning("drawdown check did not run", extra={"error": str(exc)})
 
+    # THE BOOK'S PROVENANCE TRAVELS WITH THE RUN. It goes into `scoring_notes`
+    # as well as its own field, because that list is the channel the card, the
+    # ledger and the run-detail payload already read -- a flag raised into a
+    # field nobody renders is the exact failure `scoring_notes` was created to
+    # fix (see tests/test_v3_monitor.py).
+    if book_provenance:
+        scoring_notes = list(scoring_notes) + [book_provenance]
+
     result = AnalysisRun(output=output, context=context, timings_ms=timings,
-                         funnel=funnel, scoring_notes=scoring_notes)
+                         funnel=funnel, scoring_notes=scoring_notes,
+                         book_provenance=book_provenance)
 
     # THE SCREEN READS THIS, not the API's job queue.
     #

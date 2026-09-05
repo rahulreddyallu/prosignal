@@ -79,13 +79,13 @@
       "top6_overlap": 1.0
     },
     {
-      "date": "2026-06-04",
+      "date": "2026-05-13",
       "universe": 750,
       "same_universe": {
         "score": {
           "field": "score",
           "common_names": 750,
-          "both_finite": 749,
+          "both_finite": 750,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 0.9999999999999999,
@@ -97,13 +97,13 @@
           "both_finite": 747,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
-          "spearman": 0.9999999999999999,
+          "spearman": 1.0,
           "identical": true
         },
         "quality_sub": {
           "field": "quality_sub",
           "common_names": 750,
-          "both_finite": 659,
+          "both_finite": 647,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 1.0,
@@ -112,19 +112,19 @@
         "ownership_sub": {
           "field": "ownership_sub",
           "common_names": 750,
-          "both_finite": 748,
+          "both_finite": 749,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
-          "spearman": 1.0,
+          "spearman": 0.9999999999999999,
           "identical": true
         },
         "risk_sub": {
           "field": "risk_sub",
           "common_names": 750,
-          "both_finite": 745,
+          "both_finite": 749,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
-          "spearman": 0.9999999999999999,
+          "spearman": 1.0,
           "identical": true
         },
         "reversal_sub": {
@@ -138,49 +138,49 @@
         }
       },
       "top6_research": [
-        "AXISCADES",
+        "GVT&D",
+        "GMBREW",
+        "DELHIVERY",
         "JBCHEPHARM",
-        "JAYNECOIND",
         "SAGILITY",
-        "SEAMECLTD",
-        "DELHIVERY"
+        "GRANULES"
       ],
       "top6_live": [
-        "AXISCADES",
+        "GVT&D",
+        "GMBREW",
+        "DELHIVERY",
         "JBCHEPHARM",
-        "JAYNECOIND",
         "SAGILITY",
-        "SEAMECLTD",
-        "DELHIVERY"
+        "GRANULES"
       ],
       "top6_overlap": 1.0
     },
     {
-      "date": "2026-03-25",
-      "universe": 750,
+      "date": "2026-02-10",
+      "universe": 749,
       "same_universe": {
         "score": {
           "field": "score",
-          "common_names": 750,
-          "both_finite": 750,
-          "max_abs_diff": 0.0,
-          "mean_abs_diff": 0.0,
-          "spearman": 0.9999999999999999,
-          "identical": true
-        },
-        "momentum_sub": {
-          "field": "momentum_sub",
-          "common_names": 750,
-          "both_finite": 748,
+          "common_names": 749,
+          "both_finite": 747,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 1.0,
           "identical": true
         },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 749,
+          "both_finite": 746,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
         "quality_sub": {
           "field": "quality_sub",
-          "common_names": 750,
-          "both_finite": 635,
+          "common_names": 749,
+          "both_finite": 624,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 1.0,
@@ -188,8 +188,8 @@
         },
         "ownership_sub": {
           "field": "ownership_sub",
-          "common_names": 750,
-          "both_finite": 750,
+          "common_names": 749,
+          "both_finite": 747,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 0.9999999999999999,
@@ -197,8 +197,8 @@
         },
         "risk_sub": {
           "field": "risk_sub",
-          "common_names": 750,
-          "both_finite": 750,
+          "common_names": 749,
+          "both_finite": 747,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 1.0,
@@ -206,8 +206,8 @@
         },
         "reversal_sub": {
           "field": "reversal_sub",
-          "common_names": 750,
-          "both_finite": 750,
+          "common_names": 749,
+          "both_finite": 749,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 1.0,
@@ -215,97 +215,20 @@
         }
       },
       "top6_research": [
-        "FUSION",
-        "MFSL",
+        "TVSHLTD",
+        "SBILIFE",
+        "LAURUSLABS",
         "TVSMOTOR",
-        "GRASIM",
-        "JBCHEPHARM",
-        "PVRINOX"
+        "COROMANDEL",
+        "BHARTIHEXA"
       ],
       "top6_live": [
-        "FUSION",
-        "MFSL",
+        "TVSHLTD",
+        "SBILIFE",
+        "LAURUSLABS",
         "TVSMOTOR",
-        "GRASIM",
-        "JBCHEPHARM",
-        "PVRINOX"
-      ],
-      "top6_overlap": 1.0
-    },
-    {
-      "date": "2026-01-19",
-      "universe": 746,
-      "same_universe": {
-        "score": {
-          "field": "score",
-          "common_names": 746,
-          "both_finite": 742,
-          "max_abs_diff": 0.0,
-          "mean_abs_diff": 0.0,
-          "spearman": 0.9999999999999999,
-          "identical": true
-        },
-        "momentum_sub": {
-          "field": "momentum_sub",
-          "common_names": 746,
-          "both_finite": 740,
-          "max_abs_diff": 0.0,
-          "mean_abs_diff": 0.0,
-          "spearman": 1.0,
-          "identical": true
-        },
-        "quality_sub": {
-          "field": "quality_sub",
-          "common_names": 746,
-          "both_finite": 616,
-          "max_abs_diff": 0.0,
-          "mean_abs_diff": 0.0,
-          "spearman": 0.9999999999999999,
-          "identical": true
-        },
-        "ownership_sub": {
-          "field": "ownership_sub",
-          "common_names": 746,
-          "both_finite": 743,
-          "max_abs_diff": 0.0,
-          "mean_abs_diff": 0.0,
-          "spearman": 1.0,
-          "identical": true
-        },
-        "risk_sub": {
-          "field": "risk_sub",
-          "common_names": 746,
-          "both_finite": 741,
-          "max_abs_diff": 0.0,
-          "mean_abs_diff": 0.0,
-          "spearman": 1.0,
-          "identical": true
-        },
-        "reversal_sub": {
-          "field": "reversal_sub",
-          "common_names": 746,
-          "both_finite": 744,
-          "max_abs_diff": 0.0,
-          "mean_abs_diff": 0.0,
-          "spearman": 0.9999999999999999,
-          "identical": true
-        }
-      },
-      "top6_research": [
-        "ZOTA",
-        "INTERARCH",
-        "BHARTIHEXA",
-        "UPL",
-        "IDFCFIRSTB",
-        "ASTRAZEN"
-      ],
-      "top6_live": [
-        "ZOTA",
-        "INTERARCH",
-        "BHARTIHEXA",
-        "UPL",
-        "IDFCFIRSTB",
-        "ASTRAZEN"
+        "COROMANDEL",
+        "BHARTIHEXA"
       ],
       "top6_overlap": 1.0
     },
@@ -387,7 +310,84 @@
       "top6_overlap": 1.0
     },
     {
-      "date": "2025-09-08",
+      "date": "2025-08-14",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 746,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 581,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 748,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "JSWSTEEL",
+        "PEL",
+        "BHARTIARTL",
+        "BPCL",
+        "TECHM",
+        "CARERATING"
+      ],
+      "top6_live": [
+        "JSWSTEEL",
+        "PEL",
+        "BHARTIARTL",
+        "BPCL",
+        "TECHM",
+        "CARERATING"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2025-05-22",
       "universe": 750,
       "same_universe": {
         "score": {
@@ -402,16 +402,93 @@
         "momentum_sub": {
           "field": "momentum_sub",
           "common_names": 750,
-          "both_finite": 747,
+          "both_finite": 745,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
-          "spearman": 1.0,
+          "spearman": 0.9999999999999999,
           "identical": true
         },
         "quality_sub": {
           "field": "quality_sub",
           "common_names": 750,
-          "both_finite": 585,
+          "both_finite": 564,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 747,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 743,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "WEBELSOLAR",
+        "ORIENTCEM",
+        "BHARTIARTL",
+        "SWARAJENG",
+        "JSWSTEEL",
+        "PANACEABIO"
+      ],
+      "top6_live": [
+        "WEBELSOLAR",
+        "ORIENTCEM",
+        "BHARTIARTL",
+        "SWARAJENG",
+        "JSWSTEEL",
+        "PANACEABIO"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2025-02-18",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 748,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 744,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 553,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 1.0,
@@ -429,7 +506,7 @@
         "risk_sub": {
           "field": "risk_sub",
           "common_names": 750,
-          "both_finite": 746,
+          "both_finite": 743,
           "max_abs_diff": 0.0,
           "mean_abs_diff": 0.0,
           "spearman": 0.9999999999999999,
@@ -446,20 +523,97 @@
         }
       },
       "top6_research": [
-        "MANGCHEFER",
-        "RADICO",
-        "JSWSTEEL",
-        "LLOYDSME",
-        "SUNFLAG",
-        "TECHM"
+        "BBOX",
+        "WELENT",
+        "ORIENTCEM",
+        "PANACEABIO",
+        "MAXESTATES",
+        "SOLARA"
       ],
       "top6_live": [
-        "MANGCHEFER",
-        "RADICO",
-        "JSWSTEEL",
-        "LLOYDSME",
-        "SUNFLAG",
-        "TECHM"
+        "BBOX",
+        "WELENT",
+        "ORIENTCEM",
+        "PANACEABIO",
+        "MAXESTATES",
+        "SOLARA"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2024-11-25",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 742,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 742,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 537,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 742,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 737,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "SOLARA",
+        "KESORAMIND",
+        "SUVENPHAR",
+        "TECHM",
+        "STAR",
+        "MOTHERSON"
+      ],
+      "top6_live": [
+        "SOLARA",
+        "KESORAMIND",
+        "SUVENPHAR",
+        "TECHM",
+        "STAR",
+        "MOTHERSON"
       ],
       "top6_overlap": 1.0
     }

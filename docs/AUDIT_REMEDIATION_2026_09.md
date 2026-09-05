@@ -725,3 +725,36 @@ Two consequences worth stating rather than silently resolving:
 - **`max_open_positions: 6` and `max_signals_per_run: 8` describe different
   books.** That is a config-level decision, not a bug to patch mid-audit.
 
+## R3-2 — the engine's position memory is one ledger row, and it can be another model's
+
+`pipeline.run_analysis` builds the open book from
+`Ledger.previous_run(before=resolved)`, and `ledger.py` says so plainly: *"this
+row is the entire memory the next run has."* The engine holds no position state.
+
+Two facts make that fragile in practice:
+
+- **`previous_run` takes whichever row was appended last** among those sharing
+  the most recent qualifying date (`when >= latest_date`).
+- **This ledger has hundreds of rows per date.** 2026-08-21 carries **642**,
+  2026-08-18 carries **676**, 2026-08-17 carries **193** — written across
+  several `config_version` values, because every development and backfill
+  invocation appends beside the real one. (This is the "~1,600 contaminated
+  rows" already on record; 9 of them are this session's own verification runs,
+  a rounding error on 642 but worth naming.)
+
+So the book a run inherits can have been issued by a **different model**, and
+Stage 6's exit band then governs last generation's positions with this
+generation's ranking. Verified live on 2026-08-21: *"The 8 open position(s) were
+issued by a different configuration."*
+
+**Fixed by making it visible, not by changing it.** `pipeline` now compares the
+inherited row's `config_version` to the running one and, when they differ,
+raises a warning and writes a note into `scoring_notes` — the channel the card,
+the ledger and the run-detail payload already read, which is the whole reason
+that field exists. `AnalysisRun.book_provenance` carries it too.
+
+**Deliberately NOT changed:** which row wins. Preferring the most recent row with
+a matching `config_version` is the obvious improvement and it would change what
+the book holds, which is an epoch-gated decision and not one to make inside a
+monitoring fix. It is the recommended next change.
+
