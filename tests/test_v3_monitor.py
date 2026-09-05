@@ -368,7 +368,16 @@ def test_the_scoring_notes_reach_the_run_and_the_persisted_payload(runnable_cfg)
     assert run.scoring_notes, "stage 4 said nothing about how it ranked"
 
     joined = " ".join(run.scoring_notes)
-    assert "v3 composite" in joined, "the run does not record which model ranked it"
+    # NAMES THE CONFIGURED SCORER, whichever it is. This asserted the literal
+    # "v3 composite" and broke the day `ranking.source` moved to v4 -- which is
+    # the test failing for the one reason it should not: the note was still
+    # doing its job, it just named a different model. What matters is that a run
+    # records WHICH model ordered it, so that is what is checked.
+    source = str(runnable_cfg.params.stage4_core_score.ranking.source)
+    expected = source.replace("_", " ").replace("composite", "composite")
+    assert expected in joined, (
+        f"the run does not record which model ranked it; expected {expected!r} "
+        f"for ranking.source={source!r}")
     assert "Theme influence on this cross-section" in joined, \
         "the dominance check did not run on this run"
 

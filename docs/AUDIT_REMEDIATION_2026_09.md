@@ -560,3 +560,72 @@ nothing" — it is **"it did one thing, in the tail, and that thing stopped
 working after 2021."** Which is the same conclusion the book statistics reach by
 a different route, and neither is settled by anything short of forward data.
 
+---
+
+# SHIPPED: v4 composite (epoch `2026-09-05-c1d9632e92105fb4`)
+
+`ranking.source: v3_composite -> v4_composite`. **SCAN MARKET now runs the pruned
+model.** This is a model change and it went through the epoch protocol rather
+than around it.
+
+**v4 is v3 minus seven factors and nothing else.** Same five themes, same frozen
+weights, signs, horizons and coverages, same two-level blend, same sector-neutral
+ranks. `features/v4.py` calls `v3.score_frame` with a different theme table, so
+there is no second scorer to drift; `score_frame` gained an optional `themes`
+argument whose default path is proven identical in `tests/test_v4_score.py`.
+
+Removed: `mom_2_0`, `mom_3_1`, `mom_accel`, `voladj_mom_6_1`, `ulcer_120`,
+`resid_rev_21`, `deliv_chg_5` — 22 factors to 15.
+
+**Evidence.** dIC +0.0066 at Newey-West t +2.37 across 45 purged, embargoed CPCV
+folds; 96% of folds improved; fifth percentile still positive. The seven were
+selected by an independent split-half and **re-derived unchanged** after the
+panel rebuild — a different date range, 16 more dates, quality coverage 21% to
+49% — returning the same seven with no additions or removals.
+
+**Limits, stated on the card and in the config.** Not a sealed-holdout result:
+v3's two windows were earned by the 22-factor set, do not transfer, and are
+spent. CPCV measures stability, not out-of-sample selection, and the seven were
+chosen on this panel. **The forward test registered with this epoch (375
+sessions / 18 months) is what grades it.**
+
+**It does not fix the book.** At six names on a 21-session cadence the change is
+inside the noise. The ranking has an edge; the concentrated book does not inherit
+it. Unchanged, and still the largest open problem.
+
+One immediate confirmation: with `ulcer_120` gone the live redundancy check
+reports **zero breaches**. It was the source of all three.
+
+### What was rejected, and why the biggest number lost
+
+| candidate | full-window book | why not |
+|---|---|---|
+| **momentum-only** | **+21.4%/yr gross, t +2.51**, positive in all three sub-periods | Chosen by reading book results across **25 model × exit-band combinations**. Contradicts the IC evidence (momentum's marginal ΔIC is +0.0007, t +0.08). Sub-period t declines monotonically **2.88 → 1.94 → 0.93**. Discards the only out-of-sample evidence the engine has. Chui et al. (2023) put Indian momentum in the *most liquid* names; this universe's median ADTV is ₹23 cr |
+| equal theme weights | ΔIC +0.0051 | t +1.41, p5 −0.0039 |
+| cost-only prune | ΔIC ≈ 0 | t −0.05, 53% of folds. The case is execution, not information; two of the four are already in the seven |
+| six new factors | — | none adds at NW t ≥ 2.0; three predict standalone and add nothing blended |
+
+**The book turnover finding, not acted on and worth more than any of the above.**
+At the live 6-slot / 21-session / exit-18 configuration the book replaces **61%
+of itself per rebalance**, costing **~6.6%/yr** against a gross excess of +8.5%
+(t +1.41) — a net of +1.9%. Widening the exit band cuts turnover monotonically
+for every model tested (v3: 85% → 70% → 61% → 47% → 35% at exit 6/12/18/30/48).
+The cost side of that is mechanical and certain; the gross side is noisy and
+non-monotonic at n=95 rebalances, which is why **no exit-band change ships here**
+— picking one off this sweep would be selecting a config on the same data the
+audit already used. It is the highest-value remaining experiment and it belongs
+in a pre-registered harness, not in a config edit.
+
+### Epoch hygiene done alongside
+
+- Old epoch `2026-09-03-5e0c98515d13e6e2` closed **SUPERSEDED** (scorer changed;
+  store had drifted).
+- Store re-manifested: `75152d895cd25607 -> 86f8b3d6e8865906`, 51 files,
+  9,436,569 rows, `--verify` clean.
+- First v4 epoch open (`…6a059ec0`) **VOIDed after 50 seconds** and re-cut as
+  `2026-09-05-c1d9632e92105fb4`: it had recorded the pre-rebuild manifest digest,
+  and an epoch drifted from birth is the 2026-09-03 dirty-tree mistake again. No
+  outcome was ever resolved under it.
+- Forward test registered against `baseline-v2@7b4f50fcf98d11ba`, commit
+  `5daaff349593`.
+
