@@ -191,6 +191,7 @@ class UniverseResolver:
         # companies with matching names (GOLDIAM, SKYGOLD, PNBGILTS, SILVERTUC)
         # are kept.
         non_equity = set()
+        non_equity_failed = None
         try:
             from .instruments import non_equity_symbols
             # A LONGER READ THAN THE LIQUIDITY WINDOW, because the volatility
@@ -206,6 +207,19 @@ class UniverseResolver:
                 list(adtv.index), equity_master=self.store.read_equity_master(),
                 close=wide)
         except Exception as exc:                       # pragma: no cover
+            # SURFACED ON THE SNAPSHOT, not just logged. Continuing with an
+            # empty exclusion set puts ETFs, gold and silver funds, liquid funds
+            # and bond ETFs back into an equity universe -- and they do not rank
+            # neutrally: a bond fund has almost no drawdown, almost no downside
+            # volatility, near-zero return kurtosis and a high delivered
+            # fraction, so it tops the risk, ownership and momentum-consistency
+            # themes at once. On the run that found this, three of the top five
+            # names were bond ETFs.
+            #
+            # The failure is silent by construction -- the universe simply has
+            # more names in it -- so the note travels with the snapshot and
+            # reaches the run record.
+            non_equity_failed = str(exc)
             log.warning("the non-equity filter could not run; the universe may "
                         "contain ETFs and funds", extra={"error": str(exc)})
 
@@ -241,6 +255,10 @@ class UniverseResolver:
                 f"{as_of}; {len(symbols)} names; sector known for {known} "
                 f"({100.0 * known / len(symbols):.0f}%); "
                 f"{len(non_equity)} ETFs/funds excluded as non-equity"
+                + (f". WARNING: the non-equity filter FAILED "
+                   f"({non_equity_failed}) -- this universe may contain ETFs, "
+                   f"gold and bond funds, which do not rank neutrally against "
+                   f"equities" if non_equity_failed else "")
             ),
         )
         self._apply_listing_dates(snap, as_of)

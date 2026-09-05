@@ -8,8 +8,8 @@
 > the fitted ranker as the only one with an out-of-sample number.
 
 A cross-sectional equity ranking engine for NSE cash equities. It reads
-point-in-time market data, ranks the eligible universe on sector-neutral 6-1
-momentum, and puts six names on a screen with the arithmetic that produced them
+point-in-time market data, ranks the eligible universe on the v3 thematic
+composite, and puts six names on a screen with the arithmetic that produced them
 and the record of what that configuration has historically done.
 
 It runs every session and buys every twenty-first. It issues opinions. It has no
@@ -26,7 +26,7 @@ order-routing code and no broker connection.
 | **Runs** | Every trading session, end-of-day |
 | **Buys** | Every **21st** session. Running and buying are different events — see `prosignal/cadence.py` |
 | **Horizon** | 63 sessions (~3 months), and the time limit is now the exit most winners take |
-| **Ranking** | **`mom_6_1_r`** — the sector-neutral rank of 6-1 momentum, one column. The Fama–MacBeth model over 7 factor families is still fitted, recorded and monitored; it no longer chooses |
+| **Ranking** | **`v3_composite`** — 22 factors in 5 themes, each theme combined on its own and blended with weights re-capped at 40% per name. Set by `stage4_core_score.ranking.source`. `mom_6_1_r` is the `measured_factor` path and is **not** what runs; the Fama–MacBeth model was deleted on 2026-09-03 |
 | **Book** | 6 names, equal weight, held while inside the top 18 |
 | **Exits** | Rank band, 63-session limit, and a disaster floor at 8×ATR clipped to 35%. No profit target, no thesis-invalidation exit, no trailing stop |
 | **Output** | A ranked shortlist, each with factor contributions and a trade plan |
@@ -260,14 +260,66 @@ result. The forward paper-trading record is what would establish it.
 
 ---
 
+## THE TRIAL COUNT
+
+Three numbers are quoted in this repository for the same quantity and none of
+them is the honest one:
+
+| source | charged |
+|---|---|
+| `prosignal research trials` (the registry) | **119** |
+| `config/parameters.yaml`, expectancy preamble | **4,877** |
+| this file, RESULTS OF RECORD | **81** |
+
+Counting honestly — every configuration ever evaluated against out-of-sample
+data, including the abandoned ones — the floor is:
+
+* 4,877 trade-level configurations, the `horizon-map-2026-08` sweep;
+* 144 fitted-composite configurations;
+* the v3 search that chose the 22 factors, 5 themes and their weights. Its code
+  was deleted on 2026-09-03 and the registry does not carry its arms, so **this
+  component is not recoverable from this repository**;
+* v4 through v9 — six model generations built and not shipped, each with a
+  sweep of its own;
+* the 119 in the registry, of which the DSR's own coverage guard finds only 18
+  carry a recorded score, forcing the conservative unit variance.
+
+**At least 5,140, and not reconstructible.** That is itself the finding: the
+registry was created after most of the search had already happened, so no
+deflated Sharpe computed from it can be trusted in either direction. The
+statistical machinery is not the problem — Newey-West, PSR, the expected
+maximum and CSCV PBO were each checked against their standard definitions and
+are correct. The input is the problem.
+
+
 ## RESULTS OF RECORD
 
 > [!WARNING]
-> **These supersede every other number in this file.** Earlier sections quote
-> three mutually inconsistent CPCV results, produced at different times against
-> different code. They are kept as history — a bad result is never deleted here
-> — and each is marked SUPERSEDED where it appears. If a figure below and a
-> figure elsewhere disagree, this table is the live one.
+> **NEITHER TABLE IN THIS FILE DESCRIBES WHAT SHIPS, and this one's claim to be
+> "the live one" is withdrawn (2026-09-05).**
+>
+> The two headline tables measure two different models with two different exit
+> geometries on two different panels:
+>
+> | | executive summary, above | RESULTS OF RECORD, below |
+> |---|---|---|
+> | headline | +42.6% book vs +18.9% bench, alpha +20.3% | +1.04% vs +5.27%/period, excess −4.23% |
+> | ranker | sector-neutral `mom_6_1_r`, one column | the fitted Fama–MacBeth composite |
+> | exits | 8×ATR floor only | 2.5×ATR stop, 3R target, MA50−1.5ATR invalidation |
+> | sizing | equal weight | risk budget |
+> | sample | 258 trades, 2018-11 → 2026-08 | 35,730 rows / 85 dates, 2019-02 → 2025-02 |
+>
+> They do not contradict each other; they answer different questions. What is
+> false is the claim that either is live. **The engine ranks on
+> `v3_composite`**, whose stop, target, invalidation and sizing match neither
+> row. The composite's RANKING carries two sealed-holdout evaluations
+> (`features/v3.py`); **no book at the shipped six-name geometry has ever been
+> measured**, which `v3.BOOK_NOTE` says in the code and these tables obscure.
+>
+> Both are kept as history — a bad result is never deleted here — and both are
+> now labelled with the model they measured. Replacing them needs a trade-level
+> study on `v3_composite` at the live geometry, on the TRAINING window; the
+> sealed windows are spent.
 
 Regenerated end to end after remediation. Panel 35,730 rows over 85 dates;
 selection period 2019-02-18 → 2025-02-03; holdout untouched.
@@ -283,7 +335,7 @@ selection period 2019-02-18 → 2025-02-03; holdout untouched.
 | Pre-committed significance bar | **t ≥ 3.0** |
 | Paths below zero | **11%** |
 | Path Sharpe — min / median / max | −0.03 / +0.20 / +0.37 |
-| Deflated Sharpe, charging **81** trials | **0.346 — FAIL** |
+| Deflated Sharpe, charging **81** trials | **0.346 — FAIL** (and 81 is not the honest count — see below) |
 
 **The book, against the alternative it never used to be measured against** —
 equal-weight eligible universe over the same 70 holding windows:

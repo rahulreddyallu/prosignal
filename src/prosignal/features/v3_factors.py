@@ -163,6 +163,12 @@ def factor_frame(close: pd.DataFrame, open_: Optional[pd.DataFrame] = None,
         rev = g("ttm_revenue")
         nm = (g("ttm_net_profit") / rev.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
         age = g("fund_age_days")
+        # ONE staleness limit, not two. `stage4_core_score.
+        # max_fundamental_age_days` (450) governs the legacy family block and
+        # this governs the shipped one; they disagreed by a month and nothing
+        # reconciled them. MAX_AGE_DAYS is the stricter and is the one the v3
+        # quality theme was measured under, so it wins -- the config key is now
+        # documented as applying to the family block alone.
         from .pit_fundamentals import MAX_AGE_DAYS
         nm = nm.where(age <= MAX_AGE_DAYS)
         F["net_margin"] = nm

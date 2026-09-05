@@ -81,7 +81,7 @@ cleaner read of the two.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -90,6 +90,7 @@ __all__ = ["Theme", "THEMES", "FACTOR_THEME", "ALL_FACTORS", "MIN_THEMES",
            "MIN_LOOKBACK_SESSIONS", "sector_neutral_rank", "theme_subscore",
            "score_frame", "attribution", "absolute_floor", "cap_weights",
            "BOOK", "BOOK_NOTE", "HOLDOUT_BOOK", "RESEARCH_BOOK",
+           "score_dispersion", "TYPICAL_DISPERSION", "residual_bucket_size",
            "LIVE_BOOK", "EXCLUDED_THEMES"]
 
 
@@ -188,6 +189,41 @@ MIN_LOOKBACK_SESSIONS = 274
 #: Ranks neutral rather than dropping the row when the input is missing.
 NEUTRAL_WHEN_MISSING = frozenset()
 MIN_SECTOR_NAMES = 12
+
+
+def residual_bucket_size(index, sectors: Optional[Dict[str, str]]) -> Dict[str, int]:
+    """How many names `sector_neutral_rank` ranks inside `__RESID__`.
+
+    "Sector-neutral" is a claim the engine makes on every card, and it is only
+    true for the names in a bucket big enough to rank within. Everything else --
+    a missing or `Unknown` sector, and every sector with fewer than
+    MIN_SECTOR_NAMES members -- is pooled into one residual group and ranked
+    against the others there.
+
+    Measured on the live cross-section of 386 eligible names, `__RESID__` held
+    150 of them (38.9%): 79 genuinely unclassified, plus 71 drawn from THIRTEEN
+    real sectors folded in for being too small -- Power, Realty, Telecom,
+    Textiles, Metals & Mining and eight more. A Power stock is neutralised
+    against Realty. Any sector tilt inside that bucket is not neutralised at
+    all, and nothing said so.
+    """
+    if not sectors:
+        return {"resid": len(index), "unknown": len(index), "folded": 0,
+                "buckets": 0}
+    sec = pd.Series({k: sectors.get(k) for k in index})
+    unknown = sec.isna() | sec.astype(str).isin(("", "Unknown", "nan"))
+    named = sec.where(~unknown, "__RESID__")
+    counts = named.value_counts()
+    small = {k for k, n in counts.items()
+             if k != "__RESID__" and n < MIN_SECTOR_NAMES}
+    key = named.where(~named.isin(small), "__RESID__")
+    return {
+        "resid": int((key == "__RESID__").sum()),
+        "unknown": int(unknown.sum()),
+        "folded": int(sum(counts[k] for k in small)),
+        "buckets": int(key.nunique()),
+        "folded_sectors": sorted(small),
+    }
 
 
 def sector_neutral_rank(values: pd.Series,
@@ -468,6 +504,49 @@ def absolute_floor(scored: pd.DataFrame, dist_200dma: pd.Series,
     trend = dist_200dma.reindex(scored.index) > 0
     broad = scored["n_themes_positive"] >= int(min_positive_themes)
     return (trend & broad).fillna(False)
+
+
+#: What the composite's cross-sectional spread normally is, measured on the
+#: TRAINING window (2018-11-27 .. 2024-10-25) over 61 sampled dates:
+#:
+#:     min 0.5010   p05 0.5361   median 0.5732   p75 0.6020   max 0.7358
+#:
+#: Frozen here beside the weights, for the same reason they are: a number that
+#: can be edited in a config file can drift away from the thing that was
+#: measured. Neither sealed window was touched to produce it.
+TYPICAL_DISPERSION = 0.5732
+
+
+def score_dispersion(scores: "pd.Series") -> Optional[float]:
+    """Top-decile mean minus median: how far the composite separated the
+    universe today.
+
+    The quantity `stage8_final_signal.scarcity.min_dispersion_ratio` gates on,
+    and the reason that gate has been inert. It read `prediction_dispersion`,
+    which only the deleted fitted model ever populated, so a `is not None` guard
+    skipped it on every v3 run.
+
+    READ THE LIMITS BEFORE TRUSTING IT. A blend of cross-sectional RANKS has a
+    spread bounded by construction -- each sub-score is uniform on [-1, 1] every
+    single day -- so what varies is only how much the themes AGREE. Measured on
+    61 training dates the whole range is 0.5010 to 0.7358 and the worst day is
+    0.874x the median; simulated, a rank blend runs 0.54 when its themes are
+    independent and 0.88 when they move together, with a day-to-day sd near
+    0.027 inside either regime.
+
+    So at the shipped ratio of 0.50 this CANNOT fire, and that is not a defect
+    to fix by lowering the bar -- it is what the control is for. The config says
+    so in its own words: "meant to catch a day the fit has degenerated, not to
+    tune signal count". It detects a broken scorer, not a bad market. What
+    refuses to open a book on a bad market is the BOOK-LEVEL CASH RULE, which
+    counts names above their long moving average and can go to zero for the
+    whole market at once.
+    """
+    s = pd.Series(scores).dropna()
+    if len(s) < 30:
+        return None
+    k = max(int(len(s) * 0.10), 3)
+    return float(s.nlargest(k).mean() - s.median())
 
 
 def attribution(raw: pd.DataFrame, scored: pd.DataFrame, symbol: str) -> pd.DataFrame:

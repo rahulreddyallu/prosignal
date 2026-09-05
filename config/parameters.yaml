@@ -1299,6 +1299,10 @@ stage4_core_score:
   # Measured on the sacred holdout, the two settings differ by more than
   # coverage: 240 gives IC +0.0729 (t 2.42) and DSR 0.824; 450 gives IC +0.0878
   # (t 3.20) and DSR 1.000.
+  # APPLIES TO THE LEGACY FAMILY BLOCK ONLY. The shipped v3 quality theme is
+  # gated by `features.pit_fundamentals.MAX_AGE_DAYS` (420), which is what it
+  # was measured under. The two disagreed by a month and nothing reconciled
+  # them, so editing this does not move the shipped scorer.
   max_fundamental_age_days: 450
 
   # Quarters pulled per symbol when the ingest refreshes fundamentals. Twelve
@@ -2585,6 +2589,69 @@ stage8_final_signal:
         against a realised 0.547.
     # A run producing zero signals is a legitimate, expected outcome.
     expect_frequent_no_trade: true
+    # THE BOOK-LEVEL CASH RULE. Added 2026-09-05.
+    #
+    # WHAT THIS DOES AND DOES NOT ADD, measured by replaying the engine on its
+    # three worst historical episodes rather than assumed.
+    #
+    # NO TRADE was already reachable, and the audit finding that said otherwise
+    # was too strong. Replayed: 2020-03-31 (34 eligible, 24 above the bar) and
+    # 2022-06-17 (74 eligible, 43 above) both produce NO TRADE -- through the
+    # STAGE 2 REGIME GATE, on 'downtrend_highvol'. On both dates this rule would
+    # not have fired, because the regime gate fires first and this one is
+    # guarded by `if blocked_reason is None`.
+    #
+    # What was genuinely missing is a bar on the CROSS-SECTION rather than on
+    # the index. The regime gate reads NIFTY trend and volatility; it says the
+    # market is bad, not that these candidates are weak. The two can disagree in
+    # exactly the case that matters -- an index held up by a few large caps
+    # while breadth collapses underneath it -- and nothing measured that.
+    #
+    # Its marginal contribution over the regime gate is therefore UNMEASURED and
+    # probably small. It is kept because it is independent evidence, costs one
+    # comparison, and its counter (`above_absolute_bar`) is now on every run,
+    # which is worth having whether or not the gate ever fires.
+    #
+    # Every scarcity control above is a RANK: the
+    # score is `(rank-1)/(n-1)`, so its distribution is uniform every session
+    # and the top 10% always exists however bad the day is. Measured live, the
+    # score gate rejected 0 of 37 defended names. `min_dispersion_ratio` was
+    # written to fix precisely that and reads `prediction_dispersion`, which the
+    # deleted fitted model used to populate and nothing has populated since --
+    # so it was skipped on every run.
+    #
+    # This counts NAMES, not ranks: how many of the eligible universe close
+    # above their 200-session average. That number can collapse for everybody at
+    # once, which is what makes the bar absolute. Measured over 2,018 sessions
+    # from 2018-06-27, excluding the moving average's own warm-up:
+    #
+    #     min 16    p1 51    p5 74    median 319    max 708
+    #
+    #     below 6   0 sessions        below 24   3 sessions
+    #     below 18  1 session         below 36  10 sessions
+    #
+    # The single session below 18 is 2020-03-23 -- the COVID trough, where 16
+    # names in the whole liquid universe were above water. The 2022 drawdown
+    # bottomed at 75 and the 2025 correction at 84, so neither would fire. That
+    # is the intended shape: a tail circuit breaker, not a signal-count tuner.
+    #
+    # IT DOES NOT CLOSE THE BOOK. A day with no view is a day to add nothing,
+    # not a day to liquidate; what closes a position is the Stage 6 exit band.
+    cash_rule:
+      enabled: true
+      above_ma_sessions:
+        value: 200
+        status: MEASURED
+        note: "The same bar stage4_core_score.absolute_floor measures."
+      min_qualifying:
+        value: null
+        status: MEASURED
+        note: >-
+          null means stage6_entry.admission.exit_rank, currently 18 -- the band
+          the engine already treats as the set a position may live in. If fewer
+          names than that clear the bar, the book could not be maintained even
+          if it were opened. Not a free parameter: it is the number the exit
+          band already uses.
 
   # Signal Strength Band cut points on the post-penalty composite score.
   # Bands, not a 0-100 score -- no CPCV-derived scoring exists yet.

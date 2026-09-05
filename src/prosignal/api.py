@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
+
+import pandas as pd
 from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -20,6 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config.loader import AppConfig, load_config
+from .stages._cfg import v as v_
 from .core.clock import market_today
 from .core.logging import get_logger, setup_logging
 from .core.memory import release_memory, trim_available
@@ -262,17 +265,76 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ok = False
             checks["price_data"] = f"{type(exc).__name__}: {exc}"
 
+        # THE UNIVERSE CHECK, AGAINST THE SOURCE THAT ACTUALLY RESOLVES IT.
+        # This asked for a `NIFTY 200` snapshot on every deployment, while
+        # `universe.source` is `liquidity_pit` and `_universe_liquidity_pit`
+        # never consults a snapshot -- so readiness failed closed on a condition
+        # the run does not have, and passed on every condition it does.
         try:
-            index = str(cfg.params.universe.index_name.value)
             store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
-            snaps = store.universe_snapshot_dates(index)
-            checks["universe"] = f"{index}: {len(snaps)} snapshot(s)"
-            if not snaps:
-                ok = False
-                checks["universe"] = f"no snapshot for {index}"
+            source = str(v_(cfg.params.universe.source)).lower()
+            if source == "liquidity_pit":
+                checks["universe"] = "liquidity_pit: resolved from prices, no snapshot needed"
+            else:
+                index = str(cfg.params.universe.index_name.value)
+                snaps = store.universe_snapshot_dates(index)
+                checks["universe"] = f"{index}: {len(snaps)} snapshot(s)"
+                if not snaps:
+                    ok = False
+                    checks["universe"] = f"no snapshot for {index}"
         except Exception as exc:  # noqa: BLE001
             ok = False
             checks["universe"] = f"{type(exc).__name__}: {exc}"
+
+        # THE INPUTS THE SHIPPED SCORER ACTUALLY READS. None of these was
+        # checked. A store whose fundamentals stopped eighteen months ago, whose
+        # sector map covers four names in five, and whose delivery table ended
+        # last quarter reported `ready: true` -- and the quality theme, the
+        # sector neutralisation and the ownership theme are 19%, all of the
+        # neutralisation, and 19% of the blend respectively.
+        #
+        # REPORTED, NOT BLOCKING. Every one of these degrades the ranking
+        # rather than invalidating it, and the engine already drops a theme it
+        # cannot compute. Refusing to start would be worse than saying so; not
+        # saying so is what shipped.
+        try:
+            store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+            today = market_today(cfg)
+
+            fund = store.read_fundamentals()
+            if fund is None or fund.empty:
+                checks["fundamentals"] = "none stored; the quality theme is absent"
+            else:
+                newest = pd.to_datetime(fund["filing_date"], errors="coerce").max()
+                age = (pd.Timestamp(today) - newest).days if pd.notna(newest) else None
+                checks["fundamentals"] = (
+                    f"newest filing {newest.date()} ({age} days old), "
+                    f"{fund['symbol'].nunique()} symbols")
+                if age is not None and age > 200:
+                    checks["fundamentals_stale"] = True
+
+            stmts = store.read_statements()
+            if stmts is not None and not stmts.empty:
+                newest = pd.to_datetime(stmts["period_end"], errors="coerce").max()
+                checks["statements"] = (
+                    f"newest period {newest.date()}, "
+                    f"{stmts['symbol'].nunique()} symbols")
+
+            sect = store.read_sector_map()
+            checks["sector_map"] = (
+                f"{0 if sect is None or sect.empty else sect['symbol'].nunique()} symbols")
+
+            dmax = store.delivery.max_date()
+            checks["delivery"] = dmax.isoformat() if dmax else "none stored"
+            if dmax and sessions and (sessions[-1] - dmax).days > 7:
+                checks["delivery_stale"] = True
+
+            acts = store.read_corporate_actions()
+            if acts is not None and not acts.empty:
+                amax = pd.to_datetime(acts["ex_date"], errors="coerce").max()
+                checks["corporate_actions"] = f"newest ex-date {amax.date()}"
+        except Exception as exc:  # noqa: BLE001
+            checks["data_inputs"] = f"{type(exc).__name__}: {exc}"
 
         # THE OPEN BOOK HAS TO BE A FACT BEFORE A RUN CAN USE IT.
         #

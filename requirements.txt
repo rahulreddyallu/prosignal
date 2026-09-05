@@ -3,8 +3,11 @@
 #
 # Version pins are deliberately conservative ranges, not exact pins, so that
 # `pip install -r requirements.txt` keeps working as point releases land.
-# If you need a fully reproducible build, run `pip freeze > requirements.lock.txt`
-# after your first successful install and use that instead.
+# If you need a fully reproducible build use requirements.lock.txt, which now
+# exists. Read its header first: it was generated on CPython 3.9.6 while
+# render.yaml deploys on 3.12, so it pins the DEVELOPMENT resolution and not
+# production's. Two interpreters resolving two dependency sets, with only one
+# of them recorded, is not reproducibility -- it is a narrower kind of unknown.
 
 # --- Numerics / data frames -------------------------------------------------
 numpy>=1.24,<2.1

@@ -173,13 +173,17 @@ def probabilistic_sharpe_ratio(
     if n < 3:
         return 0.0
     n_eff = float(n) if effective_n is None else float(min(effective_n, n))
-    # WHETHER THE CALLER DECLARED ITS INDEPENDENCE. The null approximation
-    # 1/(n_eff-1) is the right stand-in for Var[SR] only when n_eff is the
-    # INDEPENDENT count; handed the raw length of an overlapping series it is
-    # the defect that produced a DSR of 1.000 at 100,000 trials. A caller that
-    # does not say gets the conservative unit instead of a number derived from
-    # a count it has not vouched for.
-    declared_independence = effective_n is not None
+    # THE NULL APPROXIMATION 1/(n_eff-1) IS NOT USED, ANYWHERE, DELIBERATELY.
+    # It is the right stand-in for Var[SR] only when n_eff is the INDEPENDENT
+    # count; handed the raw length of an overlapping series it is the defect
+    # that produced a DSR of 1.000 at 100,000 trials. `effective_n` therefore
+    # moves the statistic in one direction only -- it shrinks the sqrt(n-1)
+    # term and never the benchmark. A caller with a defensible variance passes
+    # `sr_variance`; everyone else gets the conservative unit.
+    #
+    # A `declared_independence` flag used to gate that choice and outlived the
+    # branch it gated, which left this comment describing a decision the code
+    # no longer makes.
     if n_eff < 3:
         return 0.0
     sr = sharpe_ratio(arr) if observed_sr is None else float(observed_sr)
@@ -280,8 +284,9 @@ class DsrResult:
             "kurtosis": self.kurtosis,
             "passes": self.passes,
             "interpretation": self.interpretation,
-            "sr_variance": self.sr_variance,
-            "sr_variance_source": self.sr_variance_source,
+            # `sr_variance` and `sr_variance_source` appeared twice in this
+            # dict with identical values -- harmless, and a sign the method was
+            # edited twice without either edit reading the other.
             "sr_variance_measured": self.sr_variance_measured,
             "trials_scored": self.trials_scored,
         }
@@ -372,13 +377,17 @@ def deflated_sharpe_ratio(
     # The sample size the INFERENCE runs on. Never larger than what was passed:
     # a caller cannot manufacture independence it does not have.
     n_eff = float(n) if effective_n is None else float(min(effective_n, n))
-    # WHETHER THE CALLER DECLARED ITS INDEPENDENCE. The null approximation
-    # 1/(n_eff-1) is the right stand-in for Var[SR] only when n_eff is the
-    # INDEPENDENT count; handed the raw length of an overlapping series it is
-    # the defect that produced a DSR of 1.000 at 100,000 trials. A caller that
-    # does not say gets the conservative unit instead of a number derived from
-    # a count it has not vouched for.
-    declared_independence = effective_n is not None
+    # THE NULL APPROXIMATION 1/(n_eff-1) IS NOT USED, ANYWHERE, DELIBERATELY.
+    # It is the right stand-in for Var[SR] only when n_eff is the INDEPENDENT
+    # count; handed the raw length of an overlapping series it is the defect
+    # that produced a DSR of 1.000 at 100,000 trials. `effective_n` therefore
+    # moves the statistic in one direction only -- it shrinks the sqrt(n-1)
+    # term and never the benchmark. A caller with a defensible variance passes
+    # `sr_variance`; everyone else gets the conservative unit.
+    #
+    # A `declared_independence` flag used to gate that choice and outlived the
+    # branch it gated, which left this comment describing a decision the code
+    # no longer makes.
     if n < 3 or n_eff < 3:
         return DsrResult(
             0.0, 0.0, 0.0, n_trials, n, 0.0, 3.0, False,
@@ -697,28 +706,6 @@ def quintile_spread(panel: pd.DataFrame, label: str, q: int = 5,
     return (float(sp.mean()),
             float(sp.mean() / (sp.std(ddof=1) / np.sqrt(len(sp)))), len(sp))
 
-
-@dataclass
-class V2Recheck:
-    """One quarterly verdict. Nothing here changes the model."""
-    as_of: dt.date
-    holdout_start: Optional[dt.date]
-    holdout_dates: int
-    ic: float
-    ic_t: float
-    spread: float
-    spread_t: float
-    null_p_spread: float
-    reference: Dict[str, float]
-    verdict: str
-    note: str
-    factor_health: List[Dict[str, object]] = field(default_factory=list)
-
-    def to_dict(self) -> Dict[str, object]:
-        d = {k: v for k, v in self.__dict__.items()}
-        d["as_of"] = self.as_of.isoformat()
-        d["holdout_start"] = self.holdout_start.isoformat() if self.holdout_start else None
-        return d
 
 
 #: Independent label windows the re-check needs before it issues a verdict.

@@ -193,6 +193,18 @@ class Ledger:
             return None
 
         rows = self._rows_on(latest_date, mode)
+        if not rows:
+            # Unreachable while `latest_date` is chosen under the same `mode`
+            # filter `_rows_on` applies -- which is the point. Mutating either
+            # filter away makes the two disagree, and the symptom would be an
+            # IndexError on `rows[-1]` rather than anything a reader could act
+            # on. Found by mutation-testing the lineage filter.
+            raise LedgerError(
+                f"no {mode or 'any'}-mode run recorded for "
+                f"{latest_date.isoformat()}, yet that date was selected as the "
+                f"most recent one. The date scan and the row fetch are "
+                f"filtering differently.",
+                date=latest_date.isoformat(), mode=str(mode))
         identities = {self._book_identity(r) for r in rows}
         if len(identities) > 1:
             books = sorted({i[0] for i in identities})

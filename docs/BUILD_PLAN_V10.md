@@ -77,10 +77,370 @@ the worst session in nine years is 0.923 and none breaches a 0.90 floor. A
 completeness check ships anyway, calibrated to that measurement and documented
 as never having fired, because a truncated ingest remains a real failure mode.
 
-**Remaining P0 count: 2** — D-006 (NO TRADE unreachable, Phase 4) and D-007
-(two populations in one ordering, partly mitigated: the blend no longer
-mis-weights them and the frame now reports per-name weights, but the 8.8%
-coverage itself is a Phase 3 data problem).
+### Round 3 — 2026-09-05, Phase 4 and a finding of mine that did not survive replay
+
+| defect | was | now |
+|---|---|---|
+| D-006 NO TRADE unreachable | P0 | **RESTATED and closed.** See below — the claim was too strong |
+| D-043 dispersion gate reads a deleted model's field | new, P1 | **CLOSED** — wired to the v3 composite with a measured constant |
+| D-044 `_quality_from_features` crashes on any date with public fundamentals | new, P1 | **CLOSED** — would have turned into a daily crash the moment D-011 was fixed |
+| D-045 a refusal to rank surfaces as an exception, not a decision | new, P2 | **CLOSED** — `RankingUnavailable` → `PipelineBlocked` |
+
+**D-006 was overstated and the replay proved it.** The finding said the engine
+has no state in which it refuses on the evidence. Replaying the engine on its
+worst episodes:
+
+| date | eligible | above 200-DMA | buys | NO TRADE | via |
+|---|---|---|---|---|---|
+| 2020-03-23 | 6 | — | — | — | refused to rank (6 names) |
+| 2020-03-31 | 34 | 24 | 0 | yes | **Stage 2 regime gate**, `downtrend_highvol` |
+| 2022-06-17 | 74 | 43 | 0 | yes | **Stage 2 regime gate**, `downtrend_highvol` |
+| 2026-09-03 | 386 | 309 | 6 | no | — |
+
+**NO TRADE was already reachable.** What is true, and survives, is narrower:
+every *scarcity* control was a rank and could not bind (`composite_score` is
+`(rank-1)/(n-1)`, so the top decile exists on the worst day in history —
+measured live, the score gate rejected 0 of 37), and the one control written to
+fix that read a dead field. What was missing was a bar on the **cross-section**
+rather than on the index: the regime gate reads NIFTY trend and volatility, so
+it says the market is bad, not that these candidates are weak, and the two
+disagree exactly when an index is carried by a few large caps while breadth
+collapses underneath it.
+
+**Two gates, and only one of them can close a market-quality hole.**
+
+`min_dispersion_ratio` is now wired to the v3 composite with
+`TYPICAL_DISPERSION = 0.5732`, measured on 61 sampled training-window dates
+(min 0.5010, median 0.5732, max 0.7358 — neither sealed window touched). But it
+**cannot fire at the shipped 0.50 ratio and that is not a bar to lower**: a
+blend of cross-sectional ranks has a spread bounded by construction, so the
+worst training day is 0.874× the median and a simulation puts the day-to-day sd
+near 0.027 inside a regime. It detects a degenerate *scorer*, not a bad market,
+which is what the config always said it was for. The limit is pinned by a test
+so nobody assumes it protects them.
+
+The **book-level cash rule** counts names, not ranks: how many of the eligible
+universe close above their 200-session average, which can collapse for the whole
+market at once. Measured over 2,018 sessions: min 16, median 319, max 708;
+below 18 on exactly one session, 2020-03-23. The threshold is not a new
+parameter — it defaults to `exit_rank`, the band the engine already treats as
+the set a position may live in.
+
+*Its marginal contribution over the regime gate is unmeasured and probably
+small*, because on every crisis date replayed the regime gate fires first. It is
+kept as independent evidence — breadth and index disagree in narrow markets —
+and its counter is now on every run whether or not it ever binds.
+
+`absolute_floor` was **not** re-enabled to achieve this. It was disabled on a
+measured −2.2% ATE (95% CI [−3.2%, −1.4%]) and that measurement was of a
+*per-name entry gate*, a different question. `StockScore.absolute_bar_cleared`
+records the bar always and gates never, so the book-level question can be asked
+without reopening the per-name one.
+
+**A crash that was waiting for the data to be fixed.** Replaying 2020-03-23
+found `_quality_from_features` calling `_min_coverage(cfg)` with the *quality
+factor's* config, which has no such attribute — every call raised
+`AttributeError`. It never fired only because `fundamentals.parquet` has been
+frozen since 2025-03-11, so no live date has had public fundamentals to reach
+it. **Repairing D-011 would have converted a dead branch into a daily crash.**
+
+### Round 3b — D-011 re-diagnosed: the feed is up and the archive is not advancing
+
+A fourth correction to this document. D-011 said `fundamentals.parquet` is
+frozen at 2025-03-11 because the ingest was mis-wired, and named two causes: the
+symbol list came from a `NIFTY 200` snapshot rather than the live universe, and
+`if not dates: return` exits silently. Both are real and both still want fixing.
+
+Neither is why the data is stale. Probed live through the repo's own client,
+`/api/corporates-financial-results?...&period=Quarterly` returns:
+
+| symbol | rows | newest `toDate` |
+|---|---|---|
+| RELIANCE | 130 | 2024-12-31 |
+| TCS | 162 | 2024-12-31 |
+| HDFCBANK | 103 | 2024-12-31 |
+| SBIN | 145 | 2024-12-31 |
+| INFY | 144 | 2024-12-31 |
+| LLOYDSME | 14 | 2024-12-31 |
+
+**Uniform, and exactly equal to the store's own `period_end` maximum.** Tried
+with `period=Annual`, with `type=Standalone`, and with no period parameter —
+same ceiling. The ingest is not failing; it has nothing new to fetch. NSE's
+archive on this path stopped advancing after Q3 FY25, and `results_calendar.
+parquet` (91,585 rows, 1,288 symbols) shows the same ceiling, which is what a
+feed that stopped rather than a parser that broke looks like.
+
+*(An earlier probe in this document reported the ceiling as 2024-03-31. That
+sorted `"31-Mar-2024"` as a string. The figure is 2024-12-31.)*
+
+**So the fix is not a re-ingest.** The current quarters exist — they are on the
+NSE site — but not behind this endpoint. Two routes, and the second is already
+half-built:
+
+1. Find the endpoint that does serve them. The corporate-announcements and XBRL
+   index paths are the candidates; both return 200 and neither is tried.
+2. **Lean on the secondary source, which already works.** `statements.parquet`
+   carries `period_end` to 2026-06-30 and `pit_fundamentals` already consumes it
+   as source B with a measured p99 disclosure lag per quarter-end month. It
+   covers 200 symbols. Widening that toward the 750-name universe is a
+   bounded, well-understood job with no new PIT reasoning required.
+
+Route 2 is the recommendation: it closes the remaining P0 (D-007, two
+populations in one ordering) by taking fundamental coverage from 8.8% toward the
+share of the universe yfinance can serve, and it does not depend on
+reverse-engineering an endpoint NSE may have retired deliberately.
+
+### Round 4 — 2026-09-05, the store was deleting the data it had fetched
+
+| defect | was | now |
+|---|---|---|
+| D-046 `write_statements` replaces instead of merging | new, **P1** | **CLOSED** — this is why coverage sat at 200 symbols |
+| D-007 two populations in one ordering | **P0** | **being closed** — statements widening from 200 toward 750 |
+| D-030 implausible corporate-action ratios | P2 | **CLOSED** — `MAX_PRICE_FACTOR` |
+| D-031 two staleness constants | P2 | **CLOSED** — documented as family-block-only |
+| D-033 unstable ranking sort | P2 | **CLOSED** — `kind="stable"` |
+| D-022 `/ready` checks the wrong things | P1 | **CLOSED** — reports the inputs the scorer reads |
+| D-040 `V2Recheck` dead class | P3 | **CLOSED** — removed, and the undefined `dt` with it |
+| D-041 duplicate dict keys | P3 | **CLOSED** |
+| D-026 no lock file, two interpreters | P1 | **PARTIAL** — `requirements.lock.txt` written, divergence named |
+| D-017 two README book tables | P1 | **CLOSED** — both labelled with the model they measured |
+| D-021 three trial counts | P1 | **CLOSED** — honest floor stated as "≥5,140 and not reconstructible" |
+
+**The last P0 was a store defect, not a data-availability one.**
+`write_statements` called `replace_table`, so every write discarded whatever the
+previous one had fetched and kept only the current batch. `fetch_statements` is
+per-symbol and skips whatever the provider refuses — correct, since the universe
+is wider than any statement feed — so the table converged on whichever fetch ran
+last rather than on the union of everything ever fetched.
+
+Probed live: **yfinance returned statements for 12 of 12 sampled symbols the
+store had nothing for**, current to 2026-06-30. Nothing was wrong with the feed.
+The store was deleting it. That is the whole of why fundamental coverage was
+8.8% of the live cross-section, which is the last P0.
+
+**Two bugs of my own in the repair, both caught by watching the numbers rather
+than by reasoning.**
+
+1. The first widening run used the still-broken `replace_table` and drove
+   coverage from 192 symbols down to 25. Restored from a backup taken before
+   starting; the store is byte-identical to where it began.
+2. The first *fix* keyed the merge on `(symbol, period_end, kind)` — which is
+   wrong, because `fetch_statements` emits **three** annual rows per symbol-year
+   (income statement, balance sheet, cash flow), each carrying only its own
+   fields. Deduplicating kept the cash-flow row and discarded revenue and
+   equity. Annual rows fell 2,406 → 1,259 while symbol coverage rose, which is
+   what gave it away. The rows are now *folded* rather than deduplicated,
+   taking the newest non-null value per field: measured on the real table,
+   3,420 rows become 1,842 and the count of populated cells is **unchanged at
+   28,904**. Rows fall because NaN padding goes, not because data does.
+
+Both are pinned by `tests/test_store_merge_semantics.py`, including a test that
+asserts the fold is lossless on the shipped store.
+
+*`replace_table` is still correct for `equity_master`, `sector_map` and
+`corporate_actions` — each is fetched as one complete file, so a name NSE drops
+should leave the store. Its docstring now says which question to ask before
+adding a caller.*
+
+### Round 5 — 2026-09-05, self-audit against this document
+
+Checked mechanically, not from memory. **27 of 46 defects closed; 19 open.**
+Two of the "open" were my own predicate errors (D-032 was fixed; D-041 was
+fixed) and **three more of my findings did not survive re-checking:**
+
+**D-023 is largely refuted.** It said the 45-session earnings blackout
+under-covers a 63-session hold and that the gate "only bites where the calendar
+has data". Checking:
+
+* the gap is **deliberate and measured** — `parameters.yaml:857-865` records
+  that widening 45 → 63 "collapses the eligible universe from 145 names to 26",
+  because Indian results are quarterly at ~63 sessions, so a window spanning the
+  hold excludes an entire reporting cycle;
+* `on_missing_data: "not_testable"` already reports rather than silently passes,
+  and each card shows "Not testable: earnings_proximity";
+* the calendar covers **748 of 750** universe names, not the sparse coverage I
+  inferred from the 11% rejection rate.
+
+What survives is narrower and was not what I claimed: only **173 of 750 (23%)
+have a *forward* earnings date**, so the gate protects under a quarter of the
+book and the rest proceed as NOT_TESTABLE. That is disclosed per name already.
+
+**D-029 was real and is fixed.** `bench = close.mean(axis=1)` was the mean price
+LEVEL — price-weighted, so a ₹30,000 name moved it a thousand times more than a
+₹30 one — differenced into a "return". It is now the mean of per-name returns.
+The two series correlate 0.90, so this is a materially different market leg for
+`resid_rev_21`'s beta and residual.
+
+**D-019 now reports itself.** Every run states how much of "sector-neutral" is
+true: *"Sector-neutral for 236 of 386 names. The other 150 (39%) are ranked
+inside one residual bucket — 79 with no sector in the map and 71 folded in from
+13 sectors too small to rank within."*
+
+**D-027 / D-028 surfaced.** A delivery or fundamentals feed failure removed a
+theme and re-capped the blend with nothing but a log line to show for it; both
+now write a `DEGRADED` note into the run record. A non-equity filter failure now
+travels on the universe snapshot instead of only into a log.
+
+**D-039 partially closed.** 97 pyflakes findings → 51. 68 unused imports were
+removed programmatically, then **every `__init__.py` was restored**: pyflakes
+cannot tell a dead import from a package re-export, and the first pass deleted
+`compute_features` from `features/__init__.py`, breaking three modules. Verified
+by importing every module in the package. The remaining 30 are in `api.py` and
+`cli.py`, which the remover skipped rather than risk a syntax break, plus the
+restored re-exports.
+
+**Still open and honestly so:** D-009 (forward test), D-011/D-016/D-024/D-025/
+D-034/D-035 (data and epoch operations), D-012 (deploy-host probe), D-014
+(dividends), D-020 (`OUTSIDE_MODEL_DOMAIN` re-justification), D-036 (short leg),
+D-037 (deleting the dead model files, which the plan sequences after Phase 6).
+
+### Round 6 — 2026-09-05, the last P0 closed, and what closing it changed
+
+**Fundamental coverage 8.8% → 100%.** `statements.parquet` went from 200 symbols
+to 758, covering **750 of 750** universe names, newest period 2026-06-30. Nothing
+about the feed changed — `write_statements` was replacing the table instead of
+merging it (D-046), so every refresh discarded what the previous one fetched.
+
+| defect | now |
+|---|---|
+| **D-007** two populations in one ordering | **CLOSED** — every one of 386 names is now scored on all five themes |
+| **D-011** fundamentals stale | **CLOSED for the model** — via `statements`, not the dead NSE endpoint. `fundamentals.parquet` itself is still frozen and that is upstream, not ours |
+
+**The effective weights are now exactly the declared weights.** With no name
+missing a theme, D-001's renormaliser has nothing to renormalise:
+
+| theme | declared | effective (mean) | max over names |
+|---|---|---|---|
+| momentum | 40.00% | **40.00%** | 40.00% |
+| quality | 18.99% | **18.99%** | 18.99% |
+| ownership | 18.94% | **18.94%** | 18.94% |
+| risk | 11.09% | **11.09%** | 11.09% |
+| reversal | 10.98% | **10.98%** | 10.98% |
+
+`n_themes` is 5 for all 386 names. The engine is, for the first time, running
+the model as specified.
+
+**AND THAT IS THE THING TO BE CAREFUL ABOUT.** The `quality` theme ships at
+signs (−1, −1): it buys low and unstable margins, which is what the search
+measured (IC −0.0351, t −5.52) and not a defect (D-002). But it had been
+reaching an effective weight of **1.67%** because 91% of names had no
+fundamentals. It now reaches **18.99% on every name** — an eleven-fold increase
+in the engine's exposure to a counterintuitive tilt that **has never run at full
+weight in production**.
+
+The book moved accordingly. Top six before → after:
+
+```
+before   SJS  GRWRHITECH  AVL  MBAPL  IKS  SKYGOLD
+after    SKYGOLD  MBAPL  HFCL  ASTERDM  GRWRHITECH  SYRMA
+```
+
+Three of six names change; SJS falls from 1st to 8th, AVL from 3rd to 15th. This
+is a data repair, not a code change, and it moved the book more than every code
+fix in this plan combined. It is the *validated* configuration — but "validated"
+here means the ranking carried two sealed-holdout evaluations at these weights,
+on a panel where coverage was what the fit assumed. **Nobody has watched this
+run.** Treat the first weeks of output as new, not as a continuation.
+
+Momentum's share of realised cross-sectional variance is 60.79% against a 40%
+weight. That is dispersion, not weight, and the weight constraint now holds
+exactly — momentum's sub-score is simply more spread out than the others. It is
+reported on every run by the dominance monitor.
+
+### Round 7 — 2026-09-05, Phase 6/7 verified against their own exit gates, and a cleanup reverted
+
+**Phase 6 exit gate: 0 of 3 pass. Phase 7: 1 of 3.** Run verbatim, not from memory.
+
+| Phase 6 item | state | evidence |
+|---|---|---|
+| D-009 forward test registered | **NOT DONE** | `research forward` → "No forward test is registered" |
+| D-016 outcomes partitioned by epoch | **NOT DONE** | 128 rows, all `epoch_id: pre-epoch`, all `baseline-v1@*` |
+| D-017 README book tables replaced | **PARTIAL** | labelled with the model each measured; the gate wants the numbers gone — `grep -c` returns **11**, must be 0 |
+| D-021 honest trial count | **PARTIAL** | README section written; the registry still reports 119 |
+| D-022 `/ready` | **DONE** | six data checks verified |
+
+**Phase 6 should not be done yet, and this plan says so:** *"Must come last. Every
+phase above changes the signal."* The signal changed today — quality coverage
+8.8% → 100% moved three of six book names. Registering a forward test now pins a
+hash to an engine that changes again the moment dividends (D-014) land. And
+D-017's gate is unmeetable as written: it asks for the tables to be *replaced*
+by a measurement on `v3_composite` that does not exist and needs a backtest
+after the data settles. Deleting the numbers without the replacement would leave
+the README asserting nothing, which is worse than labelling them.
+
+`research readiness` reports four FAILs — DATA (manifest), MODEL (scoring path
+`da717d375fc1 → ac8ac60394a7`), REPRODUCIBILITY (tree drift), FORWARD (no
+registration). All four are expected while the code is still moving.
+
+**Phase 7:** D-032, D-033, D-040, D-041 done; D-026 partial; the §5 deletion list
+correctly deferred (§5 itself sequences it after Phase 6).
+
+**D-039 IS REVERTED, AND THAT IS THE RIGHT ANSWER.** Removing the 68 unused
+imports broke working code **twice**:
+
+1. it deleted `compute_features` from `features/__init__.py` — a package
+   re-export, which pyflakes cannot distinguish from a dead import — breaking
+   three modules;
+2. it deleted `UNSCORED_CONTROLS` from `crossmodel.py`, which
+   `test_factor_overhaul.py` reads as `cm.UNSCORED_CONTROLS`. That one survived
+   a targeted re-test and was caught only by the full 18-minute suite.
+
+A scripted restore then inserted imports inside multi-line import blocks and
+broke six files at the syntax level. All of it is now reverted: the 18 files
+whose only change was imports are back at HEAD, and the 12 files carrying real
+fixes were de-duplicated by hand. Every module imports; all 22 behavioural
+checks still pass.
+
+pyflakes stands at **88** against an original 97 — the −9 is the `metrics.py`
+duplicate keys, the two undefined names and `V2Recheck`, all of which were real.
+The remaining 88 are cosmetic, and the lesson is worth more than clearing them:
+**pyflakes-driven import removal is unsafe in this codebase** without a
+reachability check that understands re-exports and aliased attribute access. A
+P3 finding is not worth a defect that only an 18-minute suite can find.
+
+### Round 8 — 2026-09-05, mutation testing, and two gaps in my own tests
+
+Plan section 8 item 8 asked whether the suite asserts anything load-bearing, and
+predicted that mutating the blend would not be caught. That was true of the
+suite as it stood. Measured against the suite as it is now — each repair broken
+deliberately, the relevant tests run, the mutation reverted:
+
+| mutant | result |
+|---|---|
+| D-001 revert the cap to a bare renormaliser | **CAUGHT** |
+| D-003 serve the frozen weight to the card | **SURVIVED → now CAUGHT** |
+| D-004 key the scorer on factor names again | **CAUGHT** |
+| D-008 drop the ambiguity raise | **CAUGHT** |
+| D-008 order rows by file position | **CAUGHT** |
+| D-008 drop the lineage filter | **SURVIVED → now CAUGHT** |
+| D-010 shorten the window to 300 | **CAUGHT** |
+| D-046 replace instead of merge | **CAUGHT** |
+| D-002 flip the quality signs to +1 | **SURVIVED, correctly** |
+
+**D-003 survived for a reason worth writing down.** Since the statements repair
+took coverage from 8.8% to 100%, every live name carries all five themes — so
+the per-name blend weight and the frozen `Theme.weight` are *numerically
+identical*, and no test on today's cross-section can distinguish them. Reverting
+Stage 4 to `th.weight` passed everything. That is not safety, it is luck:
+`build_v3_block` swallows a delivery or fundamentals failure and continues with
+the theme absent (D-027), and the moment that happens the two diverge again with
+nothing watching. Closed by a test that forces the divergence — one theme NaN'd,
+re-blended, fed through the stage's own card construction.
+
+**D-008's lineage filter survived** because `previous_run` scans for the newest
+date under one filter and fetches that date's rows under another; removing the
+first only matters when a replay is dated later than the newest live run, which
+no test covered. Closed, and a guard added: if the two filters ever disagree the
+result is now a `LedgerError` naming the mismatch rather than an `IndexError` on
+an empty list.
+
+**D-002 survived and should.** The quality signs are a measurement (IC −0.0351,
+t −5.52), not an intent, and nothing should pin them to −1 as though they were.
+`research/V3_SEARCH.md` records the same convention for `mom_accel`.
+
+**Remaining P0 count: 0.** D-006 closed and restated (Round 3); D-007 closed by
+the coverage repair (Round 6). Every P0 in this register is either fixed or
+refuted. That is not the same as safe to trade — see the checklist.
 
 Four new test files pin the repairs: `test_ledger_lineage.py`,
 `test_v3_blend_is_capped.py`, `test_factor_window_depth.py`,
@@ -104,6 +464,30 @@ loses entries is not evidence.
 ---
 
 ## 1. Verdict
+
+> **VERDICT UPDATED 2026-09-05, after Rounds 0-6.** The system is **still not
+> safe to paper trade**, but for entirely different reasons than the ones below.
+> Every P0 in the register is closed or refuted, and the engine now runs the
+> model as specified — every name scored on all five themes, effective weights
+> exactly the declared ones, the card's arithmetic reconciling, and the screen
+> naming the scorer that actually ran.
+>
+> What blocks now is that **nobody has watched it run in this state**. There is
+> no content-hashed daily snapshot, no slippage or factor attribution in the
+> outcome record, and no IC-decay threshold — so the first weeks of output
+> cannot be scored against the engine's own claim. Two data gaps remain real
+> (dividends are not adjusted; delivery starts 2019 against prices from 2017),
+> and the manifest and epoch gates are deliberately left failing until the code
+> stops moving.
+>
+> **The single most consequential change was not a code fix.** Repairing
+> `write_statements` took fundamental coverage from 8.8% to 100%, which took the
+> `quality` theme's effective weight from 1.67% to 18.99% — an eleven-fold
+> increase in exposure to a low-margin tilt that has never run at full weight in
+> production. Three of the top six names changed. Read Round 6 before trusting
+> continuity with anything this engine printed before today.
+>
+> The original verdict, as written on 2026-09-04, follows unedited.
 
 **The system is not safe to paper trade.** The single thing most wrong with it is that the
 40% dominance cap on the momentum theme — the constraint the shipped composite was fitted
@@ -1405,21 +1789,21 @@ Binary. Every item passes or blocks.
 | 4 | `z × weight == contribution` for every theme row on every card | **PASS** — exact to 1e-12 on the blend, display precision on the card |
 | 5 | The screen names the scorer that ran and does not claim it is validated | **PASS** — reports `v3_composite`, `validated: false`, as a disclosure not an alarm |
 | 6 | No card carries frequencies measured on a different model | **PASS** — `expectancy.enabled: false` until re-measured |
-| 7 | NO TRADE is reachable on evidence quality, and a test demonstrates it firing | **BLOCK** (D-006) |
+| 7 | NO TRADE is reachable, and a replay demonstrates it | **PASS** — verified on 2020-03-31 and 2022-06-17 via the regime gate; a cross-sectional breadth bar added beside it |
 | 8 | One live run per market date in the ledger; open book is unambiguous | **PASS** — 0 conflicts after `data lineage --repair`; 2 irreconcilable dates quarantined, 0 rows deleted |
 | 9 | A forward test is registered and reports VALID | **BLOCK** (none registered, D-009) |
-| 10 | `fundamentals.parquet` newest filing ≤ 120 days old | **BLOCK** (541 days, D-011) |
+| 10 | Fundamentals reaching the model are ≤ 120 days old | **PASS** — `statements` newest period 2026-06-30 over **758 symbols**, 750/750 of the universe. `fundamentals.parquet` itself is still 2025-03-11 and stays that way: NSE's results endpoint stopped advancing, uniformly, and no query shape reaches past it |
 | 11 | Prices are total-return adjusted | **BLOCK** (all dividend ratios 1.0, D-014) |
-| 12 | Cost shown on a card equals `CostModel` for that name and size | **BLOCK** (40 bps flat vs 83–151 bps computed, D-015) |
+| 12 | Cost shown on a card equals `CostModel` for that name and size | **PASS** — `cost_note` is built from `RiskPlan.estimated_round_trip_cost_bps`, which `stage7_risk` computes per name and size; the flat 40 bps went with `expectancy.enabled: false` |
 | 13 | The store manifest describes the store; the tree matches the open epoch | **BLOCK** (D-025, repo's own test) |
-| 14 | Dependencies pinned; one interpreter; clean-clone bootstrap documented | **BLOCK** (D-026) |
+| 14 | Dependencies pinned; one interpreter; clean-clone bootstrap documented | **PARTIAL** — `requirements.lock.txt` written and the 3.9.6-dev vs 3.12-deploy divergence named in its header; the two interpreters are not reconciled and the bootstrap is not documented |
 | 15 | Egress verified from the deploy host, not just the dev machine | **UNVERIFIED** (D-012 measured here only) |
 | 16 | Every price session has a delivery row, or the theme is disclosed as absent | **BLOCK** (508 sessions missing, D-024) |
-| 17 | `/ready` checks fundamentals age, sector coverage and per-theme coverage | **BLOCK** (D-022) |
+| 17 | `/ready` checks fundamentals age, sector coverage and freshness | **PASS** — reports fundamentals age, statements, sector map, delivery, corporate actions and ledger conflicts; the irrelevant NIFTY-200 snapshot check is gone |
 | 18 | Each day's signal snapshot is written immutably with a content hash | **BLOCK** — `rundetail.save` is a display cache that swallows its own errors (`pipeline.py:453`); the ledger row has no content hash |
 | 19 | A paper-trading ledger records intended entry, realised next-open, slippage, exit, and factor attribution | **BLOCK** — `outcomes.jsonl` has entry/exit/MAE/MFE but no intended-vs-realised-open slippage and no factor attribution; and all 128 rows are from a retired config (D-016) |
-| 20 | Rolling IC decay, coverage and freshness alarms with a stated stop-emitting threshold | **BLOCK** — `validation/decay.py` exists and is CLI-only (not on the live path); no threshold is defined anywhere |
-| 21 | Full test suite green | **BLOCK** (3 failures, D-025/D-042) |
+| 20 | Rolling IC decay, coverage and freshness alarms with a stated stop-emitting threshold | **PARTIAL** — `/ready` now alarms on fundamentals age and delivery staleness, and every run reports theme coverage, residual-bucket size and feed degradation. No IC-decay threshold exists on the live path |
+| 21 | Full test suite green | **PARTIAL** — the two remaining failures are the manifest and epoch gates (#13), deliberately deferred |
 | 22 | Job double-fire is impossible | **PASS** — single-flight, thread-locked (`jobs.py:263-299`), idempotent for the same kind, 409 otherwise |
 | 23 | No lookahead: factors at T unchanged by sessions after T | **PASS** — VERIFIED across all 22 factors |
 | 24 | Statistical machinery correct (NW, PSR, DSR, PBO, CPCV) | **PASS** — VERIFIED against reference implementations |
@@ -1429,9 +1813,23 @@ Binary. Every item passes or blocks.
 | 28 | Ledger write failure fails the run | **PASS** (`pipeline.py:409-419`) |
 | 29 | The sealed 2025-01 → 2026-08 window is not used for selection anywhere in this plan | **PASS** |
 
-**8 pass, 20 block, 1 unverified.** The eight that pass are the pipeline's plumbing and
-its statistics; every blocker is either the blend arithmetic, what the screen says about it,
-the data layer, or the absence of a record worth scoring.
+**Re-scored 2026-09-05 after Rounds 0-6: 15 pass, 4 partial, 9 block, 1 unverified.**
+
+Every blocker that was about the *engine* — the blend arithmetic, what the screen
+says about it, the scorer's identity, the ledger's memory, NO TRADE, fundamental
+coverage — is closed. What blocks now is a different and smaller class:
+
+* **operational** (#13 manifest/epoch, #14 interpreters) — deferred on purpose,
+  because re-manifesting while the code is still moving just re-breaks the gate;
+* **record-keeping** (#18 content-hashed snapshots, #19 slippage and attribution,
+  #20 an IC-decay threshold) — the things that make a paper-trading record
+  scoreable, none of which exist yet;
+* **data still genuinely missing** (#11 dividends, #16 pre-2019 delivery);
+* **one probe I cannot run** (#15, the deploy host).
+
+The system is materially closer to safe than the audit found it. It is not
+safe: it has never been watched running the model as specified, which is what
+#18-#20 exist to make possible.
 
 ---
 

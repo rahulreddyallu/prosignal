@@ -140,3 +140,164 @@ def test_the_screen_and_the_model_agree_about_what_a_theme_is_called():
     while the scoring note written into the same run's record said "quality"."""
     assert V3_THEME_LABELS == {n: t.label for n, t in v3.THEMES.items()}
     assert V3_THEME_LABELS["quality"] == "Low-margin tilt"
+
+
+# =============================================================================
+# the weight the ENGINE emits, not one typed into a fixture
+# =============================================================================
+
+def test_stage4_emits_the_per_name_weight_not_the_frozen_one(live_cfg):
+    """THE GAP THIS CLOSES. Every other test in this file builds its card dict
+    by hand, so they check `_contributions`' arithmetic and not that Stage 4
+    feeds it the right number. Mutation-testing proved it: reverting
+    `stage4_core_score` to `weight=round(th.weight, 5)` -- the exact D-003
+    defect -- left all seven of them passing.
+
+    This reads what the stage actually emitted for a real name on a real
+    cross-section.
+    """
+    import datetime as dt
+    from prosignal.core.calendar import TradingCalendar
+    from prosignal.data.store import DataStore
+    from prosignal import pipeline as P
+    from prosignal.stages import (stage1_data_quality as s1, stage2_regime as s2,
+                                  stage3_eligibility as s3, stage4_core_score as s4)
+    from prosignal.features import v3
+
+    store = DataStore(live_cfg.paths.curated, live_cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        pytest.skip("no price store in this checkout")
+    cal = TradingCalendar(sessions); res = cal.last
+    uni = P._universe(store, live_cfg, res)
+    man = P._manifest_from_store(store, live_cfg, "test", res, uni)
+    P._prefetch_prices(store, live_cfg, uni, res, cal)
+    q = s1.run(man, store, cal, uni, live_cfg)
+    reg = s2.run(store, cal, uni.symbols, live_cfg, as_of=res)
+    el = s3.run(uni, store, cal, q, live_cfg, as_of=res, held=[])
+    report = s4.run(el, store, cal, reg, live_cfg, as_of=res)
+    assert report.ranked_scores, "nothing scored"
+
+    checked = 0
+    for score in report.ranked_scores[:25]:
+        rows = [f for f in score.factors.values()
+                if f.evidence_tier == "v3_theme" and f.available]
+        if not rows:
+            continue
+        total = sum(f.weight for f in rows)
+        assert total == pytest.approx(1.0, abs=1e-4), (
+            f"{score.ticker}: theme weights sum to {total:.5f}, not 1 -- the "
+            f"stage is serving the fit-time vector, not this name's blend"
+        )
+        for f in rows:
+            assert f.standardised * f.weight == pytest.approx(
+                f.contribution, abs=1e-5), (
+                f"{score.ticker}/{f.name}: weight {f.weight} does not produce "
+                f"contribution {f.contribution}"
+            )
+        checked += 1
+    assert checked >= 5, f"only {checked} names carried theme rows"
+
+
+def test_stage4_reads_the_blend_weight_under_partial_coverage(live_cfg, monkeypatch):
+    """THE MUTANT THAT SURVIVED, and why it did.
+
+    Since the statements repair took fundamental coverage from 8.8% to 100%,
+    every live name carries all five themes -- so the per-name blend weight and
+    the frozen `Theme.weight` are NUMERICALLY IDENTICAL, and no test on today's
+    cross-section can tell them apart. Reverting Stage 4 to `th.weight` passes
+    everything.
+
+    That is not safety, it is luck: `build_v3_block` swallows a delivery or
+    fundamentals failure and continues with the theme absent (D-027), and the
+    moment that happens the two diverge again with nothing watching.
+
+    So this forces the divergence: a scored frame with one theme missing, fed
+    through the stage's own card construction.
+    """
+    import datetime as dt
+    import numpy as np, pandas as pd
+    from prosignal.core.calendar import TradingCalendar
+    from prosignal.data.store import DataStore
+    from prosignal import pipeline as P
+    from prosignal.stages import (stage1_data_quality as s1, stage2_regime as s2,
+                                  stage3_eligibility as s3, stage4_core_score as s4)
+    from prosignal.features import v3
+
+    store = DataStore(live_cfg.paths.curated, live_cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        pytest.skip("no price store in this checkout")
+    cal = TradingCalendar(sessions); res = cal.last
+
+    real = s4.build_v3_block
+    def _without_quality(*a, **k):
+        raw, scored, err = real(*a, **k)
+        if scored is None or scored.empty:
+            return raw, scored, err
+        scored = scored.copy()
+        for col in ("quality_sub", "quality_w", "quality_contrib"):
+            if col in scored.columns:
+                scored[col] = np.nan
+        # re-blend the four survivors exactly as score_frame would
+        names = [t for t in v3.THEMES if t != "quality"]
+        w = v3.cap_weights({t: v3.THEMES[t].weight for t in names}, cap=0.40, floor=0.0)
+        total = 0.0
+        for t in names:
+            scored[t + "_w"] = w[t]
+            scored[t + "_contrib"] = scored[t + "_sub"] * w[t]
+            total = total + scored[t + "_contrib"].fillna(0.0)
+        scored["score"] = total
+        return raw, scored, err
+    monkeypatch.setattr(s4, "build_v3_block", _without_quality)
+
+    uni = P._universe(store, live_cfg, res)
+    man = P._manifest_from_store(store, live_cfg, "test", res, uni)
+    P._prefetch_prices(store, live_cfg, uni, res, cal)
+    q = s1.run(man, store, cal, uni, live_cfg)
+    reg = s2.run(store, cal, uni.symbols, live_cfg, as_of=res)
+    el = s3.run(uni, store, cal, q, live_cfg, as_of=res, held=[])
+    report = s4.run(el, store, cal, reg, live_cfg, as_of=res)
+
+    checked = 0
+    for score in report.ranked_scores[:15]:
+        rows = [f for f in score.factors.values()
+                if f.evidence_tier == "v3_theme" and f.available]
+        if len(rows) != 4:
+            continue
+        mom = next((f for f in rows if f.name == "momentum"), None)
+        assert mom is not None
+        assert sum(f.weight for f in rows) == pytest.approx(1.0, abs=1e-4), (
+            f"{score.ticker}: four-theme weights sum to "
+            f"{sum(f.weight for f in rows):.5f} -- the stage is serving the "
+            f"five-theme vector"
+        )
+        for f in rows:
+            # `FactorScore.weight` is rounded to 5dp while `contribution` is
+            # not, so the budget is half a unit in the last place times |z| --
+            # about 5e-6. Tight enough to catch D-003, which was out by 24%.
+            assert f.standardised * f.weight == pytest.approx(f.contribution, abs=1e-5)
+        checked += 1
+    assert checked >= 3, f"only {checked} four-theme names to check"
+
+
+def test_the_frozen_weight_is_not_what_reaches_the_card(live_cfg):
+    """A name missing a theme must show weights that differ from `Theme.weight`.
+
+    Skips when every name has full coverage -- which is the state after the
+    statements repair took fundamentals from 8.8% to 100%, and is itself the
+    thing worth knowing.
+    """
+    from prosignal.features import v3
+    import numpy as np, pandas as pd
+    rng = np.random.default_rng(11)
+    idx = [f"S{i:03d}" for i in range(200)]
+    raw = pd.DataFrame({f: rng.uniform(-1, 1, len(idx)) for f in v3.ALL_FACTORS},
+                       index=idx)
+    raw[v3.THEMES["quality"].names] = np.nan
+    scored = v3.score_frame(raw)
+    w = scored["ownership_w"].dropna()
+    assert (w != v3.THEMES["ownership"].weight).all(), (
+        "a four-theme name is being blended at the five-theme weights"
+    )
+    assert w.iloc[0] > v3.THEMES["ownership"].weight

@@ -233,9 +233,25 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # ---- Stage 4 ----------------------------------------------------------
     step(4)
     t = _clock()
-    scores = stage4_core_score.run(
-        eligibility, store, calendar, regime, config, as_of=resolved
-    )
+    # A REFUSAL TO RANK IS A DECISION, NOT A CRASH. `RankingUnavailable` is
+    # correct to be fatal -- falling back to another scorer would issue signals
+    # from a model that was not the one measured -- but it is a PipelineError
+    # and nothing caught it, so it reached the job runner as an unhandled
+    # exception and the screen showed a stack trace where a reason belongs.
+    #
+    # Found by replaying 2020-03-23, the worst session in the store: the
+    # liquidity screen and the eligibility gates left SIX names, the v3 block
+    # refused to rank a universe that small, and the engine errored instead of
+    # saying so. That is the single date this engine most needs to be legible
+    # on. `PipelineBlocked` is exactly this contract -- its docstring is "the
+    # run refused to produce an opinion. NOT the same as NO TRADE."
+    try:
+        scores = stage4_core_score.run(
+            eligibility, store, calendar, regime, config, as_of=resolved
+        )
+    except stage4_core_score.RankingUnavailable as exc:
+        raise PipelineBlocked([str(exc)],
+                              stage=stage4_core_score.STAGE_NAME) from exc
     timings[stage4_core_score.STAGE_NAME] = t()
     release_memory()
 

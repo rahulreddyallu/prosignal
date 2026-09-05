@@ -702,6 +702,16 @@ class DataStore:
         return pd.read_parquet(path, engine="pyarrow")
 
     def replace_table(self, name: str, df: pd.DataFrame) -> int:
+        """Overwrite a whole table. Correct ONLY for a feed that is complete
+        every time it is fetched.
+
+        `equity_master`, `sector_map` and `corporate_actions` are each pulled as
+        one whole file, so replacing is right for them -- a name dropped from
+        NSE's master should leave the store. `statements` is fetched per symbol
+        and skips whatever the provider refuses, so replacing it deleted every
+        symbol not in the current batch; it now merges. Before adding a caller,
+        ask which of those two a feed is.
+        """
         _atomic_write_parquet(df.reset_index(drop=True), self._flat_path(name))
         return len(df)
 
@@ -713,7 +723,58 @@ class DataStore:
         return self.read_table("equity_master")
 
     def write_statements(self, df: pd.DataFrame) -> int:
-        return self.replace_table("statements", df)
+        """MERGE, not replace.
+
+        This called `replace_table`, so every write discarded whatever the
+        previous one had fetched and kept only the current batch. A statement
+        feed is per-symbol and partial by nature -- `fetch_statements` skips a
+        symbol Yahoo refuses rather than failing the run, which is right -- so
+        the table converged on whatever the LAST fetch happened to return, not
+        on the union of everything ever fetched.
+
+        That is why coverage sat at 200 symbols against a 750-name universe
+        while the feed itself serves the universe: probed live, Yahoo returned
+        statements for 12 of 12 sampled symbols the store had nothing for, to
+        the current quarter. Nothing was wrong with the feed. The store was
+        deleting it.
+
+        COMBINED, NOT DEDUPLICATED, and the difference cost 1,147 rows the
+        first time this was written as a plain `write_table`. `fetch_statements`
+        emits THREE annual rows per symbol-year -- income statement, balance
+        sheet and cash flow -- each carrying only its own fields and NaN
+        elsewhere. Deduplicating on (symbol, period_end, kind) keeps whichever
+        arrived last and silently discards the other two, so revenue and equity
+        vanish and only the cash-flow columns survive. Caught by watching annual
+        rows fall from 2,406 to 1,259 while symbol coverage rose.
+
+        So the three are folded into one row per (symbol, period_end, kind),
+        taking the newest non-null value per field. A restatement supersedes,
+        a re-run is idempotent, and a partial fetch adds without deleting.
+        """
+        if df is None or df.empty:
+            return 0
+        keys = [SYMBOL, "period_end", "kind"]
+        path = self._flat_path("statements")
+        frame = df.copy()
+        frame["period_end"] = pd.to_datetime(frame["period_end"])
+        if path.is_file():
+            existing = pd.read_parquet(path, engine="pyarrow")
+            existing["period_end"] = pd.to_datetime(existing["period_end"])
+            # `frame` last so a re-fetch supersedes a stale earlier value.
+            combined = pd.concat([existing, frame], ignore_index=True)
+        else:
+            combined = frame
+        missing = [k for k in keys if k not in combined.columns]
+        if missing:
+            raise DataError(
+                f"statements rows are missing key column(s) {missing}; writing "
+                f"them would collapse periods or statement kinds together")
+        combined = (combined.groupby(keys, dropna=False, as_index=False)
+                            .last()          # newest non-null per field
+                            .sort_values(keys)
+                            .reset_index(drop=True))
+        _atomic_write_parquet(combined, path)
+        return len(df)
 
     def read_statements(self) -> pd.DataFrame:
         """Income statement, balance sheet and cash flow by period.

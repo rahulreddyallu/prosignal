@@ -345,6 +345,19 @@ class StockScore(_Contract):
     entry_admissible: bool = True
     #: Why not, when not.
     entry_block_reason: Optional[str] = None
+    #: MEASURED ALWAYS, ENFORCED NEVER. Whether the name closes above its long
+    #: moving average -- the one ABSOLUTE test in the engine, in the sense that
+    #: it can fail for every name at once. `entry_admissible` cannot carry this:
+    #: it is the per-name entry floor, Stage 8 gates on it, and that floor is
+    #: shipped DISABLED on a measured treatment effect of -2.2% (95% CI
+    #: [-3.2%, -1.4%]) -- ejecting a name the day it slips below its average
+    #: cost more in forced turnover than it saved.
+    #:
+    #: The book-LEVEL rule is a different question and was never measured
+    #: against that: not "may this name be bought" but "can the market supply a
+    #: book at all today". Recording the bar separately from the gate is what
+    #: lets Stage 8 ask the second without re-enabling the first.
+    absolute_bar_cleared: Optional[bool] = None
     composite_raw: float = 0.0
     #: Composite mapped onto 0..1 across the eligible universe. Every threshold
     #: in Stage 5/8 operates on this scale.

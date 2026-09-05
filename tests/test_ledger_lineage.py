@@ -303,3 +303,22 @@ def test_running_the_repair_twice_is_a_no_op(tmp_path):
     second = led.repair_lineage(dry_run=False)
     assert second["unchanged"] == 1
     assert led._path(dt.date(2026, 6, 30)).read_text(encoding="utf-8") == after_first
+
+
+def test_the_date_scan_and_the_row_fetch_filter_alike(tmp_path):
+    """A replay dated LATER than the newest live run must not select its date.
+
+    `previous_run` scans for the newest date under one `mode` filter and then
+    fetches that date's rows under another. If the two ever disagree the fetch
+    comes back empty and the symptom is an IndexError on `rows[-1]` -- not
+    something a reader can act on. Found by mutation-testing: removing the
+    filter from the scan loop survived every other test here.
+    """
+    led = Ledger(tmp_path)
+    led.append(_row(dt.date(2026, 8, 14), ["LIVE1"], "live1"))
+    led.append(_row(dt.date(2026, 8, 21), ["R1"], "rep1", mode="replay",
+                    logged_at=_at(dt.date(2026, 8, 21))))
+    # The newest LIVE run is the 14th, even though a replay sits on the 21st.
+    row = led.previous_run(before=dt.date(2026, 8, 28), mode="live")
+    assert row["run_id"] == "live1"
+    assert row["signals_generated"] == ["LIVE1"]

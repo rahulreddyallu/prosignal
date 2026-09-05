@@ -160,6 +160,39 @@ def build_adjustment_factors(
 
     usable = actions.dropna(subset=["ex_date", "ratio"])
     usable = usable[(usable["ratio"] > 0) & (usable["ratio"] != 1.0)]
+    # A RATIO OUT OF BAND IS AN UNPARSED ROW, NOT A CORPORATE ACTION.
+    #
+    # The filter above accepts anything positive, so one bad row rescales a
+    # symbol's entire prior history. The shipped store carries three:
+    # PATANJALI 2019-11-14 at 100.0, JSWSTEEL 2005-02-21 at 22.857 and LT
+    # 2004-05-19 at 2.0 -- all `split_or_bonus` from the legacy source, all with
+    # no description to parse, and all inert only because none of those symbols
+    # has a price row before its ex-date. The next one that lands inside the
+    # window multiplies a name's whole history by a hundred, silently, and every
+    # momentum and volatility factor spanning it is then describing arithmetic.
+    #
+    # `plausible_price_factors` already bounds what a real Indian split or bonus
+    # produces at [0.001, 0.999]. Reverse splits are genuine but rare, so the
+    # band is widened symmetrically rather than capped at 1: 1/MAX .. MAX covers
+    # every ratio an issuer actually uses and excludes the three above.
+    out_of_band = ~usable["ratio"].between(1.0 / MAX_PRICE_FACTOR, MAX_PRICE_FACTOR)
+    if out_of_band.any():
+        bad = usable[out_of_band]
+        # ONCE PER (symbol, ex-date) PER PROCESS. This is persistent data
+        # corruption, not a transient failure, and `build_adjustment_factors`
+        # runs once per symbol per read while a single analysis reads prices
+        # about ten times -- so an unguarded warning is thirty identical lines a
+        # run, which is how a real signal becomes something people filter out.
+        for _, r in bad.iterrows():
+            key = (str(r.get(SYMBOL)), str(r.get("ex_date")), float(r["ratio"]))
+            if key in _WARNED_RATIOS:
+                continue
+            _WARNED_RATIOS.add(key)
+            log.warning(
+                "ignoring an implausible corporate-action ratio",
+                extra={"symbol": key[0], "ex_date": key[1], "ratio": key[2],
+                       "band": [1.0 / MAX_PRICE_FACTOR, MAX_PRICE_FACTOR]})
+        usable = usable[~out_of_band]
     for _, row in usable.iterrows():
         ex_date = pd.Timestamp(row["ex_date"]).normalize()
         factors.loc[idx < ex_date] *= float(row["ratio"])
@@ -325,6 +358,17 @@ COMMON_SPLIT_FACE_VALUES: Tuple[Tuple[float, float], ...] = (
     (1, 0.5),
     (100, 1), (100, 2), (100, 5), (100, 10),
 )
+
+
+#: The widest rescaling a real Indian split, bonus or consolidation produces.
+#: A 1:20 bonus gives 0.05 and a 20:1 reverse split gives 20, so 50 leaves
+#: generous headroom on both sides while excluding the legacy junk rows --
+#: PATANJALI at 100.0 being the one that would have done the most damage.
+MAX_PRICE_FACTOR = 50.0
+
+#: Ratios already reported this process, so a persistent bad row is announced
+#: once rather than on every price read.
+_WARNED_RATIOS: set = set()
 
 
 def plausible_price_factors() -> List[float]:
