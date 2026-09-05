@@ -8,8 +8,8 @@
 > the fitted ranker as the only one with an out-of-sample number.
 
 A cross-sectional equity ranking engine for NSE cash equities. It reads
-point-in-time market data, ranks the eligible universe on sector-neutral 6-1
-momentum, and puts six names on a screen with the arithmetic that produced them
+point-in-time market data, ranks the eligible universe on the v3 thematic
+composite, and puts six names on a screen with the arithmetic that produced them
 and the record of what that configuration has historically done.
 
 It runs every session and buys every twenty-first. It issues opinions. It has no
@@ -188,6 +188,38 @@ This is the best-supported hypothesis the search found. It is not an established
 result. The forward paper-trading record is what would establish it.
 
 ---
+
+## THE TRIAL COUNT
+
+Three numbers are quoted in this repository for the same quantity and none of
+them is the honest one:
+
+| source | charged |
+|---|---|
+| `prosignal research trials` (the registry) | **119** |
+| `config/parameters.yaml`, expectancy preamble | **4,877** |
+| this file, RESULTS OF RECORD | **81** |
+
+Counting honestly — every configuration ever evaluated against out-of-sample
+data, including the abandoned ones — the floor is:
+
+* 4,877 trade-level configurations, the `horizon-map-2026-08` sweep;
+* 144 fitted-composite configurations;
+* the v3 search that chose the 22 factors, 5 themes and their weights. Its code
+  was deleted on 2026-09-03 and the registry does not carry its arms, so **this
+  component is not recoverable from this repository**;
+* v4 through v9 — six model generations built and not shipped, each with a
+  sweep of its own;
+* the 119 in the registry, of which the DSR's own coverage guard finds only 18
+  carry a recorded score, forcing the conservative unit variance.
+
+**At least 5,140, and not reconstructible.** That is itself the finding: the
+registry was created after most of the search had already happened, so no
+deflated Sharpe computed from it can be trusted in either direction. The
+statistical machinery is not the problem — Newey-West, PSR, the expected
+maximum and CSCV PBO were each checked against their standard definitions and
+are correct. The input is the problem.
+
 
 ## RESULTS OF RECORD
 

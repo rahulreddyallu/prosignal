@@ -1159,10 +1159,31 @@ class TestTheReadmeAgreesWithHead:
         import prosignal
         return (Path(prosignal.__file__).parent.parent.parent / "README.md").read_text()
 
-    def test_there_is_one_live_results_section(self):
+    def test_the_readme_does_not_claim_a_table_describes_what_ships(self):
+        """This asserted that RESULTS OF RECORD "supersede every other number
+        in this file". That claim was withdrawn on 2026-09-05, and the test is
+        strengthened rather than deleted.
+
+        The two headline tables measure two different models with two different
+        exit geometries: the executive summary is `mom_6_1_r` traded alone, and
+        RESULTS OF RECORD is the fitted Fama-MacBeth composite with a 2.5xATR
+        stop, a 3R target and risk-budget sizing. The engine ranks on
+        `v3_composite` and uses none of those exits. So neither table is the
+        live one, and a README that nominates either is more misleading than one
+        that nominates neither.
+
+        What must remain true: both are still present (a bad result is never
+        deleted here) and the file says plainly that neither describes what
+        ships."""
         r = self._readme()
-        assert "## RESULTS OF RECORD" in r
-        assert "supersede every other number in this file" in r
+        assert "## RESULTS OF RECORD" in r, "the table itself must not be deleted"
+        assert "NEITHER TABLE IN THIS FILE DESCRIBES WHAT SHIPS" in r, (
+            "the README must say which model each table measured, or a reader "
+            "takes one of them for the shipped configuration"
+        )
+        assert "supersede every other number in this file" not in r, (
+            "the withdrawn claim is back"
+        )
 
     def test_superseded_numbers_are_marked_not_deleted(self):
         """Never delete a bad result. Mark it."""

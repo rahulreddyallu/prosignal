@@ -190,9 +190,23 @@ def test_a_real_model_run_is_not_flagged():
     from prosignal.presentation.viewmodel import _scorer_used
 
     got = _scorer_used([{"factors": {_bare(c): {} for c in FAMILY_COLUMNS}}])
-    assert got["model"] == "cross-sectional"
-    assert got["validated"] is True
-    assert got["note"] is None
+    assert got["model"] == "cross-sectional", (
+        "a run that carries the model's own family columns is still that "
+        "model's run, and naming it tells a reader more than 'unknown'"
+    )
+    # `validated is True` and `note is None` USED TO BE ASSERTED HERE, and they
+    # were right while the fitted model was live and evidenced. It was retired
+    # on 2026-09-03. Certifying a retired model is what made V10's D-004
+    # invisible: the interface renders its caveat only when `validated` is
+    # false, so `True` meant the caveat could not appear, and `note: None` meant
+    # there was nothing to render even if it had.
+    #
+    # Rendered from a stored pre-v3 payload on a current-dated store: "Ranked
+    # from the close of <today>", five BUY badges, and no caveat anywhere.
+    assert got["validated"] is False, (
+        "nothing may certify a model that no longer exists"
+    )
+    assert got["note"], "and the reader has to be told which model it was"
 
 
 def test_an_unrecognised_factor_block_reports_unknown_rather_than_guessing():
@@ -221,8 +235,11 @@ def test_the_interface_renders_the_unscored_warning():
 
     ui = (Path(__file__).resolve().parents[1] / "src" / "prosignal" / "static"
           / "index.html").read_text(encoding="utf-8")
-    assert "This shortlist is not from the model" in ui
-    assert "scorer.validated === false" in ui
+    # The heading was "This shortlist is not from the model"; it is shorter
+    # now. What matters is that the ALARM branch still renders and is still
+    # keyed on the run not being validated.
+    assert "Not ranked by the model" in ui
+    assert 'sev === "alarm"' in ui
 
 
 def test_the_empty_state_does_not_flash_before_the_data_arrives():

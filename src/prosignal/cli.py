@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .config.loader import AppConfig, load_config
+from .config.loader import AppConfig, get_config
 from .core.errors import ConfigError, DataError, ProSignalError
 from .core.logging import get_logger, setup_logging
 from .version import ENGINE_NAME, ENGINE_VERSION, SCHEMA_VERSION
@@ -196,7 +196,7 @@ def cmd_config_show(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 
 def cmd_config_validate(cfg: AppConfig, args: argparse.Namespace) -> int:
-    # Reaching this point means load_config() already validated everything.
+    # Reaching this point means get_config() already validated everything.
     _rule("Configuration valid")
     _print(f"config version : {cfg.version}")
     _print(f"project root   : {cfg.paths.root}")
@@ -471,6 +471,63 @@ def cmd_data_status(cfg: AppConfig, args: argparse.Namespace) -> int:
             else "  Point-in-time membership is trustworthy only from the earliest snapshot onwards."
         )
     return 0
+
+
+def cmd_data_lineage(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Report -- and optionally repair -- which recorded runs were live.
+
+    `mode` has been on the ledger row since v1 and every path wrote the literal
+    "live", so the field carries no information and the engine could not tell a
+    session the market produced from a re-derivation of one. The row's own
+    timestamps can: `logged_at` against `date`.
+    """
+    from .ledger import Ledger
+
+    led = Ledger(cfg.paths.ledger)
+    audit = led.lineage_audit()
+
+    _rule("Ledger lineage")
+    _print(f"  rows recorded              {audit['rows']}")
+    _print(f"  market dates               {audit['market_dates']}")
+    _print(f"  recorded ON the session    {len(audit['recorded_on_the_day'])}"
+           f"  {', '.join(audit['recorded_on_the_day'][:8])}")
+    _print(f"  backfilled later only      {audit['backfilled_only']}")
+    if audit["undatable_rows"]:
+        _print(f"  rows whose dates will not parse  {audit['undatable_rows']}")
+
+    conflicts = audit["live_dates_that_conflict"]
+    if conflicts:
+        _print("")
+        _print("  DATES RECORDED ON THE DAY THAT DISAGREE WITH THEMSELVES:")
+        for c in conflicts:
+            _print(f"    {c['date']}  {c['runs']} runs, {c['distinct_books']} "
+                   f"different books, {len(c['config_versions'])} config versions")
+        _print("  Nothing recorded says which book was real -- the same date")
+        _print("  under one config produced several, and model_fingerprint is")
+        _print("  null on most rows. These are set aside, not guessed at.")
+
+    if not args.repair:
+        summary = led.repair_lineage(dry_run=True)
+        _print("")
+        _print(f"  would mark: live {summary['live']}, replay "
+               f"{summary['replay']}, quarantine {summary['quarantine']} "
+               f"({summary['unchanged']} already correct)")
+        _print("  nothing written. Pass --repair to apply.")
+        return 0
+
+    summary = led.repair_lineage(dry_run=False)
+    _print("")
+    _print(f"  live {summary['live']} / replay {summary['replay']} / "
+           f"quarantine {summary['quarantine']}")
+    _print(f"  quarantined dates: {', '.join(summary['quarantined_dates']) or 'none'}")
+    for f in summary["files"]:
+        if f["rewritten"]:
+            _print(f"    {f['file']}: {f['rewritten']} row(s) relabelled "
+                   f"(backup written alongside)")
+    remaining = led.conflicting_dates(mode="live")
+    _print("")
+    _print(f"  live lineage conflicts remaining: {len(remaining)}")
+    return 0 if not remaining else 1
 
 
 def cmd_data_check(cfg: AppConfig, args: argparse.Namespace) -> int:
@@ -2435,6 +2492,18 @@ def build_parser() -> argparse.ArgumentParser:
     purge = data_sub.add_parser("purge-cache", help="delete cached HTTP payloads")
     purge.set_defaults(func=cmd_data_purge_cache)
 
+    lin_p = data_sub.add_parser(
+        "lineage",
+        help="which recorded runs were live and which were backfills, and "
+             "repair the label when it was never written")
+    lin_p.add_argument(
+        "--repair", action="store_true",
+        help=("stamp each row with the lineage its own timestamps prove. "
+              "Deletes nothing: every row keeps its measurements and its trial "
+              "id, and a backup is written beside each file. Same-day runs that "
+              "disagree about the book are quarantined rather than guessed at."))
+    lin_p.set_defaults(func=cmd_data_lineage)
+
     man_p = data_sub.add_parser(
         "manifest",
         help="content hash of the curated store, so a result can name its "
@@ -2709,7 +2778,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     try:
-        cfg = load_config(config_path=args.config)
+        # `get_config` prefers an explicit --config and falls back to
+        # $PROSIGNAL_CONFIG. `load_config` saw neither the variable nor its
+        # absence -- see create_app.
+        cfg = get_config(config_path=args.config)
     except ProSignalError as exc:
         _print(f"[red]{exc.message}[/red]" if _console else exc.message)
         return 1

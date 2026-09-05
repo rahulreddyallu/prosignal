@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
+
+import pandas as pd
 from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .config.loader import AppConfig, load_config
+from .config.loader import AppConfig, get_config
+from .stages._cfg import v as v_
 from .core.clock import market_today
 from .core.logging import get_logger, setup_logging
 from .core.memory import release_memory, trim_available
@@ -56,8 +59,43 @@ def _in_outcome_basis(record: Dict[str, Any], outcome) -> Dict[str, Any]:
     return merged
 
 
+def _served_run_is_the_recorded_run(cfg, payload) -> str:
+    """Empty when the screen shows the run the ledger recorded, else why not.
+
+    `rundetail.save` never raises -- a display cache that fails must not fail
+    the run that produced it, and the run IS in the ledger. But nothing told
+    anyone. Forced by making the run-detail directory unwritable: the ledger
+    took the new row and the screen went on serving the previous run for the
+    same date, indistinguishable from a fresh one.
+    """
+    from .ledger import Ledger
+    try:
+        when = dt.date.fromisoformat(str(payload.get("as_of_date")))
+        newest = Ledger(cfg.paths.ledger).newest_on(when, mode="live")
+    except Exception:
+        return ""
+    if not newest:
+        return ""
+    recorded = str(newest.get("run_id") or "")
+    served = str(payload.get("run_id") or "")
+    if not recorded or recorded == served:
+        return ""
+    return (
+        f"Showing run {served} \u00b7 the record for {when.isoformat()} ends at "
+        f"{recorded} \u00b7 these are not the names it ranked"
+    )
+
+
 def create_app(config: Optional[AppConfig] = None) -> FastAPI:
-    cfg = config or load_config()
+    # `get_config`, NOT `load_config`. Only the accessor reads
+    # $PROSIGNAL_CONFIG, and this called the loader directly -- so the server
+    # ignored the variable and served the production config while the operator
+    # believed they had pointed it somewhere else. `outcomes.py` DID honour it,
+    # which made the failure worse than an inert switch: outcomes resolved
+    # against the store you asked for while the pipeline read and WROTE the one
+    # you did not. It is how an audit put a `live` row in the production ledger
+    # from a session it had sandboxed.
+    cfg = config or get_config()
     log_cfg = cfg.params.runtime.logging
     setup_logging(
         level=str(log_cfg.level),
@@ -262,17 +300,101 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             ok = False
             checks["price_data"] = f"{type(exc).__name__}: {exc}"
 
+        # THE UNIVERSE CHECK, AGAINST THE SOURCE THAT ACTUALLY RESOLVES IT.
+        # This asked for a `NIFTY 200` snapshot on every deployment, while
+        # `universe.source` is `liquidity_pit` and `_universe_liquidity_pit`
+        # never consults a snapshot -- so readiness failed closed on a condition
+        # the run does not have, and passed on every condition it does.
         try:
-            index = str(cfg.params.universe.index_name.value)
             store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
-            snaps = store.universe_snapshot_dates(index)
-            checks["universe"] = f"{index}: {len(snaps)} snapshot(s)"
-            if not snaps:
-                ok = False
-                checks["universe"] = f"no snapshot for {index}"
+            source = str(v_(cfg.params.universe.source)).lower()
+            if source == "liquidity_pit":
+                checks["universe"] = "liquidity_pit: resolved from prices, no snapshot needed"
+            else:
+                index = str(cfg.params.universe.index_name.value)
+                snaps = store.universe_snapshot_dates(index)
+                checks["universe"] = f"{index}: {len(snaps)} snapshot(s)"
+                if not snaps:
+                    ok = False
+                    checks["universe"] = f"no snapshot for {index}"
         except Exception as exc:  # noqa: BLE001
             ok = False
             checks["universe"] = f"{type(exc).__name__}: {exc}"
+
+        # THE INPUTS THE SHIPPED SCORER ACTUALLY READS. None of these was
+        # checked. A store whose fundamentals stopped eighteen months ago, whose
+        # sector map covers four names in five, and whose delivery table ended
+        # last quarter reported `ready: true` -- and the quality theme, the
+        # sector neutralisation and the ownership theme are 19%, all of the
+        # neutralisation, and 19% of the blend respectively.
+        #
+        # REPORTED, NOT BLOCKING. Every one of these degrades the ranking
+        # rather than invalidating it, and the engine already drops a theme it
+        # cannot compute. Refusing to start would be worse than saying so; not
+        # saying so is what shipped.
+        try:
+            store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+            today = market_today(cfg)
+
+            fund = store.read_fundamentals()
+            if fund is None or fund.empty:
+                checks["fundamentals"] = "none stored; the quality theme is absent"
+            else:
+                newest = pd.to_datetime(fund["filing_date"], errors="coerce").max()
+                age = (pd.Timestamp(today) - newest).days if pd.notna(newest) else None
+                checks["fundamentals"] = (
+                    f"newest filing {newest.date()} ({age} days old), "
+                    f"{fund['symbol'].nunique()} symbols")
+                if age is not None and age > 200:
+                    checks["fundamentals_stale"] = True
+
+            stmts = store.read_statements()
+            if stmts is not None and not stmts.empty:
+                newest = pd.to_datetime(stmts["period_end"], errors="coerce").max()
+                checks["statements"] = (
+                    f"newest period {newest.date()}, "
+                    f"{stmts['symbol'].nunique()} symbols")
+
+            sect = store.read_sector_map()
+            checks["sector_map"] = (
+                f"{0 if sect is None or sect.empty else sect['symbol'].nunique()} symbols")
+
+            dmax = store.delivery.max_date()
+            checks["delivery"] = dmax.isoformat() if dmax else "none stored"
+            if dmax and sessions and (sessions[-1] - dmax).days > 7:
+                checks["delivery_stale"] = True
+
+            acts = store.read_corporate_actions()
+            if acts is not None and not acts.empty:
+                amax = pd.to_datetime(acts["ex_date"], errors="coerce").max()
+                checks["corporate_actions"] = f"newest ex-date {amax.date()}"
+        except Exception as exc:  # noqa: BLE001
+            checks["data_inputs"] = f"{type(exc).__name__}: {exc}"
+
+        # THE OPEN BOOK HAS TO BE A FACT BEFORE A RUN CAN USE IT.
+        #
+        # `Ledger.previous_run` is the engine's entire position memory and it
+        # refuses to guess when a date's recorded runs disagree about what was
+        # held. That refusal surfaces as a failed run at the moment somebody
+        # presses SCAN, which is the wrong time to discover it -- so readiness
+        # asks the question first. Only dates the next run could actually READ
+        # matter, so a conflict strictly in the past is reported without
+        # blocking; the one immediately behind the decision date is not.
+        try:
+            conflicts = Ledger(cfg.paths.ledger).conflicting_dates(mode="live")
+            checks["ledger_conflicts"] = len(conflicts)
+            if conflicts:
+                worst = max(conflicts, key=lambda c: c["distinct_books"])
+                checks["ledger_conflict_detail"] = (
+                    f"{len(conflicts)} market date(s) carry live runs that "
+                    f"disagree about the book -- worst {worst['date']} with "
+                    f"{worst['runs']} runs and {worst['distinct_books']} "
+                    f"different books. A run whose previous session lands on "
+                    f"one of these refuses rather than picking one. Resolve by "
+                    f"keeping a single live run per date."
+                )
+        except Exception as exc:  # noqa: BLE001
+            checks["ledger_conflicts"] = f"{type(exc).__name__}: {exc}"
 
         checks["config_version"] = cfg.version
         active = jobs.active_job()
@@ -775,7 +897,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "run_id": payload.get("run_id"),
             "as_of_date": payload.get("as_of_date"),
             "generated_at": payload.get("generated_at"),
-            "note": "",
+            "note": _served_run_is_the_recorded_run(cfg, payload),
         }
 
     # =====================================================================

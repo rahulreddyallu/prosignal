@@ -42,9 +42,9 @@ from ..core.logging import get_logger
 from ..data.store import DataStore
 from ..data.types import DATE, SYMBOL
 from ..features import compute_features
-from ..features.crosssec import liquidity_mask
 from ..features import v3 as v3feat
 from ..features import v3_factors as v3fac
+from ..features.crosssec import liquidity_mask
 from ..features.exits import rules_from_config
 from ..features.labels import BarrierSpec
 from ..indicators import (
@@ -83,7 +83,7 @@ class RankingUnavailable(PipelineError):
 
 
 def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
-                          v3_scored=None):
+                          v3_scored=None, sectors=None):
     """Return the series the book is ordered by, and say which one it is.
 
     `composite_raw` arrives holding whatever ranked upstream -- the fitted
@@ -145,18 +145,55 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
                 f"floor. A ranking built on a minority of the universe is a "
                 f"ranking of that minority.")
         nth = v3_scored["n_themes"].reindex(covered.index)
+        # THE WEIGHTS THIS RUN USED, and the LABELS rather than the dict keys.
+        # The note quoted `Theme.weight` -- the fit-time vector, correct for a
+        # name with all five themes and for 8.8% of this universe -- and named
+        # the themes by their internal keys, so it said "quality 19%" for a
+        # theme whose two factors both ship at -1 and which the screen has
+        # called "Low-margin tilt" since the labels were made honest. The note
+        # is written into the run record, so both halves outlived the screen.
+        _wmean = {
+            t: v3_scored[t + "_w"].dropna().mean()
+            for t in v3feat.THEMES if t + "_w" in v3_scored.columns
+        }
+        _shown = ", ".join(
+            f"{th.label} {_wmean.get(t, th.weight):.0%}"
+            for t, th in v3feat.THEMES.items())
         notes.append(
             f"Book ordered by the v3 composite: {len(v3feat.ALL_FACTORS)} factors "
-            f"in {len(v3feat.THEMES)} themes "
-            f"({', '.join(f'{t} {th.weight:.0%}' for t, th in v3feat.THEMES.items())}), "
-            f"each theme combined on its own and blended with weights capped at "
-            f"40%, floored at 6% and additionally capped at the theme's "
-            f"coverage. Median name scored on {nth.median():.0f} of "
-            f"{len(v3feat.THEMES)} themes. Sealed holdouts, one run each: rank IC "
-            f"+0.049 (t 3.69) on 2025-03..2026-08 and +0.036 (t 3.83) on "
-            f"2021-07..2022-12, with every theme positive out of sample on both. "
-            f"The RANKING is what generalised; a ten-name book at these "
-            f"transaction costs did not -- see CHANGELOG.md.")
+            f"in {len(v3feat.THEMES)} themes, at the mean weights this "
+            f"cross-section actually blended them at ({_shown}). Each theme is "
+            f"combined on its own, then blended with weights RE-CAPPED at 40% "
+            f"over the themes each name has -- a name missing one does not hand "
+            f"its share to whichever theme is largest. Median name scored on "
+            f"{nth.median():.0f} of {len(v3feat.THEMES)} themes. "
+            f"The two sealed holdouts (rank IC +0.049 t 3.69 on 2025-03..2026-08, "
+            f"+0.036 t 3.83 on 2021-07..2022-12) measured the blend BEFORE that "
+            f"re-cap and are not re-run: both windows are spent. The RANKING is "
+            f"what generalised there; a ten-name book at these transaction costs "
+            f"did not -- see CHANGELOG.md.")
+        # AND HOW MUCH OF THE UNIVERSE "SECTOR-NEUTRAL" ACTUALLY COVERS. The
+        # card says the score is a sector-neutral rank; for the residual bucket
+        # it is a rank against a pool of unrelated industries. Reported rather
+        # than fixed, because raising sector coverage is a data job (D-019) and
+        # a claim that is true for 61% of the book should not be silent about
+        # the other 39%.
+        try:
+            _rb = v3feat.residual_bucket_size(covered.index, sectors)
+            if _rb["resid"]:
+                notes.append(
+                    f"Sector-neutral for {len(covered) - _rb['resid']} of "
+                    f"{len(covered)} names. The other {_rb['resid']} "
+                    f"({_rb['resid'] / max(len(covered), 1):.0%}) are ranked "
+                    f"inside one residual bucket -- {_rb['unknown']} with no "
+                    f"sector in the map and {_rb['folded']} folded in from "
+                    f"{len(_rb.get('folded_sectors') or [])} sectors too small "
+                    f"to rank within ({v3feat.MIN_SECTOR_NAMES} names needed). "
+                    f"Inside that bucket a sector tilt is not neutralised.")
+        except Exception as exc:                    # never fail a run to report
+            log.warning("residual-bucket report did not run",
+                        extra={"error": str(exc)})
+
         # THE DOMINANCE CHECK RUNS ON EVERY RUN, not only when somebody types a
         # research command. A theme that has taken over the ranking is a
         # property of today's scores and needs no forward outcome to see, so
@@ -226,13 +263,17 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
 
 
 
-def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False):
+def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False,
+                   degraded=None):
     """The v3 two-level thematic score for ``as_of``.
 
     Returns (raw factor values, scored frame, error). Reads only sessions at or
     before ``as_of``; the fundamental block is as-of joined on DISCLOSURE dates,
     never on period ends.
     """
+    # Feed failures that silently change the model, collected for the run
+    # notes rather than left in a log file.
+    _degraded = degraded if degraded is not None else []
     need = v3fac.LOOKBACK_SESSIONS + 15
     window = calendar.trailing_window(as_of, need)
     start = window[0] if window else calendar.first
@@ -266,12 +307,34 @@ def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False
             if deliv is not None:
                 deliv = deliv.reindex(index=close.index)
     except Exception as exc:
+        # SURFACED, not just logged. Losing delivery removes a theme carrying
+        # 19% nominal and about 20% of the live spread, and the blend then
+        # re-caps over what is left -- momentum goes from 40% to its cap on
+        # every name. That is a materially different model, and the only
+        # previous symptom was a log line nobody reads and a slightly different
+        # ranking. `_degraded` is carried into the run notes.
+        _degraded.append(
+            f"DELIVERY UNAVAILABLE ({exc}). The ownership theme is absent from "
+            f"this run and its weight was redistributed. This is not the model "
+            f"the holdouts measured.")
         log.warning("delivery unavailable; the ownership theme will be absent",
                     extra={"error": str(exc)})
 
-    # The market as it stood: equal-weight return of the names being scored.
-    bench = close.mean(axis=1)
-    bench_ret = bench / bench.shift(1) - 1.0
+    # THE EQUAL-WEIGHT RETURN, which is not what `close.mean(axis=1)` gives.
+    #
+    # That was the mean PRICE LEVEL across the names being scored, differenced.
+    # Two things are wrong with it. It is price-weighted -- a Rs 30,000 name
+    # moves it a thousand times more than a Rs 30 one, which is the opposite of
+    # equal weight. And `mean` skips NaN, so on any date where the set of names
+    # with a print changes, the mean jumps for a reason that is not a return:
+    # measured on the live window, the implied "return" has sd 0.0156 on
+    # composition-change dates against 0.0110 on stable ones, a 42% inflation.
+    #
+    # The equal-weight return is the mean of the per-name RETURNS. Only
+    # `resid_rev_21` consumes it -- it is the market leg of that factor's beta
+    # and residual -- so this moves one factor of twenty-two, and it moves it
+    # onto the definition its own docstring already claimed.
+    bench_ret = (close / close.shift(1) - 1.0).mean(axis=1)
 
     fund = None
     try:
@@ -285,6 +348,9 @@ def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False
                         for k, v in blk.items()
                         if k in ("ttm_revenue", "ttm_net_profit", "fund_age_days")}
     except Exception as exc:
+        _degraded.append(
+            f"POINT-IN-TIME FUNDAMENTALS UNAVAILABLE ({exc}). The quality theme "
+            f"is absent from this run and its weight was redistributed.")
         log.warning("point-in-time fundamentals unavailable; the quality theme "
                     "will be absent and the remaining weights renormalise",
                     extra={"error": str(exc)})
@@ -400,7 +466,8 @@ def run(
                     )
 
             if bv(cfg.factors.quality.enabled):
-                q, q_note = _quality_from_features(feats, symbols, cfg.factors.quality)
+                q, q_note = _quality_from_features(feats, symbols, cfg.factors.quality,
+                                                   _min_coverage(cfg))
                 if q is not None:
                     raw["quality"] = q
                 else:
@@ -413,8 +480,14 @@ def run(
             dropped_factors=dropped, notes=["every factor was dropped; no score computable"],
         )
 
-    for name, reason in dropped.items():
-        notes.append(f"{name} dropped: {reason}")
+    # Held until the ranking source is known, for the same reason the regime
+    # note is. These describe the FAMILY block. Under `v3_composite` that block
+    # does not rank, and its `quality` and the v3 theme keyed `quality` are
+    # different things computed from different sources -- so "quality dropped:
+    # no point-in-time fundamentals" went into the record of a run whose v3
+    # quality theme had scored 34 names, which reads as the theme being absent
+    # when it was present and carrying 19%.
+    _dropped_notes = [f"{name} dropped: {reason}" for name, reason in dropped.items()]
 
     # ---- winsorise -> standardise -> neutralise ----------------------------
     method = str(v(cfg.standardisation))
@@ -444,7 +517,17 @@ def run(
     total = sum(effective.values())
     if total > 0:
         effective = {n: w / total for n, w in effective.items()}
-    notes.append(
+    # SAID ONLY WHERE IT IS TRUE. This note went onto every run, and under
+    # `v3_composite` the multipliers it describes scale the FAMILY block --
+    # which `_apply_ranking_policy` then discards. An operator reading "regime
+    # 'range_lowvol' multipliers applied (momentum x0.75)" on a run whose book
+    # was ordered by an unmodified v3 blend is being told the engine leaned
+    # against momentum today. It did not.
+    #
+    # Deferred rather than deleted: the note is correct on the `fitted_composite`
+    # path, which is still selectable, so it is emitted after the ranking source
+    # is known instead of before.
+    _regime_note = (
         f"Regime '{regime.regime_bucket}' multipliers applied "
         f"(momentum x{regime.momentum_multiplier:.2f}, "
         f"sector-RS x{regime.sector_rs_multiplier:.2f}), then weights renormalised."
@@ -501,14 +584,27 @@ def run(
     v3_raw = v3_scored = None
     _src = str(getattr(cfg.ranking, "source", ""))
     if _src in ("v3_composite", "v9r_core"):
+        _degraded_feeds: List[str] = []
         v3_raw, v3_scored, v3_err = build_v3_block(
             store, calendar, symbols, as_of, sectors, cfg,
-            v9r_mode=(_src == "v9r_core"))
+            v9r_mode=(_src == "v9r_core"), degraded=_degraded_feeds)
+        notes.extend(_degraded_feeds)
         if v3_err:
             notes.append(f"v3 block unavailable: {v3_err}")
 
     composite_raw, ranking_source = _apply_ranking_policy(
-        composite_raw, model_features, cfg, notes, v3_scored=v3_scored)
+        composite_raw, model_features, cfg, notes, v3_scored=v3_scored,
+        sectors=sectors)
+
+    # The family block's regime multipliers and dropped factors moved the
+    # ranking only if the family block IS the ranking. `fitted_composite` is
+    # the one source where it is: every other branch of `_apply_ranking_policy`
+    # REPLACES `composite_raw` and keeps only its index, as a population filter.
+    # Listing the sources that discard it would have to be kept in step with
+    # that function; naming the single source that does not, does not.
+    if ranking_source == "fitted_composite":
+        notes.extend(_dropped_notes)
+        notes.append(_regime_note)
 
     # THE ABSOLUTE FLOOR, computed here and enforced at entry. Names that fail
     # it stay in the ranking -- they are holdable and they belong on a watchlist
@@ -519,15 +615,27 @@ def run(
     _floor_ma = int(iv(_fl.above_ma_sessions)) if _fl is not None else 200
     _floor_min_themes = int(iv(_fl.min_positive_themes)) if _fl is not None else 3
     _floor_scope = str(v(_fl.applies_to)) if _fl is not None else "entries"
+    # COMPUTED WHETHER OR NOT THE FLOOR IS ON. The floor decides whether this
+    # GATES a name; it does not decide whether the engine is allowed to know.
+    # Stage 8's book-level cash rule asks a different question of the same
+    # number -- not "may this name be bought" but "can the market supply a book
+    # at all" -- and gating it behind `absolute_floor.enabled` meant the one
+    # measurement that can distinguish a bad day from an ordinary one was not
+    # taken on any day the floor was off, which is every day since 2026-09-02.
     _above_ma = {}
-    if _floor_on and not closes.empty:
+    if not closes.empty:
         ma = closes.rolling(_floor_ma, min_periods=int(_floor_ma * 0.75)).mean()
         if len(ma):
             _above_ma = (closes.iloc[-1] > ma.iloc[-1]).to_dict()
 
     composite_unit = rank_to_unit_interval(composite_raw)
     percentile = composite_unit * 100.0
-    order = composite_raw.sort_values(ascending=False)
+    # STABLE. pandas defaults to quicksort, which is not, so two names on the
+    # same score would take whichever order the algorithm happened to produce --
+    # and rank decides the entry band, so a tie is a coin toss over what gets
+    # bought. Ties are rare with 22 continuous factors (386 distinct scores over
+    # 386 names on 2026-09-03) and cost nothing to make deterministic.
+    order = composite_raw.sort_values(ascending=False, kind="stable")
 
     scores: List[StockScore] = []
     for rank, sym in enumerate(order.index, start=1):
@@ -541,15 +649,34 @@ def run(
             for tname, th in sorted(
                     v3feat.THEMES.items(),
                     key=lambda kv: -(abs(_f(v3_scored.at[sym, kv[0] + "_contrib"]) or 0.0))):
+                # THE WEIGHT THIS NAME WAS BLENDED AT. `th.weight` is the
+                # frozen fit-time number and it is correct only for a name
+                # carrying all five themes -- 8.8% of the live universe. The
+                # blend re-caps per name, so serving the frozen figure here put
+                # a weight on the card that did not multiply its own z into its
+                # own contribution, uniformly out by 1/den. `score_frame` now
+                # emits the weight it used and this reads it.
+                _have = pd.notna(v3_scored.at[sym, tname + "_sub"])
+                _w = _f(v3_scored.at[sym, tname + "_w"]) \
+                    if tname + "_w" in v3_scored.columns else None
+                if _w is None:
+                    # A theme the name does not have was blended at ZERO, not at
+                    # its fit-time weight. The card drops unavailable rows so
+                    # this is invisible there, but the row goes into the ledger,
+                    # where "quality, weight 0.18991, contribution null" reads
+                    # as a theme that was carried and produced nothing rather
+                    # than one that was absent.
+                    _w = th.weight if _have else 0.0
                 factors[tname] = FactorScore(
                     name=tname,
                     raw_value=None,
                     standardised=_f(v3_scored.at[sym, tname + "_sub"]),
-                    weight=round(th.weight, 5),
+                    weight=round(_w, 5),
                     contribution=_f(v3_scored.at[sym, tname + "_contrib"]),
                     available=pd.notna(v3_scored.at[sym, tname + "_sub"]),
                     evidence_tier="v3_theme",
-                    citation=f"theme sub-score, oriented at {th.horizon} sessions",
+                    citation=(f"{th.label} -- theme sub-score, oriented at "
+                              f"{th.horizon} sessions"),
                     members=[
                         FactorMember(
                             name=fn,
@@ -646,6 +773,9 @@ def run(
                 factors=factors,
                 entry_admissible=adm,
                 entry_block_reason=reason,
+                # The bar as MEASURED, independent of whether it gates.
+                absolute_bar_cleared=(bool(_above_ma[sym])
+                                      if sym in _above_ma else None),
                 composite_raw=float(composite_raw.get(sym, 0.0)),
                 composite_score=float(composite_unit.get(sym, 0.0)),
                 percentile=float(percentile.get(sym, 0.0)),
@@ -717,10 +847,22 @@ def run(
     log.info("stage 4 complete", extra={"scored": len(scores), "factors": list(effective)})
     return CoreScoreReport(
         as_of_date=as_of,
-        prediction_dispersion=(float(getattr(model, "dispersion", 0.0))
-                               if model is not None else None),
-        typical_dispersion=(float(getattr(model, "train_dispersion", 0.0))
-                            if model is not None else None),
+        # POPULATED FROM WHATEVER RANKED, not from a model that no longer
+        # exists. `model` is None on every path but `fitted_composite`, so these
+        # were None on every shipped run -- and Stage 8's dispersion gate is
+        # guarded by `dispersion is not None`, which meant the one control able
+        # to say "the scorer degenerated today" was skipped, silently, from the
+        # moment the fitted model was deleted.
+        prediction_dispersion=(
+            v3feat.score_dispersion(v3_scored["score"])
+            if (ranking_source == "v3_composite" and v3_scored is not None
+                and "score" in getattr(v3_scored, "columns", []))
+            else (float(getattr(model, "dispersion", 0.0))
+                  if model is not None else None)),
+        typical_dispersion=(
+            v3feat.TYPICAL_DISPERSION if ranking_source == "v3_composite"
+            else (float(getattr(model, "train_dispersion", 0.0))
+                  if model is not None else None)),
         # The meta-label veto is gone (AUC 0.4996, shipped disabled), so there is
         # no win probability and nothing to explain its absence. The card reads
         # None for both rather than carrying a field that can only say "off".
@@ -728,7 +870,16 @@ def run(
         win_probability_unavailable=None,
         weighting_mode=str(v(cfg.weighting_mode)),
         standardisation=method,
-        effective_weights={k: round(v, 4) for k, v in effective.items()},
+        # THE WEIGHTS THAT RANKED THE BOOK, when something ranked it.
+        #
+        # This served `effective` -- the FAMILY block's weights, regime
+        # multipliers and all. Under `v3_composite` that block is computed and
+        # then discarded by `_apply_ranking_policy`; only its INDEX survives, as
+        # a population filter. So the field read
+        # {'momentum_12_1': 0.4688, 'sector_relative_strength': 0.5312} on a run
+        # that ordered its book by twenty-two factors in five themes: two
+        # numbers, summing to one, describing nothing that chose anything.
+        effective_weights=_reported_weights(ranking_source, v3_scored, effective),
         dropped_factors=dropped,
         ranked_scores=scores,
         redundancy=redundancy,
@@ -736,6 +887,32 @@ def run(
         notes=notes,
     )
 
+
+
+def _reported_weights(ranking_source, v3_scored, family_effective) -> Dict[str, float]:
+    """The blend weights the REPORT should carry: the ones that ranked the book.
+
+    Under `v3_composite` the weights are per-name -- the blend re-caps over the
+    themes each name has -- so a single vector is a summary, not the thing
+    itself. The mean over scored names is the honest summary and it is what the
+    dominance question is asked of ("is momentum running hotter than its cap
+    allows?"), so that is what is reported, keyed by theme.
+
+    Falls back to the family block's weights only when the family block is what
+    ranked, which is the `fitted_composite` path.
+    """
+    if ranking_source in ("v3_composite",) and v3_scored is not None:
+        out: Dict[str, float] = {}
+        for tname in v3feat.THEMES:
+            col = tname + "_w"
+            if col not in getattr(v3_scored, "columns", []):
+                continue
+            w = v3_scored[col].dropna()
+            if len(w):
+                out[tname] = round(float(w.mean()), 4)
+        if out:
+            return out
+    return {k: round(val, 4) for k, val in (family_effective or {}).items()}
 
 
 def _members_for(family: str, symbol, features) -> List[FactorMember]:
@@ -852,7 +1029,7 @@ def _relative_strength(closes, sectors, store, as_of, params, cfg) -> Optional[p
     return pd.Series(out, dtype="float64")
 
 
-def _quality_from_features(feats, symbols, cfg):
+def _quality_from_features(feats, symbols, cfg, min_coverage: float):
     """Composite quality from whichever components cleared the coverage floor.
 
     Components are z-scored INDIVIDUALLY before weighting, so a component
@@ -868,7 +1045,18 @@ def _quality_from_features(feats, symbols, cfg):
         if not bv(comp.enabled) or name not in feats.columns:
             continue
         series = feats[name].reindex(symbols).astype("float64")
-        if float(series.notna().mean()) < _min_coverage(cfg):
+        # PASSED IN, not re-derived from `cfg`. This called `_min_coverage(cfg)`
+        # while `cfg` here is the QUALITY FACTOR's config and `_min_coverage`
+        # reads `stage4_core_score.min_name_factor_coverage` -- an attribute
+        # that block does not have. Every call raised AttributeError.
+        #
+        # It never fired because the only caller is guarded by `if not
+        # feats.empty`, and `fundamentals.parquet` has been frozen since
+        # 2025-03-11, so no live date has had public fundamentals to reach it.
+        # Repairing the fundamentals feed would have turned a silent dead branch
+        # into a crash on the daily run. Found by replaying 2020-03-23, where
+        # the fundamentals DO exist.
+        if float(series.notna().mean()) < min_coverage:
             continue
         z = standardise(winsorise(series, 2.0, 98.0), method="zscore")
         if not bv(comp.higher_is_better):

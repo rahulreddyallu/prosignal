@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from ._cfg import fv, iv
+from ._cfg import fv, iv, v
 from ..core.contracts import (
     ClosestCandidate,
     CoreScoreReport,
@@ -145,6 +145,56 @@ def run(
                 f"{min_ratio:.0%} floor. It ranked the names without "
                 f"distinguishing them, so today's ordering carries no view."
             )
+
+    # -- THE BOOK-LEVEL CASH RULE -------------------------------------------
+    #
+    # A bar on the CROSS-SECTION rather than on the index or the calendar.
+    #
+    # It sits behind `blocked_reason is None`, so the Stage 2 regime gate wins
+    # when both would fire -- and on replay it always does: 2020-03-31 and
+    # 2022-06-17 both reach NO TRADE through 'downtrend_highvol', with 24 and 43
+    # names above this bar, well clear of the threshold. NO TRADE was already
+    # reachable and the audit finding that said otherwise was too strong.
+    #
+    # What the regime gate cannot see is the case this one is for: it reads
+    # NIFTY trend and volatility, so it says the MARKET is bad, not that these
+    # candidates are weak. The two disagree when an index is held up by a few
+    # large caps while breadth collapses underneath it.
+    #
+    # Everything above it is a rank: `min_universe_percentile = 90` admits the top decile whether or
+    # not the top decile is any good, because the score is `(rank-1)/(n-1)` and
+    # that distribution is uniform every session. `min_dispersion_ratio` was
+    # written to fix exactly that and reads `prediction_dispersion`, which only
+    # the deleted fitted model ever populated -- so on the shipped scorer it is
+    # skipped, silently, by a `is not None` guard.
+    #
+    # This counts NAMES above their long moving average. That count can collapse
+    # for the whole market at once, which is what an absolute bar has to be able
+    # to do. On the shipped store it falls below the threshold on one session in
+    # eight years: 2020-03-23.
+    #
+    # It blocks NEW ENTRIES and does not close the book, exactly as the
+    # dispersion gate above does -- a day with no view is a day to add nothing,
+    # not a day to liquidate.
+    cash = getattr(cfg.scarcity, "cash_rule", None)
+    if blocked_reason is None and cash is not None and bool(cash.enabled):
+        measured = [s_ for s_ in scores.ranked_scores
+                    if s_.absolute_bar_cleared is not None]
+        if measured:
+            need = iv(cash.min_qualifying) if v(cash.min_qualifying) is not None \
+                else iv(config.params.stage6_entry.admission.exit_rank)
+            clear = sum(1 for s_ in measured if s_.absolute_bar_cleared)
+            gate_counts["above_absolute_bar"] = clear
+            if clear < int(need):
+                blocked_reason = (
+                    f"Only {clear} of {len(measured)} eligible names closed above "
+                    f"their {iv(cash.above_ma_sessions)}-session average, against "
+                    f"the {int(need)} this book needs to be maintainable. The "
+                    f"market is not offering a book today, so none is opened. "
+                    f"This is the evidence failing a test, not a view on the "
+                    f"market -- and it does not close what is already held, "
+                    f"which the Stage 6 exit band governs."
+                )
 
     survivors: List[str] = []
     for sym, res in defense.per_stock.items():
@@ -865,9 +915,10 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
             if eligibility.not_testable.get(sym) else []
         ),
         factor_detail=dict(score.factors),
+        # Two numbers, not a sentence about two numbers.
         cost_note=(
-            f"Round-trip cost {plan.estimated_round_trip_cost_bps:.0f} bps, of which "
-            f"~{plan.estimated_impact_bps:.0f} bps is modelled impact."
+            f"Cost {plan.estimated_round_trip_cost_bps:.0f} bps round-trip"
+            f" \u00b7 {plan.estimated_impact_bps:.0f} bps impact"
             if plan and plan.estimated_round_trip_cost_bps else None
         ),
     )

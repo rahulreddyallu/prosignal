@@ -21,12 +21,33 @@ THREE CONSTRAINTS ON THE BLEND, each measured rather than asserted:
                 fundamentals ranks those two populations by different models.
                 Fitted without this constraint, quality took the cap.
 
+AND THE CAP IS APPLIED TWICE, WHICH IT WAS NOT. The three constraints above
+describe how the weights were CHOSEN. Applying them once, at fit time, produces
+a weight vector correct for a name carrying all five themes and for no other
+name -- and 91% of the live universe carries four, because fundamentals reach
+8.8% of it. The blend then divided by the sum of the weights a name actually
+had, which removes the cap rather than re-imposing it: momentum's 0.40 became
+0.40/0.81009 = 49.38%. Measured on 2026-09-03, momentum ran at 48.55% mean
+effective weight and 63.59% of the realised cross-sectional spread against a cap
+of 40%, which is precisely the "momentum bet with decoration" the two-level
+structure exists to prevent. `score_frame` now re-caps per name over the themes
+it has; see `_weights_for_pattern`.
+
+THE HOLDOUT NUMBERS BELOW DESCRIBE THE UNCAPPED BLEND. They were measured
+before that fix and they are not re-run here: both windows are spent, and
+re-evaluating either to make a repaired model look validated is the exact
+laundering the seal exists to stop. The repair moves the ranking -- Spearman
+0.977, but one of six book names and two of the top twenty change -- so the
+right reading of the table is "this is what the ranking did when momentum was
+carrying 49%", not "this is what ships". What ships has no sealed evaluation.
+
 EACH THEME IS ORIENTED AT THE HORIZON IT WORKS AT. Reversal is a two-week
 effect and momentum is a six-month one; oriented against a single 42-session
 label the reversal sub-score came out ANTI-predictive at t -3.96. Sub-scores are
 ranks, so they blend regardless of which horizon oriented them.
 
-WHAT THE SEALED HOLDOUTS SAID. Two windows, one evaluation each, no re-tuning:
+WHAT THE SEALED HOLDOUTS SAID, ON THE UNCAPPED BLEND. Two windows, one
+evaluation each, no re-tuning:
 
                               A 2025-03..2026-08   B 2021-07..2022-12
     rank IC (t), h=21            +0.049 (3.69)        +0.036 (3.83)
@@ -60,7 +81,7 @@ cleaner read of the two.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -69,6 +90,7 @@ __all__ = ["Theme", "THEMES", "FACTOR_THEME", "ALL_FACTORS", "MIN_THEMES",
            "MIN_LOOKBACK_SESSIONS", "sector_neutral_rank", "theme_subscore",
            "score_frame", "attribution", "absolute_floor", "cap_weights",
            "BOOK", "BOOK_NOTE", "HOLDOUT_BOOK", "RESEARCH_BOOK",
+           "score_dispersion", "TYPICAL_DISPERSION", "residual_bucket_size",
            "LIVE_BOOK", "EXCLUDED_THEMES"]
 
 
@@ -78,6 +100,14 @@ class Theme:
     horizon: int
     coverage: float
     factors: Tuple[Tuple[str, int], ...]
+    #: WHAT THIS THEME ACTUALLY BUYS, in the reader's words rather than the
+    #: search's shorthand. The dict KEYS are frozen -- they name the `_sub`,
+    #: `_contrib` and `_w` columns, the tests pin them, and every recorded run
+    #: carries them -- so the honest name has to live beside the key rather than
+    #: replace it. The interface kept its own copy of this table and the run
+    #: notes kept none, so the screen said "Low-margin tilt" while the scoring
+    #: note written into the same run's record said "quality 19%".
+    label: str = ""
 
     @property
     def names(self) -> List[str]:
@@ -90,9 +120,23 @@ class Theme:
 
 #: The frozen configuration. Weights are post-cap, post-floor, post-coverage-cap,
 #: fitted on 2018-11-27 to 2024-10-25 and not refitted since.
+#:
+#: THE SIGNS ARE MEASUREMENTS, NOT INTENTIONS, and two of them read backwards
+#: against their own theme name. `research/V3_SEARCH.md` records the screen:
+#: `margin_stability` came in at IC -0.0351, t -5.52, holding its sign across
+#: both halves of its life (-2.83 / -5.30), so it ships at -1. Because
+#: `v3_factors` computes it as MINUS the standard deviation of the TTM margin,
+#: that -1 makes the theme prefer UNSTABLE margins; `net_margin` at -1 makes it
+#: prefer LOW ones. Both are what the search found and neither is a typo -- the
+#: same treatment `mom_accel` gets inside momentum, which V3_SEARCH.md pins with
+#: a test precisely "so nobody 'corrects' it".
+#:
+#: What that means is that the key `quality` is the wrong word for it. The name
+#: is kept because it is load-bearing everywhere; `label` carries the truth.
 THEMES: Dict[str, Theme] = {
     "momentum": Theme(
         weight=0.40, horizon=42, coverage=0.9988,
+        label="Momentum",
         factors=(("intraday_mom_126", 1), ("mom_12_6", 1), ("mom_2_0", 1),
                  ("mom_3_1", 1), ("mom_accel", -1), ("mom_consist_126", 1),
                  ("prox_52w", 1), ("prox_52w_now", 1), ("voladj_mom_12_1", 1),
@@ -100,18 +144,22 @@ THEMES: Dict[str, Theme] = {
     ),
     "quality": Theme(
         weight=0.18991, horizon=21, coverage=0.1899,
+        label="Low-margin tilt",
         factors=(("margin_stability", -1), ("net_margin", -1)),
     ),
     "ownership": Theme(
         weight=0.18939, horizon=10, coverage=0.8985,
+        label="Delivery strength",
         factors=(("deliv_chg_5", 1), ("deliv_pct_60", 1), ("deliv_z_21", 1)),
     ),
     "risk": Theme(
         weight=0.11088, horizon=21, coverage=0.9983,
+        label="Downside risk",
         factors=(("downside_vol_60", -1), ("ret_kurt_126", -1), ("ulcer_120", -1)),
     ),
     "reversal": Theme(
         weight=0.10982, horizon=10, coverage=0.9993,
+        label="Short-horizon reversal",
         factors=(("max5_21", -1), ("price_vs_vwap_20", -1), ("resid_rev_21", -1),
                  ("rev_1w", -1)),
     ),
@@ -141,6 +189,41 @@ MIN_LOOKBACK_SESSIONS = 274
 #: Ranks neutral rather than dropping the row when the input is missing.
 NEUTRAL_WHEN_MISSING = frozenset()
 MIN_SECTOR_NAMES = 12
+
+
+def residual_bucket_size(index, sectors: Optional[Dict[str, str]]) -> Dict[str, int]:
+    """How many names `sector_neutral_rank` ranks inside `__RESID__`.
+
+    "Sector-neutral" is a claim the engine makes on every card, and it is only
+    true for the names in a bucket big enough to rank within. Everything else --
+    a missing or `Unknown` sector, and every sector with fewer than
+    MIN_SECTOR_NAMES members -- is pooled into one residual group and ranked
+    against the others there.
+
+    Measured on the live cross-section of 386 eligible names, `__RESID__` held
+    150 of them (38.9%): 79 genuinely unclassified, plus 71 drawn from THIRTEEN
+    real sectors folded in for being too small -- Power, Realty, Telecom,
+    Textiles, Metals & Mining and eight more. A Power stock is neutralised
+    against Realty. Any sector tilt inside that bucket is not neutralised at
+    all, and nothing said so.
+    """
+    if not sectors:
+        return {"resid": len(index), "unknown": len(index), "folded": 0,
+                "buckets": 0}
+    sec = pd.Series({k: sectors.get(k) for k in index})
+    unknown = sec.isna() | sec.astype(str).isin(("", "Unknown", "nan"))
+    named = sec.where(~unknown, "__RESID__")
+    counts = named.value_counts()
+    small = {k for k, n in counts.items()
+             if k != "__RESID__" and n < MIN_SECTOR_NAMES}
+    key = named.where(~named.isin(small), "__RESID__")
+    return {
+        "resid": int((key == "__RESID__").sum()),
+        "unknown": int(unknown.sum()),
+        "folded": int(sum(counts[k] for k in small)),
+        "buckets": int(key.nunique()),
+        "folded_sectors": sorted(small),
+    }
 
 
 def sector_neutral_rank(values: pd.Series,
@@ -223,13 +306,80 @@ def cap_weights(raw: Dict[str, float], cap: float = 0.40, floor: float = 0.06,
     return w
 
 
+def _weights_for_pattern(available: Tuple[bool, ...],
+                         cap: float = 0.40) -> np.ndarray:
+    """The blend weights for one AVAILABILITY PATTERN, re-capped.
+
+    THE CAP HAS TO BE RE-APPLIED HERE, and this is the whole of the fix.
+
+    `THEMES[t].weight` is already post-cap, post-floor and post-coverage-cap:
+    the search normalised each theme's validated top-decile excess, floored at
+    6%, capped at 40%, and capped again at the share of names the theme can
+    speak about. Quality's 0.18991 IS its 0.1899 coverage cap.
+
+    Those weights are correct for a name that has all five themes and for
+    nothing else. The blend then divided by the sum of the weights a name
+    actually had -- which is the right shape and the wrong arithmetic, because
+    dividing by 0.81009 does not re-impose the constraint the weights were
+    chosen under, it removes it. Momentum's 0.40 became 0.40/0.81009 = 49.38%
+    on every name without fundamentals, which is 91% of the live universe.
+    Measured on 2026-09-03 over 386 eligible names: momentum ran at 48.55% mean
+    effective weight and 63.59% of the realised cross-sectional spread, against
+    a cap of 40%. `cap_weights` existed, was correct, and was never called at
+    scoring time.
+
+    THE CAP IS RE-APPLIED AND THE FLOOR IS NOT, which is not an oversight.
+
+    The floor is a fit-time constraint: it exists so a theme that cleared its
+    screen cannot be handed a weight so small it may as well have been cut, and
+    `THEMES[t].weight` already carries it. Re-applying it here re-floors an
+    already-floored vector and compresses every weight toward equal --
+    `cap_weights` blends `floor + (1 - floor*n) * w`, so momentum's 0.40 comes
+    back as 0.06 + 0.70*0.40 = 0.34 EVEN FOR A NAME THAT HAS ALL FIVE THEMES.
+    That is a different model from the one that was fitted, applied to the
+    names the fit was correct for. Caught by
+    `test_a_full_coverage_name_keeps_the_fitted_weights`.
+
+    The cap is different: it is a constraint on the RESULT, and dropping a
+    theme renormalises the survivors upward, which is exactly the direction
+    that can breach it. Nothing here can push a weight DOWN below the floor --
+    renormalisation only raises, and the cap's redistribution only adds to the
+    themes that were not capped -- so the floor has no work left to do.
+
+    Re-capping over the available themes returns momentum to 40.00% (from
+    49.38%) on a four-theme name and lifts ownership to 27.71%, risk to 16.23%
+    and reversal to 16.07%. On the live cross-section the ranking moves:
+    Spearman 0.977 to the uncapped order, but one of six book names and two of
+    the top twenty change, so this is a change to what gets bought and not a
+    presentational one.
+
+    Keyed on the PATTERN rather than on the name: the weights depend only on
+    WHICH themes are present, so there are at most 2**len(THEMES) of them and
+    the iterative cap runs once per distinct pattern instead of once per symbol.
+    """
+    names = [t for t, keep in zip(THEMES, available) if keep]
+    out = np.zeros(len(THEMES), dtype="float64")
+    if not names:
+        return out
+    w = cap_weights({t: THEMES[t].weight for t in names}, cap=cap, floor=0.0)
+    for i, t in enumerate(THEMES):
+        out[i] = float(w.get(t, 0.0))
+    return out
+
+
 def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
                 min_themes: int = MIN_THEMES) -> pd.DataFrame:
     """Rank, combine within theme, blend. One row per symbol.
 
-    Weights renormalise over the themes a name actually has, and `n_themes`
-    records how many that was -- a name scored on three of five is not the same
-    measurement as one scored on five and the card says so.
+    Weights are re-capped over the themes a name actually has -- see
+    `_weights_for_pattern` -- and `n_themes` records how many that was, because
+    a name scored on three of five is not the same measurement as one scored on
+    five and the card says so.
+
+    Emits `<theme>_w` beside `<theme>_sub` and `<theme>_contrib`: the weight
+    that produced THIS name's contribution. Without it the presentation layer
+    had only `Theme.weight` to show, so every card displayed a weight that did
+    not multiply its own z into its own contribution.
     """
     if raw is None or raw.empty:
         return pd.DataFrame()
@@ -246,20 +396,34 @@ def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
         subs[tname] = s
         out[tname + "_sub"] = s
     M = np.column_stack([subs[t].to_numpy("float64") for t in THEMES])
-    W = np.array([THEMES[t].weight for t in THEMES])
     ok = np.isfinite(M)
-    num = np.nansum(np.where(ok, M * W, 0.0), axis=1)
-    den = np.where(ok, W, 0.0).sum(axis=1)
     cnt = ok.sum(axis=1)
+
+    cache: Dict[Tuple[bool, ...], np.ndarray] = {}
+    Weff = np.zeros_like(M)
+    for r in range(M.shape[0]):
+        pattern = tuple(bool(x) for x in ok[r])
+        vec = cache.get(pattern)
+        if vec is None:
+            vec = cache[pattern] = _weights_for_pattern(pattern)
+        Weff[r] = vec
+
     out["n_themes"] = cnt
     out["n_themes_positive"] = ((M > 0) & ok).sum(axis=1)
-    out["score"] = np.where((den > 0) & (cnt >= min_themes),
-                            num / np.maximum(den, 1e-12), np.nan)
-    # per-theme contribution, which sums to the score by construction
+    scored = cnt >= min_themes
+    # The weights already sum to 1 over the themes a name has, so the blend is
+    # a plain dot product. There is no second renormalisation, which is exactly
+    # what went wrong before.
+    total = np.nansum(np.where(ok, M * Weff, 0.0), axis=1)
+    out["score"] = np.where(scored & (Weff.sum(axis=1) > 0), total, np.nan)
+    finite = np.isfinite(out["score"].to_numpy())
     for i, tname in enumerate(THEMES):
-        contrib = np.where(ok[:, i] & np.isfinite(out["score"].to_numpy()),
-                           M[:, i] * W[i] / np.maximum(den, 1e-12), np.nan)
-        out[tname + "_contrib"] = contrib
+        # The weight THIS name was blended at, and the contribution it produced.
+        # `w * sub == contrib` holds row by row, which is the property the card
+        # invites the reader to check and could not previously satisfy.
+        out[tname + "_w"] = np.where(ok[:, i] & finite, Weff[:, i], np.nan)
+        out[tname + "_contrib"] = np.where(ok[:, i] & finite,
+                                           M[:, i] * Weff[:, i], np.nan)
     out["score_rank"] = out["score"].rank(ascending=False, method="first")
     return out
 
@@ -342,6 +506,49 @@ def absolute_floor(scored: pd.DataFrame, dist_200dma: pd.Series,
     return (trend & broad).fillna(False)
 
 
+#: What the composite's cross-sectional spread normally is, measured on the
+#: TRAINING window (2018-11-27 .. 2024-10-25) over 61 sampled dates:
+#:
+#:     min 0.5010   p05 0.5361   median 0.5732   p75 0.6020   max 0.7358
+#:
+#: Frozen here beside the weights, for the same reason they are: a number that
+#: can be edited in a config file can drift away from the thing that was
+#: measured. Neither sealed window was touched to produce it.
+TYPICAL_DISPERSION = 0.5732
+
+
+def score_dispersion(scores: "pd.Series") -> Optional[float]:
+    """Top-decile mean minus median: how far the composite separated the
+    universe today.
+
+    The quantity `stage8_final_signal.scarcity.min_dispersion_ratio` gates on,
+    and the reason that gate has been inert. It read `prediction_dispersion`,
+    which only the deleted fitted model ever populated, so a `is not None` guard
+    skipped it on every v3 run.
+
+    READ THE LIMITS BEFORE TRUSTING IT. A blend of cross-sectional RANKS has a
+    spread bounded by construction -- each sub-score is uniform on [-1, 1] every
+    single day -- so what varies is only how much the themes AGREE. Measured on
+    61 training dates the whole range is 0.5010 to 0.7358 and the worst day is
+    0.874x the median; simulated, a rank blend runs 0.54 when its themes are
+    independent and 0.88 when they move together, with a day-to-day sd near
+    0.027 inside either regime.
+
+    So at the shipped ratio of 0.50 this CANNOT fire, and that is not a defect
+    to fix by lowering the bar -- it is what the control is for. The config says
+    so in its own words: "meant to catch a day the fit has degenerated, not to
+    tune signal count". It detects a broken scorer, not a bad market. What
+    refuses to open a book on a bad market is the BOOK-LEVEL CASH RULE, which
+    counts names above their long moving average and can go to zero for the
+    whole market at once.
+    """
+    s = pd.Series(scores).dropna()
+    if len(s) < 30:
+        return None
+    k = max(int(len(s) * 0.10), 3)
+    return float(s.nlargest(k).mean() - s.median())
+
+
 def attribution(raw: pd.DataFrame, scored: pd.DataFrame, symbol: str) -> pd.DataFrame:
     """FACTOR / THEME / Z / WEIGHT / CONTRIB for one name.
 
@@ -358,9 +565,17 @@ def attribution(raw: pd.DataFrame, scored: pd.DataFrame, symbol: str) -> pd.Data
     for tname, th in THEMES.items():
         sub = scored.at[symbol, tname + "_sub"]
         con = scored.at[symbol, tname + "_contrib"]
+        # The weight THIS name was blended at, falling back to the fit-time one
+        # only for a frame written before `_w` existed. Serving `th.weight`
+        # unconditionally is what put a WEIGHT beside a CONTRIB it does not
+        # produce -- the same defect the card carried, and this helper is
+        # currently called by nothing, so it would have surfaced the day
+        # somebody revived it.
+        wcol = tname + "_w"
+        w = scored.at[symbol, wcol] if wcol in scored.columns else np.nan
         rows.append({"FACTOR": tname, "THEME": tname, "VALUE": np.nan,
                      "Z": float(sub) if pd.notna(sub) else np.nan,
-                     "WEIGHT": th.weight,
+                     "WEIGHT": float(w) if pd.notna(w) else th.weight,
                      "CONTRIB": float(con) if pd.notna(con) else np.nan,
                      "LEVEL": "theme"})
         for fname in th.names:

@@ -1588,6 +1588,52 @@ class ScarcityConfig(_Base):
     #: it was not consulted about opening.
     min_win_probability: TF
     expect_frequent_no_trade: bool = True
+    #: THE BOOK-LEVEL CASH RULE: a bar on the CROSS-SECTION rather than on the
+    #: index or the calendar.
+    #:
+    #: Not the only route to NO TRADE -- the Stage 2 regime gate reaches it too,
+    #: and on replay it fires first on every crisis date tested (2020-03-31,
+    #: 2022-06-17). But the regime gate reads NIFTY trend and volatility: it
+    #: says the MARKET is bad, not that these candidates are weak, and the two
+    #: disagree exactly when an index is held up by a few large caps while
+    #: breadth collapses underneath it.
+    #:
+    #: Every other scarcity control is a rank. `min_universe_percentile = 90`
+    #: admits the top 10% by construction -- the score is a cross-sectional
+    #: rank, so its distribution is uniform every single day and no absolute
+    #: threshold on it can ever bind. Measured on a live run, the score gate
+    #: rejected 0 of 37 defended names. `min_dispersion_ratio` was written to
+    #: fix exactly this and reads a field the deleted fitted model used to
+    #: populate, so it has been skipped on every run since.
+    #:
+    #: This counts names, not ranks: how many of the eligible universe close
+    #: above their long moving average. That CAN be zero for everybody at once,
+    #: which is what makes it a real bar. Measured over 2,018 sessions from
+    #: 2018-06 the count runs 16 to 708 with a median of 319; it falls below 18
+    #: on exactly ONE session, 2020-03-23, the COVID trough. A tail circuit
+    #: breaker, not a signal-count tuner.
+    #:
+    #: DISTINCT FROM `stage4_core_score.absolute_floor`, which applies the same
+    #: bar per name at entry and is shipped disabled on a measured treatment
+    #: effect of -2.2% (95% CI [-3.2%, -1.4%]). That measurement was of a
+    #: per-name gate and does not transfer to a book-level one: ejecting a name
+    #: the day it slips below its average is a turnover cost, and refusing to
+    #: open a book on a day the market has almost nothing above water is not.
+    cash_rule: "CashRuleConfig"
+
+
+class CashRuleConfig(_Base):
+    """Hold cash when the market cannot supply a book."""
+
+    enabled: bool = True
+    #: Sessions in the moving average the bar is measured against.
+    above_ma_sessions: TI
+    #: How many names must clear it. `null` means "the pool the book is drawn
+    #: from" -- `stage6_entry.admission.exit_rank` -- which is not a new number:
+    #: it is the band the engine already treats as the set a position may live
+    #: in. If fewer names than that clear the bar, the book could not be
+    #: maintained even if it were opened.
+    min_qualifying: TOI
 
 
 class StrengthBandsConfig(_Base):

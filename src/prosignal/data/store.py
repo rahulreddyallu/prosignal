@@ -246,7 +246,11 @@ class _PartitionedTable:
             out = out[out[DATE] >= pd.Timestamp(start)]
         if end is not None:
             out = out[out[DATE] <= pd.Timestamp(end)]
-        return out.sort_values(self.key_columns).reset_index(drop=True)
+        # Sort on whatever part of the key survived the projection. `columns`
+        # exists so a caller can ask for three columns instead of eighteen, and
+        # a key column it did not ask for must not turn that into a KeyError.
+        order = [c for c in self.key_columns if c in out.columns]
+        return (out.sort_values(order) if order else out).reset_index(drop=True)
 
     def max_date(self) -> Optional[dt.date]:
         years = self.years()
@@ -312,11 +316,43 @@ class DataStore:
         self.adjust_prices = bool(adjust_prices)
         self.curated = Path(curated_dir)
         self.snapshots = Path(snapshot_dir)
-        self.curated.mkdir(parents=True, exist_ok=True)
-        self.snapshots.mkdir(parents=True, exist_ok=True)
+        # NO DIRECTORY CREATION HERE. Constructing a store is a READ intent far
+        # more often than a write one -- `/ready`, every stage, every research
+        # command -- and creating two directories as a side effect of naming a
+        # path is a surprise in all of them. Every writer already creates its
+        # own parent: `_atomic_write_parquet` and `_atomic_write_json` both
+        # mkdir before the temp file, `_lock_path` mkdirs the root, and
+        # `reset_universe_snapshots` re-creates what it removed.
+        #
+        # It was not free. `DataStore(Path("/nonexistent-curated"), ...)` --
+        # which is how a test asks "what does this do with no store?" -- tried
+        # to mkdir at the filesystem root and raised OSError on any machine with
+        # a read-only /, taking down `test_adj_factor_without_a_price_column_is
+        # _refused` for a reason unrelated to the guard it was written for.
 
         self._price_cache: Optional[Dict[str, Any]] = None
-        self.prices = _PartitionedTable(self.curated, "prices", [SYMBOL, DATE])
+        # KEYED ON SERIES TOO, and this is not a detail.
+        #
+        # NSE publishes several lines per symbol per session: the EQ line, the
+        # T0 same-day-settlement line, and for an issuer with listed debt the
+        # ND / N7 / ... debenture lines. `read_prices` knows this -- its
+        # docstring is about exactly that, and it filters to the cash equity
+        # series so no stage prices an equity off its issuer's bond.
+        #
+        # But the read filter can only choose among rows that survived the
+        # WRITE, and the write deduplicated on (symbol, date) alone. Two lines
+        # for one symbol on one day therefore collapsed to whichever sorted
+        # last, silently. Measured on the shipped store: 235 (symbol, date)
+        # pairs are held under series T0 -- at volume 1, a single share in the
+        # T+0 segment -- with NO EQ row, across 59 symbols including SBIN,
+        # RELIANCE, HDFCBANK and INFY. SBIN lost 19 of its last 305 sessions
+        # that way, which took it to 286 sessions of history against a
+        # 300-session floor and out of the universe altogether.
+        #
+        # The rows already lost are not recoverable by a key change; they need
+        # a re-ingest. What this stops is losing more of them.
+        self.prices = _PartitionedTable(self.curated, "prices",
+                                        [SYMBOL, DATE, "series"])
         self.indices = _PartitionedTable(self.curated, "indices", ["index_name", DATE])
         self.delivery = _PartitionedTable(self.curated, "delivery", [SYMBOL, DATE])
         self._state_path = self.curated / _STATE_FILE
@@ -666,6 +702,16 @@ class DataStore:
         return pd.read_parquet(path, engine="pyarrow")
 
     def replace_table(self, name: str, df: pd.DataFrame) -> int:
+        """Overwrite a whole table. Correct ONLY for a feed that is complete
+        every time it is fetched.
+
+        `equity_master`, `sector_map` and `corporate_actions` are each pulled as
+        one whole file, so replacing is right for them -- a name dropped from
+        NSE's master should leave the store. `statements` is fetched per symbol
+        and skips whatever the provider refuses, so replacing it deleted every
+        symbol not in the current batch; it now merges. Before adding a caller,
+        ask which of those two a feed is.
+        """
         _atomic_write_parquet(df.reset_index(drop=True), self._flat_path(name))
         return len(df)
 
@@ -677,7 +723,58 @@ class DataStore:
         return self.read_table("equity_master")
 
     def write_statements(self, df: pd.DataFrame) -> int:
-        return self.replace_table("statements", df)
+        """MERGE, not replace.
+
+        This called `replace_table`, so every write discarded whatever the
+        previous one had fetched and kept only the current batch. A statement
+        feed is per-symbol and partial by nature -- `fetch_statements` skips a
+        symbol Yahoo refuses rather than failing the run, which is right -- so
+        the table converged on whatever the LAST fetch happened to return, not
+        on the union of everything ever fetched.
+
+        That is why coverage sat at 200 symbols against a 750-name universe
+        while the feed itself serves the universe: probed live, Yahoo returned
+        statements for 12 of 12 sampled symbols the store had nothing for, to
+        the current quarter. Nothing was wrong with the feed. The store was
+        deleting it.
+
+        COMBINED, NOT DEDUPLICATED, and the difference cost 1,147 rows the
+        first time this was written as a plain `write_table`. `fetch_statements`
+        emits THREE annual rows per symbol-year -- income statement, balance
+        sheet and cash flow -- each carrying only its own fields and NaN
+        elsewhere. Deduplicating on (symbol, period_end, kind) keeps whichever
+        arrived last and silently discards the other two, so revenue and equity
+        vanish and only the cash-flow columns survive. Caught by watching annual
+        rows fall from 2,406 to 1,259 while symbol coverage rose.
+
+        So the three are folded into one row per (symbol, period_end, kind),
+        taking the newest non-null value per field. A restatement supersedes,
+        a re-run is idempotent, and a partial fetch adds without deleting.
+        """
+        if df is None or df.empty:
+            return 0
+        keys = [SYMBOL, "period_end", "kind"]
+        path = self._flat_path("statements")
+        frame = df.copy()
+        frame["period_end"] = pd.to_datetime(frame["period_end"])
+        if path.is_file():
+            existing = pd.read_parquet(path, engine="pyarrow")
+            existing["period_end"] = pd.to_datetime(existing["period_end"])
+            # `frame` last so a re-fetch supersedes a stale earlier value.
+            combined = pd.concat([existing, frame], ignore_index=True)
+        else:
+            combined = frame
+        missing = [k for k in keys if k not in combined.columns]
+        if missing:
+            raise DataError(
+                f"statements rows are missing key column(s) {missing}; writing "
+                f"them would collapse periods or statement kinds together")
+        combined = (combined.groupby(keys, dropna=False, as_index=False)
+                            .last()          # newest non-null per field
+                            .sort_values(keys)
+                            .reset_index(drop=True))
+        _atomic_write_parquet(combined, path)
+        return len(df)
 
     def read_statements(self) -> pd.DataFrame:
         """Income statement, balance sheet and cash flow by period.
@@ -971,9 +1068,25 @@ class DataStore:
         prices = self.prices.read()
         if prices.empty:
             return
-        dupes = int(prices.duplicated(subset=[SYMBOL, DATE]).sum())
+        # WITHIN ONE SERIES. A symbol legitimately has an EQ line and a T0 line
+        # on the same date, so (symbol, date) alone is not a key -- asserting it
+        # was is the same mistake that made the write drop one of them. What
+        # must never happen is two rows for one symbol, one date and one series.
+        subset = [SYMBOL, DATE] + (["series"] if "series" in prices.columns else [])
+        dupes = int(prices.duplicated(subset=subset).sum())
         if dupes:
             raise DataError(
-                f"price store contains {dupes} duplicate (symbol, date) rows -- "
-                f"this corrupts volume sums and cross-sectional ranks"
+                f"price store contains {dupes} duplicate "
+                f"({', '.join(subset)}) rows -- this corrupts volume sums and "
+                f"cross-sectional ranks"
             )
+        # And the equity series, which is what every stage reads, must still be
+        # one row per name per session.
+        if "series" in prices.columns and self.equity_series:
+            eq = prices[prices["series"].isin(self.equity_series)]
+            eq_dupes = int(eq.duplicated(subset=[SYMBOL, DATE]).sum())
+            if eq_dupes:
+                raise DataError(
+                    f"price store contains {eq_dupes} duplicate (symbol, date) "
+                    f"rows WITHIN the equity series {list(self.equity_series)}"
+                )

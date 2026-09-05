@@ -61,6 +61,23 @@ if ! "$PY" -m prosignal.cli data ingest >>"$LOG" 2>&1; then
   exit 1
 fi
 
+# THE MANIFEST DESCRIBES THE STORE, AND THE INGEST JUST CHANGED IT.
+#
+# Nothing re-manifested. `data manifest --write` was reachable only by hand, so
+# the first ingest after any manifest left the two disagreeing -- and stayed
+# that way, because the next ingest changed the store again. The restart gate
+# reads the manifest, so it failed every morning for a reason that was not the
+# reason it exists to catch, and a failing gate nobody can act on is a gate
+# everybody learns to ignore.
+#
+# Written here, between the ingest and the analysis, so the run is scored
+# against a store the manifest actually describes. Not fatal: a stale manifest
+# makes the reproducibility claim weaker, it does not make the observation
+# wrong.
+if ! "$PY" -m prosignal.cli data manifest --write >>"$LOG" 2>&1; then
+  alert "manifest write FAILED -- the run will still be recorded, but no figure computed against the manifest describes this store"
+fi
+
 # --skip-if-recorded, because cron cannot see an NSE holiday. On one the ingest
 # fetches nothing and exits 0, the staleness gate counts a single weekday and
 # passes, and the analysis re-ranks the previous session -- writing a SECOND
@@ -92,6 +109,18 @@ fi
 # Failures are ignored on purpose: the observation is recorded either way,
 # and a cold cache is slow rather than wrong.
 API="${PROSIGNAL_API:-http://127.0.0.1:8000}"
+
+# IS THERE AN API AT ALL? On a host that runs the job but not the service --
+# a laptop, a container that only ingests -- every curl below fails and the
+# last one alerts "the screen may be empty" on a night when nothing is wrong.
+# An alarm that fires on every healthy run trains the reader to ignore the one
+# that matters.
+if ! curl -fsS -m 10 -o /dev/null "${API}/health" 2>/dev/null; then
+  say "no API at ${API} -- skipping cache warm and the screen check (the run IS recorded)"
+  say "--- observation complete"
+  exit 0
+fi
+
 warm() {
   local path="$1"
   if curl -fsS -m 600 -o /dev/null \

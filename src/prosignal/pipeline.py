@@ -155,6 +155,21 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     manifest = manifest or _manifest_from_store(store, config, run_id, resolved, universe)
     timings["stage0_data"] = t()
 
+    # THE LINEAGE THIS RUN BELONGS TO, and it is not decoration. `mode` has been
+    # on the run record since v1 and was written as the literal "live" on every
+    # path -- cron, API, CLI, and every `--date` backfill alike -- so the ledger
+    # could not tell a session the market actually produced from a
+    # reconstruction of one. They then chained: a backfill appended after a live
+    # run became that run's successor, and the next live session read its open
+    # book out of a replay. `Ledger.previous_run` filters on this.
+    #
+    # A caller that names a date is asking the engine to re-derive a past
+    # session. That is a replay whatever the reason for it, so the test is the
+    # request, not the outcome: `as_of` resolves to the same session `calendar.
+    # last` would give on a normal evening, and a rule keyed on the resolved
+    # date would call that a replay too.
+    mode = "live" if as_of is None else "replay"
+
     context = RunContext(
         run_id=run_id,
         trial_id=f"T-{run_id[:6]}",
@@ -164,7 +179,7 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         engine_version=ENGINE_VERSION,
         schema_version=SCHEMA_VERSION,
         config_version=config.version,
-        mode="live",
+        mode=mode,
     )
 
     # ---- Stage 1 ----------------------------------------------------------
@@ -203,7 +218,11 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # Entry constraints do not govern open positions. That is Stage 8's
     # contract and Stage 6 already honours it; Stage 3 must too.
     ledger = Ledger(config.paths.ledger)
-    previous = ledger.previous_run(before=resolved)
+    # Scoped to this run's own lineage, and fatal when the chosen date holds
+    # rows that disagree about the book -- see `Ledger.previous_run`. There is
+    # no safe default for "what was held": every fallback available here
+    # (empty, newest, first) silently invents a position state.
+    previous = ledger.previous_run(before=resolved, mode=mode)
     open_book = list(previous.get("signals_generated") or []) if previous else []
     previous_slate = list(previous.get("slate_shown") or []) if previous else []
 
@@ -220,9 +239,25 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # ---- Stage 4 ----------------------------------------------------------
     step(4)
     t = _clock()
-    scores = stage4_core_score.run(
-        eligibility, store, calendar, regime, config, as_of=resolved
-    )
+    # A REFUSAL TO RANK IS A DECISION, NOT A CRASH. `RankingUnavailable` is
+    # correct to be fatal -- falling back to another scorer would issue signals
+    # from a model that was not the one measured -- but it is a PipelineError
+    # and nothing caught it, so it reached the job runner as an unhandled
+    # exception and the screen showed a stack trace where a reason belongs.
+    #
+    # Found by replaying 2020-03-23, the worst session in the store: the
+    # liquidity screen and the eligibility gates left SIX names, the v3 block
+    # refused to rank a universe that small, and the engine errored instead of
+    # saying so. That is the single date this engine most needs to be legible
+    # on. `PipelineBlocked` is exactly this contract -- its docstring is "the
+    # run refused to produce an opinion. NOT the same as NO TRADE."
+    try:
+        scores = stage4_core_score.run(
+            eligibility, store, calendar, regime, config, as_of=resolved
+        )
+    except stage4_core_score.RankingUnavailable as exc:
+        raise PipelineBlocked([str(exc)],
+                              stage=stage4_core_score.STAGE_NAME) from exc
     timings[stage4_core_score.STAGE_NAME] = t()
     release_memory()
 

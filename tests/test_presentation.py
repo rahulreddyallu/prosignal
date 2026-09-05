@@ -81,7 +81,9 @@ def test_the_model_and_the_composite_are_told_apart_by_their_own_keys():
     on every healthy run -- the same misrepresentation, inverted."""
     live = {_bare(c): {} for c in FAMILY_COLUMNS}
     assert _scorer_used([{"factors": live}])["model"] == "cross-sectional"
-    assert _scorer_used([{"factors": live}])["validated"] is True
+    # Was `is True`. The model was retired on 2026-09-03; telling the two apart
+    # is still the job, certifying either of them is not. See test_coverage.
+    assert _scorer_used([{"factors": live}])["validated"] is False
 
     composite = {k: {} for k in COMPOSITE_KEYS}
     assert _scorer_used([{"factors": composite}])["model"] == "composite"

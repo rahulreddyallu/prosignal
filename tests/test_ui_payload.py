@@ -101,7 +101,7 @@ def test_the_view_is_json_serialisable():
     "No recommendation was produced", # withheld on bad data
     "could not be completed",         # a failed run must not imply a trade
     "Not tested",      # NOT_TESTABLE is not a pass
-    "What would move this to Buy",    # the near misses stay actionable
+    "To qualify",                     # the near misses stay actionable
     # The empty History page. It waited for a CLOSE and now waits for a CALL:
     # open positions are marked to the latest close and to the index over the
     # same days, so this state means the engine has issued nothing at all.

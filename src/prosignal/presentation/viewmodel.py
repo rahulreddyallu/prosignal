@@ -14,6 +14,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..core.logging import get_logger
+from ..features.v3 import THEMES as _V3_THEMES
 from .evidence import build_evidence, category_summary, confirmation_count
 from .narrative import build_narrative
 from .selection import BUY, SLOTS, WATCH, select_slate
@@ -85,64 +86,142 @@ def _tidy_company(name: str) -> str:
 def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Which scorer actually produced this ranking.
 
-    Stage 4 falls back to a hand-weighted composite when the cross-sectional
-    model cannot fit -- an insufficient store is treated as a benign reason, so
-    the run proceeds rather than failing. That is a defensible degraded mode
-    and the engine records it in a note. The note never reached this payload,
-    so the composite's output rendered identically to the model's: same cards,
-    same green contributions, same BUY.
+    Stage 4 can rank on the v3 composite, on v9R, on the hand-weighted family
+    composite, or -- historically -- on a fitted cross-sectional model. They
+    render identically: same cards, same green contributions, same BUY. So the
+    screen has to say which one, and saying the wrong one is the single most
+    misleading thing this interface can do.
 
-    The composite was measured at -0.047%/month excess against an equal-weight
-    benchmark, t = -0.11. Presenting it as the validated model is the single
-    most misleading thing this interface could do, so it is detected here from
-    the factor names themselves rather than trusted to arrive as a flag.
+    DECIDED ON `evidence_tier`, which the scoring stage stamps onto every
+    FactorScore, and NOT on the factor names. Two rounds of name-matching both
+    failed, in opposite directions:
 
-    DETECTED BY THE COMPOSITE'S OWN KEYS, not by failing to recognise the
-    model's. This read `seen & FACTOR_MAP` while FACTOR_MAP still held the
-    pre-family factor names, so the fitted model's family keys matched nothing
-    and every healthy run was reported as "the cross-sectional model could not
-    fit this run ... treat this shortlist as unscored". That is the exact
-    misrepresentation this function exists to prevent, inverted. Keying on the
-    composite's four names makes the failure direction safe: an unrecognised
-    key set reports UNKNOWN rather than asserting either scorer.
+      - matching `seen & FACTOR_MAP` while FACTOR_MAP held pre-family names
+        reported every healthy run as unscored;
+      - matching `seen & (MODEL_KEYS - COMPOSITE_KEYS)` reported every v3 run as
+        the fitted `cross-sectional` model, VALIDATED -- because the v3 theme
+        keyed `reversal` collides with a family of the same name in a model
+        deleted on 2026-09-03. Since the interface renders its caveat only when
+        `validated` is false, that made the caveat unreachable.
+
+    A tier is written by the code that did the scoring, so it cannot collide
+    with a retired model's vocabulary. An unrecognised tier and key set reports
+    UNKNOWN rather than asserting either scorer, which is the safe direction.
+
+    `severity` separates a FAILURE ("the model could not score this run") from a
+    DISCLOSURE ("the ranking is evidenced, the book size is not"). Both set
+    `validated: False`; only the first is an alarm.
     """
     from .evidence import COMPOSITE_KEYS, MODEL_KEYS
 
     seen: set = set()
+    tiers: set = set()
     for pick in picks:
-        seen.update((pick.get("factors") or {}).keys())
+        factors = pick.get("factors") or {}
+        seen.update(factors.keys())
+        for detail in factors.values():
+            tier = (detail or {}).get("tier")
+            if tier:
+                tiers.add(str(tier))
     if not seen:
         return {"model": "unknown", "validated": False,
+                "points": ["No factor detail was recorded for this run"],
                 "note": "No factor detail was recorded for this run."}
-    # Decided on the keys only ONE scorer can emit. `value` and `quality` are
-    # both fitted families and hand-weighted composite factors -- the engine
-    # genuinely uses the same two words for both -- so a shared key identifies
-    # nothing and matching on it would call a composite run a model run.
-    if seen & (MODEL_KEYS - COMPOSITE_KEYS):
-        return {"model": "cross-sectional", "validated": True, "note": None}
+
+    # DECIDED ON THE TIER, WHICH STAGE 4 STAMPS, not on the factor NAMES.
+    #
+    # Name-matching was never safe and it failed in the worst available
+    # direction. The v3 composite emits a theme keyed `reversal`; the deleted
+    # Fama-MacBeth model had a family keyed `reversal` too. So
+    # `seen & (MODEL_KEYS - COMPOSITE_KEYS)` was non-empty on EVERY v3 run and
+    # this function returned {"model": "cross-sectional", "validated": True} --
+    # certifying the ranking as produced by a model that was removed from the
+    # codebase on 2026-09-03, and marking it validated. The interface renders
+    # its warning only when `validated` is false, so the "treat this shortlist
+    # as unscored" branch below had become unreachable.
+    #
+    # `evidence_tier` is written by the stage that did the scoring and travels
+    # on every FactorScore, so it cannot collide with a retired model's
+    # vocabulary.
+    if "v3_theme" in tiers:
+        return {
+            "model": "v3_composite",
+            "validated": False,
+            # A DISCLOSURE, not an alarm -- see the render in index.html. The
+            # ranking is what the sealed windows evidenced; the six-name book
+            # drawn from it is not, and that is true on every run.
+            "severity": "note",
+            "factors": sorted(seen),
+            # POINTERS, NOT PROSE. This was a ninety-word paragraph at the top
+            # of the screen; every number in it is kept and the sentences
+            # around them are gone. A caveat nobody finishes reading is not a
+            # caveat.
+            "points": [
+                "v3 composite \u00b7 22 factors \u00b7 5 themes \u00b7 40% cap per name",
+                "Ranking: rank IC +0.049 and +0.036, both t > 3.6, two sealed holdouts",
+                "Six-name book: top-ten excess +0.38%, t 0.81 \u2014 not validated",
+            ],
+            "note": "The ranking is evidenced. A book this concentrated is not.",
+        }
+    # THE CERTIFICATION IS GONE. The IDENTIFICATION IS NOT.
+    #
+    # This branch used to return:
+    #     {"model": "cross-sectional", "validated": True, "note": None}
+    #
+    # and every one of those three fields was wrong in a different way. The
+    # model was deleted on 2026-09-03. `validated: True` suppresses the
+    # interface's caveat, which renders only when it is false. `note: None`
+    # leaves nothing to render even if it did.
+    #
+    # Keying the live path on `evidence_tier` fixed the run in front of you and
+    # left this reachable for every payload written before tiers existed --
+    # `MODEL_KEYS - COMPOSITE_KEYS` is {beta, delivery, drawdown, lottery, mom,
+    # reversal, skew}, which ANY stored pre-v3 run matches. Rendered on the day
+    # the code is upgraded and the newest stored run predates it: today's date,
+    # five BUY badges, "Lottery-like payoff shape leads at -1.94 sd" as the
+    # reason, and no caveat anywhere.
+    #
+    # Naming it is still right -- "unknown" tells a reader less than "the model
+    # we retired" -- so the name stays and the certification goes.
+    if "model" in tiers or (seen & (MODEL_KEYS - COMPOSITE_KEYS)):
+        return {
+            "model": "cross-sectional",
+            "validated": False,
+            "severity": "alarm",
+            "factors": sorted(seen),
+            "points": [
+                "Ranked by the fitted cross-sectional model, retired 2026-09-03",
+                "Not the engine running now \u2014 this run predates it",
+                "Re-scan before acting on these names",
+            ],
+            "note": ("Ranked by the fitted cross-sectional model, which was "
+                     "retired on 2026-09-03. Re-scan before acting."),
+        }
     if not (seen & (COMPOSITE_KEYS - MODEL_KEYS)):
         return {
             "model": "unknown",
             "validated": False,
+            "severity": "alarm",
             "factors": sorted(seen),
-            "note": (
-                "This run's factor names match neither the fitted model nor the "
-                "hand-weighted composite, so which scorer produced the ranking "
-                "cannot be established from the payload. Treat the shortlist as "
-                "unattributed until that is resolved."
-            ),
+            "points": [
+                "Scorer cannot be identified from this run\u2019s factor names",
+                "Treat the shortlist as unattributed",
+            ],
+            "note": "Which model ranked this is not established.",
         }
     return {
         "model": "composite",
         "validated": False,
+        "severity": "alarm",
         "factors": sorted(seen),
-        "note": (
-            "The cross-sectional model could not fit this run, so the ranking "
-            "came from the hand-weighted composite instead. That composite was "
-            "measured at -0.047% excess per month against an equal-weight "
-            "benchmark, t = -0.11 -- it is a placeholder, not a signal. Treat "
-            "this shortlist as unscored."
-        ),
+        "points": [
+            "Ranked by the hand-weighted composite, not the fitted model",
+            "That composite measured \u22120.047% excess per month, t \u22120.11",
+            "Treat this shortlist as unscored",
+        ],
+        "note": ("The hand-weighted composite ranked this run, not the model. "
+                 "It measured -0.047% excess per month, t = -0.11 -- a "
+                 "placeholder, not a signal."),
     }
 
 
@@ -573,12 +652,13 @@ def _unscored_note(card: Dict[str, Any]) -> Optional[str]:
 #:
 #: See the 2026-09 quant audit, section D. Changing a LABEL is a presentation
 #: fix and does not touch the frozen model; changing a SIGN would.
+#: Read from the model rather than restated here. This was a second copy of the
+#: theme names, so the screen said "Low-margin tilt" while the scoring note
+#: written into the same run's record said "quality 19%" -- one honest label and
+#: one not, for the same theme, in the same run.
 V3_THEME_LABELS: Dict[str, str] = {
-    "momentum":  "Momentum",
-    "quality":   "Low-margin tilt",
-    "ownership": "Delivery strength",
-    "risk":      "Downside risk",
-    "reversal":  "Short-horizon reversal",
+    name: (theme.label or name.title())
+    for name, theme in _V3_THEMES.items()
 }
 
 

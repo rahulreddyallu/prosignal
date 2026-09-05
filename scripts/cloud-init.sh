@@ -6,6 +6,9 @@
 # Two placeholders must be edited before pasting:
 #   __DOMAIN__  the hostname you pointed at this machine
 #   __TOKEN__   the access token, 24+ characters
+#   __ALERT__   where a failure should reach you. See PROSIGNAL_ALERT_CMD
+#               below -- leave it as the default and failures stay in a log
+#               file on a box nobody logs into.
 #
 # Progress is written to /var/log/prosignal-setup.log. If the site does not
 # come up, that file says why.
@@ -14,6 +17,12 @@ exec > >(tee -a /var/log/prosignal-setup.log) 2>&1
 
 DOMAIN="__DOMAIN__"
 TOKEN="__TOKEN__"
+# A command that receives the message as its single argument. A healthcheck.io
+# ping URL, a Telegram send, `mail -s`. Left empty, forward_run.sh's alerting is
+# inert -- which is what it was, because this file wrote the token and the
+# allocator variables into /etc/prosignal.env and never this one. Every failure
+# the nightly is careful to detect went to a log file and stopped there.
+ALERT_CMD="__ALERT__"
 APP_USER="ubuntu"
 APP_DIR="/home/${APP_USER}/prosignal"
 
@@ -65,7 +74,19 @@ PROSIGNAL_PUBLIC=1
 ARROW_DEFAULT_MEMORY_POOL=system
 MALLOC_ARENA_MAX=2
 PYTHONMALLOC=malloc
+PROSIGNAL_ALERT_CMD=${ALERT_CMD}
 EOF
+
+# A FAILURE ALARM CANNOT REPORT THAT THE JOB NEVER STARTED.
+# It only fires from inside a run. The job stopping -- a dead instance, an
+# unloaded cron, a full disk -- is silent by construction, and silence and
+# success look identical. If ALERT_CMD is a healthcheck.io-style ping URL,
+# point its schedule at 20:30 IST daily and it alarms on ABSENCE, which is the
+# failure this deployment has actually had.
+if [ -z "${ALERT_CMD}" ] || [ "${ALERT_CMD}" = "__ALERT__" ]; then
+  echo "WARNING: PROSIGNAL_ALERT_CMD is not set. Failures will be written to"
+  echo "         ${APP_DIR}/data/ledger/forward.log and nowhere else."
+fi
 chmod 600 /etc/prosignal.env
 
 # --- 5. the API as a service --------------------------------------------

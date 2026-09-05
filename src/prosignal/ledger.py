@@ -22,10 +22,10 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from .modelprint import model_fingerprint
 from .core.contracts import FinalSignalOutput, LedgerRow, RunContext
-from .core.errors import LedgerError
+from .core.errors import AmbiguousLedgerHistory, LedgerError
 from .core.logging import get_logger
 
-__all__ = ["Ledger", "row_from_output"]
+__all__ = ["Ledger", "row_from_output", "AmbiguousLedgerHistory"]
 
 log = get_logger(__name__)
 
@@ -106,7 +106,60 @@ class Ledger:
             last = row
         return last
 
-    def previous_run(self, before: Optional[dt.date] = None) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _book_identity(row: Dict[str, Any]) -> tuple:
+        """What a row claims was held and shown. Two rows agreeing on this
+        describe the same state, whatever else differs between them."""
+        book = tuple(sorted(str(s) for s in (row.get("signals_generated") or [])))
+        slate = tuple(
+            str(e.get("ticker"))
+            for e in (row.get("slate_shown") or [])
+            if isinstance(e, dict) and e.get("ticker")
+        )
+        return book, slate
+
+    def _rows_on(self, when: dt.date, mode: Optional[str]) -> List[Dict[str, Any]]:
+        """Every row for one date and lineage, in a deterministic order.
+
+        Ordered by `(logged_at, run_id)` rather than by position in the file.
+        File order is an artefact of when a process happened to flush; two
+        clones of the same ledger must resolve the same book.
+        """
+        out = []
+        for row in self.iter_rows():
+            if self._row_date(row) != when:
+                continue
+            if mode is not None and str(row.get("mode") or "live") != mode:
+                continue
+            out.append(row)
+        return sorted(out, key=lambda r: (str(r.get("logged_at") or ""),
+                                          str(r.get("run_id") or "")))
+
+    def newest_on(self, when: dt.date,
+                  mode: Optional[str] = "live") -> Optional[Dict[str, Any]]:
+        """The last row recorded for one date and lineage.
+
+        The ledger is the record; the run-detail file is a display cache that
+        is allowed to fail. When it does, the newest payload on disk is an
+        EARLIER run for the same date -- same `as_of`, so the staleness check
+        passes -- and the screen shows a slate the record does not name, with
+        nothing saying so. `/today` compares against this.
+        """
+        rows = self._rows_on(when, mode)
+        return rows[-1] if rows else None
+
+    @staticmethod
+    def _row_date(row: Dict[str, Any]) -> Optional[dt.date]:
+        try:
+            return dt.date.fromisoformat(str(row.get("date"))[:10])
+        except (TypeError, ValueError):
+            return None
+
+    def previous_run(
+        self,
+        before: Optional[dt.date] = None,
+        mode: Optional[str] = "live",
+    ) -> Optional[Dict[str, Any]]:
         """The most recent recorded run strictly before ``before``.
 
         The engine holds no live position state -- every run rebuilds its view
@@ -115,24 +168,277 @@ class Ledger:
         read together because this is a full scan of a file that grows without
         bound; doing it twice per run was pure waste.
 
+        TWO THINGS THIS GUARDS, both of which it used to get wrong.
+
+        LINEAGE. Rows are filtered to one ``mode`` -- the run's own. A live run
+        reads live history; a replay of a past date reads replay history. They
+        used to share one stream, so a backfill appended after a live run became
+        that run's successor and the next live session inherited a book from a
+        reconstruction. `mode` has existed on the row since v1 and was written
+        as the literal "live" on every path, so nothing could tell them apart.
+        Pass ``mode=None`` to read across every lineage, which is what a
+        reporting caller wants and a pipeline caller never does.
+
+        AMBIGUITY. The selection rule was `if latest_date is None or when >=
+        latest_date`, so within a date the last line in the FILE won. On the
+        shipped ledger 80 dates carried more than one run and 2026-08-18 carried
+        676 of them recording seven different books. There is no fact of the
+        matter about what was held on such a date, so this raises
+        :class:`AmbiguousLedgerHistory` rather than choosing. Rows that agree
+        about the book -- the ordinary case of an operator pressing SCAN twice
+        -- are not a conflict, and the newest is returned.
+
         Rows whose date will not parse are skipped rather than crashing the
         run: one bad line must not become "the engine holds nothing".
         """
-        latest: Optional[Dict[str, Any]] = None
         latest_date: Optional[dt.date] = None
         for row in self.iter_rows():
-            raw = row.get("date")
-            try:
-                when = dt.date.fromisoformat(str(raw)[:10])
-            except (TypeError, ValueError):
+            when = self._row_date(row)
+            if when is None:
                 continue
             if before is not None and when >= before:
                 continue
-            if latest_date is None or when >= latest_date:
-                latest_date, latest = when, row
-        return latest
+            if mode is not None and str(row.get("mode") or "live") != mode:
+                continue
+            if latest_date is None or when > latest_date:
+                latest_date = when
+        if latest_date is None:
+            return None
 
-    def open_book(self, before: Optional[dt.date] = None) -> List[str]:
+        rows = self._rows_on(latest_date, mode)
+        if not rows:
+            # Unreachable while `latest_date` is chosen under the same `mode`
+            # filter `_rows_on` applies -- which is the point. Mutating either
+            # filter away makes the two disagree, and the symptom would be an
+            # IndexError on `rows[-1]` rather than anything a reader could act
+            # on. Found by mutation-testing the lineage filter.
+            raise LedgerError(
+                f"no {mode or 'any'}-mode run recorded for "
+                f"{latest_date.isoformat()}, yet that date was selected as the "
+                f"most recent one. The date scan and the row fetch are "
+                f"filtering differently.",
+                date=latest_date.isoformat(), mode=str(mode))
+        identities = {self._book_identity(r) for r in rows}
+        if len(identities) > 1:
+            books = sorted({i[0] for i in identities})
+            raise AmbiguousLedgerHistory(
+                f"{len(rows)} runs are recorded for {latest_date.isoformat()} "
+                f"and they disagree about the book: "
+                + "; ".join(
+                    "[" + (", ".join(b) if b else "empty") + "]" for b in books[:6]
+                )
+                + (f" (+{len(books) - 6} more)" if len(books) > 6 else "")
+                + ". The open book is the engine's entire position memory, so "
+                  "there is nothing to fall back to -- resolve the ledger for "
+                  "that date (keep one run, or re-record it) before running "
+                  "against it.",
+                date=latest_date.isoformat(),
+                runs=len(rows),
+                distinct_books=len(books),
+                run_ids=[str(r.get("run_id")) for r in rows[:8]],
+            )
+        return rows[-1]
+
+    #: A run recorded this many calendar days after the session it scores is
+    #: still the live run for it. One, not zero: the cron fires in the evening
+    #: and a run that starts at 23:50 finishes tomorrow.
+    LIVE_RECORDING_LAG_DAYS = 1
+
+    @classmethod
+    def _observed_mode(cls, row: Dict[str, Any]) -> Optional[str]:
+        """What the row's own timestamps say it was, or None if they cannot say.
+
+        The ONLY evidence in the record that separates a session the market
+        produced from a re-derivation of one. `mode` was written as the literal
+        "live" on every path, so it carries no information; `logged_at` against
+        `date` carries all of it. A run recorded weeks after the session it
+        scores is a backfill whatever its `mode` field claims.
+        """
+        market = cls._row_date(row)
+        try:
+            logged = dt.date.fromisoformat(str(row.get("logged_at"))[:10])
+        except (TypeError, ValueError):
+            return None
+        if market is None:
+            return None
+        lag = (logged - market).days
+        if lag < 0:
+            return None              # recorded before the session: unreadable
+        return "live" if lag <= cls.LIVE_RECORDING_LAG_DAYS else "replay"
+
+    def lineage_audit(self) -> Dict[str, Any]:
+        """What the ledger actually contains, before anything is changed.
+
+        Read-only. Answers the question `mode` was supposed to answer and
+        could not: how much of this record is the engine running, and how much
+        is the engine being re-run.
+        """
+        live_dates: Dict[dt.date, List[Dict[str, Any]]] = {}
+        replay_dates: set = set()
+        unknown = 0
+        for row in self.iter_rows():
+            observed = self._observed_mode(row)
+            when = self._row_date(row)
+            if observed is None or when is None:
+                unknown += 1
+                continue
+            if observed == "live":
+                live_dates.setdefault(when, []).append(row)
+            else:
+                replay_dates.add(when)
+        conflicted = []
+        for when, rows in sorted(live_dates.items()):
+            identities = {self._book_identity(r) for r in rows}
+            if len(identities) > 1:
+                conflicted.append({
+                    "date": when.isoformat(),
+                    "runs": len(rows),
+                    "distinct_books": len({i[0] for i in identities}),
+                    "config_versions": sorted({str(r.get("config_version"))
+                                               for r in rows}),
+                })
+        return {
+            "rows": sum(1 for _ in self.iter_rows()),
+            "market_dates": len(set(live_dates) | replay_dates),
+            "recorded_on_the_day": sorted(d.isoformat() for d in live_dates),
+            "backfilled_only": len(replay_dates - set(live_dates)),
+            "undatable_rows": unknown,
+            "live_dates_that_conflict": conflicted,
+        }
+
+    def repair_lineage(self, *, dry_run: bool = True) -> Dict[str, Any]:
+        """Stamp each row with the lineage its own timestamps prove, once.
+
+        NOTHING IS DELETED. Every row keeps its measurements, its trial id and
+        its place in the file; what changes is one label that was never
+        populated with anything but the constant "live". Deleting the
+        contaminated rows was the obvious move and it is the wrong one: the
+        honest trial count feeds the Deflated Sharpe directly, `Ledger.append`
+        is fatal-on-failure precisely so that count cannot be corrupted, and
+        removing 1,365 rows to tidy a lineage field would corrupt it far more
+        thoroughly than a wrong label ever did.
+
+        THREE OUTCOMES, and the third is the one that matters.
+
+        `live`    -- recorded within LIVE_RECORDING_LAG_DAYS of the session it
+                     scores. This is the engine running.
+        `replay`  -- recorded later. A re-derivation of a past session, which
+                     is a legitimate and useful thing to do and is not a
+                     forward observation of anything.
+        `quarantine` -- recorded on the day, and DISAGREEING with another run
+                     recorded on the same day about what was held. These cannot
+                     be resolved and this method does not try: the same date
+                     under the SAME config_version produced up to five different
+                     books, so the code moved underneath, and
+                     `model_fingerprint` -- the field that exists to catch
+                     exactly that -- is null on 1,733 of 1,942 rows. There is no
+                     recorded property that reconstructs which book was real.
+                     Guessing would put a fabricated position history under
+                     every hysteresis decision that reads it, so they are set
+                     aside instead: still counted, still readable, out of the
+                     lineage.
+
+        Returns the summary either way; `dry_run=False` writes. A backup of
+        every file is written beside it first.
+        """
+        import shutil
+
+        summary = {"live": 0, "replay": 0, "quarantine": 0, "unchanged": 0,
+                   "undatable": 0, "files": [], "quarantined_dates": [],
+                   "dry_run": dry_run}
+
+        # Which same-day dates disagree with themselves. Decided BEFORE any row
+        # is rewritten, so the classification is a function of the file as it
+        # stands rather than of the order rows happen to be visited in.
+        by_day: Dict[dt.date, List[Dict[str, Any]]] = {}
+        for row in self.iter_rows():
+            if self._observed_mode(row) == "live":
+                when = self._row_date(row)
+                if when is not None:
+                    by_day.setdefault(when, []).append(row)
+        quarantined = {
+            when for when, rows in by_day.items()
+            if len({self._book_identity(r) for r in rows}) > 1
+        }
+        summary["quarantined_dates"] = sorted(d.isoformat() for d in quarantined)
+
+        for path in sorted(self.dir.glob("runs-*.jsonl")):
+            out_lines: List[str] = []
+            changed = 0
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    out_lines.append(line)          # keep what cannot be parsed
+                    continue
+                observed = self._observed_mode(row)
+                if observed is None:
+                    summary["undatable"] += 1
+                    out_lines.append(line)
+                    continue
+                when = self._row_date(row)
+                target = ("quarantine"
+                          if observed == "live" and when in quarantined
+                          else observed)
+                summary[target] += 1
+                if str(row.get("mode") or "live") == target:
+                    summary["unchanged"] += 1
+                    out_lines.append(line)
+                    continue
+                row["mode"] = target
+                # Why, on the row, so the change explains itself to the next
+                # reader without reference to this docstring.
+                row["mode_source"] = (
+                    "repair_lineage: logged_at vs date"
+                    + ("; same-day runs disagree about the book"
+                       if target == "quarantine" else "")
+                )
+                changed += 1
+                out_lines.append(json.dumps(row, separators=(",", ":"),
+                                            sort_keys=True))
+            summary["files"].append({"file": path.name, "rewritten": changed})
+            if not dry_run and changed:
+                backup = path.with_suffix(".jsonl.pre-lineage-repair")
+                if not backup.exists():                  # never clobber a backup
+                    shutil.copy2(path, backup)
+                tmp = path.with_suffix(".jsonl.tmp")
+                tmp.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+                os.replace(str(tmp), str(path))
+        return summary
+
+    def conflicting_dates(self, mode: Optional[str] = "live") -> List[Dict[str, Any]]:
+        """Every date whose recorded runs disagree about the book.
+
+        The diagnostic behind :class:`AmbiguousLedgerHistory`: it answers "which
+        days do I have to clean up" without running an analysis into the wall.
+        """
+        by_date: Dict[dt.date, List[Dict[str, Any]]] = {}
+        for row in self.iter_rows():
+            when = self._row_date(row)
+            if when is None:
+                continue
+            if mode is not None and str(row.get("mode") or "live") != mode:
+                continue
+            by_date.setdefault(when, []).append(row)
+        out: List[Dict[str, Any]] = []
+        for when in sorted(by_date):
+            rows = by_date[when]
+            identities = {self._book_identity(r) for r in rows}
+            if len(identities) > 1:
+                out.append({
+                    "date": when.isoformat(),
+                    "runs": len(rows),
+                    "distinct_books": len({i[0] for i in identities}),
+                    "config_versions": sorted(
+                        {str(r.get("config_version")) for r in rows}),
+                })
+        return out
+
+    def open_book(self, before: Optional[dt.date] = None,
+                  mode: Optional[str] = "live") -> List[str]:
         """Names the most recent recorded run issued as BUY.
 
         Stage 6's exit band needs it: a name is kept while it stays inside the
@@ -143,7 +449,7 @@ class Ledger:
         correct starting state rather than an error -- a first run holds
         nothing.
         """
-        row = self.previous_run(before=before)
+        row = self.previous_run(before=before, mode=mode)
         if not row:
             return []
         book = list(row.get("signals_generated") or [])
@@ -163,7 +469,8 @@ class Ledger:
                 seen.add(ticker)
         return book
 
-    def shown_slate(self, before: Optional[dt.date] = None) -> List[Dict[str, Any]]:
+    def shown_slate(self, before: Optional[dt.date] = None,
+                    mode: Optional[str] = "live") -> List[Dict[str, Any]]:
         """The screen the most recent recorded run produced, in order.
 
         Empty for a run recorded before the slate was part of the record, which
@@ -171,7 +478,7 @@ class Ledger:
         one is chosen fresh. It is not an error and must not be inferred from
         `signals_generated` -- that is the book, which is a different list.
         """
-        row = self.previous_run(before=before)
+        row = self.previous_run(before=before, mode=mode)
         return list(row.get("slate_shown") or []) if row else []
 
     def signals_for(self, ticker: str) -> List[Dict[str, Any]]:
