@@ -1,0 +1,36 @@
+{
+  "started_on": "2026-08-27",
+  "config_version": "baseline-v1@a30a8d4847080ddc",
+  "engine_version": "0.1.0",
+  "git_commit": "bf7702cfd004c4c2cec1f2f06583060065180ad5",
+  "target_sessions": 375,
+  "target_months": 18,
+  "primary": "PRIMARY. Regress the paper portfolio's monthly excess return on the six long-short factors built by validation.attribution, over the 18 forward months. The engine passes if the intercept is positive with an overlap-corrected t of at least 2.0. It fails if the intercept is not distinguishable from zero. On the holdout this test gave alpha -1.01% at t -0.38 with only 15 observations against 6 factors; 18 monthly observations leave 11 degrees of freedom rather than 8.",
+  "secondary": "SECONDARY. Pooled rank IC of the daily shortlist against the 63-session forward return, over every forward date with a complete label. The engine passes if the IC is positive with an overlap-corrected t of at least 2.0. This is expected to pass on the holdout evidence and is NOT the question at issue -- it is recorded so that a failure here would be visible rather than assumed away.",
+  "invalidation": [
+    "config_version changes during the window -- the observations after the change came from a different model.",
+    "Any factor, gate or parameter is retuned using data from inside the window.",
+    "The shortlist is acted on with real capital, which introduces a feedback loop the test cannot separate from the signal.",
+    "Fewer than 60% of expected sessions produce a recorded run, which would make the sample a selection rather than a period."
+  ],
+  "notes": [
+    "Eighteen months adds about six non-overlapping 63-session windows. That is NOT enough to settle the ranking question and the secondary test is reported with that stated.",
+    "The primary test uses monthly portfolio returns precisely because they are numerous enough to leave the attribution with degrees of freedom.",
+    "No result may be reported before both targets are met. Reading an interim result and stopping when it looks good is optional stopping, and it invalidates the p-value."
+  ],
+  "fingerprint": "04a39fb964483900",
+  "_archived": {
+    "archived_on": "2026-09-04",
+    "status": "VOID",
+    "superseded_by": "the v2 registration written the same day, scheme v2",
+    "why": [
+      "The configuration changed after registration: registered against baseline-v1@a30a8d4847080ddc, the engine ran baseline-v2.",
+      "Five distinct model fingerprints were recorded inside the window against one config_version -- the store grew underneath it and the identity could not see that. Closed by config/identity.py.",
+      "No benchmark-relative hypothesis: the window could have been passed by an engine that loses to holding its own universe, which on the selection period it does by about four points per period.",
+      "Session coverage reached 40% against the 60% floor its own invalidation clause names.",
+      "The PRIMARY regressed on six long-short factors built from this engine's OWN ranked columns, which is circular."
+    ],
+    "correction": "`research forward` also reported that this file 'no longer matches its hash'. THAT WAS WRONG and the accusation is withdrawn. The file was never edited: it carries no `tertiary` field and its fingerprint matches the true v1 payload exactly. `Registration._payload` wrote `tertiary` into both the current and the legacy branch, so the two fingerprints were byte-identical, the legacy branch was unreachable and every pre-tertiary registration read as tampered. Fixed 2026-09-04; this file now correctly reports scheme 'legacy'.",
+    "kept_because": "A negative result is evidence. This window failed, the reasons are recorded, and deleting it would remove the only account of why the v2 contract has the shape it has."
+  }
+}

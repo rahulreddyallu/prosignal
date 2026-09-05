@@ -26,7 +26,7 @@ order-routing code and no broker connection.
 | **Runs** | Every trading session, end-of-day |
 | **Buys** | Every **21st** session. Running and buying are different events — see `prosignal/cadence.py` |
 | **Horizon** | 63 sessions (~3 months), and the time limit is now the exit most winners take |
-| **Ranking** | **`v3_composite`** — 22 factors in 5 themes, each theme combined on its own and blended with weights re-capped at 40% per name. Set by `stage4_core_score.ranking.source`. `mom_6_1_r` is the `measured_factor` path and is **not** what runs; the Fama–MacBeth model was deleted on 2026-09-03 |
+| **Ranking** | **`v3_composite`** — the two-level thematic composite in `features/v3.py`: 22 factors in 5 themes (momentum 40%, quality 19%, ownership 19%, risk 11%, reversal 11%), each theme combined on its own and blended with weights capped at 40%, floored at 6% and capped again at each theme's coverage. The Fama–MacBeth model over 7 factor families is still fitted, recorded and monitored by `research decay`; it no longer chooses |
 | **Book** | 6 names, equal weight, held while inside the top 18 |
 | **Exits** | Rank band, 63-session limit, and a disaster floor at 8×ATR clipped to 35%. No profit target, no thesis-invalidation exit, no trailing stop |
 | **Output** | A ranked shortlist, each with factor contributions and a trade plan |
@@ -56,109 +56,38 @@ order-routing code and no broker connection.
 
 ---
 
-## What changed in the tuning pass (2026-08-29)
+## What changed in the tuning pass (2026-08-29) — WITHDRAWN
 
-The engine was measured at TRADE level rather than at IC level: 4,877
-configurations on a rebuilt point-in-time panel (2,212 sessions, 1,517
-ever-eligible symbols), entries taken only on cron dates, exits checked every
-session, and every result scored against an **investable equal-weight benchmark
-of the same eligible universe** rather than against zero.
-
-Four things changed, each on its own measurement. Findings T1–T6 in
-`prosignal.validation.findings` carry the full arithmetic.
-
-**The fitted composite stopped choosing what to buy.** It lost to the benchmark
-in all 144 of its configurations; its own 6-1 momentum input, ranked
-sector-neutrally and traded alone, returned +20.3% annualised alpha. The cause is
-that the composite is fitted against a cross-sectional RANK, and rank rewards
-ordering the middle of a distribution whose money is in the right tail — at H=63
-its rank IC is +0.0338 while its **top-decile excess is −0.35%**. Three repairs
-were tried and each failed on measurement: refitting on the return, using the
-composite as an exclusion filter, and trading the engine's own three-column
-momentum family. The composite is still fitted, still on the card, still
-monitored by `research decay`.
-
-**Three of the four price exits came off.** Measured one at a time rather than as
-a bundle: the 3R target cost 0.9 points of annual alpha, the MA50 − 1.5 ATR
-invalidation cost 14.3 and 15.6 points of per-trade win probability. The stop
-went the other way — walked out to a **disaster floor at 8×ATR**, it *adds* 2.0
-points of alpha (better in 52 of 54 paired configurations) and cuts the worst
-single trade by 21.5 points. The invalidation level survives as the ADMISSION
-predicate, which is a different and cheaper use of the same number.
-
-**Buying became a schedule.** The engine still runs every session — the floor is
-a price level, the rank band and eligibility can release a position any day, and
-outcomes resolve daily — but new positions open every 21st session, counted in
-sessions from a fixed anchor so a holiday cannot re-phase it. The 21-session stem
-is the only one on the surface positive in all six calendar years.
-
-**Every trade now records what it is.** Cadence, planned hold, risk at the floor,
-and the frozen frequencies of the study it belongs to, written into the ledger
-row rather than read from the config later. That is what makes the paper-trading
-record scoreable against the engine's own claim and not only against the market.
-
-### What the shipped configuration measured
-
-258 trades over 7.5 years, net of 40 bps, against the equal-weight eligible
-universe:
-
-| | |
-|---|---|
-| Probability of a net profit | **57.8%** |
-| Probability of beating the universe | **51.2%** |
-| Mean net return per trade | **+7.09%** (median +3.65%) |
-| Mean excess over the benchmark | **+3.74%** (median +0.69%) |
-| Annualised book return | **+42.6%** vs benchmark +18.9% |
-| Annualised alpha | **+20.3%**, 95% CI [+7.7%, +30.9%] |
-| Sharpe / excess Sharpe | 1.59 / 1.12 |
-| Maximum drawdown | −32.6% vs benchmark −42.4% |
-| Positive alpha | **6 of 6** calendar years since 2021 |
-| Median sessions held | 42 |
-
-How a trade ends, which is where the shape of the distribution lives:
-
-| exit | trades | win rate | mean net |
-|---|---|---|---|
-| rank band | 149 | 53.7% | +3.3% |
-| time limit | 100 | **69.0%** | **+16.1%** |
-| disaster floor | 9 | 0.0% | −31.0% |
-
-Two thirds of the return comes from the 39% of positions that survive to the
-time limit. Every rule that was removed was a rule that sold part of that
-population early.
-
-### What it has not cleared
-
-| | |
-|---|---|
-| Deflated Sharpe, all 4,877 trials | **0.030 — FAILS** (threshold: annual excess Sharpe 1.80; this has 1.12) |
-| Deflated Sharpe, variance within the winning family | 0.50 |
-| Deflated Sharpe, within the final 378-cell surface | 0.97 |
-| PBO (CSCV, 3,432 splits) | 0.388 — passes, not comfortably |
-
-All three DSR readings are published because choosing one silently is how a
-search gets laundered. The spread is driven almost entirely by the trial
-variance, and the DSR's null — every trial has zero true Sharpe and they differ
-only by noise — is false when the trials include signals that differ for real
-reasons.
-
-What supports shipping is different evidence: **every one of the 378
-configurations on the final surface has positive mean excess over 2021–2026**,
-the shipped cell is positive in all six years, and a stationary block bootstrap
-(blocked at the holding period) puts annual alpha at [+7.7%, +30.9%] with
-P(alpha ≤ 0) = 0.000 over 4,000 resamples. A six-year walk-forward of the
-SELECTION PROCEDURE — choose the best cell on data available at each year end,
-then trade it — returns +13.2% mean out-of-sample alpha against +8.9% for not
-choosing at all, and lands at the 53rd percentile of the surface. That is the
-honest reading: the region works and the exact cell within it is not identified,
-which is why the plateau rather than the peak is what ships.
-
-This is the best-supported hypothesis the search found. It is not an established
-result. The forward paper-trading record is what would establish it.
-
----
-
-## What changed in the tuning pass (2026-08-29)
+> [!CAUTION]
+> **WITHDRAWN 2026-09-04, superseded by config `baseline-v2@590fc800eb8bdd23`.**
+>
+> **Every performance figure in this section is withdrawn.** It was re-run
+> against the current store through the repository's own simulator by
+> `prosignal research results`, and it does not reproduce:
+>
+> | figure | this section claimed | re-run measured |
+> |---|---|---|
+> | annualised alpha | **+20.3%** | **+1.8%** |
+> | annualised book return | **+42.6%** | **+5.2%** |
+> | Sharpe | **1.59** | **0.93** |
+> | mean excess over the benchmark | **+3.74%** | **−3.92%** per period |
+>
+> **And it never described the shipped engine.** This study ranked on
+> sector-neutral `mom_6_1` — *one column*, from `features/crosssec.py`, the
+> **fitted** model's panel. The engine ships `v3_composite`: 22 factors in 5
+> themes. `mom_6_1` is not one of them. Measured by driving stages 1–4 on the
+> 2026-09-03 cross-section, the shipped ordering is the v3 composite's ordering
+> at Spearman **+1.000000**, identical on all 386 names.
+>
+> It is kept, not deleted, because a negative result is evidence and this one
+> explains a live defect: the `expectancy:` block in `config/parameters.yaml`
+> still stamps **these** frequencies onto every card **the v3 composite**
+> issues. That block describes a different ranker and is now flagged in config
+> as such.
+>
+> The live numbers are in [RESULTS OF RECORD](#results-of-record) and in
+> [`docs/RESULTS_OF_RECORD.md`](docs/RESULTS_OF_RECORD.md), which is generated.
+> Nothing below this banner may be quoted.
 
 The engine was measured at TRADE level rather than at IC level: 4,877
 configurations on a rebuilt point-in-time panel (2,212 sessions, 1,517
@@ -294,106 +223,59 @@ are correct. The input is the problem.
 
 ## RESULTS OF RECORD
 
-> [!WARNING]
-> **NEITHER TABLE IN THIS FILE DESCRIBES WHAT SHIPS, and this one's claim to be
-> "the live one" is withdrawn (2026-09-05).**
->
-> The two headline tables measure two different models with two different exit
-> geometries on two different panels:
->
-> | | executive summary, above | RESULTS OF RECORD, below |
-> |---|---|---|
-> | headline | +42.6% book vs +18.9% bench, alpha +20.3% | +1.04% vs +5.27%/period, excess −4.23% |
-> | ranker | sector-neutral `mom_6_1_r`, one column | the fitted Fama–MacBeth composite |
-> | exits | 8×ATR floor only | 2.5×ATR stop, 3R target, MA50−1.5ATR invalidation |
-> | sizing | equal weight | risk budget |
-> | sample | 258 trades, 2018-11 → 2026-08 | 35,730 rows / 85 dates, 2019-02 → 2025-02 |
->
-> They do not contradict each other; they answer different questions. What is
-> false is the claim that either is live. **The engine ranks on
-> `v3_composite`**, whose stop, target, invalidation and sizing match neither
-> row. The composite's RANKING carries two sealed-holdout evaluations
-> (`features/v3.py`); **no book at the shipped six-name geometry has ever been
-> measured**, which `v3.BOOK_NOTE` says in the code and these tables obscure.
->
-> Both are kept as history — a bad result is never deleted here — and both are
-> now labelled with the model they measured. Replacing them needs a trade-level
-> study on `v3_composite` at the live geometry, on the TRAINING window; the
-> sealed windows are spent.
+> [!IMPORTANT]
+> **The numbers below are GENERATED, not written.** They come from
+> [`docs/RESULTS_OF_RECORD.md`](docs/RESULTS_OF_RECORD.md), which
+> `prosignal research results` produces from the current store and stamps with
+> the config version, the store fingerprint, the git commit, the panel span and
+> the trial count. `tests/test_readme_numbers.py` fails if this section drifts
+> from it. **These supersede every other number in this file.**
 
-Regenerated end to end after remediation. Panel 35,730 rows over 85 dates;
-selection period 2019-02-18 → 2025-02-03; holdout untouched.
+This file used to carry two book tables that cannot both describe the same
+engine. Both configurations have now been re-run against the current store,
+through the repository's own simulator, with the shipped cost model. One
+reproduced and one did not. They are not averaged and the more favourable one is
+not quoted.
 
-**The ranking**
+<!-- RESULTS_OF_RECORD:BEGIN -->
+
+**The shipped book — `v3_composite`, six names — against an equal-weight hold of
+the eligible universe it selects from.** Re-run: **REPRODUCED.**
 
 | | |
 |---|---|
-| Pooled rank IC (CPCV, 45 splits, 9 paths) | **+0.0449** |
-| Top-decile excess | **+0.97%** per 63-session period |
-| Distinct test dates / independent observations | 70 / **23.6** |
-| Overlap-corrected t on the excess | **+1.20** (naive +2.06) |
-| Pre-committed significance bar | **t ≥ 3.0** |
-| Paths below zero | **11%** |
-| Path Sharpe — min / median / max | −0.03 / +0.20 / +0.37 |
-| Deflated Sharpe, charging **81** trials | **0.346 — FAIL** (and 81 is not the honest count — see below) |
+| mean excess per 63-session period | <!--shipped_mean_excess-->-4.46% |
+| information ratio | <!--shipped_ir-->-0.84 |
+| alpha per period | <!--shipped_alpha-->+0.09% |
+| periods beating the benchmark | <!--shipped_beat_rate-->32.6% |
 
-**The book, against the alternative it never used to be measured against** —
-equal-weight eligible universe over the same 70 holding windows:
+**Gross and cost, separately.** Netting them and keeping the last number hides
+which of the two is binding — and here it is emphatically not cost:
 
-| | book | benchmark |
-|---|---|---|
-| mean return / period | **+1.04%** | **+5.27%** |
-| Sharpe | +0.31 | +0.83 |
-| mean excess | **−4.23%** | — |
-| information ratio | **−0.83** | — |
-| beta to benchmark | +0.32 | — |
-| alpha / period | **−0.67%** | — |
-| periods beating the benchmark | **32.9%** | — |
-| worst drawdown on one schedule | −20.6% | — |
+| | annualised |
+|---|---|
+| gross excess over the universe | <!--shipped_gross_excess_ann-->-17.4% |
+| cost drag | <!--shipped_cost_drag_ann-->0.5% |
+| **net excess** | <!--shipped_net_excess_ann-->-17.8% |
 
-*(`portfolio_sim._path_drawdown` documents −21.7%, which was the same statistic
-on the pre-W3/W5/W8 panel. −20.6% is the current figure.)*
+<!-- RESULTS_OF_RECORD:END -->
 
-**What the two tables say together.** The ranking carries a little information
-— IC +0.045, and remediation raised it from +0.034. The machinery that turns
-that ranking into a book destroys considerably more than the ranking creates:
-measured arm by arm, ranking earns +1.82% per period over the benchmark, risk
-budget sizing costs −1.14%, the 2.5×ATR stop costs −3.06%, the 3R target
-−0.36% and costs −0.67%. **The engine's own book underperforms buying its own
-universe equal-weighted, by 4.23% per period.**
+**What that says.** The ranking carries information — rank IC +0.077 at h=63,
+overlap-corrected t +3.11, and its deciles are monotone at Spearman +0.29. The
+six-name book built on it loses to buying the same universe equal-weighted, and
+it loses **gross**: cost drag at this cadence is about half a point a year
+against a deficit of seventeen. **This is not a cost problem and it cannot be
+fixed by trading more cheaply.** The gap is selection plus the concentration of
+six names plus sitting in cash while the universe compounded.
 
-**Two further qualifications on the ranking figures.**
+**Read the independent-observation count before any t-statistic here.** The
+panel is 204,425 rows and **31.1** independent 63-session windows. Every Sharpe,
+information ratio and deflated statistic this engine reports is bounded by the
+second number.
 
-*They describe the label, not the book.* The model is fitted against the
-63-session forward return; the book earns whatever the stop, target and
-invalidation level produce. Within-date rank correlation between the two is
-**+0.529** — the label explains 28% of the variance of what is actually earned.
-The book's positions leave by invalidation 39.2% of the time, by stop 32.2%, by
-target 17.9%, by timeout 10.7%. (Code comments quote +0.531 / 39.3% / 32.1%
-from the original audit's panel; the figures here are the re-measurement on the
-remediated panel, and the difference is the remediation.)
-
-*The traded coefficients are biased away from zero.* The gate selects on
-\|t\| ≥ 2 from the same sample that estimated λ. Corrected for that selection,
-`mom`'s implied true t is **+2.20** and `delivery`'s is **+1.46** — the second
-does not clear the gate it passed. The correction is reported, not traded; see
-`work/audit/W2_failure_model.md` for why it failed its own ship rule.
-
----
-
-**Historical figures below are superseded.** No naive t-statistic is quoted
-from CPCV, and the harness refuses to compute one: test dates recur across
-splits and the woven paths share training data and one calendar, so neither is
-a sample of independent experiments. The overlap-corrected figure in RESULTS OF
-RECORD is what the harness will stand behind.
-
-The honest summary is that the ranking carries a little information on the
-selection period — pooled IC +0.045 — and that **the book which trades it
-underperforms the universe it selects from by 4.23% per period**, with an
-information ratio of −0.83 and alpha of −0.67%. The engine's problem is not
-that its ranking is worthless; it is that the sizing, the stop and the costs
-take more than the ranking creates. Whether any of it survives out of sample is
-what the forward test is for, and it has not run yet.
+For the ranking table at every horizon, the full claimed-against-measured
+comparison, and the withdrawn arm, see
+[`docs/RESULTS_OF_RECORD.md`](docs/RESULTS_OF_RECORD.md).
 
 ---
 

@@ -1,4 +1,4 @@
-# Data Sources — audit of 2026-08-17
+# Data Sources — audit of 2026-08-17, re-probed 2026-09-04
 
 Every endpoint below was **probed live on 2026-08-17**, not taken from
 documentation. Response structures are quoted from actual returns. The point of
@@ -10,6 +10,87 @@ get this number" but "can I get it *as it was known on the decision date*". A
 fundamentals feed without a filing date is not a point-in-time source, however
 accurate its numbers, because using a figure before it was public is lookahead
 and lookahead is invisible in a backtest.
+
+> [!IMPORTANT]
+> **Re-probed 2026-09-04 (v10 Pass 1). One capability recorded here is GONE and
+> one is far better than recorded. See "Re-probe, 2026-09-04" immediately below
+> before trusting the 2026-08-17 tables.**
+>
+> The August audit's own principle — "nobody re-probes" — is the reason this
+> section exists rather than an edit in place. An endpoint that answered three
+> weeks ago is not evidence that it answers today, and one of these had already
+> stopped answering in the form the engine was built to call.
+
+---
+
+## Re-probe, 2026-09-04
+
+Same client, same cookie handshake, same host. The warm-up still works and the
+JSON API is still reachable from this machine.
+
+| Endpoint | 2026-08-17 recorded | 2026-09-04 measured | Verdict |
+|---|---|---|---|
+| `corporates-financial-results` **by date window** | 91 rows / 12 months | **0 rows at every window width tried** (1, 3, 8, 12 months) | **GONE** |
+| `corporates-financial-results` **by symbol** | not recorded | **130 rows for RELIANCE**, `period=Quarterly` | **NEW, and much better** |
+| `corporates-pit` | 9,998 rows / 12 months | 9,354 rows / 12 months; **0 rows at 3 months** | unchanged, quirk confirmed |
+| `corporate-share-holdings-master` | 2,286 rows | 20–22 rows per symbol, symbol-keyed | working |
+| `corporate-sast-reg29` | 2,755 rows / 6 months | 447 rows / 1 month | working |
+| `corporate-announcements` | 9.8 MB / 17 days | 1,539 rows / 4 days | working |
+
+### The date-window form of `corporates-financial-results` is dead
+
+This matters because it is the form the engine was built to call and the one
+Pass 1 was planned around. It returns a well-formed empty result at **every**
+window width — not an error, not a 404, an empty list. Under the convention
+this file already sets out, an empty window is **UNKNOWN**; four widths all
+empty while the same endpoint answers richly by symbol is not unknown, it is a
+changed interface.
+
+### The by-symbol form is a large upgrade, not a workaround
+
+```
+/api/corporates-financial-results?index=equities&symbol=<SYM>&period=Quarterly
+```
+
+Measured across RELIANCE, TCS, HDFCBANK, INFY, ITC, SBIN, LT, KTKBANK:
+
+| | |
+|---|---|
+| rows per symbol | 95 – 162 |
+| period-end span | **2005-03-31 → 2024-12-31**, identical on all eight |
+| `filingDate` present | yes, on every row |
+| `xbrl` link present | **100% of rows** (direct nsearchives Ind-AS URL) |
+| `resultDetailedDataLink` | null on 55 of RELIANCE's 130 rows — **use `xbrl`, not this** |
+| throughput | ~0.4 s/symbol → ~5 minutes for a 750-name universe |
+| filing lag (RELIANCE, n=122) | min 13, median 22, p90 74, max 457 days |
+
+Two consequences worth stating plainly:
+
+1. **Twenty years of point-in-time quarterly history is reachable, not five.**
+   The store's `fundamentals.parquet` currently holds 3,504 rows over
+   2019-11 → 2025-03 for 186 symbols. This path reaches 2005 for the whole
+   universe. That is the single biggest change to what the value and quality
+   themes could be built on — both were dropped for coverage, on the finding
+   that "balance-sheet data begins 2023 and the median training date has ZERO
+   names with a book value".
+
+2. **It stops at 2024-12-31, on every symbol.** That is a property of the
+   endpoint, not of the companies — all eight symbols end on the same date. So
+   this feed is ~20 months stale at the front and **cannot serve the recent
+   panel**. Recent quarters remain `NOT_TESTABLE` from this path and must be
+   sourced elsewhere before any factor built on it can be computed for a live
+   date. Nothing here may be interpolated forward.
+
+### Shareholding lag, re-measured
+
+The August audit measured period-end → disclosure across 800 filings at
+min 20 / median 21 / p90 21 / max 45. Re-measured across 169 filings on eight
+symbols: **min 0, median 18, p90 21, max 115**. The median and p90 agree; the
+tails do not, and the `min 0` — a broadcast stamped the same day as the period
+it describes — is not credible as a disclosure lag and should be treated as a
+data-quality flag on that row rather than as a fast filer.
+
+This feed **is** current: period ends run to **2026-06-30**.
 
 ---
 
