@@ -152,7 +152,7 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
 
     dates = list(close.index)
     T = len(dates)
-    lo = v3_factors.LOOKBACK_SESSIONS
+    lo = v3_factors.LOOKBACK_SESSIONS      # see FRAME_SESSIONS: win is lo + 16 rows
     hi = T - min(horizons) - 2
     rows: List[pd.DataFrame] = []
     for i in range(lo, max(hi, lo), stride):
@@ -160,7 +160,9 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
         syms = list(sel[sel].index)
         if len(syms) < 60:
             continue
-        win = slice(max(i - lo - 15, 0), i + 1)
+        # `FRAME_SESSIONS` rows ending at i, expressed as a slice. The live
+        # path asks the calendar for the same count; the two must agree.
+        win = slice(max(i + 1 - v3_factors.FRAME_SESSIONS, 0), i + 1)
         fund = None
         if fund_recs is not None:
             try:

@@ -2048,17 +2048,50 @@ stage6_entry:
         against -17.4%); it buys the only stem on the surface that never had a
         losing year.
     exit_rank:
-      value: 18
+      value: 30
       status: MEASURED
       search_range: [4, 60]
       note: >-
-        THREE times entry_rank, not the two-times index convention that shipped.
-        Measured on the same surface: at cadence 21 with six names and a
-        63-session backstop, the 3x band returned +20.0% alpha against +17.4%
-        at 2x, with p_win 0.578 against 0.569 and a worst year of +6.4% against
-        -0.9%. The mechanism is turnover -- a wider band lets a name that
-        wobbles out of the top six stay in the book instead of being sold and
-        re-bought -- and it is the same direction the cost model predicts.
+        FIVE times entry_rank, widened from 3x on 2026-09-05 by
+        `research/v3/experiments/turnover_2026_09.py`.
+
+        WHAT WAS MEASURED. At 6 slots on the 21-session cadence, turnover falls
+        monotonically in the band and so does cost, and that side carries no
+        alpha estimate and essentially no sampling error:
+
+            band   exit  turnover/rebalance   cost/yr
+            1x        6        75.7%           7.97%
+            2x       12        59.2%           6.23%
+            3x       18        46.8%           4.92%   <- previous setting
+            5x       30        33.9%           3.56%   <- this setting
+            8x       48        28.9%           3.04%
+
+        Widening 3x -> 5x buys 1.36 points of cost a year, and no band's gross
+        excess is significantly worse than 3x (paired per-fold, 45 purged and
+        embargoed CPCV folds; 5x reads +4.65%/yr at NW t +1.42, i.e. not worse
+        and not reliably better either).
+
+        WHY 5x AND NOT THE 8x THE RULE PICKED. The pre-registered rule -- lowest
+        turnover among bands not significantly worse -- selected 8x, which is
+        the WIDEST BAND IN THE GRID. That is a boundary solution of an unbounded
+        objective: turnover falls monotonically, so the rule returns the grid
+        edge whatever the edge is, and a wider grid would have returned wider
+        still. The harness now says so rather than presenting it as an optimum.
+        5x is an interior choice made on a structural argument the data cannot
+        resolve at ~95 rebalances: IR = TC x IC x sqrt(breadth) (Grinold 1989;
+        Clarke, de Silva & Thorley 2002), and a band wide enough to hold names
+        that have drifted far down the ranking lowers the transfer coefficient.
+        Exit 30 is the top ~7% of a ~450-name eligible set; exit 48 is the top
+        ~11%.
+
+        THE PREVIOUS NOTE'S NUMBERS (+20.0% alpha at 3x against +17.4% at 2x)
+        came from the 378-cell selection surface and are not comparable to the
+        table above, which is the shipped cost model on the shipped ranking.
+        The mechanism both agree on is the same one: a wider band lets a name
+        that wobbles out of the top six stay in the book instead of being sold
+        and re-bought.
+
+        TO REVERT: set this back to 18.
 
     # A name already below its own thesis-invalidation level is not an entry.
     # Stage 7 lists invalidation as exit condition #1, so opening there issues a

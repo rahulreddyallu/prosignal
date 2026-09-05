@@ -1,0 +1,119 @@
+{
+  "spec_sha256": "805e164123d7ad264c203a6a8f24a8bde99fa5775dfb94eb9647a6b0de65ec78",
+  "spec": {
+    "exit_multiples": [
+      1.0,
+      2.0,
+      3.0,
+      5.0,
+      8.0
+    ],
+    "rebalance_every_signal_dates": 4,
+    "slots": 6,
+    "incumbent_exit_multiple": 3.0,
+    "primary": "turnover per rebalance -- a property of the ranking, not of returns",
+    "constraint": "gross excess must not be significantly worse than the incumbent: one-sided paired t on per-fold differences > -1.0",
+    "decision_rule": "among bands satisfying the constraint, take the LOWEST turnover. If none qualifies, change nothing.",
+    "t_threshold": -1.0
+  },
+  "ranking_source": "v4_composite",
+  "panel_provenance": {
+    "panel": "panel_2026_09.parquet",
+    "built_at": "2026-09-05T05:59:52+00:00",
+    "store_manifest_digest": "75152d895cd25607",
+    "rows": 204425,
+    "dates": 380,
+    "start": "2018-11-27",
+    "end": "2026-08-03",
+    "theme_coverage_on_scored_rows": {
+      "momentum": 0.9994107826770107,
+      "quality": 0.4904792300893646,
+      "ownership": 0.9368997348522047,
+      "risk": 0.9960718845134047,
+      "reversal": 0.9997053913385053
+    }
+  },
+  "cost_model": {
+    "round_trip_bps": 87.6728248828502,
+    "position_inr": 166666.66666666666,
+    "median_adtv_inr": 248946824.4625,
+    "rebalances_per_year": 12.0
+  },
+  "cpcv": {
+    "splits": 45,
+    "purge_obs": 5
+  },
+  "newey_west_lag": 4,
+  "results": {
+    "1.0": {
+      "exit_rank": 6,
+      "turnover_per_rebalance": 0.7570921985815602,
+      "cost_per_year": 0.07965169409569581,
+      "gross_excess_per_year": 0.09620223206643902,
+      "gross_nw_t": 1.3420116836800644,
+      "net_per_year": 0.016550537970743212,
+      "delta_gross_vs_incumbent": 0.004480479899971107,
+      "delta_nw_t": 1.6726781664606751,
+      "cpcv_folds": 45,
+      "cpcv_folds_not_worse": 0.8,
+      "rebalances": 95
+    },
+    "2.0": {
+      "exit_rank": 12,
+      "turnover_per_rebalance": 0.5921985815602837,
+      "cost_per_year": 0.06230366704440844,
+      "gross_excess_per_year": 0.07756832765786172,
+      "gross_nw_t": 1.0246356439536406,
+      "net_per_year": 0.015264660613453274,
+      "delta_gross_vs_incumbent": 0.002927654532589663,
+      "delta_nw_t": 1.2044292708596493,
+      "cpcv_folds": 45,
+      "cpcv_folds_not_worse": 0.7333333333333333,
+      "rebalances": 95
+    },
+    "3.0": {
+      "exit_rank": 18,
+      "turnover_per_rebalance": 0.4680851063829788,
+      "cost_per_year": 0.04924601227462225,
+      "gross_excess_per_year": 0.042436473266785735,
+      "gross_nw_t": 0.5874430687566858,
+      "net_per_year": -0.0068095390078365126,
+      "delta_gross_vs_incumbent": 0.0,
+      "delta_nw_t": NaN,
+      "cpcv_folds": 45,
+      "cpcv_folds_not_worse": 0.0,
+      "rebalances": 95
+    },
+    "5.0": {
+      "exit_rank": 30,
+      "turnover_per_rebalance": 0.3386524822695035,
+      "cost_per_year": 0.03562874372898805,
+      "gross_excess_per_year": 0.08888842126156479,
+      "gross_nw_t": 1.316550140409721,
+      "net_per_year": 0.053259677532576745,
+      "delta_gross_vs_incumbent": 0.0038709956662315885,
+      "delta_nw_t": 1.4200939136087551,
+      "cpcv_folds": 45,
+      "cpcv_folds_not_worse": 0.6888888888888889,
+      "rebalances": 95
+    },
+    "8.0": {
+      "exit_rank": 48,
+      "turnover_per_rebalance": 0.28900709219858156,
+      "cost_per_year": 0.030405681821073578,
+      "gross_excess_per_year": 0.058258495095292476,
+      "gross_nw_t": 0.9484841557966105,
+      "net_per_year": 0.027852813274218898,
+      "delta_gross_vs_incumbent": 0.0013185018190422268,
+      "delta_nw_t": 0.3669521172922822,
+      "cpcv_folds": 45,
+      "cpcv_folds_not_worse": 0.5333333333333333,
+      "rebalances": 95
+    }
+  },
+  "selected_exit_multiple": "8.0",
+  "decision": "exit multiple 8.0x (rank 48): the lowest turnover among bands whose gross excess is not significantly worse than the incumbent. Turnover 28.9% per rebalance against the incumbent's 46.8%, cost 3.04%/yr against 4.92%/yr, gross delta +1.58%/yr at NW t +0.37.",
+  "boundary_solution": "THE RULE SELECTED THE WIDEST BAND TESTED (8.0x). That is a boundary solution of an unbounded objective, not an optimum: turnover falls monotonically in the band, so the rule returns the grid edge whatever the edge is. Treat it as 'no interior optimum was found'. Acting on it means either widening the grid until the constraint binds, or choosing an interior band on a stated structural argument -- Grinold (1989) and Clarke, de Silva & Thorley (2002) give one: IR = TC x IC x sqrt(breadth), and a band wide enough to hold names that have drifted far down the ranking lowers the transfer coefficient in a way ~95 rebalances cannot detect.",
+  "book_size_caveat": "This simulates a STRICT `slots`-name book. The live engine caps cards at `stage8_final_signal.portfolio.max_signals_per_run` (8), not at `capital.max_open_positions` (6), and the schema only requires per_run >= entry_rank -- so a real book can carry 7 or 8 names when hysteresis keeps a previously-signalled name ranked between entry_rank and exit_rank. Widening the band makes that more likely, which means the turnover figures here are a LOWER bound on live turnover and the cost saving is, if anything, understated. The 6-vs-8 tension is a config-level question and is reported rather than resolved here.",
+  "caveat": "Turnover and cost are properties of the ranking and the band and carry no alpha estimate. Gross excess at ~95 rebalances is noisy and non-monotonic, which is why it is used only as a constraint. Nothing here ships without an epoch."
+}

@@ -629,3 +629,99 @@ in a pre-registered harness, not in a config edit.
 - Forward test registered against `baseline-v2@7b4f50fcf98d11ba`, commit
   `5daaff349593`.
 
+---
+
+# Round 3 — parity, turnover, and the number that had to be re-earned
+
+## The credibility question, answered
+
+Every decision in this audit was made on `validation.v3_panel.build_v3_panel`.
+The engine ranks with `stage4_core_score.build_v3_block`. **Those are two
+functions and nothing had ever compared them.** The panel reproducing its own
+stored scores proves nothing about the engine.
+
+`research/v3/experiments/parity_research_vs_live.py` runs both paths on the same
+date and the same symbol list, then compares raw factors, theme sub-scores, the
+composite and the top six. First run, six sampled dates:
+
+```
+2026-08-07   score max|diff| 1.596e-02   rho 0.999992   top-6 overlap 100%   DIVERGES
+2026-06-04   score max|diff| 3.862e-02   rho 0.999978   top-6 overlap 100%   DIVERGES
+...
+```
+
+**Cause: the research path read 316 sessions and the live path read 315.** The
+panel sliced `[i - LOOKBACK - 15 : i + 1]` (316 rows inclusive); the live path
+asked the calendar for `LOOKBACK + 15` (315). One extra leading bar shifts the
+start of every rolling window. Not a wrong answer — **a second answer**, close
+enough that six dates still ranked an identical top six and different enough that
+the model selected on the research path was not the model the engine ran.
+
+Fixed with a single constant, `v3_factors.FRAME_SESSIONS = LOOKBACK + 16`, read
+by both callers. **316 is the researched convention** — it is what
+`build_v3_panel` used for both sealed holdouts and every experiment since — so
+production moved to it rather than the other way round. Re-run:
+
+```
+all six dates   score max|diff| 0.000e+00   rho 1.000000   top-6 overlap 100%   IDENTICAL
+```
+
+`tests/test_research_live_parity.py` pins it: the constant, that neither caller
+computes its own window (checked against tokenised code, not raw text — the first
+version failed on the comment explaining the fix), and that both paths select the
+same session list on a synthetic calendar.
+
+**The audit's numbers now describe what the engine ranks.** They did not before.
+
+## Turnover harness
+
+`research/v3/experiments/turnover_2026_09.py`, pre-registered (`spec_sha256
+805e164123d7ad26`), scored on the same 45 purged/embargoed CPCV folds.
+
+| band | exit | turnover/rebalance | cost/yr | gross/yr | NW t | net/yr | Δgross | NW t |
+|---|---|---|---|---|---|---|---|---|
+| 1× | 6 | 75.7% | 7.97% | +9.62% | 1.34 | +1.66% | +5.38% | 1.67 |
+| 2× | 12 | 59.2% | 6.23% | +7.76% | 1.02 | +1.53% | +3.51% | 1.20 |
+| **3× (was)** | **18** | **46.8%** | **4.92%** | +4.24% | 0.59 | −0.68% | — | — |
+| **5× (now)** | **30** | **33.9%** | **3.56%** | +8.89% | 1.32 | +5.33% | +4.65% | 1.42 |
+| 8× | 48 | 28.9% | 3.04% | +5.83% | 0.95 | +2.79% | +1.58% | 0.37 |
+
+The design point: **turnover and cost carry no alpha estimate and essentially no
+sampling error**, and fall monotonically in the band for every model tested.
+Gross excess at ~95 rebalances is noisy and non-monotonic — the incumbent is the
+*worst* gross of the five, which is a statement about noise, not about 3×. So
+gross is used only as a constraint ("not significantly worse"), never to pick.
+
+**The rule picked 8× and the harness now refuses to present that as an optimum.**
+"Lowest turnover subject to not being worse" is unbounded: turnover falls
+monotonically, so the rule returns whatever the grid edge is, and a wider grid
+would return wider still. The harness detects and flags boundary solutions.
+
+**Shipped 5× (exit 30) instead — a judgement, stated as one.** It is interior to
+the grid, captures 1.36 of the 1.88 points of available cost saving, and the
+structural argument the data cannot resolve at 95 rebalances is
+IR = TC × IC × √breadth (Grinold 1989; Clarke, de Silva & Thorley 2002): a band
+wide enough to hold names that have drifted far down the ranking lowers the
+transfer coefficient. Exit 30 is the top ~7% of a ~450-name eligible set; exit 48
+is the top ~11%.
+
+`features/v3.py::LIVE_BOOK` and `BOOK_NOTE` updated to match — the repo's own
+mirror test caught the drift immediately, which is the guard working.
+
+## Reported, not fixed: the book can exceed its own slot count
+
+The engine holds 7 positions and proposed 7 buys on 2026-08-21. Not a cap breach
+and not caused by the band change: `stage8_final_signal.portfolio.max_signals_per_run`
+is **8**, `capital.max_open_positions` is **6**, and the schema only requires
+`per_run >= entry_rank`. So a book carrying 7–8 names is permitted by design,
+which is hysteresis working — a previously-signalled name ranked between
+`entry_rank` and `exit_rank` keeps its card. Widening the band makes it more
+likely.
+
+Two consequences worth stating rather than silently resolving:
+
+- **The turnover figures above simulate a STRICT 6-name book**, so they are a
+  lower bound on live turnover and the cost saving is, if anything, understated.
+- **`max_open_positions: 6` and `max_signals_per_run: 8` describe different
+  books.** That is a config-level decision, not a bug to patch mid-audit.
+

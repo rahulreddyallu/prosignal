@@ -24,6 +24,23 @@ __all__ = ["factor_frame", "LOOKBACK_SESSIONS"]
 #: Sessions of history the block needs. `prox_52w` reads 273 of them.
 LOOKBACK_SESSIONS = 300
 
+#: HOW MANY SESSIONS A CALLER MUST HAND `factor_frame`, and there is exactly one
+#: right answer because two callers used two.
+#:
+#: `validation.v3_panel` sliced `[i - LOOKBACK - 15 : i + 1]`, which is 316 rows
+#: inclusive. `stage4_core_score.build_v3_block` asked the calendar for a
+#: trailing window of `LOOKBACK + 15`, which is 315. One extra leading bar shifts
+#: the start of every rolling window, so the two produced scores that agreed to
+#: Spearman 0.99997 and were not equal -- close enough that six sampled dates
+#: still ranked an identical top six, and different enough that the model
+#: selected on the research path was not quite the model the engine ran.
+#:
+#: 316 is the researched convention: it is what `build_v3_panel` used for both
+#: sealed holdouts and every experiment since, so production moves to it rather
+#: than the other way round. Both callers now read this constant, and
+#: `tests/test_research_live_parity.py` fails if either stops.
+FRAME_SESSIONS = LOOKBACK_SESSIONS + 16
+
 
 def _roll(df, w, how, mp=None):
     mp = mp if mp is not None else max(int(w * 0.6), 2)

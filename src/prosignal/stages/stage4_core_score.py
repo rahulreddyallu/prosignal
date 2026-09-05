@@ -306,7 +306,11 @@ def build_v3_block(store, calendar, symbols, as_of, sectors, cfg,
     before ``as_of``; the fundamental block is as-of joined on DISCLOSURE dates,
     never on period ends.
     """
-    need = v3fac.LOOKBACK_SESSIONS + 15
+    # ONE CONSTANT, TWO CALLERS. This read `LOOKBACK_SESSIONS + 15` while the
+    # research panel sliced 316 rows, so the engine computed every rolling
+    # statistic from a window one bar shorter than the one the model was
+    # selected on. See `v3_factors.FRAME_SESSIONS`.
+    need = v3fac.FRAME_SESSIONS
     window = calendar.trailing_window(as_of, need)
     start = window[0] if window else calendar.first
     px = store.read_prices(symbols=symbols, start=start, end=as_of)

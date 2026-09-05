@@ -300,7 +300,7 @@ RESEARCH_BOOK = {"slots": 12, "entry_rank": 24, "exit_rank": 48,
                  "universe_max_names": 750, "floor_applies_to": "entries_only"}
 
 #: Read-only mirror of the LIVE book. The config is the source of truth.
-LIVE_BOOK = {"slots": 6, "entry_rank": 6, "exit_rank": 18,
+LIVE_BOOK = {"slots": 6, "entry_rank": 6, "exit_rank": 30,
              "entry_cadence_sessions": 21}
 
 #: Kept as the name older code imported. It is the RESEARCH book -- which is
@@ -315,8 +315,12 @@ BOOK_NOTE = (
     "window A and beat it by 2.0% on window B, and on both the reason was "
     "transaction costs of 9.7% and 13.7% a year. "
     "AND THAT IS NOT THE BOOK THAT TRADES. Production runs SIX positions on a "
-    "21-session cadence with a 3x exit band (18), which is both slower and far "
-    "more concentrated than anything either window measured. Slower cuts the "
+    "21-session cadence with a 5x exit band (30, widened from 18 on 2026-09-05 "
+    "by research/v3/experiments/turnover_2026_09.py: turnover per rebalance "
+    "46.8% -> 33.9%, modelled cost 4.92% -> 3.56% a year, with no band's gross "
+    "excess significantly worse than the incumbent across 45 purged CPCV "
+    "folds), which is both slower and far more concentrated than anything "
+    "either window measured. Slower cuts the "
     "cost drag that sank the tested book, and turnover needs no labels to "
     "verify. More concentrated cuts the other way, and it leans on the "
     "statistic that generalised LEAST: top-ten excess on window A was +0.38% "

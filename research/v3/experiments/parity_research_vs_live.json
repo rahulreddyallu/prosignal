@@ -1,0 +1,471 @@
+{
+  "ranking_source": "v4_composite",
+  "dates": [
+    {
+      "date": "2026-08-07",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 748,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 702,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "RATEGAIN",
+        "GMRAIRPORT",
+        "DELHIVERY",
+        "STARHEALTH",
+        "BBOX",
+        "PFOCUS"
+      ],
+      "top6_live": [
+        "RATEGAIN",
+        "GMRAIRPORT",
+        "DELHIVERY",
+        "STARHEALTH",
+        "BBOX",
+        "PFOCUS"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2026-06-04",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 747,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 659,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 748,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 745,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "AXISCADES",
+        "JBCHEPHARM",
+        "JAYNECOIND",
+        "SAGILITY",
+        "SEAMECLTD",
+        "DELHIVERY"
+      ],
+      "top6_live": [
+        "AXISCADES",
+        "JBCHEPHARM",
+        "JAYNECOIND",
+        "SAGILITY",
+        "SEAMECLTD",
+        "DELHIVERY"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2026-03-25",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 748,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 635,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "FUSION",
+        "MFSL",
+        "TVSMOTOR",
+        "GRASIM",
+        "JBCHEPHARM",
+        "PVRINOX"
+      ],
+      "top6_live": [
+        "FUSION",
+        "MFSL",
+        "TVSMOTOR",
+        "GRASIM",
+        "JBCHEPHARM",
+        "PVRINOX"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2026-01-19",
+      "universe": 746,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 746,
+          "both_finite": 742,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 746,
+          "both_finite": 740,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 746,
+          "both_finite": 616,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 746,
+          "both_finite": 743,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 746,
+          "both_finite": 741,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 746,
+          "both_finite": 744,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "ZOTA",
+        "INTERARCH",
+        "BHARTIHEXA",
+        "UPL",
+        "IDFCFIRSTB",
+        "ASTRAZEN"
+      ],
+      "top6_live": [
+        "ZOTA",
+        "INTERARCH",
+        "BHARTIHEXA",
+        "UPL",
+        "IDFCFIRSTB",
+        "ASTRAZEN"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2025-11-13",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 746,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 599,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 750,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 743,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 748,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "TATASTEEL",
+        "TECHM",
+        "FORTIS",
+        "ERIS",
+        "CAMLINFINE",
+        "TVSMOTOR"
+      ],
+      "top6_live": [
+        "TATASTEEL",
+        "TECHM",
+        "FORTIS",
+        "ERIS",
+        "CAMLINFINE",
+        "TVSMOTOR"
+      ],
+      "top6_overlap": 1.0
+    },
+    {
+      "date": "2025-09-08",
+      "universe": 750,
+      "same_universe": {
+        "score": {
+          "field": "score",
+          "common_names": 750,
+          "both_finite": 747,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "momentum_sub": {
+          "field": "momentum_sub",
+          "common_names": 750,
+          "both_finite": 747,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "quality_sub": {
+          "field": "quality_sub",
+          "common_names": 750,
+          "both_finite": 585,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "ownership_sub": {
+          "field": "ownership_sub",
+          "common_names": 750,
+          "both_finite": 748,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        },
+        "risk_sub": {
+          "field": "risk_sub",
+          "common_names": 750,
+          "both_finite": 746,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 0.9999999999999999,
+          "identical": true
+        },
+        "reversal_sub": {
+          "field": "reversal_sub",
+          "common_names": 750,
+          "both_finite": 749,
+          "max_abs_diff": 0.0,
+          "mean_abs_diff": 0.0,
+          "spearman": 1.0,
+          "identical": true
+        }
+      },
+      "top6_research": [
+        "MANGCHEFER",
+        "RADICO",
+        "JSWSTEEL",
+        "LLOYDSME",
+        "SUNFLAG",
+        "TECHM"
+      ],
+      "top6_live": [
+        "MANGCHEFER",
+        "RADICO",
+        "JSWSTEEL",
+        "LLOYDSME",
+        "SUNFLAG",
+        "TECHM"
+      ],
+      "top6_overlap": 1.0
+    }
+  ],
+  "all_identical_same_universe": true,
+  "worst_max_abs_diff": 0.0,
+  "mean_top6_overlap": 1.0,
+  "verdict": "The research path and the live path compute the SAME score on the same universe. Every number the audit produced describes what the engine ranks."
+}
