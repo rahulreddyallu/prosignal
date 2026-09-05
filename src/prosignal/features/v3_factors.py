@@ -19,7 +19,7 @@ import pandas as pd
 
 from .v3 import ALL_FACTORS
 
-__all__ = ["factor_frame", "LOOKBACK_SESSIONS"]
+__all__ = ["factor_frame", "LOOKBACK_SESSIONS", "FRAME_SESSIONS"]
 
 #: Sessions of history the block needs.
 #:
@@ -37,6 +37,27 @@ __all__ = ["factor_frame", "LOOKBACK_SESSIONS"]
 #: Every other factor in the block was already bit-stable at 315. 420 is 400
 #: with a quarter of slack.
 LOOKBACK_SESSIONS = 420
+
+#: HOW MANY SESSIONS A CALLER MUST HAND `factor_frame`, and there is exactly one
+#: right answer because two callers used two.
+#:
+#: `validation.v3_panel` slices `[i - LOOKBACK - 15 : i + 1]`, which is
+#: LOOKBACK + 16 rows inclusive. `stage4_core_score.build_v3_block` asks the
+#: calendar for a trailing window of `LOOKBACK + 15`. One extra leading bar
+#: shifts the start of every rolling window, so the two produce scores that
+#: agree to roughly Spearman 0.9999 and are NOT equal -- close enough that
+#: sampled dates still rank an identical top six, and different enough that the
+#: model measured on the research path is not the model the engine runs.
+#:
+#: Measured before this constant existed, on the then-shipped scorer: max
+#: absolute score difference 3.9e-02 across six dates, top-six overlap 100%.
+#: With both callers reading this, 0.000e+00.
+#:
+#: The panel's convention is the one that generalises, because it is what every
+#: recorded experiment and both sealed holdouts were computed with -- so
+#: production moves to it rather than the other way round.
+#: `tests/test_research_live_parity.py` fails if either caller stops reading it.
+FRAME_SESSIONS = LOOKBACK_SESSIONS + 16
 
 #: Own sessions a SYMBOL needs before `resid_rev_21` means anything. The frame
 #: has to be deep enough (LOOKBACK_SESSIONS) and so does the column: a name

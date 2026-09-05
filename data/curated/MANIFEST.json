@@ -1,9 +1,9 @@
 {
  "root": "/Users/rahulreddyallu/Desktop/Pro Stock Signal BOT/data/curated",
- "built_at": "2026-09-04T02:46:14+00:00",
- "digest": "024097d7280e36cc",
- "n_files": 47,
- "total_bytes": 251952702,
+ "built_at": "2026-09-05T10:04:41+00:00",
+ "digest": "86f8b3d6e8865906",
+ "n_files": 51,
+ "total_bytes": 257686878,
  "files": [
   {
    "path": "corporate_actions.parquet",
@@ -144,6 +144,16 @@
    "max_date": null,
    "schema_sha": "67beab2cdc245c3e",
    "mtime_ms": 1788397178652
+  },
+  {
+   "path": "fo_lots.parquet",
+   "bytes": 10590,
+   "sha256": "4622ecd4fbc5a625e0daeb73ecc32eb5e15db2246d3689a1dd79a79a6011cde8",
+   "rows": 216,
+   "min_date": null,
+   "max_date": null,
+   "schema_sha": "8768724028ec37c1",
+   "mtime_ms": 1788535687875
   },
   {
    "path": "fundamentals.parquet",
@@ -366,24 +376,54 @@
    "mtime_ms": 1788487557730
   },
   {
+   "path": "results_calendar.parquet",
+   "bytes": 3964073,
+   "sha256": "bd3e17032ad4a1d7103ef6160fb859efb4f118a30c018c9ad9ce995f36b0fb31",
+   "rows": 91585,
+   "min_date": null,
+   "max_date": null,
+   "schema_sha": "23588abea43b02cc",
+   "mtime_ms": 1788536418123
+  },
+  {
    "path": "sector_map.parquet",
-   "bytes": 7120,
-   "sha256": "9b9839158cfadb348174c6dc6a725e4df9f7619a76df50dce52a90248d1f1921",
-   "rows": 500,
+   "bytes": 9838,
+   "sha256": "f27081a3332cff9727641e7e6c8296bf31048c0e18e3b39a7e6efe98af414dd0",
+   "rows": 754,
    "min_date": null,
    "max_date": null,
    "schema_sha": "a8f25e6f5e8a08a1",
-   "mtime_ms": 1788487559327
+   "mtime_ms": 1788492295598
+  },
+  {
+   "path": "security_list.parquet",
+   "bytes": 99406,
+   "sha256": "2117cf70fb2934eda48ebbe968a67525a2445a68d73b91e2b0592eb572619c60",
+   "rows": 3534,
+   "min_date": null,
+   "max_date": null,
+   "schema_sha": "33c7e0d86d2ceefe",
+   "mtime_ms": 1788535647301
+  },
+  {
+   "path": "shareholding.parquet",
+   "bytes": 994181,
+   "sha256": "183cc22c4d021c8f27c003f7f372878af822820dcf89ac2a16ce96303c1e8297",
+   "rows": 22787,
+   "min_date": null,
+   "max_date": null,
+   "schema_sha": "a5e98930a37c9c3a",
+   "mtime_ms": 1788543763955
   },
   {
    "path": "statements.parquet",
-   "bytes": 253563,
-   "sha256": "8c69f6848a1269e3baf03a56c7cdc1843b83987105f0804d3d3a6fbecc379743",
-   "rows": 3420,
+   "bytes": 916771,
+   "sha256": "36abb938bdc01c05f46ecb5d92d34a8f11074e7242042002ab683d71ab5735ed",
+   "rows": 7051,
    "min_date": null,
    "max_date": null,
    "schema_sha": "3af7fceba6cfcf21",
-   "mtime_ms": 1788397818755
+   "mtime_ms": 1788570079093
   },
   {
    "path": "v5_aux/equity_l.csv",

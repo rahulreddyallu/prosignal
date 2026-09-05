@@ -147,8 +147,20 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
     adtv = turnover.rolling(60, min_periods=1).median()
     adtv_rank = adtv.where(elig).rank(axis=1, ascending=False, method="first")
 
-    bench = close.mean(axis=1)
-    bench_ret = bench / bench.shift(1) - 1.0
+    # THE MEAN OF RETURNS, NOT THE RETURN OF THE MEAN. These are different
+    # indices and this line computed the wrong one: `close.mean(axis=1)` is an
+    # average PRICE, so its period-to-period change is a PRICE-WEIGHTED index
+    # dominated by whatever happens to trade at four figures. The contract in
+    # `v3_factors.factor_frame` is explicit -- "the equal-weight return of the
+    # ELIGIBLE universe" -- and `stage4_core_score` builds exactly that.
+    #
+    # `resid_rev_21` is the only factor that reads it, and it is a shipped
+    # factor. So it was measured against one benchmark in every experiment and
+    # both sealed holdouts, and computed against another in production: raw
+    # factor values differ by up to 1.30 on a live cross-section, while the
+    # other twenty-one agree to 0.000e+00. Found by
+    # `research/v3/experiments/parity_research_vs_live.py`.
+    bench_ret = (close / close.shift(1) - 1.0).mean(axis=1)
 
     dates = list(close.index)
     T = len(dates)
@@ -160,7 +172,9 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
         syms = list(sel[sel].index)
         if len(syms) < 60:
             continue
-        win = slice(max(i - lo - 15, 0), i + 1)
+        # `FRAME_SESSIONS` rows ending at i, expressed as a slice. The live
+        # path asks the calendar for the same count; the two must agree.
+        win = slice(max(i + 1 - v3_factors.FRAME_SESSIONS, 0), i + 1)
         fund = None
         if fund_recs is not None:
             try:

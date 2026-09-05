@@ -116,7 +116,20 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
                 "that was not the one measured.")
         ranked = v3_scored["score"].dropna()
         covered = ranked.reindex(composite_raw.index).dropna()
-        floor = max(int(0.6 * len(composite_raw)), 20)
+        # COVERAGE, NOT HEADCOUNT. `max(int(0.6 * n), 20)` asks for twenty
+        # names however small the universe is, so a cross-section of three
+        # scoreable names fails at "covers 3 of 3, under the 20 floor". The two
+        # conditions answer different questions and only one is intended: the
+        # message says a ranking built on a MINORITY of the universe is a
+        # ranking of that minority, which is a share. The absolute term is a
+        # sanity check against a near-empty cross-section and must never exceed
+        # what exists.
+        #
+        # It bites where refusing is worst. `absolute_floor`'s own note records
+        # 11 names clearing at the COVID trough and 8 in the 2022 drawdown; on
+        # such a day the engine would refuse to rank at all rather than ranking
+        # the names that survived.
+        floor = min(max(int(0.6 * len(composite_raw)), 20), len(composite_raw))
         if len(covered) < floor:
             raise RankingUnavailable(
                 f"the v9R composite covers {len(covered)} of "
@@ -137,7 +150,20 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
                 "issue signals from a model that was not the one measured.")
         ranked = v3_scored["score"].dropna()
         covered = ranked.reindex(composite_raw.index).dropna()
-        floor = max(int(0.6 * len(composite_raw)), 20)
+        # COVERAGE, NOT HEADCOUNT. `max(int(0.6 * n), 20)` asks for twenty
+        # names however small the universe is, so a cross-section of three
+        # scoreable names fails at "covers 3 of 3, under the 20 floor". The two
+        # conditions answer different questions and only one is intended: the
+        # message says a ranking built on a MINORITY of the universe is a
+        # ranking of that minority, which is a share. The absolute term is a
+        # sanity check against a near-empty cross-section and must never exceed
+        # what exists.
+        #
+        # It bites where refusing is worst. `absolute_floor`'s own note records
+        # 11 names clearing at the COVID trough and 8 in the 2022 drawdown; on
+        # such a day the engine would refuse to rank at all rather than ranking
+        # the names that survived.
+        floor = min(max(int(0.6 * len(composite_raw)), 20), len(composite_raw))
         if len(covered) < floor:
             raise RankingUnavailable(
                 f"the v3 composite covers {len(covered)} of "
@@ -274,7 +300,11 @@ def build_v3_block(store, calendar, symbols, as_of, sectors, cfg, v9r_mode=False
     # Feed failures that silently change the model, collected for the run
     # notes rather than left in a log file.
     _degraded = degraded if degraded is not None else []
-    need = v3fac.LOOKBACK_SESSIONS + 15
+    # ONE CONSTANT, TWO CALLERS. This read `LOOKBACK_SESSIONS + 15` while the
+    # research panel sliced one row more, so the engine computed every rolling
+    # statistic from a window one bar shorter than the one every experiment
+    # and both sealed holdouts used. See `v3_factors.FRAME_SESSIONS`.
+    need = v3fac.FRAME_SESSIONS
     window = calendar.trailing_window(as_of, need)
     start = window[0] if window else calendar.first
     px = store.read_prices(symbols=symbols, start=start, end=as_of)
@@ -834,8 +864,13 @@ def run(
         if len(cols) >= 2:
             member_block = model_features[cols].rename(columns=lambda c: c[:-2])
 
-    redundancy = _redundancy(model_block if model_block is not None else frame,
-                             cfg, members=member_block)
+    # THE MONITOR FOLLOWS THE SCORER. `model_features` is None on every run
+    # since the fitted ranker was removed, so the old call fell through to the
+    # legacy `frame` and never saw a factor the book is ordered by.
+    redundancy = _v3_redundancy(v3_scored, cfg)
+    if redundancy is None:
+        redundancy = _redundancy(model_block if model_block is not None else frame,
+                                 cfg, members=member_block)
     if redundancy.breaches:
         pairs = ", ".join(f"{a}/{b} {r:+.2f}" for a, b, r in redundancy.breaches[:4])
         notes.append(
@@ -1099,6 +1134,100 @@ def _weights(cfg, surviving: List[str]) -> Dict[str, float]:
     return {n: v / total for n, v in mids.items()} if total > 0 else {
         n: 1.0 / len(surviving) for n in surviving
     }
+
+
+def _v3_blocks(v3_scored):
+    """The two levels of the shipped scorer, ready for the redundancy check.
+
+    Returns ``(themes, factors)``: the five theme sub-scores, which are what the
+    blend weights are applied to, and the factor ranks underneath them,
+    SIGN-ORIENTED so a -1 factor lining up with a +1 factor reads as the
+    positive alignment it is rather than a spurious negative.
+
+    Orientation is the whole point. Unoriented, `ulcer_120` (sign -1) against
+    `prox_52w` (sign +1) reports -0.78 and looks like diversification; oriented,
+    it reports +0.78 and is the same bet twice.
+    """
+    if v3_scored is None or getattr(v3_scored, "empty", True):
+        return None, None
+    theme_block = pd.DataFrame(index=v3_scored.index)
+    for tname in v3feat.THEMES:
+        col = tname + "_sub"
+        if col in v3_scored.columns:
+            theme_block[tname] = v3_scored[col]
+    factors = pd.DataFrame(index=v3_scored.index)
+    for tname, th in v3feat.THEMES.items():
+        for fname, sign in th.factors:
+            col = fname + "_r"
+            if col in v3_scored.columns:
+                factors[fname] = v3_scored[col] * sign
+    return (theme_block if theme_block.shape[1] >= 2 else None,
+            factors if factors.shape[1] >= 2 else None)
+
+
+def _v3_redundancy(v3_scored, cfg):
+    """Redundancy for the scorer that actually orders the book.
+
+    WHY THIS EXISTS SEPARATELY. `_redundancy` was written for the fitted model
+    and is fed `model_features`, which has been `None` on every run since the
+    fitted ranker was removed in the 2026-09-03 cleanup -- so it fell through to
+    the legacy standardised frame and NO SHIPPED FACTOR PAIR HAS EVER BEEN
+    CHECKED. A monitor that inspects an empty frame reports no breaches, which
+    is indistinguishable from a clean bill of health.
+
+    WHAT COUNTS AS A BREACH HERE IS NOT WHAT COUNTS THERE. Two factors inside
+    one theme are SUPPOSED to overlap: the theme averages them, and the average
+    is what carries a weight. Two factors in DIFFERENT themes are another
+    matter -- the 40% cap is applied per theme, so a momentum factor sitting in
+    the `risk` theme is momentum exposure the cap cannot see. Measured on the
+    research panel, `prox_52w`/`ulcer_120` correlate +0.69..+0.78 across the
+    momentum/risk boundary.
+
+    So: cross-theme factor pairs above the cutoff are BREACHES, within-theme
+    pairs are reported as absorbed, and the theme sub-scores are checked in
+    their own right because they are what the weights multiply.
+    """
+    theme_of = {f: t for t, th in v3feat.THEMES.items() for f in th.names}
+    theme_block, factors = _v3_blocks(v3_scored)
+    if theme_block is None and factors is None:
+        return None
+    cutoff = fv(cfg.redundancy.max_abs_spearman)
+    notes = []
+
+    theme_pairs = spearman_pairs(theme_block) if theme_block is not None else {}
+    breaches = [(k.split("|")[0], k.split("|")[1], round(rho, 4))
+                for k, rho in theme_pairs.items() if abs(rho) > cutoff]
+
+    factor_pairs = spearman_pairs(factors) if factors is not None else {}
+    cross, within = [], []
+    for key, rho in factor_pairs.items():
+        a, b = key.split("|")
+        if abs(rho) <= cutoff:
+            continue
+        same = theme_of.get(a) == theme_of.get(b)
+        (within if same else cross).append((a, b, round(rho, 4)))
+
+    for a, b, rho in sorted(cross, key=lambda r: -abs(r[2])):
+        breaches.append((a, b, rho))
+        notes.append(
+            f"CROSS-THEME OVERLAP: {a} ({theme_of[a]}) and {b} "
+            f"({theme_of[b]}) correlate {rho:+.2f} oriented. The 40% cap is "
+            f"applied per theme and cannot see this; the exposure is carried "
+            f"twice.")
+    if within:
+        worst = sorted(within, key=lambda r: -abs(r[2]))[:4]
+        notes.append(
+            "Within-theme overlap (absorbed by the theme average, not a "
+            "breach): " + ", ".join(f"{a}/{b} {rho:+.2f}" for a, b, rho in worst))
+    if not theme_pairs and not factor_pairs:
+        notes.append("fewer than two scored columns carried enough values to "
+                     "correlate; overlap not measurable this run")
+
+    combined = {f"theme:{k}": round(v, 4) for k, v in theme_pairs.items()}
+    combined.update({k: round(v, 4) for k, v in factor_pairs.items()})
+    return RedundancyReport(
+        pairwise_spearman=combined, breaches=breaches, cutoff=cutoff,
+        action_taken=str(v(cfg.redundancy.on_breach)), notes=notes)
 
 
 def _redundancy(frame: pd.DataFrame, cfg,
