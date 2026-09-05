@@ -336,7 +336,7 @@ class DataStore:
     #: -- is the VWAP of the session after the signal, which is the manual
     #: next-session execution the product asks of its user. This list omitted
     #: `vwap`, so the store held it (100% coverage in the parquet) and served
-    #: it to nobody: `build_v3_panel` and `build_v2_panel` both fall back to
+    #: it to nobody: `build_panel` and `build_v2_panel` both fall back to
     #: open, then close, when vwap is absent, and would have quietly measured a
     #: different execution than the one the holdouts were computed on. It also
     #: left `price_vs_vwap_20` -- one of the four reversal factors -- NaN on

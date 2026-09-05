@@ -129,7 +129,7 @@ def test_earnings_proximity_is_not_a_factor():
     ALL_FACTORS somebody has turned a risk disclosure into an alpha claim on
     data that cannot support one -- the calendar is dense for 179 names and has
     a median of two rows for everybody else."""
-    from prosignal.features import v3
-    names = " ".join(v3.ALL_FACTORS).lower()
+    from prosignal.features import engine
+    names = " ".join(engine.ALL_FACTORS).lower()
     assert "earn" not in names
     assert not hasattr(E, "factor_frame")

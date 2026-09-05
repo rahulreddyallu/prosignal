@@ -57,7 +57,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from prosignal.features import v3                              # noqa: E402
+from prosignal.features import engine                              # noqa: E402
 from prosignal.validation.cpcv import CombinatorialPurgedCV     # noqa: E402
 from prosignal.validation.significance import overlap_lag       # noqa: E402
 
@@ -126,13 +126,13 @@ SPECS = {
                 "40/19/19/11/11. Equal declared weight is the neutral alternative "
                 "to a weight vector nobody chose. EXP-D previously found frozen "
                 "beats equal on the full sample; this re-asks it out of sample.",
-        "drop_factors": (), "move": {}, "weights": {t: 0.2 for t in v3.THEMES},
+        "drop_factors": (), "move": {}, "weights": {t: 0.2 for t in engine.THEMES},
     },
     "F_prune7_equal_theme": {
         "note": "A and E together, because they interact: pruning changes what "
                 "each theme contains, which changes what an equal weight buys.",
         "drop_factors": BOTH_HALVES_SEVEN, "move": {},
-        "weights": {t: 0.2 for t in v3.THEMES},
+        "weights": {t: 0.2 for t in engine.THEMES},
     },
 }
 
@@ -187,23 +187,23 @@ SPEC_SHA = hashlib.sha256(
 def _themes_for(spec) -> dict:
     """The theme table this specification implies, built from the frozen one.
 
-    `v3.THEMES` is never mutated. A moved factor keeps its sign and changes
+    `engine.THEMES` is never mutated. A moved factor keeps its sign and changes
     theme; a dropped factor leaves its theme, and a theme emptied by the drop is
     removed rather than left to divide by zero.
     """
     move = spec.get("move") or {}
     drop = set(spec.get("drop_factors") or ())
-    members: dict = {t: [] for t in v3.THEMES}
-    for tname, th in v3.THEMES.items():
+    members: dict = {t: [] for t in engine.THEMES}
+    for tname, th in engine.THEMES.items():
         for fname, sign in th.factors:
             if fname in drop:
                 continue
             members[move.get(fname, tname)].append((fname, sign))
     out = {}
-    for tname, th in v3.THEMES.items():
+    for tname, th in engine.THEMES.items():
         if not members[tname]:
             continue
-        out[tname] = v3.Theme(weight=th.weight, horizon=th.horizon,
+        out[tname] = engine.Theme(weight=th.weight, horizon=th.horizon,
                               coverage=th.coverage, factors=tuple(members[tname]))
     return out
 
@@ -211,7 +211,7 @@ def _themes_for(spec) -> dict:
 def build_scores(panel, spec, rank_frame, idx, dates, min_themes=3) -> np.ndarray:
     """Rebuild the composite under one specification, per date.
 
-    THE SUB-SCORE COMES FROM `v3.theme_subscore`, not from a copy of it. A first
+    THE SUB-SCORE COMES FROM `engine.theme_subscore`, not from a copy of it. A first
     version of this re-implemented the sign-oriented mean and the re-rank in
     numpy and reproduced the shipped score to 5e-3 -- two names out of 750
     breaking a tie the other way. That is small enough to pass any eyeball check
@@ -229,7 +229,7 @@ def build_scores(panel, spec, rank_frame, idx, dates, min_themes=3) -> np.ndarra
         ix = idx[d]
         block = rank_frame.iloc[ix]
         subs = np.column_stack([
-            v3.theme_subscore(block, themes[t]).to_numpy("float64")
+            engine.theme_subscore(block, themes[t]).to_numpy("float64")
             for t in names])
         ok = np.isfinite(subs)
         den = (ok * W).sum(1)
@@ -294,8 +294,8 @@ def main() -> int:
     idx = {d: np.asarray(v) for d, v in P.groupby("date").indices.items()}
     # `theme_subscore` reads COLUMNS NAMED AFTER THE FACTORS, which is what the
     # live path hands it; the panel stores them with an `_r` suffix.
-    rank_frame = P[[f + "_r" for f in v3.ALL_FACTORS]].copy()
-    rank_frame.columns = list(v3.ALL_FACTORS)
+    rank_frame = P[[f + "_r" for f in engine.ALL_FACTORS]].copy()
+    rank_frame.columns = list(engine.ALL_FACTORS)
     y = P[args.label].to_numpy("float64")
 
     base = build_scores(P, SPECS["incumbent"], rank_frame, idx, dates)

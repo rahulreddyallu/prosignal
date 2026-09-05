@@ -1051,71 +1051,27 @@ stage4_core_score:
   #   liquidity    0 of 9 clear.
   #   seasonality  0 of 2 clear; placebo |t| threshold 9.9 against a real 1.2.
   ranking:
-    #: v3_composite    -- the shipped scorer, `features/v3.py`.
-    #: v9r_core        -- the v9R model, `features/v9r.py`. NINE factors, equal
-    #:                    risk contribution, unneutralised, no coverage
-    #:                    renormalisation. It is the only model in this engine
-    #:                    with an out-of-sample number: +9.50% net active on a
-    #:                    sealed 2012-2017 window at Newey-West t +1.87 against
-    #:                    a PRE-REGISTERED bar of 2.0. That is a FAILED ship
-    #:                    gate -- positive and underpowered -- and it is
-    #:                    selectable here so it can be shadow-run beside the
-    #:                    incumbent, NOT because the evidence supports switching.
-    #:                    Switching on this evidence would be reading a failure
-    #:                    as a pass. docs/MODEL_v9R.md has the full table.
-    #: v2_composite    -- the previous answer, kept so it can be re-run.
-    #: measured_factor -- rank on `column`, a sector-neutral rank already.
-    #: fitted_composite / family_average -- older behaviours, kept for comparison.
-    #: v4_composite    -- THE SHIPPED SCORER since the 2026-09-05 epoch.
-    #:                    v3 MINUS SEVEN FACTORS and nothing else: same five
-    #:                    themes, same frozen weights, same signs, same blend.
-    #:                    Removed: mom_2_0 (own rank IC +0.0001 at t 0.02 --
-    #:                    absent, not weak: 2-month momentum with no skip, so the
-    #:                    reversal window sits inside it), mom_3_1, mom_accel,
-    #:                    voladj_mom_6_1, ulcer_120 (a momentum factor filed
-    #:                    under `risk`, correlating +0.69..+0.78 oriented with
-    #:                    prox_52w, where the per-theme 40% cap could not see
-    #:                    it), resid_rev_21 and deliv_chg_5.
-    #:
-    #:                    EVIDENCE, stated as narrowly as it deserves. An
-    #:                    independent split-half selection nominated exactly
-    #:                    these seven in BOTH halves, and re-deriving it after
-    #:                    the research panel was rebuilt -- different date range,
-    #:                    16 more dates, quality coverage 21% -> 49% -- returned
-    #:                    the same seven with no additions or removals. Over 45
-    #:                    purged, embargoed CPCV folds: composite rank IC
-    #:                    +0.0541 -> +0.0607, delta +0.0066 at Newey-West t
-    #:                    +2.37, 96% of folds improved, fifth percentile still
-    #:                    positive.
-    #:
-    #:                    WHAT IT IS NOT. Not a sealed-holdout result. v3's two
-    #:                    sealed windows were earned by the 22-factor set, do NOT
-    #:                    transfer, and are both spent. CPCV measures stability
-    #:                    across sub-periods, not selection out-of-sample, and
-    #:                    the seven were chosen on this panel. The forward test
-    #:                    re-registered with this epoch is what grades it.
-    #:
-    #:                    AND IT DOES NOT FIX THE BOOK. At six names on a
-    #:                    21-session cadence the change is inside the noise. The
-    #:                    ranking has an edge; the concentrated book does not
-    #:                    inherit it. That finding is untouched.
-    #:
-    #:                    TO REVERT: set this back to "v3_composite". v4 removes
-    #:                    nothing from v3 and v3 stays selectable.
-    source: "v4_composite"
-    column: "mom_6_1_r"
-    v3_min_themes:
+    # THERE IS NO `source` HERE ANY MORE. It used to choose between
+    # v4_composite, v3_composite, v9r_core, measured_factor, fitted_composite
+    # and family_average -- six ways to rank the same universe, of which one
+    # ran and the rest existed to be compared against. The comparison never
+    # happened on a schedule and the cost was a repository that could not say
+    # in one sentence what it recommended. The alternatives are deleted;
+    # `src/prosignal/features/engine.py` IS the scorer. Setting `source` here
+    # is now a config error rather than a no-op, so nobody can believe they
+    # have switched models when they have not.
+    #
+    # The factor definitions, signs, theme membership and blend weights live in
+    # `features/engine.py` rather than here: a number that can be edited in a
+    # config file is a number that can drift away from the thing that was
+    # tested.
+    min_themes:
       value: 3
       status: MEASURED
       note: >-
         Three of five. A name scored on two themes is not the same measurement
         as one scored on five. Validated across 2, 3 and 4; the ranking is flat
         in this parameter and 3 keeps the widest population.
-    note: >-
-      The factor definitions, signs, theme membership and blend weights live in
-      `src/prosignal/features/v3.py` rather than here: they are what two sealed
-      holdouts measured, and a number that can be edited in a config file is a
-      number that can drift away from the thing that was tested.
 
   # ---------------------------------------------------------------------------
   # THE ABSOLUTE FLOOR, AND HOW NO TRADE HAPPENS

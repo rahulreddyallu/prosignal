@@ -1,4 +1,4 @@
-"""The twenty-two shipped factors, computed exactly as the search measured them.
+"""The fifteen shipped factors, computed exactly as the search measured them.
 
 Every window here matches the v3 search code (removed 2026-09-03; the windows are frozen here) to
 machine precision -- `tests/test_v3_score.py` checks it on real data across five
@@ -17,7 +17,7 @@ from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
-from .v3 import ALL_FACTORS
+from .engine import ALL_FACTORS
 
 __all__ = ["factor_frame", "LOOKBACK_SESSIONS"]
 
@@ -27,7 +27,7 @@ LOOKBACK_SESSIONS = 300
 #: HOW MANY SESSIONS A CALLER MUST HAND `factor_frame`, and there is exactly one
 #: right answer because two callers used two.
 #:
-#: `validation.v3_panel` sliced `[i - LOOKBACK - 15 : i + 1]`, which is 316 rows
+#: `validation.panel` sliced `[i - LOOKBACK - 15 : i + 1]`, which is 316 rows
 #: inclusive. `stage4_core_score.build_v3_block` asked the calendar for a
 #: trailing window of `LOOKBACK + 15`, which is 315. One extra leading bar shifts
 #: the start of every rolling window, so the two produced scores that agreed to
@@ -35,7 +35,7 @@ LOOKBACK_SESSIONS = 300
 #: still ranked an identical top six, and different enough that the model
 #: selected on the research path was not quite the model the engine ran.
 #:
-#: 316 is the researched convention: it is what `build_v3_panel` used for both
+#: 316 is the researched convention: it is what `build_panel` used for both
 #: sealed holdouts and every experiment since, so production moves to it rather
 #: than the other way round. Both callers now read this constant, and
 #: `tests/test_research_live_parity.py` fails if either stops.
@@ -51,27 +51,22 @@ def factor_frame(close: pd.DataFrame, open_: Optional[pd.DataFrame] = None,
                  vwap: Optional[pd.DataFrame] = None,
                  turnover: Optional[pd.DataFrame] = None,
                  deliv_pct: Optional[pd.DataFrame] = None,
-                 bench_ret: Optional[pd.Series] = None,
                  fundamentals: Optional[Dict[str, pd.DataFrame]] = None,
                  last_row_only: bool = True):
     """The factor block. Rows are dates ascending, columns are symbols.
 
-    ``bench_ret`` is the equal-weight return of the ELIGIBLE universe -- the
-    market as it stood, not as today's survivors describe it. Only
-    `resid_rev_21` uses it; the other twenty-one are own-series statistics, so a
-    change in how the benchmark is assembled cannot move them.
+    EVERY FACTOR HERE IS AN OWN-SERIES STATISTIC. `bench_ret` used to be a
+    parameter because `resid_rev_21` needed a market return; that factor was
+    removed on 2026-09-05 and the parameter went with it. Nothing in this block
+    now depends on how the benchmark is assembled, which removes the one way a
+    change in the universe could silently move a factor value.
     """
     F: Dict[str, pd.DataFrame] = {}
     ret = close / close.shift(1) - 1.0
 
     # ---- momentum -------------------------------------------------------
-    F["mom_2_0"] = close / close.shift(42) - 1.0
-    F["mom_3_1"] = close.shift(21) / close.shift(63) - 1.0
-    mom_6_1 = close.shift(21) / close.shift(126) - 1.0
     mom_12_1 = close.shift(21) / close.shift(252) - 1.0
     F["mom_12_6"] = close.shift(126) / close.shift(252) - 1.0
-    F["mom_accel"] = F["mom_3_1"] - mom_6_1
-    F["voladj_mom_6_1"] = mom_6_1 / _roll(ret, 126, "std").replace(0, np.nan)
     F["voladj_mom_12_1"] = mom_12_1 / _roll(ret, 252, "std").replace(0, np.nan)
     pos = (ret > 0).astype("float64").where(ret.notna())
     F["mom_consist_126"] = _roll(pos, 126, "mean").shift(21)
@@ -105,37 +100,20 @@ def factor_frame(close: pd.DataFrame, open_: Optional[pd.DataFrame] = None,
         del win, srt
     F["max5_21"] = pd.DataFrame(out_max, index=close.index, columns=close.columns)
 
-    # ---- risk, and the market residual the reversal factor needs ---------
+    # ---- risk ------------------------------------------------------------
     dsr = ret.where(ret < 0)
     F["downside_vol_60"] = dsr.rolling(60, min_periods=20).std()
     F["ret_kurt_126"] = _roll(ret, 126, "kurt", mp=90)
-    cm = close.rolling(120, min_periods=72).max()
-    dd = close / cm.replace(0, np.nan) - 1.0
-    F["ulcer_120"] = np.sqrt((dd ** 2).rolling(120, min_periods=72).mean())
-
-    if bench_ret is not None:
-        b = pd.Series(bench_ret).reindex(close.index).astype("float64")
-        bc = b - b.rolling(126, min_periods=90).mean()
-        bvar = (bc * bc).rolling(126, min_periods=90).mean()
-        beta = ret.mul(bc, axis=0).rolling(126, min_periods=90).mean() \
-                  .div(bvar.replace(0, np.nan), axis=0)
-        resid = ret.sub(_roll(ret, 126, "mean", mp=90)).sub(beta.mul(bc, axis=0))
-        idio = _roll(resid, 126, "std", mp=90)
-        F["resid_rev_21"] = _roll(resid, 21, "sum", mp=15) / idio.replace(0, np.nan)
-    else:
-        F["resid_rev_21"] = pd.DataFrame(np.nan, index=close.index,
-                                         columns=close.columns)
 
     # ---- ownership: the delivered fraction --------------------------------
     if deliv_pct is not None:
         dp = deliv_pct.reindex(index=close.index, columns=close.columns)
         F["deliv_pct_60"] = _roll(dp, 60, "mean")
-        F["deliv_chg_5"] = _roll(dp, 5, "mean", mp=3) - _roll(dp, 60, "mean")
         sd = _roll(dp, 252, "std", mp=150)
         F["deliv_z_21"] = (_roll(dp, 21, "mean")
                            - _roll(dp, 252, "mean", mp=150)) / sd.replace(0, np.nan)
     else:
-        for k in ("deliv_pct_60", "deliv_chg_5", "deliv_z_21"):
+        for k in ("deliv_pct_60", "deliv_z_21"):
             F[k] = pd.DataFrame(np.nan, index=close.index, columns=close.columns)
 
     # ---- quality, from point-in-time fundamentals -------------------------

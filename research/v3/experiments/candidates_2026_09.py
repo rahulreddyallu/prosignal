@@ -63,7 +63,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from prosignal.data.store import DataStore                      # noqa: E402
-from prosignal.features import v3                               # noqa: E402
+from prosignal.features import engine                               # noqa: E402
 from prosignal.validation.significance import overlap_lag        # noqa: E402
 
 if str(Path(__file__).resolve().parent) not in sys.path:

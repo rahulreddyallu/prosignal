@@ -1031,19 +1031,13 @@ class RankingConfig(_Base):
     (+0.0338 at H=63) while its top-decile excess is negative (-0.35%, t -0.28).
     """
 
-    #: v4_composite -- the shipped scorer since the 2026-09-05 epoch: v3 minus
-    #: the seven factors an independent split-half nominated in both halves.
-    #: v3_composite -- the previous scorer, still selectable and the thing to
-    #: revert to. v9r_core -- the sealed-window model, selectable for shadow
-    #: running; see docs/MODEL_v9R.md for why it is not the default.
-    source: str = Field("measured_factor",
-                        pattern="^(v4_composite|v3_composite|v9r_core"
-                                "|measured_factor|fitted_composite"
-                                "|family_average)$")
-    #: v3_composite only: how many of the five themes a name must have before it
-    #: is scored. A name scored on two themes is not the same measurement as one
-    #: scored on five, and blending them into one ranking hides that.
-    v3_min_themes: TI = Field(default_factory=lambda: Tunable[int](
+    #: THERE IS NO `source`. This field used to select between v4_composite,
+    #: v3_composite, v9r_core, measured_factor, fitted_composite and
+    #: family_average -- six ways to rank the same universe, of which one ran.
+    #: The alternatives are deleted; `features/engine.py` is the scorer. A
+    #: config that still sets `source` is rejected rather than ignored, because
+    #: silently ignoring it would let someone believe they had switched models.
+    min_themes: TI = Field(default_factory=lambda: Tunable[int](
         value=3, status="MEASURED",
         note="Three of five. Validated across 2 and 4; the ranking is flat in "
              "this parameter and 3 keeps the widest population."))

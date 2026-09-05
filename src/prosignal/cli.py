@@ -1858,7 +1858,7 @@ def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 
 
-def cmd_research_v3(cfg: AppConfig, args: argparse.Namespace) -> int:
+def cmd_research_model(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Live health of the shipped v3 thematic composite, and its re-check.
 
     THREE READS, and the second is the one v2 could not give. `--monitor`
@@ -1879,9 +1879,9 @@ def cmd_research_v3(cfg: AppConfig, args: argparse.Namespace) -> int:
     import json
 
     from .data.store import DataStore
-    from .validation import v3_panel as vp
-    from . import v3_monitor as vm
-    from .features import v3 as v3feat
+    from .validation import panel as vp
+    from . import monitor as vm
+    from .features import engine
 
     store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
     sessions = store.price_sessions()
@@ -1893,7 +1893,7 @@ def cmd_research_v3(cfg: AppConfig, args: argparse.Namespace) -> int:
         start = end - dt.timedelta(days=int(365.25 * float(args.years)))
 
     _rule("Building the v3 themed panel")
-    panel = vp.build_v3_panel(store, start=start, end=end)
+    panel = vp.build_panel(store, start=start, end=end)
     if panel.empty:
         _print("the panel came back empty; nothing to report")
         return 1
@@ -1940,7 +1940,7 @@ def cmd_research_v3(cfg: AppConfig, args: argparse.Namespace) -> int:
         for h in fh:
             ic = "     n/a" if h.ic_mean is None else f"{h.ic_mean:+9.4f}"
             t = "    n/a" if h.ic_t is None else f"{h.ic_t:+7.2f}"
-            sg = v3feat.THEMES[h.theme].signs.get(h.name, 0)
+            sg = eng.THEMES[h.theme].signs.get(h.name, 0)
             state = "INVERTED" if h.inverted else ("no verdict"
                                                    if h.ic_mean is None else "ok")
             _print(f"{h.name:22s} {h.theme:12s} {int(sg):+4d} {h.n_periods:4d} "
@@ -2454,23 +2454,23 @@ def build_parser() -> argparse.ArgumentParser:
         "trials", help="every configuration compared, and what the DSR charges")
     trials_p.set_defaults(func=cmd_research_trials)
 
-    v3_p = research_sub.add_parser(
-        "v3", help="health of the shipped v3 thematic composite, and its re-check")
-    v3_p.add_argument("--monitor", action="store_true",
+    model_p = research_sub.add_parser(
+        "model", help="health of the shipped composite, and its re-check")
+    model_p.add_argument("--monitor", action="store_true",
                       help="rolling IC per FACTOR and per THEME, plus the share "
                            "of the ranking each theme actually runs (default)")
-    v3_p.add_argument("--recheck", action="store_true",
+    model_p.add_argument("--recheck", action="store_true",
                       help="apply the frozen configuration to the most recent "
                            "months, once, under the same holdout discipline that "
                            "earned the deploy")
-    v3_p.add_argument("--holdout-months", type=int, default=3,
+    model_p.add_argument("--holdout-months", type=int, default=3,
                       help="length of the re-check window (default 3)")
-    v3_p.add_argument("--window", type=int, default=52,
+    model_p.add_argument("--window", type=int, default=52,
                       help="rolling window, in signal dates, for the ICs")
-    v3_p.add_argument("--years", type=float, default=3.0,
+    model_p.add_argument("--years", type=float, default=3.0,
                       help="how much history to build the panel over")
-    v3_p.add_argument("--json", action="store_true", help="also print the raw verdict")
-    v3_p.set_defaults(func=cmd_research_v3)
+    model_p.add_argument("--json", action="store_true", help="also print the raw verdict")
+    model_p.set_defaults(func=cmd_research_model)
 
     decay_p = research_sub.add_parser(
         "decay", help="evaluate the pre-committed kill criterion per theme")

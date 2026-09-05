@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prosignal.features import v3
+from prosignal.features import engine
 from prosignal.stages.stage4_core_score import (
     _residual_share,
     _v3_blocks,
@@ -47,20 +47,20 @@ def _scored(n=200, seed=7, drop_quality=False, clone=None):
     rng = np.random.default_rng(seed)
     idx = [f"S{i:03d}" for i in range(n)]
     out = pd.DataFrame(index=idx)
-    for f in v3.ALL_FACTORS:
+    for f in engine.ALL_FACTORS:
         out[f + "_r"] = rng.uniform(-1, 1, n)
     if clone:
         src, dst = clone
-        s_sign = v3.THEMES[v3.FACTOR_THEME[src]].signs[src]
-        d_sign = v3.THEMES[v3.FACTOR_THEME[dst]].signs[dst]
+        s_sign = engine.THEMES[engine.FACTOR_THEME[src]].signs[src]
+        d_sign = engine.THEMES[engine.FACTOR_THEME[dst]].signs[dst]
         out[dst + "_r"] = out[src + "_r"] * (s_sign * d_sign)
-    for t, th in v3.THEMES.items():
+    for t, th in engine.THEMES.items():
         cols = [f + "_r" for f in th.names]
         signs = np.array([th.signs[f] for f in th.names])
         out[t + "_sub"] = (out[cols].to_numpy() * signs).mean(axis=1)
     if drop_quality:
         out["quality_sub"] = np.nan
-        for f in v3.THEMES["quality"].names:
+        for f in engine.THEMES["quality"].names:
             out[f + "_r"] = np.nan
     return out
 
@@ -69,8 +69,8 @@ def _scored(n=200, seed=7, drop_quality=False, clone=None):
 def test_the_check_sees_the_twenty_two_factors_that_order_the_book():
     """The regression: it used to see none of them."""
     themes, factors = _v3_blocks(_scored())
-    assert list(factors.columns) == list(v3.ALL_FACTORS)
-    assert set(themes.columns) == set(v3.THEMES)
+    assert list(factors.columns) == list(engine.ALL_FACTORS)
+    assert set(themes.columns) == set(engine.THEMES)
 
 
 def test_factor_ranks_are_oriented_before_they_are_correlated():
@@ -110,7 +110,7 @@ def test_independent_factors_produce_no_breaches():
 # ----------------------------------------------------------------- weights
 def test_effective_weight_equals_declared_only_when_every_theme_is_present():
     eff = theme_effective_weights(_scored())
-    for t, th in v3.THEMES.items():
+    for t, th in engine.THEMES.items():
         assert eff[t][0] == pytest.approx(th.weight, abs=1e-9)
         assert eff[t][1] == pytest.approx(1.0)
 
@@ -120,9 +120,9 @@ def test_a_missing_theme_hands_its_weight_to_the_others():
     declared 40% is applied at 40/(1-0.18991) = 49.4%."""
     eff = theme_effective_weights(_scored(drop_quality=True))
     assert eff["quality"] == (pytest.approx(0.0), pytest.approx(0.0))
-    expected = v3.THEMES["momentum"].weight / (1.0 - v3.THEMES["quality"].weight)
+    expected = engine.THEMES["momentum"].weight / (1.0 - engine.THEMES["quality"].weight)
     assert eff["momentum"][0] == pytest.approx(expected, abs=1e-9)
-    assert eff["momentum"][0] > v3.THEMES["momentum"].weight
+    assert eff["momentum"][0] > engine.THEMES["momentum"].weight
     assert sum(e for e, _ in eff.values()) == pytest.approx(1.0, abs=1e-9)
 
 

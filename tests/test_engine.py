@@ -1,4 +1,4 @@
-"""The v3 thematic composite.
+"""The thematic composite -- the one scorer.
 
 Every test here exists because a plausible alternative was written first and was
 wrong in a way that produced sensible-looking numbers: a theme oriented at the
@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prosignal.features import v3, v3_factors
+from prosignal.features import engine, factors
 
 
 def _panel(n_days=400, n_syms=60, seed=11):
@@ -33,35 +33,35 @@ def _panel(n_days=400, n_syms=60, seed=11):
 def test_the_shipped_themes_and_weights_are_the_deployed_configuration():
     """If any of this changes, the sealed-holdout numbers in CHANGELOG.md stop
     describing the running model and the deploy has to be re-earned."""
-    assert set(v3.THEMES) == {"momentum", "quality", "ownership", "risk", "reversal"}
-    assert sum(t.weight for t in v3.THEMES.values()) == pytest.approx(1.0)
-    assert max(t.weight for t in v3.THEMES.values()) <= 0.40 + 1e-9
-    assert min(t.weight for t in v3.THEMES.values()) >= 0.06 - 1e-9
-    assert len(v3.ALL_FACTORS) == 22
+    assert set(engine.THEMES) == {"momentum", "quality", "ownership", "risk", "reversal"}
+    assert sum(t.weight for t in engine.THEMES.values()) == pytest.approx(1.0)
+    assert max(t.weight for t in engine.THEMES.values()) <= 0.40 + 1e-9
+    assert min(t.weight for t in engine.THEMES.values()) >= 0.06 - 1e-9
+    assert len(engine.ALL_FACTORS) == 22
     # Both were frozen rounded (weight to 5dp, coverage to 4dp), so the
     # comparison is only meaningful to the coarser of the two.
-    assert v3.THEMES["quality"].weight <= v3.THEMES["quality"].coverage + 5e-5
-    for name, th in v3.THEMES.items():
+    assert engine.THEMES["quality"].weight <= engine.THEMES["quality"].coverage + 5e-5
+    for name, th in engine.THEMES.items():
         assert th.weight <= th.coverage + 5e-5, f"{name} outruns its coverage"
 
 
 def test_every_theme_is_oriented_at_its_own_horizon():
     """One label for all five made the reversal sub-score anti-predictive."""
-    h = {t: th.horizon for t, th in v3.THEMES.items()}
+    h = {t: th.horizon for t, th in engine.THEMES.items()}
     assert h["momentum"] == 42 and h["reversal"] == 10 and h["ownership"] == 10
     assert h["risk"] == 21 and h["quality"] == 21
     assert len(set(h.values())) > 1, "a single horizon is the bug this prevents"
 
 
 def test_no_factor_belongs_to_two_themes():
-    seen = [f for t in v3.THEMES.values() for f in t.names]
+    seen = [f for t in engine.THEMES.values() for f in t.names]
     assert len(seen) == len(set(seen))
-    assert set(seen) == set(v3.ALL_FACTORS)
+    assert set(seen) == set(engine.ALL_FACTORS)
 
 
 # ---------------------------------------------------------------- the weights
 def test_the_cap_stops_one_theme_swamping_the_rest():
-    w = v3.cap_weights({"a": 0.9, "b": 0.05, "c": 0.05}, cap=0.40, floor=0.0)
+    w = engine.cap_weights({"a": 0.9, "b": 0.05, "c": 0.05}, cap=0.40, floor=0.0)
     assert w["a"] == pytest.approx(0.40)
     assert sum(w.values()) == pytest.approx(1.0)
 
@@ -69,7 +69,7 @@ def test_the_cap_stops_one_theme_swamping_the_rest():
 def test_a_theme_is_also_capped_at_its_coverage():
     """Weights renormalise over the themes a NAME has, so a theme carried at 40%
     while a fifth of names have it ranks two populations by different models."""
-    w = v3.cap_weights({"a": 0.25, "b": 0.50, "c": 0.15, "d": 0.10},
+    w = engine.cap_weights({"a": 0.25, "b": 0.50, "c": 0.15, "d": 0.10},
                        cap=0.40, floor=0.0,
                        coverage={"a": 1.0, "b": 0.19, "c": 1.0, "d": 1.0})
     assert w["b"] == pytest.approx(0.19)
@@ -83,7 +83,7 @@ def test_caps_that_cannot_all_be_met_degrade_to_their_own_proportions():
     fallback is to allocate in proportion to the caps -- the low-coverage theme
     still ends up the smaller of the two, which is the property that matters.
     Pinned here so the infeasible branch is a decision and not an accident."""
-    w = v3.cap_weights({"a": 0.5, "b": 0.5}, cap=0.40, floor=0.0,
+    w = engine.cap_weights({"a": 0.5, "b": 0.5}, cap=0.40, floor=0.0,
                        coverage={"a": 1.0, "b": 0.19})
     assert sum(w.values()) == pytest.approx(1.0)
     assert w["a"] / w["b"] == pytest.approx(0.40 / 0.19)
@@ -91,7 +91,7 @@ def test_caps_that_cannot_all_be_met_degrade_to_their_own_proportions():
 
 
 def test_the_floor_keeps_a_theme_that_one_window_dislikes():
-    w = v3.cap_weights({"a": 1.0, "b": 0.0, "c": 0.0}, cap=0.40, floor=0.06)
+    w = engine.cap_weights({"a": 1.0, "b": 0.0, "c": 0.0}, cap=0.40, floor=0.06)
     assert w["b"] >= 0.06 - 1e-9 and w["c"] >= 0.06 - 1e-9
     assert sum(w.values()) == pytest.approx(1.0)
 
@@ -101,21 +101,21 @@ def test_no_factor_reads_a_session_after_the_decision_row():
     close, open_, vwap, turnover, deliv, bench = _panel()
     cut = 380
     sl = slice(0, cut)
-    a = v3_factors.factor_frame(close.iloc[sl], open_.iloc[sl], vwap.iloc[sl],
+    a = factors.factor_frame(close.iloc[sl], open_.iloc[sl], vwap.iloc[sl],
                                 turnover.iloc[sl], deliv.iloc[sl], bench.iloc[sl])
     future = close.copy()
     future.iloc[cut:] *= 4.0
-    b = v3_factors.factor_frame(future.iloc[sl], open_.iloc[sl], vwap.iloc[sl],
+    b = factors.factor_frame(future.iloc[sl], open_.iloc[sl], vwap.iloc[sl],
                                 turnover.iloc[sl], deliv.iloc[sl], bench.iloc[sl])
     pd.testing.assert_frame_equal(a, b)
 
 
 def test_the_momentum_skip_windows_end_21_sessions_back():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    base = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    base = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
     moved = close.copy()
     moved.iloc[-21:] *= 1.6
-    after = v3_factors.factor_frame(moved, open_, vwap, turnover, deliv, bench)
+    after = factors.factor_frame(moved, open_, vwap, turnover, deliv, bench)
     for name in ("mom_consist_126", "prox_52w", "mom_12_6"):
         pd.testing.assert_series_equal(base[name], after[name], check_names=False)
     # and the non-skipping ones must move, or the test above proves nothing
@@ -126,9 +126,9 @@ def test_the_momentum_skip_windows_end_21_sessions_back():
 # ---------------------------------------------------------------- the composite
 def test_theme_contributions_sum_to_the_score():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
-    scored = v3.score_frame(raw, sectors=None)
-    contrib = scored[[t + "_contrib" for t in v3.THEMES]].sum(axis=1, min_count=1)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    scored = engine.score_frame(raw, sectors=None)
+    contrib = scored[[t + "_contrib" for t in engine.THEMES]].sum(axis=1, min_count=1)
     ok = scored["score"].notna()
     np.testing.assert_allclose(contrib[ok].to_numpy(),
                                scored.loc[ok, "score"].to_numpy(),
@@ -137,9 +137,9 @@ def test_theme_contributions_sum_to_the_score():
 
 def test_a_name_missing_a_theme_is_scored_on_the_rest_not_pushed_to_zero():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
     assert raw["net_margin"].isna().all(), "no fundamentals in this fixture"
-    scored = v3.score_frame(raw, sectors=None)
+    scored = engine.score_frame(raw, sectors=None)
     assert (scored["n_themes"] == 4).all()
     assert scored["score"].notna().any()
     assert scored["score"].abs().max() > 0.5, "a missing theme must not flatten the score"
@@ -147,8 +147,8 @@ def test_a_name_missing_a_theme_is_scored_on_the_rest_not_pushed_to_zero():
 
 def test_a_name_on_too_few_themes_is_not_scored_at_all():
     close, open_, vwap, turnover, deliv, bench = _panel(n_days=120)
-    raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
-    scored = v3.score_frame(raw, sectors=None, min_themes=5)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    scored = engine.score_frame(raw, sectors=None, min_themes=5)
     assert scored["score"].isna().all()
 
 
@@ -159,7 +159,7 @@ def test_the_signs_are_applied():
     sector-neutral rank and is SUPPOSED to be highest for the deepest drawdown.
     So the sign is checked where it is applied: hold the other two risk factors
     flat, vary ulcer alone, and the risk sub-score must fall as ulcer rises."""
-    th = v3.THEMES["risk"]
+    th = engine.THEMES["risk"]
     assert th.signs["ulcer_120"] == -1
 
     idx = [f"S{i:02d}" for i in range(20)]
@@ -168,7 +168,7 @@ def test_the_signs_are_applied():
          "downside_vol_60": 0.0,
          "ret_kurt_126": 0.0},
         index=idx)
-    sub = v3.theme_subscore(ranks, th)
+    sub = engine.theme_subscore(ranks, th)
     assert sub.iloc[0] > sub.iloc[-1], "deepest drawdown scored best"
     assert (np.diff(sub.to_numpy()) < 0).all(), "not monotone in ulcer"
 
@@ -177,11 +177,11 @@ def test_the_sign_reaches_the_per_stock_card():
     """A reader checking the theme against its parts needs the sign on the row,
     otherwise a high rank on a bad-is-high factor reads as a positive."""
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
-    scored = v3.score_frame(raw, sectors=None)
-    card = v3.attribution(raw, scored, scored.index[0])
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    scored = engine.score_frame(raw, sectors=None)
+    card = engine.attribution(raw, scored, scored.index[0])
     rows = card[card.LEVEL == "factor"].set_index("FACTOR")
-    for tname, th in v3.THEMES.items():
+    for tname, th in engine.THEMES.items():
         n = len(th.names)
         for fname, sign in th.signs.items():
             w = rows.at[fname, "WEIGHT"]
@@ -190,7 +190,7 @@ def test_the_sign_reaches_the_per_stock_card():
     # Not every member of a theme points the same way, and this one surprises
     # people: acceleration screened NEGATIVE inside momentum. Pinned so it is
     # not "corrected" to +1 by someone reading the theme name alone.
-    assert v3.THEMES["momentum"].signs["mom_accel"] == -1
+    assert engine.THEMES["momentum"].signs["mom_accel"] == -1
 
 
 # ---------------------------------------------------------------- the floor
@@ -198,12 +198,12 @@ def test_the_absolute_floor_can_actually_empty_the_list():
     """A floor on a cross-sectional RANK cannot fire -- somebody is top of the
     list every day. This one is measured against the stock."""
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
-    scored = v3.score_frame(raw, sectors=None)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    scored = engine.score_frame(raw, sectors=None)
     everyone_below = pd.Series(-0.2, index=scored.index)
-    assert not v3.absolute_floor(scored, everyone_below).any()
+    assert not engine.absolute_floor(scored, everyone_below).any()
     everyone_above = pd.Series(0.2, index=scored.index)
-    passed = v3.absolute_floor(scored, everyone_above)
+    passed = engine.absolute_floor(scored, everyone_above)
     assert passed.any() and not passed.all(), "the theme half must bind too"
 
 
@@ -231,15 +231,15 @@ def test_the_floor_ships_disabled_and_its_scope_is_still_entries():
 # ---------------------------------------------------------------- attribution
 def test_attribution_gives_the_card_theme_and_factor_levels():
     close, open_, vwap, turnover, deliv, bench = _panel()
-    raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
-    scored = v3.score_frame(raw, sectors=None)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
+    scored = engine.score_frame(raw, sectors=None)
     sym = scored["score"].idxmax()
-    tab = v3.attribution(raw, scored, sym)
+    tab = engine.attribution(raw, scored, sym)
     assert list(tab.columns) == ["FACTOR", "THEME", "VALUE", "Z", "WEIGHT",
                                 "CONTRIB", "LEVEL"]
     assert set(tab["LEVEL"]) == {"theme", "factor"}
-    assert (tab["LEVEL"] == "theme").sum() == len(v3.THEMES)
-    assert (tab["LEVEL"] == "factor").sum() == len(v3.ALL_FACTORS)
+    assert (tab["LEVEL"] == "theme").sum() == len(engine.THEMES)
+    assert (tab["LEVEL"] == "factor").sum() == len(engine.ALL_FACTORS)
 
 
 # ---------------------------------------------------------------- instruments
@@ -282,9 +282,9 @@ def test_the_percentile_on_the_card_is_a_real_ordinal():
 
 # ---------------------------------------------------------------- the books
 def test_the_live_book_mirror_matches_the_config_that_actually_trades():
-    """THE MISREAD THIS PREVENTS. `v3.BOOK` describes a 12-slot book on a
+    """THE MISREAD THIS PREVENTS. `engine.BOOK` describes a 12-slot book on a
     10-session rebalance. Production trades SIX positions on a 21-session
-    cadence, from `config/parameters.yaml`. Nothing reads `v3.BOOK` -- so a
+    cadence, from `config/parameters.yaml`. Nothing reads `engine.BOOK` -- so a
     reader of the shipped scorer would have taken it for the live book, and
     reasoned about turnover, concentration and cost for a book that does not
     exist. A stale mirror is worse than no mirror, so this fails when it drifts.
@@ -298,19 +298,19 @@ def test_the_live_book_mirror_matches_the_config_that_actually_trades():
             "exit_rank": int(val(p.stage6_entry.admission.exit_rank)),
             "entry_cadence_sessions":
                 int(val(p.stage6_entry.admission.entry_cadence_sessions))}
-    assert v3.LIVE_BOOK == live, (
-        "features/v3.py::LIVE_BOOK has drifted from parameters.yaml, which is "
+    assert engine.LIVE_BOOK == live, (
+        "features/engine.py::LIVE_BOOK has drifted from parameters.yaml, which is "
         "the only thing that changes what trades. Update the mirror.")
 
 
 def test_the_three_books_are_distinct_and_the_note_says_which_one_trades():
     """A number measured on one book and quoted about another is how a backtest
     becomes a claim it never made."""
-    assert v3.LIVE_BOOK != v3.RESEARCH_BOOK != v3.HOLDOUT_BOOK
-    assert v3.BOOK is v3.RESEARCH_BOOK, "BOOK must stay the research book"
-    assert v3.LIVE_BOOK["slots"] < v3.HOLDOUT_BOOK["slots"], \
+    assert engine.LIVE_BOOK != engine.RESEARCH_BOOK != engine.HOLDOUT_BOOK
+    assert engine.BOOK is engine.RESEARCH_BOOK, "BOOK must stay the research book"
+    assert engine.LIVE_BOOK["slots"] < engine.HOLDOUT_BOOK["slots"], \
         "the live book is the more concentrated one -- that is the point"
-    note = v3.BOOK_NOTE
+    note = engine.BOOK_NOTE
     assert "NO BOOK DOES" in note, "the note must not imply a book was validated"
     assert "SIX positions" in note and "21-session" in note
     assert "t 0.81" in note, "the weakest holdout statistic must be named"

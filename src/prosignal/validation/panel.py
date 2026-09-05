@@ -1,7 +1,7 @@
 """Research panel for the v3 thematic scorer, and the quarterly re-check.
 
 One row per (signal date, symbol), built with the SAME `features.v3_factors`
-and `features.v3` the live path calls -- there is no second implementation to
+and `features.engine` the live path calls -- there is no second implementation to
 drift from. The universe is resolved per date by the liquidity screen Stage 3
 applies, minus the non-equity instruments NSE publishes in the same EQ-series
 bhavcopy, so a name appears on a date only if it could have been traded on it.
@@ -29,11 +29,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from ..features import v3, v3_factors
+from ..features import engine, factors
 from ..features.crosssec import liquidity_mask
 from .metrics import quintile_spread, rank_ic
 
-__all__ = ["build_v3_panel", "recheck", "V3Recheck",
+__all__ = ["build_panel", "recheck", "Recheck",
            "SIGNAL_STRIDE_SESSIONS", "LABEL_HORIZON_SESSIONS",
            "MIN_INDEPENDENT_WINDOWS", "DEPLOY_REFERENCE"]
 
@@ -53,7 +53,7 @@ def _pivot(df: pd.DataFrame, col: str) -> Optional[pd.DataFrame]:
                           aggfunc="last", observed=True).sort_index()
 
 
-def build_v3_panel(store, *, start: Optional[dt.date] = None,
+def build_panel(store, *, start: Optional[dt.date] = None,
                    end: Optional[dt.date] = None,
                    stride: int = SIGNAL_STRIDE_SESSIONS,
                    horizons: Sequence[int] = (LABEL_HORIZON_SESSIONS, 42),
@@ -152,7 +152,7 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
 
     dates = list(close.index)
     T = len(dates)
-    lo = v3_factors.LOOKBACK_SESSIONS      # see FRAME_SESSIONS: win is lo + 16 rows
+    lo = factors.LOOKBACK_SESSIONS      # see FRAME_SESSIONS: win is lo + 16 rows
     hi = T - min(horizons) - 2
     rows: List[pd.DataFrame] = []
     for i in range(lo, max(hi, lo), stride):
@@ -162,7 +162,7 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
             continue
         # `FRAME_SESSIONS` rows ending at i, expressed as a slice. The live
         # path asks the calendar for the same count; the two must agree.
-        win = slice(max(i + 1 - v3_factors.FRAME_SESSIONS, 0), i + 1)
+        win = slice(max(i + 1 - factors.FRAME_SESSIONS, 0), i + 1)
         fund = None
         if fund_recs is not None:
             try:
@@ -175,7 +175,7 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
                                      "fund_age_days")}
             except Exception:
                 fund = None
-        raw = v3_factors.factor_frame(
+        raw = factors.factor_frame(
             close.iloc[win][syms],
             open_.iloc[win][syms] if open_ is not None else None,
             vwap.iloc[win][syms] if vwap is not None else None,
@@ -184,7 +184,7 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
             bench_ret.iloc[win], fund)
         if raw.empty:
             continue
-        scored = v3.score_frame(raw, sectors)
+        scored = engine.score_frame(raw, sectors)
         if scored.empty:
             continue
         blk = pd.concat([raw, scored], axis=1)
@@ -211,7 +211,7 @@ def build_v3_panel(store, *, start: Optional[dt.date] = None,
 
 
 @dataclass
-class V3Recheck:
+class Recheck:
     """One quarterly verdict. Nothing here changes the model."""
     as_of: dt.date
     holdout_start: Optional[dt.date]
@@ -277,23 +277,23 @@ DEPLOY_REFERENCE = {
 
 def recheck(panel: pd.DataFrame, *, holdout_months: int = 3,
             label: str = f"y{LABEL_HORIZON_SESSIONS}",
-            n_null: int = 200, seed: int = 0) -> V3Recheck:
+            n_null: int = 200, seed: int = 0) -> Recheck:
     """Apply the frozen v3 scorer to the most recent `holdout_months` of dates.
 
     The shuffled-score null permutes the composite WITHIN each cross-section,
     breaking the score/outcome link and preserving everything else. It is the
     reference both sealed windows were judged against (p 0.02 and 0.01).
     """
-    from .. import v3_monitor as vm
+    from .. import monitor as vm
 
     if panel is None or panel.empty:
-        return V3Recheck(dt.date.today(), None, 0, float("nan"), float("nan"),
+        return Recheck(dt.date.today(), None, 0, float("nan"), float("nan"),
                          float("nan"), float("nan"), float("nan"),
                          DEPLOY_REFERENCE, "NO_DATA",
                          "the panel is empty; nothing to re-check")
     score = "score" if "score" in panel.columns else "v3_score"
     if score not in panel.columns or label not in panel.columns:
-        return V3Recheck(dt.date.today(), None, 0, float("nan"), float("nan"),
+        return Recheck(dt.date.today(), None, 0, float("nan"), float("nan"),
                          float("nan"), float("nan"), float("nan"),
                          DEPLOY_REFERENCE, "NO_DATA",
                          f"the panel carries no {score!r}/{label!r} column")
@@ -369,7 +369,7 @@ def recheck(panel: pd.DataFrame, *, holdout_months: int = 3,
                          else (float("nan"), float("nan"), 0))
         need = int(np.ceil(MIN_INDEPENDENT_WINDOWS * LABEL_HORIZON_SESSIONS
                            / SIGNAL_STRIDE_SESSIONS))
-        return V3Recheck(
+        return Recheck(
             end.date(), cut.date(), n_dates, ic0, ic0_t, sp0, sp0_t,
             float("nan"), DEPLOY_REFERENCE, "TOO_EARLY",
             _tail(f"{n_dates} scored dates is {indep:.1f} independent "
@@ -423,6 +423,6 @@ def recheck(panel: pd.DataFrame, *, holdout_months: int = 3,
                 f"selected on training data and tested on a window this one "
                 f"has not seen. Patching the failed configuration against this "
                 f"window is exactly what the holdout discipline forbids.")
-    return V3Recheck(end.date(), cut.date(), n_dates, ic, ic_t, sp, sp_t, p,
+    return Recheck(end.date(), cut.date(), n_dates, ic, ic_t, sp, sp_t, p,
                      DEPLOY_REFERENCE, verdict, _tail(note),
                      factor_health, theme_health)

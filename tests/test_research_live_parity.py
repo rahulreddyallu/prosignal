@@ -2,7 +2,7 @@
 
 THE BUG THIS PINS. Every number that justified the shipped model -- the prune,
 the CPCV folds, both sealed holdouts -- came from
-`validation.v3_panel.build_v3_panel`. The engine ranks with
+`validation.panel.build_panel`. The engine ranks with
 `stage4_core_score.build_v3_block`. They share the factor formulae and the
 scorer, so the arithmetic could not differ; what differed was the WINDOW. The
 panel sliced `[i - LOOKBACK - 15 : i + 1]`, which is 316 rows inclusive, and the
@@ -22,14 +22,14 @@ import datetime as dt
 
 import pytest
 
-from prosignal.features import v3_factors
+from prosignal.features import factors
 
 
 def test_the_frame_length_is_a_single_constant():
     """Both callers read `FRAME_SESSIONS`. If either goes back to computing its
     own window, they can disagree again without anything failing."""
-    assert v3_factors.FRAME_SESSIONS == v3_factors.LOOKBACK_SESSIONS + 16
-    assert v3_factors.FRAME_SESSIONS == 316
+    assert factors.FRAME_SESSIONS == factors.LOOKBACK_SESSIONS + 16
+    assert factors.FRAME_SESSIONS == 316
 
 
 def _code_lines(path):
@@ -63,7 +63,7 @@ def test_neither_caller_hardcodes_its_own_window():
     from pathlib import Path
     import prosignal
     root = Path(prosignal.__file__).resolve().parent
-    for rel in ("stages/stage4_core_score.py", "validation/v3_panel.py"):
+    for rel in ("stages/stage4_core_score.py", "validation/panel.py"):
         code = _code_lines(root / rel)
         assert "FRAME_SESSIONS" in code, f"{rel} no longer reads the constant"
         assert "LOOKBACK_SESSIONS + 15" not in code, (
@@ -81,16 +81,16 @@ def test_both_paths_select_the_same_sessions(monkeypatch):
     for offset in (0, 7, 120):
         as_of = sessions[-1 - offset]
         i = sessions.index(as_of)
-        panel = sessions[max(i + 1 - v3_factors.FRAME_SESSIONS, 0): i + 1]
-        live = cal.trailing_window(as_of, v3_factors.FRAME_SESSIONS)
+        panel = sessions[max(i + 1 - factors.FRAME_SESSIONS, 0): i + 1]
+        live = cal.trailing_window(as_of, factors.FRAME_SESSIONS)
         assert list(panel) == list(live), (
             f"the two paths disagree on the window ending {as_of}: "
             f"{len(panel)} rows vs {len(live)}")
-        assert len(panel) == v3_factors.FRAME_SESSIONS
+        assert len(panel) == factors.FRAME_SESSIONS
 
 
 def test_the_window_covers_the_longest_factor():
     """`margin_stability` rolls 504 sessions but tolerates min_periods; the
     binding constraint the frame must satisfy is `prox_52w`'s 273."""
-    assert v3_factors.FRAME_SESSIONS > 273
-    assert v3_factors.LOOKBACK_SESSIONS >= 300
+    assert factors.FRAME_SESSIONS > 273
+    assert factors.LOOKBACK_SESSIONS >= 300

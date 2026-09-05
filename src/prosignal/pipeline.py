@@ -463,7 +463,7 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # reassure about a book that has not been tested yet.
     scoring_notes = list(getattr(scores, "notes", []) or [])
     try:
-        from . import v3_monitor as _v3mon
+        from . import monitor as _v3mon
         from . import outcomes as _out
         _p = Path(config.paths.ledger) / "outcomes.jsonl"
         if _p.exists():

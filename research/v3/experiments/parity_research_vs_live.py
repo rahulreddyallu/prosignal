@@ -4,11 +4,11 @@ THE QUESTION NOTHING ELSE ASKS. `validation/parity.py` compares a live run to a
 replay of the same date, which tests whether the store settled the way the run
 assumed -- a data-timing question. This asks a different one: the audit's
 conclusions, the CPCV folds, the prune that now ships, were all computed by
-`validation.v3_panel.build_v3_panel`. The engine ranks with
+`validation.panel.build_panel`. The engine ranks with
 `stage4_core_score.build_v3_block`. Those are two functions. If they disagree,
 every number that justified the model describes something the engine does not do.
 
-They share `features/v3_factors.factor_frame` and `features/v3.score_frame`, so
+They share `features/factors.factor_frame` and `features/engine.score_frame`, so
 the FORMULAE cannot differ. What can differ is everything around them, and each
 of these is a real hypothesis rather than paranoia:
 
@@ -57,20 +57,20 @@ sys.path.insert(0, str(ROOT / "src"))
 from prosignal.config.loader import load_config                      # noqa: E402
 from prosignal.core.calendar import TradingCalendar                  # noqa: E402
 from prosignal.data.store import DataStore                           # noqa: E402
-from prosignal.features import v3, v3_factors, v4                    # noqa: E402
+from prosignal.features import engine, factors                    # noqa: E402
 from prosignal.features.crosssec import liquidity_mask               # noqa: E402
-from prosignal.stages.stage4_core_score import build_v3_block        # noqa: E402
+from prosignal.stages.stage4_core_score import build_score_block     # noqa: E402
 
 OUT = HERE / "parity_research_vs_live.json"
 
-#: What the panel screens on, copied from `build_v3_panel`'s defaults so this
+#: What the panel screens on, copied from `build_panel`'s defaults so this
 #: harness reproduces the research universe rather than inventing one.
 PANEL_SCREEN = dict(max_names=750, min_adtv_inr=5e7, min_price_inr=20.0,
                     min_history_sessions=300)
 
 
 def panel_universe(store, as_of, sessions):
-    """The symbol list `build_v3_panel` would have scored on `as_of`."""
+    """The symbol list `build_panel` would have scored on `as_of`."""
     start = sessions[max(0, sessions.index(as_of) - 400)]
     px = store.read_prices(start=start, end=as_of)
     px["date"] = pd.to_datetime(px["date"]).dt.normalize()
@@ -101,10 +101,10 @@ def panel_universe(store, as_of, sessions):
     return sorted(row[row].index.astype(str)), close, turnover
 
 
-def research_score(store, as_of, symbols, sectors, sessions, themes):
+def research_score(store, as_of, symbols, sectors, sessions):
     """Score `symbols` on `as_of` the way the RESEARCH panel does it."""
     i = sessions.index(as_of)
-    win = sessions[max(i + 1 - v3_factors.FRAME_SESSIONS, 0): i + 1]
+    win = sessions[max(i + 1 - factors.FRAME_SESSIONS, 0): i + 1]
     px = store.read_prices(symbols=symbols, start=win[0], end=as_of)
     px["date"] = pd.to_datetime(px["date"]).dt.normalize()
     piv = lambda c: (px.pivot_table(index="date", columns="symbol", values=c,
@@ -139,10 +139,8 @@ def research_score(store, as_of, symbols, sectors, sessions, themes):
                         if k in ("ttm_revenue", "ttm_net_profit", "fund_age_days")}
     except Exception:
         fund = None
-    bench = close.mean(axis=1)
-    raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv,
-                                  bench / bench.shift(1) - 1.0, fund)
-    scored = v3.score_frame(raw, sectors, themes=themes)
+    raw = factors.factor_frame(close, open_, vwap, turnover, deliv, fund)
+    scored = engine.score_frame(raw, sectors)
     return raw, scored
 
 
@@ -177,11 +175,8 @@ def main() -> int:
     sm = store.read_sector_map()
     sectors = dict(zip(sm["symbol"].astype(str), sm["sector"]))
 
-    source = str(cfg.params.stage4_core_score.ranking.source)
-    themes = v4.THEMES if source == "v4_composite" else v3.THEMES
-    v4_mode = source == "v4_composite"
-    print(f"ranking.source = {source}  ({len(themes)} themes, "
-          f"{sum(len(t.factors) for t in themes.values())} factors)")
+    themes = engine.THEMES
+    print(f"one scorer: {len(themes)} themes, {len(engine.ALL_FACTORS)} factors")
 
     picks = [sessions[i] for i in
              range(len(sessions) - 20, 400, -args.stride)][:args.dates]
@@ -191,11 +186,10 @@ def main() -> int:
         if len(puni) < 100:
             continue
         # LIVE PATH on the research universe -- the same-universe test.
-        _, live_same, err = build_v3_block(store, cal, puni, as_of, sectors,
-                                           cfg.params.stage4_core_score,
-                                           v4_mode=v4_mode)
+        _, live_same, err = build_score_block(store, cal, puni, as_of, sectors,
+                                              cfg.params.stage4_core_score)
         # RESEARCH PATH on the same universe.
-        _, res_same = research_score(store, as_of, puni, sectors, sessions, themes)
+        _, res_same = research_score(store, as_of, puni, sectors, sessions)
         if live_same is None or res_same is None or err:
             print(f"{as_of}  skipped ({err or 'a path returned nothing'})")
             continue
@@ -234,7 +228,7 @@ def main() -> int:
                f"numbers do NOT describe the shipped engine until this is "
                f"explained.")
     OUT.write_text(json.dumps(
-        {"ranking_source": source, "dates": rows,
+        {"dates": rows,
          "all_identical_same_universe": bool(all(ident)),
          "worst_max_abs_diff": worst, "mean_top6_overlap": mean_overlap,
          "verdict": verdict}, indent=2))

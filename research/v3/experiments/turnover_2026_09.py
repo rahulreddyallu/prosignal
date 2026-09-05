@@ -59,7 +59,7 @@ sys.path.insert(0, str(HERE))
 from _panel_guard import provenance, require_fresh                   # noqa: E402
 from prosignal.config.loader import load_config                      # noqa: E402
 from prosignal.costs import CostModel                                # noqa: E402
-from prosignal.features import v3, v4                                # noqa: E402
+from prosignal.features import engine                                # noqa: E402
 from prosignal.validation.cpcv import CombinatorialPurgedCV          # noqa: E402
 from prosignal.validation.significance import overlap_lag            # noqa: E402
 
@@ -157,11 +157,11 @@ def main() -> int:
 
     cfg = load_config(ROOT / "config/parameters.yaml")
     source = str(cfg.params.stage4_core_score.ranking.source)
-    themes = v4.THEMES if source == "v4_composite" else v3.THEMES
+    themes = engine.THEMES if source == "v4_composite" else engine.THEMES
 
     # Rebuild the SHIPPED score from the panel's stored ranks, through the
     # shipped blend, so the book being measured is the book that trades.
-    rank_frame = P[[f + "_r" for f in v3.ALL_FACTORS
+    rank_frame = P[[f + "_r" for f in engine.ALL_FACTORS
                     if f + "_r" in P.columns]].copy()
     rank_frame.columns = [c[:-2] for c in rank_frame.columns]
     names = list(themes)
@@ -170,7 +170,7 @@ def main() -> int:
     for d in dates:
         ix = idx[d]
         blk = rank_frame.iloc[ix]
-        subs = np.column_stack([v3.theme_subscore(blk, themes[t]).to_numpy("float64")
+        subs = np.column_stack([engine.theme_subscore(blk, themes[t]).to_numpy("float64")
                                 for t in names])
         ok = np.isfinite(subs)
         den = (ok * W).sum(1)

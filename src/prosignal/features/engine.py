@@ -1,32 +1,68 @@
-"""ProSignal v3 -- the two-level thematic composite. THE SHIPPED SCORER.
+"""THE SCORER. There is one, and this is it.
 
     factors  ->  one sub-score per THEME  ->  a capped blend of themes
 
-WHY TWO LEVELS. A flat weighted sum of twenty-two factors is whichever theme
-brought the most factors, wearing a disguise. Momentum brought ten and quality
-brought two; summed flat, the composite is a momentum bet with decoration. So
-each theme is combined on its own first, every sub-score is re-ranked within the
-date so the themes are commensurable, and only then are they blended.
+FIFTEEN FACTORS IN FIVE THEMES. Until 2026-09-05 this file carried twenty-two,
+and three other scorers sat beside it -- `v9r_core`, the `v2` composite and a
+fitted cross-sectional model -- selectable through `stage4_core_score.ranking.source`.
+Every one of them was a second answer to the question this file exists to answer,
+and having four of those is how a repository stops knowing what it recommends.
+They are deleted. The switch is deleted. This is the model.
+
+WHY TWO LEVELS. A flat weighted sum of fifteen factors is whichever theme brought
+the most factors, wearing a disguise. So each theme is combined on its own first,
+every sub-score is re-ranked within the date so the themes are commensurable, and
+only then are they blended.
 
 THREE CONSTRAINTS ON THE BLEND, each measured rather than asserted:
 
-  cap 0.40      no theme may exceed 40% of the composite. Uncapped, momentum
-                and quality took 74% between them.
+  cap 0.40      no theme may exceed 40% of the composite.
   floor 0.06    no theme that cleared its screen may fall below 6%. On
                 validation the floor alone moved max drawdown from -38.5% to
                 -34.9% at no cost in excess.
   coverage      a theme is also capped at the SHARE OF NAMES IT CAN SPEAK
-                ABOUT. Weights renormalise over the themes a name has, so
-                carrying `quality` at 40% while only 19% of names have
-                fundamentals ranks those two populations by different models.
-                Fitted without this constraint, quality took the cap.
+                ABOUT. Weights renormalise over the themes a name has.
 
-EACH THEME IS ORIENTED AT THE HORIZON IT WORKS AT. Reversal is a two-week
-effect and momentum is a six-month one; oriented against a single 42-session
-label the reversal sub-score came out ANTI-predictive at t -3.96. Sub-scores are
-ranks, so they blend regardless of which horizon oriented them.
+EACH THEME IS ORIENTED AT THE HORIZON IT WORKS AT. Reversal is a two-week effect
+and momentum is a six-month one; oriented against a single 42-session label the
+reversal sub-score came out ANTI-predictive at t -3.96. Sub-scores are ranks, so
+they blend regardless of which horizon oriented them.
 
-WHAT THE SEALED HOLDOUTS SAID. Two windows, one evaluation each, no re-tuning:
+THE SEVEN THAT WERE REMOVED, on 2026-09-05, and why. An independent split-half
+selection -- fit the drop set on one half of the research panel, apply it to the
+other -- nominated these in BOTH halves, and re-deriving it after the panel was
+rebuilt (different date range, 16 more dates, quality coverage 21% -> 49%)
+returned exactly the same seven, with no additions and no removals:
+
+  mom_2_0          own rank IC +0.0001 at t 0.02. Not weak, ABSENT: two-month
+                   momentum with no skip, so the short-term reversal window
+                   Jegadeesh (1990) says to skip sits inside it.
+  mom_3_1          correlates +0.61 with prox_52w; adds nothing after it.
+  mom_accel        correlates +0.74 with voladj_mom_6_1.
+  voladj_mom_6_1   removing it RAISED composite IC at t +2.25.
+  ulcer_120        filed under `risk` and correlating +0.69..+0.78 oriented with
+                   prox_52w. The 40% momentum cap is applied per theme and could
+                   not see a momentum factor living in another one, so this was
+                   momentum exposure carried twice at no cap. With it gone the
+                   live redundancy check reports zero breaches; it was the source
+                   of all three.
+  resid_rev_21     removing it RAISED composite IC at t +2.14.
+  deliv_chg_5      the fast member of the theme that carries the model and the
+                   only one of its three that adds nothing. 15.5 round trips a
+                   year, ~13.9%/yr of drag on its own.
+
+Measured over 45 purged, embargoed CPCV folds: composite rank IC +0.0541 ->
++0.0607, delta +0.0066 at Newey-West t +2.37, 96% of folds improved, and the
+fifth percentile of folds still positive.
+
+WHAT THE EVIDENCE IS NOT. The two sealed holdouts below were earned by the
+TWENTY-TWO factor ancestor. They do not transfer to this set and both windows are
+spent. CPCV measures stability across sub-periods, not selection out of sample,
+and the seven were chosen on the panel they were then measured on. The forward
+test registered with the current epoch is what grades this model.
+
+THE SEALED HOLDOUTS, kept as the historical record of the ancestor. Two windows,
+one evaluation each, no re-tuning:
 
                               A 2025-03..2026-08   B 2021-07..2022-12
     rank IC (t), h=21            +0.049 (3.69)        +0.036 (3.83)
@@ -35,26 +71,11 @@ WHAT THE SEALED HOLDOUTS SAID. Two windows, one evaluation each, no re-tuning:
     themes with positive IC          5 of 5              3 of 3
     ten-name book, net excess        -2.8%/yr            +2.0%/yr
     modelled cost drag                9.7%/yr           13.7%/yr
-    max drawdown                     -23.9%             -16.4%
 
-For window B the ENTIRE pipeline -- screen, stability, admission, weights -- was
-re-run on data ending 2021-02-17 and evaluated once on the eighteen months that
-followed. The ranking is what generalised. The concentrated book is not: it
-earned roughly 15.7% gross on window B and paid 13.7% of it away in costs. See
-CHANGELOG.md; the book's cost curve is in CHANGELOG.md and turnover
-is reported on every run rather than left to be discovered.
-
-THOSE ARE THE SECOND EVALUATION OF WINDOW A, and the first stands on the record
-beside them. The first run scored a universe that still contained ETFs, gold and
-liquid funds -- NSE publishes them in the same EQ-series bhavcopy as equities --
-and they took 26.25% of its top-ten slots. It read +0.059 (3.66) / +1.12%
-(2.65) / -7.2% book. The UNIVERSE was defective, not the configuration, so the
-fix was to exclude non-equity instruments and re-run BOTH windows with every
-parameter untouched; nothing was tuned after either number was seen. Window A
-has therefore been evaluated three times counting the pre-seal dry run, and its
-t-statistics should be read with that multiplicity charged against them. Window
-B -- once before the defect was found, once after, both positive -- is the
-cleaner read of the two.
+The RANKING is what generalised. The concentrated book is not, and still is not:
+measured over 380 weekly dates the six-name book's gross excess reaches |t| 1.5
+in no window at all. Read the shortlist as drawn from an evidenced ranking; the
+concentration is an operator's risk choice.
 """
 
 from __future__ import annotations
@@ -65,7 +86,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-__all__ = ["Theme", "THEMES", "FACTOR_THEME", "ALL_FACTORS", "MIN_THEMES",
+__all__ = ["Theme", "THEMES", "REMOVED_2026_09", "FACTOR_THEME",
+           "ALL_FACTORS", "MIN_THEMES",
            "MIN_LOOKBACK_SESSIONS", "sector_neutral_rank", "theme_subscore",
            "score_frame", "attribution", "absolute_floor", "cap_weights",
            "BOOK", "BOOK_NOTE", "HOLDOUT_BOOK", "RESEARCH_BOOK",
@@ -88,15 +110,16 @@ class Theme:
         return {n: float(s) for n, s in self.factors}
 
 
-#: The frozen configuration. Weights are post-cap, post-floor, post-coverage-cap,
-#: fitted on 2018-11-27 to 2024-10-25 and not refitted since.
+#: The shipped configuration. Weights are post-cap, post-floor,
+#: post-coverage-cap, fitted on 2018-11-27 to 2024-10-25 and NOT refitted
+#: when the seven were removed -- refitting them on the panel that chose the
+#: prune would be a second fit on the same data.
 THEMES: Dict[str, Theme] = {
     "momentum": Theme(
         weight=0.40, horizon=42, coverage=0.9988,
-        factors=(("intraday_mom_126", 1), ("mom_12_6", 1), ("mom_2_0", 1),
-                 ("mom_3_1", 1), ("mom_accel", -1), ("mom_consist_126", 1),
-                 ("prox_52w", 1), ("prox_52w_now", 1), ("voladj_mom_12_1", 1),
-                 ("voladj_mom_6_1", 1)),
+        factors=(("intraday_mom_126", 1), ("mom_12_6", 1),
+                 ("mom_consist_126", 1), ("prox_52w", 1),
+                 ("prox_52w_now", 1), ("voladj_mom_12_1", 1)),
     ),
     "quality": Theme(
         weight=0.18991, horizon=21, coverage=0.1899,
@@ -104,18 +127,25 @@ THEMES: Dict[str, Theme] = {
     ),
     "ownership": Theme(
         weight=0.18939, horizon=10, coverage=0.8985,
-        factors=(("deliv_chg_5", 1), ("deliv_pct_60", 1), ("deliv_z_21", 1)),
+        factors=(("deliv_pct_60", 1), ("deliv_z_21", 1)),
     ),
     "risk": Theme(
         weight=0.11088, horizon=21, coverage=0.9983,
-        factors=(("downside_vol_60", -1), ("ret_kurt_126", -1), ("ulcer_120", -1)),
+        factors=(("downside_vol_60", -1), ("ret_kurt_126", -1)),
     ),
     "reversal": Theme(
         weight=0.10982, horizon=10, coverage=0.9993,
-        factors=(("max5_21", -1), ("price_vs_vwap_20", -1), ("resid_rev_21", -1),
-                 ("rev_1w", -1)),
+        factors=(("max5_21", -1), ("price_vs_vwap_20", -1), ("rev_1w", -1)),
     ),
 }
+
+#: Removed 2026-09-05. Kept as a named list because an absence has to be a
+#: decision on the record: without it, "why is there no mom_2_0" has no answer in
+#: the code and someone re-adds it.
+REMOVED_2026_09: Tuple[str, ...] = (
+    "deliv_chg_5", "mom_2_0", "mom_3_1", "mom_accel", "resid_rev_21",
+    "ulcer_120", "voladj_mom_6_1",
+)
 
 FACTOR_THEME: Dict[str, str] = {f: t for t, th in THEMES.items() for f in th.names}
 ALL_FACTORS: Tuple[str, ...] = tuple(FACTOR_THEME)
@@ -224,25 +254,22 @@ def cap_weights(raw: Dict[str, float], cap: float = 0.40, floor: float = 0.06,
 
 
 def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
-                min_themes: int = MIN_THEMES,
-                themes: Optional[Dict[str, Theme]] = None) -> pd.DataFrame:
+                min_themes: int = MIN_THEMES) -> pd.DataFrame:
     """Rank, combine within theme, blend. One row per symbol.
 
     Weights renormalise over the themes a name actually has, and `n_themes`
     records how many that was -- a name scored on three of five is not the same
     measurement as one scored on five and the card says so.
 
-    `themes` exists so a DERIVED specification can reuse this blend instead of
-    copying it. It defaults to the frozen `THEMES` and the default path is
-    byte-identical to what the sealed holdouts measured; `features/v4.py` passes
-    its own pruned table. The alternative was a second implementation of the
-    two-level blend, and a scorer that drifts from the one that earned the
-    out-of-sample numbers is the failure this module exists to prevent.
+    There is no `themes` argument and no second theme table. A previous
+    revision took one so a derived scorer could reuse this blend; the derived
+    scorer is now the only scorer, so the parameter was a switch with one
+    position.
     """
     if raw is None or raw.empty:
         return pd.DataFrame()
-    themes = THEMES if themes is None else themes
-    factors = tuple(f for th in themes.values() for f in th.names)
+    themes = THEMES
+    factors = ALL_FACTORS
     sec = pd.Series(sectors).reindex(raw.index) if sectors else None
     cols = [c for c in factors if c in raw.columns]
     ranks = pd.DataFrame({c: sector_neutral_rank(raw[c], sec) for c in cols},

@@ -1,9 +1,9 @@
 """Quant-audit experiments (2026-09), run against the SHIPPED scorer.
 
 These resolve the factor-level findings of the 2026-09 adversarial review WITHOUT
-touching the frozen model: every number here comes from `features.v3` /
+touching the frozen model: every number here comes from `features.engine` /
 `features.v3_factors` applied to the local curated store through
-`validation.v3_panel.build_v3_panel`, the same panel the quarterly re-check uses.
+`validation.panel.build_panel`, the same panel the quarterly re-check uses.
 
     EXP-A  sign stability (K-4)      -- does each theme (esp. "quality") hold its
                                         IC sign across sub-periods, or is a sign a
@@ -48,15 +48,15 @@ if str(SRC) not in sys.path:
 
 from prosignal.config.loader import load_config          # noqa: E402
 from prosignal.data.store import DataStore                # noqa: E402
-from prosignal.features import v3                          # noqa: E402
-from prosignal.validation.v3_panel import build_v3_panel   # noqa: E402
+from prosignal.features import engine                          # noqa: E402
+from prosignal.validation.panel import build_panel   # noqa: E402
 # `validation.v2_panel` was removed in the 2026-09-03 cleanup and this import
 # went with it -- so this harness has been unrunnable since, and the EXP-A..D
 # results recorded in docs/AUDIT_REMEDIATION_2026_09.md cannot currently be
 # reproduced by running it. Both functions live in `validation.metrics`, which
-# is where `v3_panel` already reads them from.
+# is where `panel` already reads them from.
 from prosignal.validation.metrics import rank_ic, quintile_spread  # noqa: E402
-from prosignal import v3_monitor as vm                     # noqa: E402
+from prosignal import monitor as vm                     # noqa: E402
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -65,7 +65,7 @@ from _panel_guard import require_fresh, stamp                # noqa: E402
 OUT = Path(__file__).resolve().parent
 PANEL_CACHE = OUT / "panel_2026_09.parquet"
 LABEL = "y21"          # the horizon the composite blend was judged on
-THEMES = list(v3.THEMES)
+THEMES = list(engine.THEMES)
 
 
 # --------------------------------------------------------------------------- IC
@@ -254,7 +254,7 @@ def exp_d_equal_weight(panel: pd.DataFrame) -> dict:
     M = p[sub_cols].to_numpy("float64")
     ok = np.isfinite(M)
     n = ok.sum(axis=1)
-    eq = np.where(n >= v3.MIN_THEMES,
+    eq = np.where(n >= engine.MIN_THEMES,
                   np.nansum(np.where(ok, M, 0.0), axis=1) / np.maximum(n, 1), np.nan)
     p["score_eq"] = eq
     ic_f, ic_ft, _ = rank_ic(panel, LABEL, "score")
@@ -295,7 +295,7 @@ def main() -> None:
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
         print("[panel] building from the shipped scorer over the local store "
               "(this reads years of prices; ~1-3 min)...", flush=True)
-        panel = build_v3_panel(
+        panel = build_panel(
             store,
             start=pd.Timestamp(args.start).date(),
             end=pd.Timestamp(args.end).date() if args.end else None)

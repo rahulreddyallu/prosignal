@@ -6,7 +6,7 @@ cost real conclusions: the panel predated the fundamentals ingest, so its
 `quality` theme covered 25% of scored names against the live engine's ~85%, and
 four harnesses had been reporting on it as though it were the shipped model.
 
-Building through `validation.v3_panel.build_v3_panel` -- the same function the
+Building through `validation.panel.build_panel` -- the same function the
 quarterly re-check uses -- so there is no second panel implementation to drift.
 
 Usage:
@@ -30,7 +30,7 @@ sys.path.insert(0, str(HERE))
 from _panel_guard import stamp                                   # noqa: E402
 from prosignal.config.loader import load_config                  # noqa: E402
 from prosignal.data.store import DataStore                       # noqa: E402
-from prosignal.validation.v3_panel import build_v3_panel         # noqa: E402
+from prosignal.validation.panel import build_panel         # noqa: E402
 
 
 def main() -> int:
@@ -52,7 +52,7 @@ def main() -> int:
         print(f"previous panel kept at {keep.name}")
 
     print("building ...")
-    panel = build_v3_panel(store)
+    panel = build_panel(store)
     if panel is None or panel.empty:
         print("the panel came back empty; the store served nothing usable")
         return 2

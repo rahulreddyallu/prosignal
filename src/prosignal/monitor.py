@@ -37,7 +37,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from .features.v3 import THEMES, FACTOR_THEME
+from .features.engine import THEMES, FACTOR_THEME
 
 __all__ = ["FactorHealth", "ThemeHealth", "DrawdownFlag", "rolling_factor_ic",
            "rolling_theme_ic", "review_factors", "review_themes",

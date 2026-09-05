@@ -758,3 +758,91 @@ a matching `config_version` is the obvious improvement and it would change what
 the book holds, which is an epoch-gated decision and not one to make inside a
 monitoring fix. It is the recommended next change.
 
+---
+
+# Round 4 — one engine
+
+The repository carried **six selectable rankings** (`v4_composite`,
+`v3_composite`, `v9r_core`, `measured_factor`, `fitted_composite`,
+`family_average`) across **three scorer modules** (`v3.py`, `v4.py`, `v9r.py`).
+One ran. The rest existed to be compared against, the comparison never happened
+on a schedule, and I made it worse by adding a fourth module rather than
+replacing the third.
+
+**That is now one engine and no switch.**
+
+| before | after |
+|---|---|
+| `features/v3.py` (22 factors) | `features/engine.py` (**15 factors**) |
+| `features/v3_factors.py` (computes 22) | `features/factors.py` (**computes exactly 15**) |
+| `features/v4.py` | deleted |
+| `features/v9r.py` | deleted |
+| `ranking.source` — six values | **deleted from schema and config** |
+| `build_v3_block(..., v9r_mode, v4_mode)` | `build_score_block(...)` |
+| `_apply_ranking_policy` — six branches | `_rank_by_engine` — one path, no fallback |
+
+`features/factors.py` now computes **exactly** the fifteen the engine declares —
+verified by set equality, not by inspection. Removing `resid_rev_21` also removed
+the `bench_ret` parameter, which was the only path by which a change in universe
+construction could move a factor value.
+
+**Setting `ranking.source` is now a config error, not a no-op.** Silently
+ignoring it would let someone believe they had switched models.
+
+### What survived and why
+
+The fifteen are the set with the best evidence in the audit: ΔIC +0.0066 at
+NW t +2.37 over 45 purged CPCV folds, 96% of folds positive, fifth percentile
+positive, and the selection re-derived unchanged after a full panel rebuild.
+Everything else was measured and lost:
+
+- **`v9r_core`** — the only model with a sealed out-of-sample number, and it
+  **failed** its own pre-registered gate (+9.50% at NW t +1.87 against a bar of
+  2.0). It also weighted `mom_2_0` at 13.80%, a factor whose standalone rank IC
+  is +0.0001 at t 0.02.
+- **momentum-only** — the best book number in the audit (+21.4%/yr, t +2.51),
+  rejected: chosen across 25 model × band combinations, contradicts the IC
+  evidence, sub-period t declining 2.88 → 1.94 → 0.93.
+- **the fitted cross-sectional model** — already dead code; `model_features` had
+  been `None` on every run since 2026-09-03.
+- **six new research-backed candidates** — none adds at NW t ≥ 2.0.
+
+### Epoch bookkeeping
+
+`epoch.py`'s scoring fingerprint hashed a *list* of scorer modules, and it had
+already broken twice — once when `v2` was removed, once when `v9r` was — each
+time falling into a bare `except` that turned the hash into the string
+`"unknown"`, so the guard against an unnoticed factor-set change was defeated by
+a factor-set change. It now hashes the one scorer plus `REMOVED_2026_09`, and
+there is no list to go stale.
+
+### Round 4, continued — the last of the version numbers, and the ledger
+
+**Module and command names.** A file called `v3_monitor.py` monitoring an engine
+with no version number is the same confusion in a different place:
+
+| before | after |
+|---|---|
+| `v3_monitor.py` | `monitor.py` |
+| `validation/v3_panel.py` | `validation/panel.py` |
+| `build_v3_panel()` | `build_panel()` |
+| `prosignal research v3` | `prosignal research model` |
+| `evidence_tier="v3_theme"` | `evidence_tier="theme"` |
+| `tests/test_v3_score.py` | `tests/test_engine.py` |
+| `tests/test_v3_monitor.py` | `tests/test_monitor.py` |
+
+**Ledger de-duplicated: 1,953 rows -> 253, one per date.** 2026 alone held
+**1,697 rows over 71 dates** — 676 for a single date — because every development
+and backfill invocation appended beside the real one. `previous_run` is the
+engine's whole position memory and takes the last row for the latest qualifying
+date, so keeping exactly that row and dropping its predecessors is behaviour-
+preserving by construction. Verified: `previous_run(before=2026-08-21)` returns
+the same row before and after (2026-08-18, `baseline-v1@3ecb5458`, 8 signals).
+
+Every file was backed up to `<name>.jsonl.pre-dedupe` first. What is lost is the
+output of runs that were never the operative one for their date; what is gained
+is that the book's provenance is now a fact rather than a draw from a bag of 676.
+
+This is the "~1,600 contaminated rows" that has been on the record for weeks,
+cleared.
+

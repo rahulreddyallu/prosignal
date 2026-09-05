@@ -19,8 +19,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prosignal import v3_monitor as mon
-from prosignal.features import v3
+from prosignal import monitor as mon
+from prosignal.features import engine
 
 
 def _panel(n_dates=80, n_syms=90, seed=7, invert=None, flatten=None):
@@ -40,7 +40,7 @@ def _panel(n_dates=80, n_syms=90, seed=7, invert=None, flatten=None):
         y = truth + rng.normal(scale=1.5, size=n_syms)  # the realised label
         rec = {"date": d, "symbol": syms, "fwd": y}
         contribs = {}
-        for tname, th in v3.THEMES.items():
+        for tname, th in engine.THEMES.items():
             if tname in flatten:
                 sub = rng.normal(size=n_syms)
             else:
@@ -68,7 +68,7 @@ def test_a_healthy_factor_reads_positive_and_is_not_flagged():
     assert len(ic) == p["date"].nunique()
     assert ic["mom_12_6"].mean() > 0
     health = {h.name: h for h in mon.review_factors(ic)}
-    assert set(health) == set(v3.FACTOR_THEME)
+    assert set(health) == set(engine.FACTOR_THEME)
     assert not any(h.inverted for h in health.values())
     assert health["mom_12_6"].theme == "momentum"
 
@@ -107,13 +107,13 @@ def test_a_factor_missing_from_the_panel_is_reported_not_skipped():
 def test_theme_ic_is_reported_for_every_shipped_theme():
     p = _panel()
     ic = mon.rolling_theme_ic(p, "fwd")
-    assert set(v3.THEMES).issubset(ic.columns)
+    assert set(engine.THEMES).issubset(ic.columns)
     health = {h.name: h for h in mon.review_themes(ic, p)}
-    assert set(health) == set(v3.THEMES)
+    assert set(health) == set(engine.THEMES)
     assert all(h.ic_mean > 0 for h in health.values())
     assert not any(h.inverted for h in health.values())
     for name, h in health.items():
-        assert h.weight == v3.THEMES[name].weight
+        assert h.weight == engine.THEMES[name].weight
 
 
 def test_an_inverted_theme_is_caught_even_while_the_composite_holds_up():
@@ -165,7 +165,7 @@ def test_the_healthy_design_point_reads_back_its_own_declared_weights():
     thing that makes 40% and 55% comparable numbers."""
     p = _panel()
     share = mon.theme_influence_share(p)
-    for t, th in v3.THEMES.items():
+    for t, th in engine.THEMES.items():
         assert share[t] == pytest.approx(th.weight, abs=0.02)
     assert share["momentum"] == pytest.approx(0.40, abs=0.02)
 
@@ -175,10 +175,10 @@ def test_a_small_theme_over_running_is_flagged_below_the_absolute_alarm():
     and is nowhere near an absolute 55%, so only the relative rule catches it."""
     p = _panel()
     # three times the cross-sectional spread it was given, not a level shift
-    p["quality_contrib"] = p["quality_sub"] * v3.THEMES["quality"].weight * 3.1
+    p["quality_contrib"] = p["quality_sub"] * engine.THEMES["quality"].weight * 3.1
     share = mon.theme_influence_share(p)
     assert share["quality"] < mon.DOMINANCE_ALERT, "not testing the relative rule"
-    assert share["quality"] > v3.THEMES["quality"].weight + mon.DOMINANCE_EXCESS
+    assert share["quality"] > engine.THEMES["quality"].weight + mon.DOMINANCE_EXCESS
     health = {h.name: h for h in mon.review_themes(
         mon.rolling_theme_ic(p, "fwd"), p)}
     assert health["quality"].dominating
@@ -189,16 +189,16 @@ def test_variance_share_measures_influence_not_declared_weight():
     """momentum ships at 40% and quality at 19%; if quality's contribution is
     the only one moving, quality is what the ranking is."""
     p = _panel()
-    for t in v3.THEMES:
+    for t in engine.THEMES:
         p[t + "_contrib"] = 0.0
     p["quality_contrib"] = p["quality_sub"]
     share = mon.theme_influence_share(p)
     assert share["quality"] == pytest.approx(1.0)
-    assert v3.THEMES["quality"].weight < v3.THEMES["momentum"].weight
+    assert engine.THEMES["quality"].weight < engine.THEMES["momentum"].weight
 
 
 def test_variance_share_is_empty_rather_than_wrong_without_contributions():
-    p = _panel().drop(columns=[t + "_contrib" for t in v3.THEMES])
+    p = _panel().drop(columns=[t + "_contrib" for t in engine.THEMES])
     assert mon.theme_influence_share(p) == {}
     health = mon.review_themes(mon.rolling_theme_ic(p, "fwd"), p)
     assert all(h.influence_share is None for h in health)
@@ -244,8 +244,8 @@ def test_the_monitor_changes_no_state():
     the deployed model would silently stop being the model the sealed holdouts
     describe -- which is the exact failure the flag-don't-disable rule exists
     to prevent."""
-    before_themes = copy.deepcopy(v3.THEMES)
-    before_factors = copy.deepcopy(v3.FACTOR_THEME)
+    before_themes = copy.deepcopy(engine.THEMES)
+    before_factors = copy.deepcopy(engine.FACTOR_THEME)
     p = _panel(invert={"ulcer_120", "mom_12_6"}, flatten={"quality", "risk"})
     snapshot = p.copy(deep=True)
 
@@ -254,9 +254,9 @@ def test_the_monitor_changes_no_state():
     mon.theme_influence_share(p)
     mon.review_drawdown([1.0, 1.4, 0.9])
 
-    assert v3.THEMES == before_themes, "the monitor rewrote the shipped config"
-    assert v3.FACTOR_THEME == before_factors
-    assert {t: th.weight for t, th in v3.THEMES.items()} == \
+    assert engine.THEMES == before_themes, "the monitor rewrote the shipped config"
+    assert engine.FACTOR_THEME == before_factors
+    assert {t: th.weight for t, th in engine.THEMES.items()} == \
            {t: th.weight for t, th in before_themes.items()}
     pd.testing.assert_frame_equal(p, snapshot)
 
@@ -281,7 +281,7 @@ def _one_date(seed=5, flat=(), scale=None):
     n = 200
     idx = [f"S{i:03d}" for i in range(n)]
     out = pd.DataFrame(index=idx)
-    for t, th in v3.THEMES.items():
+    for t, th in engine.THEMES.items():
         sub = (pd.Series(rng.normal(size=n)).rank(pct=True).to_numpy() - 0.5) * 2
         out[t + "_sub"] = sub
         w = 0.0 if t in flat else th.weight * (scale or {}).get(t, 1.0)
@@ -296,9 +296,9 @@ def test_the_daily_check_needs_no_forward_outcome():
     scored = _one_date()
     assert not [c for c in scored.columns if c.startswith("y")]
     share = mon.cross_section_influence(scored)
-    assert set(share) == set(v3.THEMES)
+    assert set(share) == set(engine.THEMES)
     assert sum(share.values()) == pytest.approx(1.0)
-    for t, th in v3.THEMES.items():
+    for t, th in engine.THEMES.items():
         assert share[t] == pytest.approx(th.weight, abs=0.03)
 
 
@@ -336,17 +336,17 @@ def test_too_few_names_is_no_measurement_rather_than_a_wrong_one():
 
 
 def test_a_frame_without_contributions_says_nothing_instead_of_guessing():
-    scored = _one_date().drop(columns=[t + "_contrib" for t in v3.THEMES])
+    scored = _one_date().drop(columns=[t + "_contrib" for t in engine.THEMES])
     assert mon.cross_section_influence(scored) == {}
     assert mon.review_cross_section(scored) == []
 
 
 def test_the_daily_check_changes_no_state_either():
-    before = copy.deepcopy(v3.THEMES)
+    before = copy.deepcopy(engine.THEMES)
     scored = _one_date(flat={"quality", "risk"})
     snap = scored.copy(deep=True)
     mon.review_cross_section(scored)
-    assert v3.THEMES == before
+    assert engine.THEMES == before
     pd.testing.assert_frame_equal(scored, snap)
 
 
@@ -392,7 +392,7 @@ def test_the_daily_influence_line_reports_every_shipped_theme(runnable_cfg):
 
     line = next(n for n in run_analysis(runnable_cfg).scoring_notes
                 if n.startswith("Theme influence"))
-    for t, th in v3.THEMES.items():
+    for t, th in engine.THEMES.items():
         assert t in line
         assert f"declared {th.weight:.0%}" in line
 

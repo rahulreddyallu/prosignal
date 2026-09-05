@@ -3,7 +3,7 @@
 The definitive K-1 experiment -- the traded book on a window that never touched
 the 378-cell selection surface -- can only be answered by data that post-dates
 that surface, i.e. the live forward test as it accrues past sealed window A. The
-repo already builds exactly this discipline into `validation.v3_panel.recheck`,
+repo already builds exactly this discipline into `validation.panel.recheck`,
 which:
 
   * applies the FROZEN scorer (no fitting) to the most recent dates,
@@ -36,7 +36,7 @@ if str(SRC) not in sys.path:
 
 from prosignal.config.loader import load_config           # noqa: E402
 from prosignal.data.store import DataStore                 # noqa: E402
-from prosignal.validation.v3_panel import build_v3_panel, recheck  # noqa: E402
+from prosignal.validation.panel import build_panel, recheck  # noqa: E402
 
 OUT = Path(__file__).resolve().parent
 PANEL_CACHE = OUT / "panel_2026_09.parquet"
@@ -57,7 +57,7 @@ def main() -> None:
         store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
         print("[panel] building recent window from the shipped scorer...", flush=True)
         start = (pd.Timestamp.today() - pd.DateOffset(months=args.holdout_months + 30)).date()
-        panel = build_v3_panel(store, start=start)
+        panel = build_panel(store, start=start)
         if panel.empty:
             print("PANEL EMPTY", flush=True)
             sys.exit(2)

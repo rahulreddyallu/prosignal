@@ -21,13 +21,15 @@ import datetime as dt
 
 import numpy as np
 import pandas as pd
+from types import SimpleNamespace
 import pytest
 
 from prosignal import cadence
 from prosignal.core.contracts import RiskPlan
+from prosignal.features import engine
 from prosignal.stages.stage4_core_score import (
     RankingUnavailable,
-    _apply_ranking_policy,
+    _rank_by_engine,
 )
 from prosignal.tradeplan import build_trade_plan
 
@@ -126,138 +128,85 @@ class TestTheEntryClock:
 
 
 # =============================================================================
-# the ranking policy
+# the ranking, of which there is one
 # =============================================================================
-class TestTheRankingPolicy:
-    """`measured_factor` orders the book by one column. The danger is not that
-    it fails -- it is that it fails QUIETLY back to the fitted composite, which
-    returned negative alpha in every one of its 144 trade-level configurations
-    while the column returned positive alpha in 98.1% of its 960."""
+class TestTheRankingIsSingular:
+    """This class used to be `TestTheRankingPolicy` and exercised a six-way
+    switch: v3_composite, v9r_core, a v2 composite, a fitted cross-sectional
+    model, measured_factor and family_average. Five of those never ran. The
+    switch and the alternatives were deleted on 2026-09-05, and the tests that
+    proved the switch worked went with them -- a test suite that still checks a
+    branch nobody can reach is how dead code survives a cleanup.
+
+    What is worth pinning is what replaced it: exactly one scorer, no fallback,
+    and a loud failure when it cannot build."""
 
     class _Cfg:
-        def __init__(self, source="measured_factor", column="mom_6_1_r"):
-            self.ranking = type("R", (), {"source": source, "column": column})()
+        """Nested classes cannot see each other's names at class-body scope, so
+        this builds the shape in __init__ rather than by nesting."""
+
+        def __init__(self, min_themes: int = 3):
+            self.ranking = SimpleNamespace(
+                min_themes=SimpleNamespace(value=min_themes))
 
     @staticmethod
-    def _features(n=100, col="mom_6_1_r"):
-        idx = [f"S{i}" for i in range(n)]
-        return pd.DataFrame({col: np.linspace(-1, 1, n),
-                             "other_r": np.zeros(n)}, index=idx)
+    def _scored(n=60, missing=0):
+        idx = [f"S{i:03d}" for i in range(n)]
+        score = pd.Series(np.linspace(-1, 1, n), index=idx)
+        if missing:
+            score.iloc[:missing] = np.nan
+        return pd.DataFrame({"score": score,
+                             "n_themes": pd.Series(5, index=idx)})
 
-    def test_the_column_replaces_the_composite(self):
-        f = self._features()
-        composite = pd.Series(np.random.default_rng(0).normal(size=len(f)),
-                              index=f.index)
+    def test_the_engine_ranks_and_says_so(self):
+        scored = self._scored()
+        composite = pd.Series(0.0, index=scored.index)
         notes = []
-        out, source = _apply_ranking_policy(composite, f, self._Cfg(), notes)
-        assert source == "measured_factor"
+        out = _rank_by_engine(composite, self._Cfg(), notes, scored)
         pd.testing.assert_series_equal(out.sort_index(),
-                                       f["mom_6_1_r"].sort_index(),
+                                       scored["score"].sort_index(),
                                        check_names=False)
-        assert notes and "not by the fitted composite" in notes[0]
+        joined = " ".join(notes)
+        assert "Book ordered by the composite" in joined
+        assert "15 factors in 5 themes" in joined
 
-    def test_fitted_composite_is_a_no_op(self):
-        f = self._features()
-        composite = pd.Series(np.arange(len(f), dtype=float), index=f.index)
+    def test_the_note_reports_effective_weights_not_declared_ones(self):
+        """The blend renormalises over the themes a name has, so the declared
+        vector is not what ranked anything."""
+        scored = self._scored()
+        for t in engine.THEMES:
+            scored[t + "_sub"] = 0.0
         notes = []
-        out, source = _apply_ranking_policy(composite, f, self._Cfg("fitted_composite"),
-                                            notes)
-        assert source == "fitted_composite"
-        pd.testing.assert_series_equal(out, composite)
-        assert notes == []
+        _rank_by_engine(pd.Series(0.0, index=scored.index), self._Cfg(),
+                        notes, scored)
+        assert "declared -> effective" in " ".join(notes)
 
-    def test_it_keys_on_the_symbol_COLUMN_the_live_frame_actually_has(self):
-        """The bug this exists for, reproduced in the shape that produced it.
-
-        `crosssec.features_for_date` ends with `.reset_index(drop=True)`, so the
-        live feature frame has a RangeIndex and keeps the ticker in a `symbol`
-        column. The first version of the policy reindexed a symbol-indexed
-        composite against 0..451, matched nothing, and stopped the run with
-        "covers 0 of 452". A fixture indexed by symbol -- which every other test
-        in this class uses, because it is the convenient shape -- cannot see
-        that, so this one is built the way the engine builds it.
-        """
-        n = 60
-        f = pd.DataFrame({
-            "symbol": [f"T{i}" for i in range(n)],
-            "mom_6_1_r": np.linspace(-1, 1, n),
-        })                                          # RangeIndex, on purpose
-        composite = pd.Series(np.zeros(n), index=[f"T{i}" for i in range(n)])
+    def test_the_removed_seven_are_named_on_every_run(self):
+        """An absence nobody is told about gets re-added by the next person."""
+        scored = self._scored()
         notes = []
-        out, _ = _apply_ranking_policy(composite, f, self._Cfg(), notes)
-        assert len(out) == n, f"got {len(out)}: the join must be on the ticker"
-        assert out.loc["T59"] == pytest.approx(1.0)
-        assert out.idxmax() == "T59" and out.idxmin() == "T0"
+        _rank_by_engine(pd.Series(0.0, index=scored.index), self._Cfg(),
+                        notes, scored)
+        joined = " ".join(notes)
+        for f in engine.REMOVED_2026_09:
+            assert f in joined
 
-    def test_a_duplicated_symbol_takes_the_last_row_rather_than_exploding(self):
-        """A duplicate would otherwise make the reindex raise, and a run that
-        dies on a repeated ticker is a run that dies on a data glitch."""
-        f = pd.DataFrame({
-            "symbol": ["A", "B", "B", "C"] + [f"T{i}" for i in range(60)],
-            "mom_6_1_r": [0.1, 0.2, 0.9, 0.3] + list(np.linspace(-1, 1, 60)),
-        })
-        composite = pd.Series(np.zeros(63),
-                              index=["A", "B", "C"] + [f"T{i}" for i in range(60)])
-        out, _ = _apply_ranking_policy(composite, f, self._Cfg(), [])
-        assert out.loc["B"] == pytest.approx(0.9)
-
-    def test_a_missing_column_STOPS_the_run(self):
-        """The whole point. A fallback here is silent and reinstates the scorer
-        the setting exists to retire."""
-        f = self._features(col="something_else_r")
-        composite = pd.Series(np.zeros(len(f)), index=f.index)
-        with pytest.raises(RankingUnavailable) as exc:
-            _apply_ranking_policy(composite, f, self._Cfg(), [])
-        assert "mom_6_1_r" in str(exc.value)
-        assert "fitted_composite" in str(exc.value), (
-            "the error must name the escape hatch, or the only way out of it "
-            "is to guess")
-
-    def test_no_feature_frame_at_all_STOPS_the_run(self):
-        composite = pd.Series([1.0, 2.0], index=["A", "B"])
+    def test_a_scorer_that_did_not_build_stops_the_run(self):
+        """There is no second scorer to fall back to, and falling back to one
+        would issue signals from a model that was not the one measured."""
+        composite = pd.Series(0.0, index=["A", "B"])
         with pytest.raises(RankingUnavailable):
-            _apply_ranking_policy(composite, None, self._Cfg(), [])
-
-    def test_thin_coverage_STOPS_the_run(self):
-        """A ranking of a fifth of the universe is a ranking of that fifth.
-
-        The names the column cannot see would be dropped without ever being
-        compared against the ones it can, which is a silent universe change
-        wearing the clothes of a ranking.
-        """
-        f = self._features(100)
-        f.loc[f.index[20:], "mom_6_1_r"] = np.nan
-        composite = pd.Series(np.zeros(100), index=f.index)
-        with pytest.raises(RankingUnavailable) as exc:
-            _apply_ranking_policy(composite, f, self._Cfg(), [])
-        assert "covers 20 of 100" in str(exc.value)
-
-    def test_an_all_nan_column_STOPS_the_run(self):
-        f = self._features(100)
-        f["mom_6_1_r"] = np.nan
-        composite = pd.Series(np.zeros(100), index=f.index)
+            _rank_by_engine(composite, self._Cfg(), [], None)
         with pytest.raises(RankingUnavailable):
-            _apply_ranking_policy(composite, f, self._Cfg(), [])
+            _rank_by_engine(composite, self._Cfg(), [], pd.DataFrame())
 
-
-    def test_the_absolute_floor_ships_disabled_with_its_scope_intact(self, cfg):
-        """DISABLED on measurement, 2026-09-02: ATE -2.2%, 95% CI [-3.2%, -1.4%]
-        across 66 purged and embargoed CPCV folds, measured at the scope this
-        config actually uses.
-
-        The geometry is still asserted. If the floor is ever switched back on it
-        has to return as `entries` at 200 sessions and 3 themes -- applied to the
-        whole POPULATION it forces an exit every time a held name dips below its
-        200-DMA, and that scope was measured wrong twice before it was measured
-        right."""
-        f = cfg.params.stage4_core_score.absolute_floor
-        assert bool(f.enabled.value) is False
-        assert int(f.above_ma_sessions.value) == 200
-        assert int(f.min_positive_themes.value) == 3
-        assert str(f.applies_to.value) == "entries"
-
-
-
+    def test_a_ranking_over_a_minority_of_the_universe_is_refused(self):
+        """A ranking built on a minority of the universe is a ranking of that
+        minority, whatever the header says."""
+        scored = self._scored(n=60, missing=45)
+        composite = pd.Series(0.0, index=scored.index)
+        with pytest.raises(RankingUnavailable):
+            _rank_by_engine(composite, self._Cfg(), [], scored)
 
 # =============================================================================
 # the trade plan

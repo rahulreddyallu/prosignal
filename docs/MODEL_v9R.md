@@ -1,3 +1,22 @@
+> **RETIRED 2026-09-05. `features/v9r.py` is deleted and `v9r_core` is no longer
+> selectable — `ranking.source` itself no longer exists.**
+>
+> This document is kept as the record of a model that was built, sealed,
+> measured and **failed its own pre-registered gate**: +9.50% net active on the
+> sealed 2012-2017 window at Newey-West t +1.87 against a bar of 2.0. Positive
+> and underpowered is a failed ship gate, not a passed one, and it never became
+> the default.
+>
+> Two further reasons it was deleted rather than kept for shadow running. It
+> weighted `mom_2_0` at **13.80%** — a factor whose standalone rank IC is
+> **+0.0001 at t 0.02**, measured over 380 dates in the 2026-09-05 audit. And a
+> scorer nobody runs on a schedule is not a control, it is a second answer to
+> the question `features/engine.py` exists to answer; the repository carried six
+> of those and could not say in one sentence what it recommended.
+>
+> The sealed 2012-2017 window is spent and cannot be reused. Nothing here
+> transfers to the shipped engine.
+
 # v9R CORE — the model card
 
 `src/prosignal/features/v9r.py`. Selectable as

@@ -582,17 +582,11 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
           config=None, earnings_note: Optional[str] = None) -> Recommendation:
     """Build the recommendation, including the evidence AGAINST it."""
     why: List[str] = []
-    # WHAT PUT THIS NAME HERE, first, before any theme attribution. Under
-    # `ranking.source: measured_factor` the book is ordered by one column and
-    # the fitted composite explains the THEMES behind a name without deciding
-    # anything. Leading with the theme attribution -- as this card did -- reads
-    # as "the model liked it for these reasons", which is no longer what
-    # happened, and a reader has no way to tell from a list of coefficients
-    # that the coefficients did not choose.
-    rank_cfg = (getattr(config.params.stage4_core_score, "ranking", None)
-                if config is not None else None)
-    source = str(rank_cfg.source) if rank_cfg is not None else "fitted_composite"
-    if source == "v3_composite":
+    # WHAT PUT THIS NAME HERE, first, before any theme attribution. This used to
+    # branch on `ranking.source`, which no longer exists: there is one scorer,
+    # `features/engine.py`, so there is one thing to say about why a name is
+    # here and no need to work out which model was speaking.
+    if True:
         # WHAT IS EVIDENCED AND WHAT IS NOT, in that order. The RANKING carries
         # two sealed holdouts. The concentrated BOOK carries none, and the
         # 2026-09-05 factor audit measured what it does carry: over 380 weekly
@@ -671,13 +665,13 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 f"so they were set to zero rather than given a weight the data "
                 f"did not support."
             )
-    elif source == "v3_composite":
+    if True:
         # TWO LEVELS ON THE CARD, because the score has two levels. Theme rows
         # carry the sub-score and the weight it was blended at and sum to the
         # composite; the factors under each theme carry the ranks it was built
         # from. "momentum +0.42" does not say which momentum moved.
         themes = [f for f in score.factors.values()
-                  if f.evidence_tier == "v3_theme" and f.contribution is not None]
+                  if f.evidence_tier == "theme" and f.contribution is not None]
         for f in sorted(themes, key=lambda x: -abs(x.contribution)):
             pct = ((f.standardised + 1.0) / 2.0 * 100.0
                    if f.standardised is not None else None)
@@ -697,9 +691,9 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 why.append(f"    from: {inside}"
                            + (f" (+{len(members) - 5} more)" if len(members) > 5 else ""))
         n_themes = len([f for f in score.factors.values()
-                        if f.evidence_tier == "v3_theme"])
+                        if f.evidence_tier == "theme"])
         absent = [f.name for f in score.factors.values()
-                  if f.evidence_tier == "v3_theme" and not f.available]
+                  if f.evidence_tier == "theme" and not f.available]
         if absent:
             why.append(
                 f"No data for the {', '.join(absent)} theme"

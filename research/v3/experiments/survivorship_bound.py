@@ -1,7 +1,7 @@
 """K-5: bound the residual survivorship inflation of the OOS IC.
 
 The universe is survivorship-FREE by construction for the collection period:
-`build_v3_panel` admits any name liquid on each date, including ones that later
+`build_panel` admits any name liquid on each date, including ones that later
 stop printing (the config's liquidity_pit choice, not index_snapshot). So the
 question is not "are dead names excluded" -- they are present until they die --
 but "when a name dies WITHIN the label horizon, its 21-session forward return

@@ -433,12 +433,12 @@ def _build_pick(
         # one flat dict and the panel rendered all eleven rows under a single
         # heading, counting their members together, which is where "12
         # measured factors" came from.
-        "themes": _contributions(card.get("factors") or {}, tier="v3_theme"),
+        "themes": _contributions(card.get("factors") or {}, tier="theme"),
         "model_reading": _contributions(card.get("factors") or {},
                                         tier="model_secondary"),
         # Kept for anything still reading the old key: the rows that DECIDE,
         # falling back to whatever tier exists when v3 is not the ranker.
-        "contributions": (_contributions(card.get("factors") or {}, tier="v3_theme")
+        "contributions": (_contributions(card.get("factors") or {}, tier="theme")
                           or _contributions(card.get("factors") or {})),
         "earnings_note": card.get("earnings_note"),
         "entry_admissible": bool(card.get("entry_admissible", True)),
@@ -618,7 +618,7 @@ def _contributions(factors: Dict[str, Any], top: Optional[int] = None,
                         else round(float(sd) * float(weight), 5))
         fam = FAMILY_MAP.get(name)
         mapped = FACTOR_MAP.get(name)
-        if (detail or {}).get("tier") == "v3_theme":
+        if (detail or {}).get("tier") == "theme":
             fam = None
             mapped = (None, V3_THEME_LABELS.get(name, name.title()))
         rows.append({
