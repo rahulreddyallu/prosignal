@@ -3282,3 +3282,112 @@ api:
   disclaimer: >-
     Decision-support tool. Not financial advice. No trades are placed
     automatically.
+
+# =============================================================================
+# STAGE 9 -- CONVICTION. The final 0-2 gate.
+# =============================================================================
+#
+# WHAT THIS REPLACED. Until this stage existed, whether the engine issued a BUY
+# was decided by a rank band (model_rank <= entry_rank) and an entry clock
+# (entry_cadence_sessions = 21). Measured on a live run, the evidence gates
+# ahead of them cut ZERO of 36 defended names and the day's answer was NO TRADE
+# for one reason: session 2 of 21. Scarcity was a property of the CALENDAR.
+#
+# Here it is a property of the EVIDENCE, and the calendar has no vote. Signal
+# frequency is a consequence of these thresholds and must never be a target
+# they are tuned toward.
+#
+# EVERY VALUE IS UNVALIDATED. They were chosen to be defensible a priori. The
+# selection-precision study (top 1/2/3/5/10/20, per date then averaged, net of
+# the shipped cost model) is what moves them, and until it runs the conviction
+# grade orders candidates against each other and claims nothing about outcomes.
+stage9_conviction:
+  enabled: true
+
+  # Candidates evaluated in full. A COMPUTE bound, not a selection rule: each
+  # evaluation re-ranks the universe once per alternative specification, so
+  # this must be wide enough that the eventual winner is always inside it.
+  shortlist:
+    value: 15
+    status: UNVALIDATED
+    search_range: [5, 50]
+
+  # ---- independent evidence ------------------------------------------------
+  # Meucci's Effective Number of Bets (entropy of the diversification
+  # distribution) over the factors SUPPORTING the candidate, using the
+  # correlation structure of today's own cross-section.
+  #
+  # WHY THIS BINDS. On the live cross-section the top-ranked name had FOURTEEN
+  # supporting factors spanning 1.53 independent directions -- a 9.1x
+  # redundancy ratio, with 91% of the evidence in one direction. The card
+  # printed fourteen confirmations. There were effectively one and a half.
+  # Below 2.0 a "multi-factor" case is one bet wearing many hats.
+  min_independent_evidence:
+    value: 2.0
+    status: UNVALIDATED
+    search_range: [1.0, 5.0]
+  max_evidence_concentration:
+    value: 0.85
+    status: UNVALIDATED
+    search_range: [0.5, 1.0]
+
+  # ---- separation ----------------------------------------------------------
+  # In robust sigma units of the RAW score, never the rank. composite_score is
+  # (rank-1)/(n-1) and is uniform every session by construction, so no absolute
+  # threshold on it can ever bind -- which is exactly why the shipped score and
+  # percentile gates cut 0 of 36.
+  min_gap_to_median:
+    value: 1.0
+    status: UNVALIDATED
+    search_range: [0.0, 3.0]
+  # THE NO-EDGE ZONE. Measured live, ranks 7 to 10 were separated by 0.004 to
+  # 0.013 sigma. That ordering is noise and must not produce a BUY.
+  min_gap_to_next:
+    value: 0.05
+    status: UNVALIDATED
+    search_range: [0.0, 0.5]
+
+  # ---- robustness ----------------------------------------------------------
+  # Share of alternative theme weightings -- each theme dropped, each tilted
+  # +/-25%, and equal-weight -- under which the name holds a top-10 place.
+  min_robustness:
+    value: 0.70
+    status: UNVALIDATED
+    search_range: [0.0, 1.0]
+
+  # ---- economics -----------------------------------------------------------
+  # The one threshold with a measurement behind it. RESULTS_OF_RECORD puts the
+  # ranking's top-decile excess at +0.64% over 21 sessions, +1.20% over 42 and
+  # +1.76% over 63. The shipped cost model prices live candidates at 60-84 bps
+  # round-trip. At 21 sessions the measured edge is SMALLER than the cost of a
+  # typical candidate; at 63 a candidate costing 84 bps keeps about half.
+  max_cost_burden:
+    value: 0.60
+    status: UNVALIDATED
+    search_range: [0.1, 1.0]
+
+  # ---- independence, for the second slot -----------------------------------
+  # Two names can clear every pairwise test the engine already runs -- different
+  # sectors, correlation under 0.70 -- and still be one position. Correlation is
+  # taken on RESIDUALS after removing the market, because raw correlation
+  # rejects good pairs in a trending market and accepts bad ones in a flat one.
+  max_residual_correlation:
+    value: 0.35
+    status: UNVALIDATED
+    search_range: [0.0, 0.9]
+  max_evidence_similarity:
+    value: 0.80
+    status: UNVALIDATED
+    search_range: [0.0, 1.0]
+  # ENB of the two-name book. 2.00 is two independent bets, 1.00 is one
+  # position held twice.
+  min_basket_enb:
+    value: 1.70
+    status: UNVALIDATED
+    search_range: [1.0, 2.0]
+
+  # A HARD CAP, never a target. The production layer can never emit more.
+  max_buys:
+    value: 2
+    status: OPERATIONAL
+    search_range: [1, 5]

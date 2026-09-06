@@ -43,6 +43,7 @@ from .data.storelock import store_lock
 from .data.types import DATE, SYMBOL
 from .data.universe import UniverseSnapshot
 from .ledger import Ledger, row_from_output
+from .conviction import gate as _conviction_gate
 from .stages._cfg import v
 from .stages import (
     stage1_data_quality,
@@ -53,6 +54,7 @@ from .stages import (
     stage6_entry,
     stage7_risk,
     stage8_final_signal,
+    stage9_conviction,
 )
 from .version import ENGINE_VERSION, SCHEMA_VERSION
 
@@ -75,6 +77,7 @@ STAGE_LABELS = [
     "Running false-signal defense",
     "Checking entry triggers",
     "Building risk plans",
+    "Weighing conviction",
     "Applying decision gates",
 ]
 
@@ -289,13 +292,26 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     # Resolved here, once, and carried into the run's record so a reader can
     # tell "the book was not buying today" from "the market offered nothing".
     clock = clock_from_config(config, sessions, resolved)
+    # THE CALENDAR HAS NO VOTE WHEN CONVICTION DECIDES. Stage 9 answers "is the
+    # evidence strong enough to spend a slot"; the entry clock answers "is today
+    # a scheduled buying day". Running both means a name that cleared every
+    # piece of evidence machinery is refused because of the date -- measured on
+    # the live run, that is exactly what happened: 36 names cleared and the
+    # answer was NO TRADE on session 2 of 21.
+    #
+    # The clock is still RESOLVED and still recorded, because the schedule it
+    # describes is what the recorded history was generated under and a reader
+    # comparing the two needs to see it. It simply does not gate.
+    conviction_on = bool(config.params.stage9_conviction.enabled)
+    entries_open = True if conviction_on else clock.is_entry_date
+    entries_closed_reason = None if conviction_on else clock.blocked_reason()
     # `open_book` and `previous_slate` were read once, above Stage 3 -- this
     # file grows without bound and scanning it twice per run for two fields of
     # one record was waste.
     entries = stage6_entry.run(defended, frames, config, resolved,
                                ranks=ranks, held=open_book,
-                               entries_open=clock.is_entry_date,
-                               entries_closed_reason=clock.blocked_reason())
+                               entries_open=entries_open,
+                               entries_closed_reason=entries_closed_reason)
     timings[stage6_entry.STAGE_NAME] = t()
 
     # ---- Stage 7 ----------------------------------------------------------
@@ -323,8 +339,21 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     timings[stage7_risk.STAGE_NAME] = t()
     release_memory()
 
-    # ---- Stage 8 ----------------------------------------------------------
+    # ---- Stage 9 -- CONVICTION --------------------------------------------
+    # Runs BEFORE stage 8 despite the number: it needs the risk plans stage 7
+    # builds (the economic gate prices the actual position), and stage 8 needs
+    # its verdict (it decides which names get a card). The numbering follows
+    # the order the stages were added, not the order they execute -- renumbering
+    # would rewrite every recorded stage timing in the ledger.
     step(8)
+    t = _clock()
+    verdict = stage9_conviction.run(
+        scores, defense, plans, regime, closes, config, as_of=resolved)
+    timings[stage9_conviction.STAGE_NAME] = t()
+    release_memory()
+
+    # ---- Stage 8 ----------------------------------------------------------
+    step(9)
     t = _clock()
     # EARNINGS PROXIMITY for the names that could be carded. Computed here
     # because stage 8 has no store, and computed for the SCORED set rather than
@@ -361,6 +390,10 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         # held it applied them to open positions and evicted them, which is how
         # Stage 6's hysteresis was being undone one session after it worked.
         held=open_book,
+        # THE AUTHORITY ON WHAT IS BOUGHT. When this is present the rank band
+        # and the entry clock are silent -- see the stage 8 conviction branch.
+        conviction=verdict if bool(
+            config.params.stage9_conviction.enabled) else None,
     )
     timings[stage8_final_signal.STAGE_NAME] = t()
 
@@ -425,13 +458,29 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
         # cadence must be named as itself, because an operator seeing "no new
         # entries" three sessions running should be able to tell a halted
         # market from a book that simply is not due to buy until the 21st.
+        # UNDER CONVICTION THE CADENCE IS NOT A REFUSAL. Announcing "entries
+        # closed, session 2 of 21" on a run that just issued a BUY is a
+        # contradiction the operator has no way to resolve, and it was on
+        # screen above a live position. When Stage 9 decides, this field
+        # carries only the things that actually refuse: a halted market or a
+        # regime block. The clock is still recorded in `entry_clock` for anyone
+        # reconciling against the history it generated.
         new_entries_blocked=(
-            clock.blocked_reason()
-            if not clock.is_entry_date
-            else (None if regime.allow_new_entries and not defense.market_halt
-                  else (no_trade.reason if no_trade else None))
+            (None if regime.allow_new_entries and not defense.market_halt
+             else (no_trade.reason if no_trade else None))
+            if conviction_on else (
+                clock.blocked_reason()
+                if not clock.is_entry_date
+                else (None if regime.allow_new_entries and not defense.market_halt
+                      else (no_trade.reason if no_trade else None)))
         ),
         entry_clock=_clock_record(clock, sessions, resolved),
+        # THE CONVICTION RECORD, including every candidate refused. Written on
+        # every run, not only the ones that produced a BUY -- a NO TRADE day
+        # with fifteen full evaluations behind it is the most informative
+        # record this engine produces, and it used to leave no trace at all.
+        conviction=_conviction_gate.to_record(verdict) if conviction_on else [],
+        conviction_cause=verdict.cause if conviction_on else None,
         data_quality_flags=flags,
         manifest=manifest,
         stage_timings_ms={k: round(v, 1) for k, v in timings.items()},

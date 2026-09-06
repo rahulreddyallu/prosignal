@@ -893,6 +893,12 @@ class FinalSignalOutput(_Contract):
     #: could never show the clock. Keys: cadence_sessions, is_entry_date,
     #: sessions_since_anchor, next_entry_date, sessions_until_next.
     entry_clock: Dict[str, Any] = Field(default_factory=dict)
+    #: Stage 9's full evaluation, one entry per shortlisted candidate --
+    #: including the ones it refused, which is the half that makes the record
+    #: worth keeping. Flows into `LedgerRow.conviction`.
+    conviction: List[Dict[str, Any]] = Field(default_factory=list)
+    #: Which mutually exclusive NO-TRADE cause bound, when one did.
+    conviction_cause: Optional[str] = None
     #: What happens to held names the run produced no card for -- suspended,
     #: dropped from the universe, or delisted. Without this a position left the
     #: book by omission and no exit was ever recorded.
@@ -961,6 +967,16 @@ class LedgerRow(_Contract):
     no_trade_reason: Optional[str] = None
 
     gate_counts: Dict[str, int] = Field(default_factory=dict)
+    #: THE CONVICTION RECORD -- every candidate Stage 9 evaluated, cleared or
+    #: not, with the four measurements that decided it and the reason the first
+    #: one failed. This is the research substrate for the selection-precision
+    #: study: without it there is no way to ask, later, whether the names the
+    #: gate refused went on to outperform the ones it took. `conviction_grade`
+    #: is ORDINAL and uncalibrated -- see `conviction.gate`.
+    conviction: List[Dict[str, Any]] = Field(default_factory=list)
+    #: Which of the mutually exclusive NO-TRADE causes bound, when one did.
+    #: A thin-evidence day and a broken feed are not the same fact.
+    conviction_cause: Optional[str] = None
     data_quality_flags: List[str] = Field(default_factory=list)
     survivorship_risk: bool = False
     stage_timings_ms: Dict[str, float] = Field(default_factory=dict)

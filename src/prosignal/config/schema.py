@@ -2051,6 +2051,59 @@ class ExpectancyConfig(_Base):
         return self
 
 
+# =============================================================================
+# Stage 9 -- CONVICTION
+# =============================================================================
+
+
+class ConvictionConfig(_Base):
+    """The final 0-2 gate. EVERY value here is UNVALIDATED.
+
+    These thresholds were chosen to be defensible a priori, not fitted to make
+    any particular day's output look good. Signal frequency must be a
+    CONSEQUENCE of them; tuning them to hit a target number of BUYs per week is
+    the failure this whole layer exists to prevent.
+
+    The one number with a measurement behind it is `max_cost_burden`, and only
+    indirectly: `docs/RESULTS_OF_RECORD.json` puts the ranking's top-decile
+    excess at +1.76% over 63 sessions (corrected t 2.21), while the shipped cost
+    model prices live candidates at 60-84 bps round-trip. A candidate spending
+    more than 60% of the only edge the model has ever demonstrated is not a
+    trade worth one of two slots.
+    """
+
+    enabled: bool = True
+    #: Candidates evaluated in full. A compute bound, not a selection rule.
+    shortlist: TI = Field(default_factory=lambda: Tunable[int](
+        value=15, status="UNVALIDATED", search_range=[5, 50]))
+    #: Meucci ENB over the supporting factors. Below 2.0 the case is one bet
+    #: wearing many hats. Measured live, the top-ranked name spans 1.53.
+    min_independent_evidence: TF = Field(default_factory=lambda: Tunable[float](
+        value=2.0, status="UNVALIDATED", search_range=[1.0, 5.0]))
+    max_evidence_concentration: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.85, status="UNVALIDATED", search_range=[0.5, 1.0]))
+    #: Separation in robust sigma units of the RAW score, not the rank.
+    min_gap_to_median: TF = Field(default_factory=lambda: Tunable[float](
+        value=1.0, status="UNVALIDATED", search_range=[0.0, 3.0]))
+    min_gap_to_next: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.05, status="UNVALIDATED", search_range=[0.0, 0.5]))
+    #: Share of alternative theme weightings keeping the name in the top 10.
+    min_robustness: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.70, status="UNVALIDATED", search_range=[0.0, 1.0]))
+    max_cost_burden: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.60, status="UNVALIDATED", search_range=[0.1, 1.0]))
+    #: The second slot must be a second BET.
+    max_residual_correlation: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.35, status="UNVALIDATED", search_range=[0.0, 0.9]))
+    max_evidence_similarity: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.80, status="UNVALIDATED", search_range=[0.0, 1.0]))
+    min_basket_enb: TF = Field(default_factory=lambda: Tunable[float](
+        value=1.70, status="UNVALIDATED", search_range=[1.0, 2.0]))
+    #: HARD CAP on what the production layer may emit. Not a target.
+    max_buys: TI = Field(default_factory=lambda: Tunable[int](
+        value=2, status="OPERATIONAL", search_range=[1, 5]))
+
+
 class RootConfig(_Base):
     """The fully validated contents of config/parameters.yaml."""
 
@@ -2069,6 +2122,7 @@ class RootConfig(_Base):
     stage6_entry: Stage6Config
     stage7_risk: Stage7Config
     stage8_final_signal: Stage8Config
+    stage9_conviction: ConvictionConfig = Field(default_factory=ConvictionConfig)
     costs: CostsConfig
     expectancy: ExpectancyConfig
     ledger: LedgerConfig

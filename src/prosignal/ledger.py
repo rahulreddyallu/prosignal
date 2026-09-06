@@ -632,6 +632,8 @@ def row_from_output(
         new_entries_blocked=output.new_entries_blocked,
         no_trade_reason=output.no_trade.reason if output.no_trade else None,
         gate_counts=dict(funnel),
+        conviction=list(getattr(output, "conviction", []) or []),
+        conviction_cause=getattr(output, "conviction_cause", None),
         data_quality_flags=list(output.data_quality_flags),
         survivorship_risk=bool(output.manifest.survivorship_risk) if output.manifest else False,
         stage_timings_ms=dict(output.stage_timings_ms),
