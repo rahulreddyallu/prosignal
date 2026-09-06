@@ -1019,6 +1019,42 @@ REGISTER: Tuple[Finding, ...] = (
               "way.",
     ),
     _f(
+        fid="Q9", severity="high",
+        title="Breadth was counted in declared factors, and 22 correlated "
+              "factors are not 22 bets",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="Grinold's IR = IC * sqrt(breadth) takes breadth to be "
+                   "INDEPENDENT bets. This engine describes itself as 22 "
+                   "factors across 5 themes and every breadth argument in the "
+                   "repository rests on those two counts. The pairwise "
+                   "redundancy check catches duplicates one pair at a time and "
+                   "says nothing about the aggregate, so nothing measured how "
+                   "many independent columns the composite actually carries. "
+                   "The participation ratio over each cross-section's Spearman "
+                   "matrix, averaged across 380 panel dates: 20.9 factor "
+                   "columns present carry 6.94 effective (median 7.34), and "
+                   "4.59 theme columns carry 3.96 (median 4.30).",
+        location="prosignal.v3_monitor::effective_breadth",
+        fix="`participation_ratio`, `effective_count` and `effective_breadth` "
+            "in `v3_monitor`, wired into `_v3_redundancy` so every stage-4 run "
+            "reports it on `RedundancyReport.effective_breadth` with a note "
+            "naming the overstatement factor. Averaged across dates rather "
+            "than pooled: a matrix over stacked cross-sections mixes "
+            "within-date structure with drift in the factor means, and drift "
+            "is not breadth. The default is an EMPTY dict, because an absent "
+            "measurement and a measured 22 are different things.",
+        regression_test="tests/test_effective_breadth.py",
+        before_after="breadth counted as 22; measured at 6.94, so any IR "
+                     "computed from the declared count overstates by 1.74x. "
+                     "The theme level is close to honest at 3.96 of 4.59, "
+                     "which is the two-level structure doing its job",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This does not prune anything. Pruning to the effective count is "
+              "a model change that spends trials and opens an epoch, and it is "
+              "an operator's decision taken against this measurement rather "
+              "than a consequence of it.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

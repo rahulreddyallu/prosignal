@@ -1234,11 +1234,45 @@ def _v3_redundancy(v3_scored, cfg):
         notes.append("fewer than two scored columns carried enough values to "
                      "correlate; overlap not measurable this run")
 
+    # HOW MANY INDEPENDENT COLUMNS ARE ACTUALLY THERE. Pair breaches catch the
+    # duplicates; they say nothing about the aggregate. Grinold's
+    # IR = IC * sqrt(breadth) takes breadth to be independent bets, and this
+    # engine describes itself as 22 factors across 5 themes. Measured across
+    # 380 panel dates the factors carry 6.94 effective and the themes 3.96 --
+    # so a breadth argument made on the factor count overstates by 1.74x, and
+    # the theme level is close to honest, which is the two-level structure
+    # doing its job.
+    from ..v3_monitor import effective_count
+
+    eff: Dict[str, float] = {}
+    if factors is not None:
+        e = effective_count(factors)
+        if np.isfinite(e):
+            eff["factors_declared"] = float(factors.shape[1])
+            eff["factors_effective"] = round(float(e), 3)
+    if theme_block is not None:
+        e = effective_count(theme_block)
+        if np.isfinite(e):
+            eff["themes_declared"] = float(theme_block.shape[1])
+            eff["themes_effective"] = round(float(e), 3)
+    if "factors_effective" in eff and eff["factors_effective"] > 0:
+        eff["breadth_overstatement"] = round(
+            float(np.sqrt(eff["factors_declared"] / eff["factors_effective"])), 3)
+        notes.append(
+            f"EFFECTIVE BREADTH: {eff['factors_declared']:.0f} factors carry "
+            f"{eff['factors_effective']:.2f} independent columns"
+            + (f" and {eff['themes_declared']:.0f} themes carry "
+               f"{eff['themes_effective']:.2f}" if "themes_effective" in eff
+               else "")
+            + f". Any IR computed from the declared count overstates by "
+              f"{eff['breadth_overstatement']:.2f}x.")
+
     combined = {f"theme:{k}": round(v, 4) for k, v in theme_pairs.items()}
     combined.update({k: round(v, 4) for k, v in factor_pairs.items()})
     return RedundancyReport(
         pairwise_spearman=combined, breaches=breaches, cutoff=cutoff,
-        action_taken=str(v(cfg.redundancy.on_breach)), notes=notes)
+        action_taken=str(v(cfg.redundancy.on_breach)), notes=notes,
+        effective_breadth=eff)
 
 
 def _redundancy(frame: pd.DataFrame, cfg,

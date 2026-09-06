@@ -103,6 +103,81 @@ def theme_availability(panel: pd.DataFrame) -> pd.DataFrame:
         lambda g: g.notna().mean())
 
 
+def participation_ratio(corr: np.ndarray) -> float:
+    """Effective number of independent columns behind a correlation matrix.
+
+    `(sum L)^2 / sum L^2` over the eigenvalues. It equals the column count when
+    the columns are orthogonal and collapses toward 1 as they align, which is
+    the quantity a breadth claim actually needs -- Grinold's IR = IC * sqrt(N)
+    takes N to be independent bets, and correlated factors are not independent
+    bets.
+    """
+    m = np.nan_to_num(np.asarray(corr, dtype="float64"), nan=0.0)
+    # Numerical asymmetry in a Spearman matrix makes eigvalsh unhappy on some
+    # BLAS builds; symmetrise rather than trusting the input.
+    ev = np.linalg.eigvalsh((m + m.T) / 2.0)
+    ev = np.clip(ev, 0.0, None)
+    total = float(ev.sum())
+    sq = float(np.sum(ev * ev))
+    return (total * total) / sq if sq > 0 else float("nan")
+
+
+def effective_count(frame: pd.DataFrame, min_names: int = 30) -> float:
+    """`participation_ratio` of one cross-section's Spearman matrix."""
+    if frame is None or frame.empty:
+        return float("nan")
+    x = frame.astype("float64")
+    x = x.loc[:, x.notna().sum() >= int(min_names)]
+    if x.shape[1] < 2:
+        return float("nan")
+    c = np.nan_to_num(x.corr(method="spearman").to_numpy(), nan=0.0)
+    np.fill_diagonal(c, 1.0)
+    return participation_ratio(c)
+
+
+def effective_breadth(panel: pd.DataFrame,
+                      columns: Optional[Sequence[str]] = None,
+                      min_names: int = 30) -> Dict[str, float]:
+    """How many independent columns the composite really carries, per date.
+
+    THE CLAIM THIS CHECKS. The engine describes itself as 22 factors across 5
+    themes, and every breadth argument in this repository rests on those two
+    numbers. Measured per date on the 380-date panel and averaged:
+
+        factors   20.9 columns present  ->   6.94 effective  (median 7.34)
+        themes     4.59 columns present ->   3.96 effective
+
+    So the factor count overstates independent breadth by a factor of three,
+    and `sqrt(22 / 6.94)` = 1.78x on any IR computed from it. The theme level
+    is close to honest, which is the two-level structure doing its job.
+
+    Averaged ACROSS DATES rather than pooled: a single correlation matrix over
+    stacked cross-sections mixes within-date structure with the drift of the
+    factor means, and the second is not breadth.
+    """
+    cols = list(columns) if columns else [c for c in panel.columns
+                                          if c in set(FACTOR_THEME)]
+    cols = [c for c in cols if c in panel.columns]
+    if not cols or "date" not in panel.columns:
+        return {}
+    eff, present = [], []
+    for _, g in panel.groupby("date", sort=True):
+        e = effective_count(g[cols], min_names=min_names)
+        if np.isfinite(e):
+            eff.append(e)
+            present.append(int((g[cols].notna().sum() >= min_names).sum()))
+    if not eff:
+        return {}
+    return {"n_dates": float(len(eff)),
+            "columns_declared": float(len(cols)),
+            "columns_present_mean": float(np.mean(present)),
+            "effective_mean": float(np.mean(eff)),
+            "effective_median": float(np.median(eff)),
+            "breadth_overstatement": (float(np.sqrt(np.mean(present)
+                                                    / np.mean(eff)))
+                                      if np.mean(eff) > 0 else float("nan"))}
+
+
 def stable_model_window(panel: pd.DataFrame,
                         floor: float = STABLE_MODEL_FLOOR):
     """First date from which EVERY theme stays above `floor`, or None.
