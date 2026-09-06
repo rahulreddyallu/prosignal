@@ -928,14 +928,24 @@ REGISTER: Tuple[Finding, ...] = (
             "be quoted without its schedule. The default is unchanged for a "
             "caller that passes nothing.",
         regression_test="tests/test_cadence_parity.py",
-        before_after="the simulator made 4 decisions a year against the live "
-                     "engine's 12, and annualised its cost on the 63-session "
-                     "horizon rather than the 21-session hold -- a 3x "
-                     "understatement on top of the missing turnover",
+        before_after="measured on the whole store, same ranking and same "
+                     "params, only the cadence moved: cost 0.45% -> 1.17% a "
+                     "year and its share of gross 10.3% -> 22.6%; round trips "
+                     "15.8 -> 40.6 a year; periods per year 4.0 -> 12.0. "
+                     "Deployment is unchanged at 20%, so this is turnover "
+                     "rather than leverage. Alpha on deployed capital RISES, "
+                     "+4.50% -> +6.74%, which is consistent with the "
+                     "out-of-sample IC being strongest at the shorter "
+                     "horizons: the live book re-ranks often enough to use it",
         moves_coefficients=False, moves_history=True, forces_restart=False,
         notes="This does not change the ranking, and it changes every cost, "
               "turnover and net-return figure the simulator has ever "
-              "produced. All of them move in the same direction: worse.",
+              "produced. The cost figures all move the same way -- worse, by "
+              "more than a factor of two. The book's own alpha does not, and "
+              "that is worth noticing rather than filing away: the schedule "
+              "the engine actually runs is better than the one it was being "
+              "measured on, and it was being measured on the wrong one for "
+              "reasons that had nothing to do with which was better.",
     ),
     _f(
         fid="Q7", severity="high",
