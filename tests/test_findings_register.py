@@ -125,10 +125,19 @@ def test_the_dossier_s_own_open_items_are_all_present():
         assert f.status is not Status.OPEN, f"{fid} is still open"
 
 
-def test_r1_is_the_only_thing_left_open():
+def test_exactly_two_things_are_left_open_and_both_are_named():
     """The honest state of this engine. If another finding opens, this fails
-    and somebody has to say which."""
-    assert [f.fid for f in open_findings()] == ["R1"]
+    and somebody has to say which.
+
+    R1 is the long-standing one. Q7 joined it in the 2026-09 audit: market
+    impact cannot be calibrated, because `data/ledger/outcomes.jsonl` holds no
+    fills -- in 126 of 128 rows the recorded `entry_price` is the next
+    session's OPEN to the tick, which is the engine's own entry rule rather
+    than an execution. It stays OPEN because no amount of code closes it; it
+    closes when the ledger holds broker fills. The harness that will do the
+    calibration is built and refuses to report one until then.
+    """
+    assert [f.fid for f in open_findings()] == ["R1", "Q7"]
 
 
 def test_every_restart_blocker_changes_the_engine_its_identity_or_the_question():

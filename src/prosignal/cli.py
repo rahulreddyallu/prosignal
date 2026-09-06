@@ -1632,6 +1632,13 @@ def _portfolio_params(cfg: AppConfig):
         invalidation_ma_sessions=iv(c7.thesis_invalidation.structure_ma_sessions),
         invalidation_buffer_atr=fv(c7.thesis_invalidation.structure_buffer_atr),
         horizon_sessions=iv(cfg.params.stage4_core_score.model_horizon_sessions),
+        # CADENCE PARITY. Without this the simulator decides once per horizon
+        # -- four times a year at H=63 -- while the live engine decides every
+        # `entry_cadence_sessions`, twelve times a year, and carries names
+        # across decisions through the exit band. Every cost and turnover
+        # figure measured on the cohort schedule and quoted about the live book
+        # was a number about a different strategy.
+        decision_sessions=iv(c6.admission.entry_cadence_sessions),
         entry_rank=iv(c6.admission.entry_rank),
         exit_rank=iv(c6.admission.exit_rank),
         target_r_multiple=fv(c7.targets.t2_r_multiple),

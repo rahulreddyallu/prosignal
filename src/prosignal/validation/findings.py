@@ -894,6 +894,131 @@ REGISTER: Tuple[Finding, ...] = (
               "leverage confound.",
     ),
     _f(
+        fid="Q6", severity="critical",
+        title="The simulator decided four times a year and the engine decides "
+              "twelve, so every cost figure described a different strategy",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`simulate` walks `ceil(horizon / step_sessions)` ranking "
+                   "dates at a time, and the numerator was always "
+                   "`horizon_sessions`. At the shipped horizon of 63 that is a "
+                   "NON-OVERLAPPING COHORT schedule -- form a book, hold it "
+                   "for the whole horizon, liquidate, form the next -- and "
+                   "four decisions a year. The live engine decides every "
+                   "`stage6_entry.admission.entry_cadence_sessions`, which is "
+                   "21: twelve times a year, three times as often, carrying "
+                   "names across decisions through the exit band. The cohort "
+                   "schedule cannot re-rank a held name for 63 sessions, so it "
+                   "never pays the turnover the hysteresis band generates, and "
+                   "its cost is the cheaper of the two. The code comment even "
+                   "stated the assumption -- 'rebalances are ceil(horizon/step) "
+                   "apart precisely so one cohort finishes before the next "
+                   "opens' -- while the engine it was measuring did not work "
+                   "that way.",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="`decision_sessions` truncates each cohort at the next decision "
+            "date and re-selects: a name still inside the exit band is kept "
+            "and owes nothing, a name that has left it or whose position "
+            "closed early is replaced and pays a round trip -- the live book's "
+            "arithmetic. `PortfolioParams.decision_sessions` carries it and "
+            "`_portfolio_params` reads the live cadence, so the shipped "
+            "measurement and the shipped engine now decide on the same clock. "
+            "`phase_summary` annualises on the HOLD rather than the horizon "
+            "(twelve periods a year at cadence 21, not four) and reports "
+            "`decision_sessions` on the result, so a cost figure can no longer "
+            "be quoted without its schedule. The default is unchanged for a "
+            "caller that passes nothing.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="the simulator made 4 decisions a year against the live "
+                     "engine's 12, and annualised its cost on the 63-session "
+                     "horizon rather than the 21-session hold -- a 3x "
+                     "understatement on top of the missing turnover",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+        notes="This does not change the ranking, and it changes every cost, "
+              "turnover and net-return figure the simulator has ever "
+              "produced. All of them move in the same direction: worse.",
+    ),
+    _f(
+        fid="Q7", severity="high",
+        title="Market impact cannot be calibrated, because the ledger holds no "
+              "fills -- it holds the engine's own entry rule",
+        category=Category.EXECUTION, status=Status.OPEN,
+        root_cause="`CostModel.impact_bps` is "
+                   "`coefficient * participation ** exponent` plus an assumed "
+                   "half-spread, and both constants are config values that "
+                   "have never been compared to a price this engine traded at. "
+                   "The obvious calibration -- regress realised implementation "
+                   "shortfall on participation -- cannot run: in 126 of the "
+                   "128 rows of `data/ledger/outcomes.jsonl` the recorded "
+                   "`entry_price` equals the NEXT SESSION'S OPEN to the tick, "
+                   "so the ledger is recording the simulator's entry rule "
+                   "rather than an execution. Fitting the impact model to "
+                   "those rows would fit it to the assumption it was built "
+                   "from and report the circularity as agreement. The other "
+                   "two are VEDL rows carrying an unadjusted price against an "
+                   "adjusted open (415.65 against 145.90, ratio 2.85, with "
+                   "`price_basis_factor` recorded as 1.0) -- the price-basis "
+                   "defect, not a fill.",
+        location="prosignal.validation.fill_calibration::calibrate",
+        fix="OPEN, and it stays open until the ledger holds broker fills -- no "
+            "amount of code closes it. What is built is the harness and its "
+            "refusal: `calibrate` returns SYNTHETIC_FILLS when the recorded "
+            "price collapses onto a reference price for more than "
+            "`SYNTHETIC_SHARE` of rows, reports NO coefficient when it "
+            "refuses, and drops price-basis rows by name rather than fitting "
+            "through them. It returns CALIBRATED on genuine fills, which is "
+            "what makes the refusal mean something.",
+        regression_test="tests/test_fill_calibration.py",
+        before_after="87 bps round trip, asserted; still asserted, and now "
+                     "labelled as an assumption with the harness that would "
+                     "test it standing ready",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Reading the same ledger off the raw year parquets instead of "
+              "through `DataStore` gives a different answer -- 92.4% "
+              "synthetic, and TATAINVEST appears with a fill of 1066.00 "
+              "against a raw open of 10660.00. The ledger's `entry_price` is "
+              "not on one consistent price basis. That is a second defect and "
+              "it is recorded here rather than fixed here.",
+    ),
+    _f(
+        fid="Q8", severity="high",
+        title="Every recorded ablation was decided on a statistic that moves "
+              "with the knob being ablated",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`parameters.yaml` settles its exit, target and band "
+                   "ablations on annual alpha, excess Sharpe and worst-year -- "
+                   "'booking at 3R cost 0.9 points of annual alpha', 'booking "
+                   "at 1.5R cost 4.6 points'. None of those is comparable "
+                   "across the arms that produced them. Position size is "
+                   "`risk_budget / risk_per_share`, so an arm that changes the "
+                   "stop distance, the risk budget or the slot count changes "
+                   "how much capital is deployed; with `r = dep * r_d`, raw "
+                   "alpha is PROPORTIONAL to deployment and raw excess "
+                   "additionally carries a cash-drag term against a "
+                   "fully-invested benchmark. Disarming the 3R target changes "
+                   "how long positions live and therefore how much capital "
+                   "sits in cash, so the arm moved for a reason that has "
+                   "nothing to do with whether the target is a good rule.",
+        location="prosignal.validation.ablation::rank_arms",
+        fix="`validation/ablation.py` runs arms through the shipped simulator "
+            "at a FIXED cadence -- letting `decision_sessions` vary would make "
+            "a one-variable comparison into a two-variable one, see Q6 -- and "
+            "`rank_arms` RAISES on any key in `CONFOUNDED` rather than sorting "
+            "by it, naming the mechanism and pointing at "
+            "`alpha_on_deployed_ann`. The confounded columns are still printed "
+            "in `table`, because every earlier write-up quotes them and a "
+            "reconciliation needs them; what they may not do is decide.",
+        regression_test="tests/test_ablation_leverage_neutral.py",
+        before_after="the guard is demonstrated on a pure sizing sweep in "
+                     "which the ranking, the names and the costs are "
+                     "identical: raw excess separates the arms and "
+                     "alpha-on-deployed does not",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="The recorded ablation VERDICTS are not overturned here -- "
+              "re-running them needs the full panel and is its own decision. "
+              "What is fixed is that the next one cannot be decided the same "
+              "way.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

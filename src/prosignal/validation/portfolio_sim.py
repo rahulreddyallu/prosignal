@@ -77,6 +77,13 @@ class PortfolioParams:
     use_stop: bool = True
     use_target: bool = True
     use_invalidation: bool = True
+    #: SESSIONS BETWEEN DECISIONS, from `stage6_entry.entry_cadence_sessions`.
+    #: `None` keeps the historical behaviour: decide once per horizon, which is
+    #: a NON-OVERLAPPING COHORT schedule and four decisions a year at H=63. The
+    #: live engine decides every 21 sessions -- three times as often -- and
+    #: carries names across decisions through the exit band, so it pays
+    #: turnover the cohort schedule never sees. See `simulate`.
+    decision_sessions: Optional[int] = None
 
     # -- portfolio-level volatility scaling (Moreira & Muir 2017) -----------
     #: Annualised volatility the BOOK is scaled toward. `None` disables the
@@ -446,7 +453,8 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
 
 
 def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
-          high=None) -> Optional[Tuple[float, float]]:
+          high=None, horizon: Optional[int] = None
+          ) -> Optional[Tuple[float, float]]:
     """(realised return, exit side) of one position, from the SHARED resolver.
 
     This used to carry its own copy of the exit logic -- stop, invalidation,
@@ -474,6 +482,14 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
     charges a round trip only to names absent from the previous book, which is
     correct for a position carried through -- and wrong for the 84% that close
     early and are re-bought. Without the side it cannot tell the two apart.
+
+    ``horizon`` overrides `p.horizon_sessions` so a cohort can be TRUNCATED at
+    the next decision date. A book that re-ranks every 21 sessions does not
+    carry a name blindly for 63 of them; it looks again, and the hysteresis
+    band decides whether the name is kept. A position still open when the
+    truncated horizon arrives exits at EXIT_TIMEOUT, which is exactly the side
+    the caller reads as "carried, owes no round trip". See
+    `simulate(decision_sessions=...)`.
     """
     from ..features.exits import ExitRules, resolve_exits
 
@@ -484,7 +500,7 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
         target_r_multiple=p.target_r_multiple,
         invalidation_ma_sessions=p.invalidation_ma_sessions,
         invalidation_buffer_atr=p.invalidation_buffer_atr,
-        horizon=p.horizon_sessions,
+        horizon=int(horizon) if horizon else p.horizon_sessions,
         use_stop=p.use_stop,
         use_target=p.use_target,
         use_invalidation=p.use_invalidation,
@@ -508,12 +524,35 @@ def simulate(
     phase: int = 0,
     step_sessions: int = 21,
     dates_allowed: Optional[Sequence[pd.Timestamp]] = None,
+    decision_sessions: Optional[int] = None,
 ) -> PortfolioResult:
     """Run the book across rebalances, one cohort at a time.
 
     ``rankings`` is (date, score series sorted best first). ``prices`` holds the
     aligned panels: close, low, open, atr, ma, adtv. ``phase`` selects which
     offset of the non-overlapping schedule to walk.
+
+    ``decision_sessions`` IS THE CADENCE THE BOOK RE-RANKS AT, and defaults to
+    `params.horizon_sessions`, which is what this simulator has always done.
+    That default is a NON-OVERLAPPING COHORT schedule: form a book, hold it for
+    the whole horizon, liquidate, form the next. At the shipped horizon of 63
+    that is four decisions a year.
+
+    THE LIVE ENGINE DECIDES EVERY 21 SESSIONS -- twelve times a year, three
+    times as often -- and carries names across decisions through the exit band.
+    The two schedules pay different amounts of cost for the same signal, and
+    the simulator's is the cheaper one: it cannot re-rank a held name for 63
+    sessions, so it never pays the turnover the hysteresis band generates. Cost
+    measured on the default schedule and quoted about the live book is a
+    number about a different strategy.
+
+    Passing `decision_sessions` shorter than the horizon truncates each cohort
+    at the next decision date and re-selects. A name still inside the exit band
+    is kept and owes nothing; a name that has left it, or whose position closed
+    early, is replaced and pays a round trip. That is the live book's
+    arithmetic, and `metrics(periods_per_year=...)` must then be annualised on
+    the DECISION cadence rather than on the horizon -- `phase_summary` does
+    this from `hold_sessions`.
     """
     close, low, open_ = prices["close"], prices["low"], prices["open"]
     atr, ma, adtv = prices["atr"], prices["ma"], prices["adtv"]
@@ -542,7 +581,12 @@ def simulate(
     pos = {d: i for i, d in enumerate(index)}
     allowed = set(dates_allowed) if dates_allowed is not None else None
 
-    stride = max(int(np.ceil(params.horizon_sessions / step_sessions)), 1)
+    # THE DECISION CADENCE, and the hold it implies. `stride` counts ranking
+    # dates, which arrive `step_sessions` apart.
+    decision = int(decision_sessions or params.decision_sessions
+                   or params.horizon_sessions)
+    stride = max(int(np.ceil(decision / step_sessions)), 1)
+    hold_sessions = min(int(params.horizon_sessions), decision)
     equity = params.capital
     #: symbol -> the side its last position exited on. EXIT_TIMEOUT means the
     #: position was still open at the horizon and a re-selection genuinely costs
@@ -555,7 +599,7 @@ def simulate(
         if date not in pos or (allowed is not None and date not in allowed):
             continue
         i = pos[date]
-        if i + params.horizon_sessions >= len(index):
+        if i + hold_sessions >= len(index):
             continue
         rank = {sym: r for r, sym in enumerate(scores.index, start=1)}
         # Hysteresis: a held name survives while inside the wider exit band.
@@ -580,7 +624,8 @@ def simulate(
             if sized is None or sized[0] <= 0:
                 continue
             size, price, liquidity = sized
-            outcome = _hold(sym, i, close, low, open_, ma, atr, params, high=high)
+            outcome = _hold(sym, i, close, low, open_, ma, atr, params,
+                            high=high, horizon=hold_sessions)
             if outcome is None:
                 continue
             ret, side = outcome
@@ -614,7 +659,7 @@ def simulate(
         # than annualised afterwards so it lines up period for period.
         bench_ret = float("nan")
         if bench is not None:
-            j_exit = min(i + params.horizon_sessions, len(index) - 1)
+            j_exit = min(i + hold_sessions, len(index) - 1)
             try:
                 b0 = float(bench.iloc[i]); b1 = float(bench.iloc[j_exit])
                 if np.isfinite(b0) and np.isfinite(b1) and b0 > 0:
@@ -643,6 +688,11 @@ def simulate(
             #: three quarters invested.
             "deployed_frac": deployed / opening,
             "vol_scale": vol_scale, "realised_vol": realised_vol,
+            #: Sessions this cohort was actually held. Equal to the horizon on
+            #: the default schedule; equal to the decision cadence when the
+            #: book re-ranks faster than the horizon. Every annualisation
+            #: downstream has to divide by THIS, not by the horizon.
+            "hold_sessions": float(hold_sessions),
         })
         # Carry the EXIT SIDE, not a bare 1. A name still open at the horizon
         # costs nothing to keep; one that stopped out and is re-bought is a new
@@ -707,12 +757,20 @@ def phase_summary(
     *,
     step_sessions: int = 21,
     dates_allowed: Optional[Sequence[pd.Timestamp]] = None,
+    decision_sessions: Optional[int] = None,
 ) -> Dict[str, float]:
-    """Every phase offset, pooled. One offset is one arbitrary schedule."""
-    stride = max(int(np.ceil(params.horizon_sessions / step_sessions)), 1)
+    """Every phase offset, pooled. One offset is one arbitrary schedule.
+
+    ``decision_sessions`` is forwarded to `simulate` and defaults to the
+    horizon, which is the non-overlapping cohort schedule this has always run.
+    See `simulate` for why that is NOT the live book's cadence.
+    """
+    decision = int(decision_sessions or params.decision_sessions
+                   or params.horizon_sessions)
+    stride = max(int(np.ceil(decision / step_sessions)), 1)
     results = [
         simulate(rankings, prices, params, phase=p, step_sessions=step_sessions,
-                 dates_allowed=dates_allowed)
+                 dates_allowed=dates_allowed, decision_sessions=decision)
         for p in range(stride)
     ]
     usable = [r for r in results if not r.empty and len(r.periods) >= 3]
@@ -726,13 +784,24 @@ def phase_summary(
     # factor is sqrt(12), so a fixed 4 understates a short horizon by 1.73x and
     # overstates a long one. That error made Sharpe look like it rose
     # monotonically with horizon; corrected, it peaks near 63 and falls away.
-    periods_per_year = 252.0 / float(params.horizon_sessions)
+    # ANNUALISE ON THE HOLD, NOT ON THE HORIZON. They are the same number on
+    # the default schedule and they are not when the book re-ranks faster than
+    # the horizon: at a 21-session cadence there are twelve periods a year, not
+    # four, and using the horizon would understate every annualised figure --
+    # cost included, which is the figure this cadence exists to get right.
+    hold = float(pooled["hold_sessions"].iloc[0]) if "hold_sessions" in pooled \
+        else float(params.horizon_sessions)
+    periods_per_year = 252.0 / max(hold, 1.0)
     per_phase = [x.metrics(periods_per_year=periods_per_year) for x in usable]
     drawdowns = [m["max_drawdown"] for m in per_phase]
     return {
         "mean_return": float(r.mean()),
         "sharpe": float(r.mean() / sd * np.sqrt(periods_per_year)) if sd > 0 else 0.0,
         "periods_per_year": periods_per_year,
+        #: The cadence this was run at, so a caller cannot quote a cost figure
+        #: without knowing which schedule produced it.
+        "decision_sessions": float(decision),
+        "hold_sessions": hold,
         # A MEAN OF SCHEDULES IS NOT A DRAWDOWN. Each phase is a different,
         # complete rebalance schedule -- one of them is the one that would have
         # been run -- so averaging their worst moments describes an experience
