@@ -638,3 +638,9 @@
 {"key": "70f2c7afaff80739", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 12", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.28}
 {"key": "5da91d774936bd02", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 18", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
 {"key": "13ec2deb31fe1049", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 36", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 8.76}
+{"key": "940c7f22a0f67cd8", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top6", "recorded_at": "2026-09-06T05:32:46+00:00", "score": -1.5196}
+{"key": "abee4c7feabde960", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: D10", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 0.3242}
+{"key": "bb8cf60e79ad525a", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: D6-D8", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 1.1934}
+{"key": "1071b6393f8180a7", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top-half", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 0.9052}
+{"key": "029735724bfa2783", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: D10-D1", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 2.6729}
+{"key": "6b15738a4cd21204", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top-half minus bottom-half", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 1.812}

@@ -1337,6 +1337,52 @@ REGISTER: Tuple[Finding, ...] = (
               "sentence about cash that made it read as a balance.",
     ),
     _f(
+        fid="Q17", severity="critical",
+        title="The long-only constraint is not what binds -- the six-name "
+              "concentration is, and a tradeable shape carries the signal",
+        category=Category.MODEL, status=Status.FIXED,
+        root_cause="IR = TC x IC x sqrt(breadth), and nothing measured TC. A "
+                   "signal that fails to appear in the book is either a broken "
+                   "signal or a book that cannot hold the signal's opinion, "
+                   "and those call for opposite responses. Measured out of "
+                   "sample at h=63 over 87 dates and a median 750 names, "
+                   "gross of cost:\n"
+                   "  D10-D1        LONG_SHORT  +2.6729%  t +1.08  TC +0.762\n"
+                   "  half-minus-half LONG_SHORT +1.8120%  t +1.54  TC +0.822\n"
+                   "  D6-D8         LONG_ONLY   +1.1934%  t +2.42  TC +0.296\n"
+                   "  top-half      LONG_ONLY   +0.9052%  t +1.54  TC +0.822\n"
+                   "  D10           LONG_ONLY   +0.3242%  t +0.26  TC +0.553\n"
+                   "  top6 SHIPPED  LONG_ONLY   -1.5196%  t -0.67  TC +0.206\n"
+                   "The shipped shape is the worst of the six and its "
+                   "out-of-sample excess is NEGATIVE. The decile it is drawn "
+                   "from is indistinguishable from zero on its own. D6-D8 -- "
+                   "where the decile profile peaks out of sample, see Q10 -- "
+                   "is the ONLY shape of any kind that clears t = 2, and it is "
+                   "long-only and tradeable.",
+        location="prosignal.validation.transfer",
+        fix="`validation/transfer.py` evaluates portfolio SHAPES against the "
+            "same panel the IC is measured on, reporting gross excess over the "
+            "equal-weight cross-section, an overlap-corrected t, Grinold's "
+            "transfer coefficient, and how many names the shape needs. "
+            "Long-short shapes are computed and marked untradeable: India has "
+            "no retail borrow market worth the name, and a table that ranks a "
+            "short book beside a long one without saying so is proposing "
+            "something the engine cannot do.",
+        regression_test="tests/test_transfer_coefficient.py",
+        before_after="the engine's answer to 'the IC is real but the book "
+                     "loses' was a shrug between two diagnoses; it is now a "
+                     "measurement that rules one of them out",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="GROSS, and the word is load-bearing: D6-D8 holds 221 names and "
+              "pays turnover a six-name book does not, and nothing here prices "
+              "it. This is a construction diagnostic, not a proposal -- "
+              "changing the book is a model decision that spends trials and "
+              "opens an epoch. The six shapes are charged to the registry. "
+              "What it settles is the DIAGNOSIS: the long-only constraint is "
+              "not the binding one, because the best-performing shape in the "
+              "table is long-only.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,
