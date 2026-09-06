@@ -70,6 +70,59 @@ DRAWDOWN_FLAG = -0.25
 #: Below this many scored names an influence share is noise, not a measurement.
 MIN_NAMES_FOR_INFLUENCE = 30
 
+#: Coverage every theme must reach before the composite is the SAME MODEL it is
+#: at the end of the sample. See `theme_availability`.
+STABLE_MODEL_FLOOR = 0.40
+
+
+def theme_availability(panel: pd.DataFrame) -> pd.DataFrame:
+    """Share of names each theme can speak about, per date.
+
+    WHY THIS IS A VALIDATION CONCERN AND NOT A DATA NOTE. `score_frame`
+    re-caps the blend over the themes a name actually has, so a name scored on
+    three themes and a name scored on five are combined by different weight
+    vectors. That is correct per name. Across TIME it means the composite is
+    not one model: the fundamentals feed reaches almost nobody early in the
+    sample and most of the universe late in it, so an early score is a
+    three-theme blend and a late one is a five-theme blend.
+
+    Measured on the 380-date panel, `quality_sub` coverage by year:
+
+        2018  0.0%   2019  0.0%   2020  1.5%   2021 23.3%   2022 26.5%
+        2023 50.2%   2024 68.9%   2025 77.1%   2026 86.4%
+
+    and mean `n_themes` per name rises 2.99 -> 4.86 over the same span. Any IC
+    or book statistic quoted over the whole panel is therefore a weighted
+    average across structurally different models, and the weighting is set by a
+    data feed rather than by anything anybody chose.
+    """
+    cols = [t + "_sub" for t in THEMES if t + "_sub" in panel.columns]
+    if not cols or "date" not in panel.columns:
+        return pd.DataFrame()
+    return panel.groupby("date", sort=True)[cols].apply(
+        lambda g: g.notna().mean())
+
+
+def stable_model_window(panel: pd.DataFrame,
+                        floor: float = STABLE_MODEL_FLOOR):
+    """First date from which EVERY theme stays above `floor`, or None.
+
+    "From which it stays" rather than "on which it first happens": a single
+    date clearing the bar and then falling back is not the point at which the
+    model settled. Measured on the shipped panel at a 40% floor this is
+    2023-07-21, leaving 150 of 380 dates -- which is a hard fact about how much
+    evidence describes the model as it now stands, and it is a great deal less
+    than the row count suggests.
+    """
+    av = theme_availability(panel)
+    if av.empty:
+        return None
+    ok = (av >= float(floor)).all(axis=1)
+    for d in ok.index:
+        if bool(ok.loc[d:].all()):
+            return d
+    return None
+
 
 @dataclass
 class FactorHealth:

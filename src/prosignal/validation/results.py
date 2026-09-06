@@ -66,6 +66,15 @@ __all__ = ["ArmResult", "RankingResult", "Stamp", "ResultsOfRecord",
 
 DOC_RELPATH = "docs/RESULTS_OF_RECORD.md"
 
+#: Below this many signal dates the restricted window is not a measurement, and
+#: printing an IC over it invites the reader to compare a number against noise.
+MIN_STABLE_DATES = 60
+
+#: Mirrored from `v3_monitor` so `render` can name the bar without importing
+#: the monitor at module scope; `tests/test_model_stability_window.py` pins the
+#: two together.
+_STABLE_FLOOR = 0.40
+
 #: How close a re-run has to land before the published claim is called
 #: REPRODUCED. Generous on purpose -- the question is whether a number is the
 #: same RESULT, not whether it matches to the basis point. The simulator's
@@ -143,6 +152,16 @@ class RankingResult:
     decile_monotonicity: float
     independent_observations: float
     vif: float
+    #: FULL_PANEL, or STABLE_MODEL for the rows restricted to the span over
+    #: which the composite is the same model it is today. See
+    #: `v3_monitor.stable_model_window`.
+    window: str = "FULL_PANEL"
+    #: Mean themes a scored name actually had. On the full panel this rises
+    #: 2.99 -> 4.86 across the sample, which is what makes the two windows
+    #: different models rather than the same model on different dates.
+    n_themes_mean: float = float("nan")
+    #: The least-covered theme's share of names, over the same rows.
+    min_theme_coverage: float = float("nan")
 
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -409,8 +428,20 @@ def _stamp(cfg, store, panel: pd.DataFrame, horizon: int, stride: int,
     )
 
 
+def _theme_shape(sub: pd.DataFrame) -> Tuple[float, float]:
+    """Mean themes per name, and the least-covered theme's coverage."""
+    from ..v3_monitor import THEMES
+    n_mean = (float(sub["n_themes"].mean()) if "n_themes" in sub.columns
+              else float("nan"))
+    cols = [t + "_sub" for t in THEMES if t + "_sub" in sub.columns]
+    cov = (min(float(sub[c].notna().mean()) for c in cols) if cols
+           else float("nan"))
+    return n_mean, cov
+
+
 def _ranking_results(panel: pd.DataFrame, horizons: Sequence[int],
-                     stride: int) -> List[RankingResult]:
+                     stride: int, window: str = "FULL_PANEL"
+                     ) -> List[RankingResult]:
     out: List[RankingResult] = []
     for h in horizons:
         label = f"y{h}"
@@ -438,6 +469,9 @@ def _ranking_results(panel: pd.DataFrame, horizons: Sequence[int],
             decile_monotonicity=_decile_monotonicity(sub, label),
             independent_observations=_independent(n_dates, stride, h),
             vif=vif,
+            window=window,
+            n_themes_mean=_theme_shape(sub)[0],
+            min_theme_coverage=_theme_shape(sub)[1],
         ))
     return out
 
@@ -508,6 +542,21 @@ def build(cfg, store, *, panel: Optional[pd.DataFrame] = None,
 
     say("scoring the ranking")
     ranking = _ranking_results(panel, (21, 42, horizon), stride)
+
+    # THE SAME RANKING OVER THE SPAN ON WHICH IT IS THE SAME MODEL.
+    # `score_frame` re-caps the blend over the themes a name has, so a
+    # three-theme score and a five-theme score are different functions. The
+    # fundamentals feed reaches 0% of names in 2018 and 86% in 2026, so the
+    # full-panel row is an average over models, weighted by a data feed. The
+    # restricted row is the evidence that describes the shipped composite.
+    from ..v3_monitor import stable_model_window
+    stable_from = stable_model_window(panel)
+    if stable_from is not None:
+        stable = panel[pd.to_datetime(panel["date"]) >= pd.Timestamp(stable_from)]
+        if int(stable["date"].nunique()) >= MIN_STABLE_DATES:
+            ranking += _ranking_results(stable, (21, 42, horizon), stride,
+                                        window="STABLE_MODEL")
+
     n_dates = int(panel["date"].nunique())
     independent = _independent(n_dates, stride, horizon)
 
@@ -984,13 +1033,26 @@ def render(rec: ResultsOfRecord) -> str:
           f"{s.stride_sessions} sessions apart against a "
           f"{s.horizon_sessions}-session label, so observations overlap and the "
           "naive statistic is inflated by roughly `sqrt(VIF)`.", "",
-          "| horizon | dates | rows | rank IC | IC t (naive) | IC t (corrected) | "
+          "`window` splits the same measurement two ways, and the split is not "
+          "cosmetic. `score_frame` re-caps the theme blend over the themes a "
+          "name actually has, so a name scored on three themes and a name "
+          "scored on five are combined by different weight vectors. The "
+          "fundamentals feed reaches almost nobody at the start of the panel "
+          "and most of the universe at the end, so `FULL_PANEL` averages "
+          "across structurally different models with the weighting set by a "
+          "data feed. `STABLE_MODEL` is the span over which every theme stays "
+          "above "
+          f"{_pct(_STABLE_FLOOR, 0)} coverage -- the evidence that describes "
+          "the composite as it now stands, and there is much less of it.", "",
+          "| window | horizon | dates | rows | themes/name | rank IC | "
+          "IC t (naive) | IC t (corrected) | "
           "quintile spread | spread t (corr.) | top-decile excess | "
           "top-decile t (corr.) | decile monotonicity | indep. obs | VIF |",
-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rec.ranking:
         L.append(
-            f"| {r.horizon} | {r.n_dates} | {r.n_rows:,} | {r.ic:+.4f} | "
+            f"| {r.window} | {r.horizon} | {r.n_dates} | {r.n_rows:,} | "
+            f"{_num(r.n_themes_mean)} | {r.ic:+.4f} | "
             f"{_num(r.ic_t_naive)} | **{_num(r.ic_t_corrected)}** | "
             f"{_pct(r.spread)} | **{_num(r.spread_t_corrected)}** | "
             f"{_pct(r.top_decile_excess)} | **{_num(r.top_decile_t_corrected)}** | "

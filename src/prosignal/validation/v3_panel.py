@@ -313,6 +313,10 @@ DEPLOY_REFERENCE = {
     "ic_window_b": 0.0357, "spread_window_b": 0.0086,
     "window_b_is_in_sample": True,
     "citable_windows": list(CITABLE_SEALED_WINDOWS),
+    # Q4. These were measured over the whole panel, which spans a model that
+    # scored 2.99 themes per name at the start and 4.86 at the end. See
+    # `v3_monitor.stable_model_window`.
+    "spans_variable_theme_coverage": True,
 }
 
 

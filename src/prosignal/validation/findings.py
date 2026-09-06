@@ -799,6 +799,44 @@ REGISTER: Tuple[Finding, ...] = (
               "shipped configuration after the cap repair.",
     ),
     _f(
+        fid="Q4", severity="high",
+        title="Every panel-wide statistic averaged across structurally "
+              "different models, weighted by a data feed",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`score_frame` re-caps the theme blend over the themes a "
+                   "name actually has, which is right per name and turns into "
+                   "a validation problem across time. The fundamentals feed "
+                   "reaches almost nobody early in the panel and most of the "
+                   "universe late in it -- `quality_sub` coverage runs 0.0% "
+                   "(2018), 1.5% (2020), 23.3% (2021), 50.2% (2023), 86.4% "
+                   "(2026), and mean themes per name rises 2.99 -> 4.86 over "
+                   "the same span. So an early score is a three-theme blend "
+                   "and a late one is a five-theme blend, and every IC, "
+                   "spread and book figure quoted over the whole panel is a "
+                   "weighted average across different models whose weighting "
+                   "nobody chose: it was set by when a vendor's coverage "
+                   "improved.",
+        location="prosignal.validation.results::_ranking_results",
+        fix="`v3_monitor.theme_availability` reports the coverage per date "
+            "and `stable_model_window` returns the first date from which "
+            "EVERY theme stays above 40% -- 2023-07-21, leaving 150 of 380 "
+            "dates. The ranking table now carries both windows side by side "
+            "with a themes/name column, so the reader can see which model "
+            "each row describes rather than inferring it. FULL_PANEL is kept, "
+            "not replaced: it is the longer record, and hiding it would be "
+            "the same class of selection this register exists to stop.",
+        regression_test="tests/test_model_stability_window.py",
+        before_after="rank IC at h=21, overlap-corrected: FULL_PANEL +0.0541 "
+                     "t +7.74 on 380 dates; STABLE_MODEL +0.0468 t +6.22 on "
+                     "150. The ordering survives the restriction -- which is "
+                     "the finding's answer, and it could equally have gone "
+                     "the other way",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This does not move a coefficient. It changes what the evidence "
+              "is understood to be evidence ABOUT, and it cuts the honest "
+              "sample for the shipped composite from 380 dates to 150.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,
