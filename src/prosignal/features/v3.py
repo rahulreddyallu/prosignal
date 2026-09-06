@@ -47,9 +47,17 @@ label the reversal sub-score came out ANTI-predictive at t -3.96. Sub-scores are
 ranks, so they blend regardless of which horizon oriented them.
 
 WHAT THE SEALED HOLDOUTS SAID, ON THE UNCAPPED BLEND. Two windows, one
-evaluation each, no re-tuning:
+evaluation each, no re-tuning -- AND THEY ARE NOT TWO INDEPENDENT
+CONFIRMATIONS. The weights below were fitted 2018-11-27..2024-10-25
+(`FIT_WINDOW`). Window A starts after that and is genuinely out-of-sample for
+them. WINDOW B LIES ENTIRELY INSIDE IT. B is evidence about the METHOD -- the
+whole pipeline was re-run on data ending 2021-02-17 and evaluated once on what
+followed -- and it is NOT evidence about the shipped configuration, because the
+model it graded was a different fit. Quoting the pair as a matched set reads an
+in-sample number as a second seal, and B is the better-looking of the two.
 
                               A 2025-03..2026-08   B 2021-07..2022-12
+    provenance vs FIT_WINDOW     OUT-OF-SAMPLE    >>> IN-SAMPLE <<<
     rank IC (t), h=21            +0.049 (3.69)        +0.036 (3.83)
     quintile spread (t)          +1.07% (2.89)        +0.86% (3.05)
     top-ten excess (t)           +0.38% (0.81)        +1.37% (2.50)
@@ -57,6 +65,17 @@ evaluation each, no re-tuning:
     ten-name book, net excess        -2.8%/yr            +2.0%/yr
     modelled cost drag                9.7%/yr           13.7%/yr
     max drawdown                     -23.9%             -16.4%
+
+READ COLUMN A ALONE AND THE HONEST SUMMARY IS: the RANKING generalises
+(IC +0.049 at t 3.69) and the BOOK does not (top-ten excess +0.38% at t 0.81,
+net excess negative). Every reassuring figure in the table comes from column B.
+
+A FURTHER CAUTION ON THE BOOK ROW. "-2.8%/yr net excess" is a raw comparison
+against a FULLY-INVESTED benchmark, and this book is not fully invested --
+risk-budget sizing deploys about a fifth of capital, so most of any such gap is
+cash rather than selection. See `validation.portfolio_sim._benchmark_stats`;
+the leverage-neutral reading of the shipped book is about -6% a year on
+deployed capital at t -0.7, i.e. not distinguishable from zero either way.
 
 For window B the ENTIRE pipeline -- screen, stability, admission, weights -- was
 re-run on data ending 2021-02-17 and evaluated once on the eighteen months that
@@ -80,6 +99,7 @@ cleaner read of the two.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -91,7 +111,71 @@ __all__ = ["Theme", "THEMES", "FACTOR_THEME", "ALL_FACTORS", "MIN_THEMES",
            "score_frame", "attribution", "absolute_floor", "cap_weights",
            "BOOK", "BOOK_NOTE", "HOLDOUT_BOOK", "RESEARCH_BOOK",
            "score_dispersion", "TYPICAL_DISPERSION", "residual_bucket_size",
-           "LIVE_BOOK", "EXCLUDED_THEMES"]
+           "LIVE_BOOK", "EXCLUDED_THEMES",
+           "FIT_WINDOW", "window_provenance", "IN_SAMPLE", "OUT_OF_SAMPLE",
+           "STRADDLES_FIT_BOUNDARY"]
+
+
+#: THE WINDOW THE SHIPPED SIGNS AND WEIGHTS WERE FITTED ON. Stated as data
+#: rather than prose because a sealed-window claim has to be checkable: a
+#: holdout that lies inside this range is not a holdout for THIS model, however
+#: carefully it was sealed at the time.
+FIT_WINDOW: Tuple[dt.date, dt.date] = (dt.date(2018, 11, 27),
+                                       dt.date(2024, 10, 25))
+
+IN_SAMPLE = "IN_SAMPLE"
+OUT_OF_SAMPLE = "OUT_OF_SAMPLE"
+STRADDLES_FIT_BOUNDARY = "STRADDLES_FIT_BOUNDARY"
+
+
+def window_provenance(start: dt.date, end: dt.date) -> Dict[str, object]:
+    """Is `[start, end]` out-of-sample FOR THE SHIPPED WEIGHTS?
+
+    WHY THIS IS NOT A DETAIL. The docstring above reports two sealed windows
+    side by side, and a reader takes the pair as two independent confirmations.
+    They are not. Window A (2025-03-06..2026-08-17) begins after `FIT_WINDOW`
+    ends and is genuinely out-of-sample. Window B (2021-07-01..2022-12-27) lies
+    ENTIRELY INSIDE the window the signs and weights were fitted on.
+
+    The defence recorded for B is that "the ENTIRE pipeline was re-run on data
+    ending 2021-02-17 and evaluated once on the eighteen months that followed".
+    That is a real and valuable test -- of the METHOD. It is not a test of the
+    shipped configuration, because the model it evaluated was a different fit.
+    So B's numbers may not be quoted as evidence about what ships, and the
+    cleaner-looking of the two windows is the one that cannot be used.
+
+    Which leaves window A as the only out-of-sample evaluation of the shipped
+    weights -- and window A is the one reporting a top-ten excess of +0.38% at
+    t 0.81 and a negative book. Reading the two together as "3 of 5 themes
+    positive on B, 5 of 5 on A" averages an in-sample result with an
+    out-of-sample one.
+    """
+    lo, hi = FIT_WINDOW
+    if start > hi:
+        verdict, note = OUT_OF_SAMPLE, (
+            "begins after the fit window closed; a genuine out-of-sample "
+            "evaluation of the shipped signs and weights")
+    elif end < lo:
+        verdict, note = OUT_OF_SAMPLE, (
+            "ends before the fit window opened; out-of-sample, though the "
+            "factor SET was still chosen with knowledge of this era")
+    elif start >= lo and end <= hi:
+        verdict, note = IN_SAMPLE, (
+            "lies ENTIRELY INSIDE the window the shipped signs and weights "
+            "were fitted on. Any result here describes the fit, not a "
+            "forecast, unless the model evaluated was re-fitted on data "
+            "ending before this window -- in which case it is evidence about "
+            "the METHOD and not about the shipped configuration")
+    else:
+        verdict, note = STRADDLES_FIT_BOUNDARY, (
+            "straddles the fit boundary, so it pools in-sample and "
+            "out-of-sample dates into one statistic. Split it")
+    span = max((end - start).days, 1)
+    inside = max((min(end, hi) - max(start, lo)).days, 0)
+    return {"start": start.isoformat(), "end": end.isoformat(),
+            "fit_window": [lo.isoformat(), hi.isoformat()],
+            "verdict": verdict, "share_in_sample": min(inside / span, 1.0),
+            "note": note}
 
 
 @dataclass(frozen=True)

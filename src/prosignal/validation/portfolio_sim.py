@@ -191,11 +191,13 @@ class PortfolioResult:
         ok = np.isfinite(b) & np.isfinite(r)
         if int(ok.sum()) < 3:
             return {"benchmarked": False}
-        return _benchmark_stats(r[ok], b[ok], periods_per_year)
+        dep = (self.periods["deployed_frac"].to_numpy(dtype="float64")[ok]
+               if "deployed_frac" in self.periods else None)
+        return _benchmark_stats(r[ok], b[ok], periods_per_year, deployed=dep)
 
 
-def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float
-                     ) -> Dict[str, float]:
+def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float,
+                     deployed: Optional[np.ndarray] = None) -> Dict[str, float]:
     """The single definition of every benchmark-relative figure.
 
     One function, used by `PortfolioResult.metrics` and by `phase_summary`, so
@@ -203,27 +205,141 @@ def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float
     things. That divergence is how the repository ended up with three
     incompatible CPCV results.
 
-    `information_ratio` is mean excess over the standard deviation of excess,
-    annualised. `beta_to_benchmark` and `alpha_per_period` come from the same
-    regression, so a book that is only long beta shows it.
+    THE RAW EXCESS IS NOT A PERFORMANCE STATISTIC. `mean_excess` is
+    `mean(r - b)` against a benchmark that is FULLY INVESTED, while this book
+    is not: risk-budget sizing is `risk_budget / risk_per_share`, so with a 1%
+    risk budget and an 8xATR stop clipped at 35% the position that clears is
+    about Rs 28,600 against a Rs 166,667 slot and the book runs at roughly a
+    fifth of capital. Measured on the shipped configuration over 87 periods,
+    mean deployed capital is 0.2177 and the equal-weight eligible universe
+    returned +22.1% a year, so
+
+        raw excess           -18.60% a year
+        mechanical cash drag (1 - 0.2177) x 22.11%  =  +17.30%
+        leverage-matched      -1.30% a year
+
+    -- that is, 93% of the "underperformance" the engine has been reporting
+    about itself is arithmetic. Worse, the raw figure MOVES WITH A SIZING KNOB
+    that has nothing to do with the signal: holding the ranking, the names and
+    every other setting fixed and raising `risk_per_trade_pct` from 1% to 4.6%
+    takes deployed capital from 0.218 to 0.824 and the reported excess from
+    -20.98% to -11.49%, while the beta-adjusted alpha barely moves
+    (-1.32% to -3.81%). Every ablation ever selected on `mean_excess` -- the
+    stop multiple, the clip, the book size, the holding period -- was selected
+    on a metric confounded with leverage.
+
+    WHICH FIGURE IS ACTUALLY INVARIANT, derived rather than assumed. Write the
+    book's return as `r = dep * r_d`, where `r_d` is the return on the capital
+    actually at risk and cash earns nothing. Then
+
+        beta  = cov(dep*r_d, b)/var(b) = dep * beta_d
+        alpha = dep*mean(r_d) - dep*beta_d*mean(b) = dep * alpha_d
+
+    so the RAW ALPHA SCALES LINEARLY WITH DEPLOYMENT and is NOT invariant --
+    it is merely free of the additive `-(1-dep)*mean(b)` term that dominates
+    `mean_excess`. The quantity that does not move is alpha per unit of
+    deployed capital, `alpha / dep = alpha_d`. Measured across the same
+    risk-budget sweep:
+
+        risk/trade   deployed   mean_excess   alpha_ann   alpha_on_deployed
+            1%         0.218      -20.98%      -1.32%          -6.05%
+            2%         0.434      -18.73%      -3.05%          -7.03%
+            3%         0.633      -16.51%      -4.60%          -7.27%
+          4.6%         0.824      -11.49%      -3.81%          -4.62%
+
+    Raw excess spans 9.5 points, raw alpha 3.3, alpha-on-deployed 2.7 -- and
+    what residual movement the last one has is real (as leverage rises the
+    capital slot starts binding on individual names, which changes the weights,
+    not just the scale).
+
+    So this function returns FOUR readings and names which one leads:
+
+      alpha_on_deployed  alpha / deployed. Leverage-invariant. THE HEADLINE.
+      alpha_per_period   r - beta*b. Free of the cash-drag term but still
+                         proportional to deployment. Reported for continuity.
+      levmatch_excess    mean_excess + (1 - deployed) * mean(b). The raw
+                         comparison with the cash drag added back.
+      mean_excess        kept, because every published figure in this
+                         repository quotes it and a reconciliation needs it --
+                         but flagged `leverage_confounded` so no caller can
+                         use it without meeting that word.
+
+    `alpha_t` is the regression t of the intercept. It is scale-free -- both
+    alpha and its standard error carry the same factor of `dep` -- so it is
+    the significance of `alpha_on_deployed` as well.
     """
     ex = r - b
+    n = int(len(r))
     sd_ex = float(ex.std(ddof=1))
     sd_b = float(b.std(ddof=1))
     var_b = float(b.var(ddof=1))
     beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
     alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
+
+    # t of the intercept from the same OLS. se(alpha) = sd(resid) *
+    # sqrt(1/n + mean(b)^2 / ((n-1) var(b))). Reported so the headline cannot
+    # be quoted as a point estimate with no error bar.
+    alpha_t = float("nan")
+    if np.isfinite(beta) and n > 2 and var_b > 0:
+        resid = r - alpha - beta * b
+        sd_e = float(resid.std(ddof=2)) if n > 2 else float("nan")
+        if np.isfinite(sd_e) and sd_e > 0:
+            se_a = sd_e * np.sqrt(1.0 / n + (b.mean() ** 2) / ((n - 1) * var_b))
+            alpha_t = float(alpha / se_a) if se_a > 0 else float("nan")
+
+    dep = (float(np.nanmean(deployed)) if deployed is not None
+           and np.isfinite(np.asarray(deployed, dtype="float64")).any()
+           else float("nan"))
+    cash_drag = (1.0 - dep) * float(b.mean()) if np.isfinite(dep) else float("nan")
+    levmatch = float(ex.mean()) + cash_drag if np.isfinite(cash_drag) else float("nan")
+
+    # THE HEADLINE. alpha / dep, i.e. the alpha of the capital actually at
+    # risk. NaN when deployment is unknown -- never silently 1.0, because that
+    # would assert a full-investment claim nobody checked.
+    on_dep = (alpha / dep if np.isfinite(alpha) and np.isfinite(dep) and dep > 1e-9
+              else float("nan"))
+    # The same question without the beta charge: what the deployed capital
+    # returned against the benchmark, straight. Reported beside the headline
+    # because the two disagree in SIGN here (+2.6% vs -2.5% a year on the
+    # shipped book) and the disagreement IS the finding -- the deployed book
+    # carries beta 0.77, so charging it for that beta flips the verdict, and
+    # neither figure is distinguishable from zero.
+    ex_on_dep = (float(r.mean()) / dep - float(b.mean()) if np.isfinite(dep)
+                 and dep > 1e-9 else float("nan"))
+
     return {
         "benchmarked": True,
         "bench_mean_return": float(b.mean()),
         "bench_sharpe": (float(b.mean() / sd_b * np.sqrt(periods_per_year))
                          if sd_b > 0 else float("nan")),
+        # -- HEADLINE: leverage-invariant ----------------------------------
+        "alpha_on_deployed": on_dep,
+        "alpha_on_deployed_ann": (on_dep * periods_per_year
+                                  if np.isfinite(on_dep) else float("nan")),
+        "alpha_t": alpha_t,
+        "excess_on_deployed": ex_on_dep,
+        "excess_on_deployed_ann": (ex_on_dep * periods_per_year
+                                   if np.isfinite(ex_on_dep) else float("nan")),
+        # -- proportional to deployment; kept for continuity ---------------
+        "alpha_per_period": alpha,
+        "alpha_ann": alpha * periods_per_year if np.isfinite(alpha) else float("nan"),
+        "beta_to_benchmark": beta,
+        # -- the raw comparison, with the cash drag added back -------------
+        "deployed_frac": dep,
+        "cash_drag_per_period": cash_drag,
+        "levmatch_excess": levmatch,
+        "levmatch_excess_ann": (levmatch * periods_per_year
+                                if np.isfinite(levmatch) else float("nan")),
+        # -- LEVERAGE-CONFOUNDED. Retained only for reconciliation. --------
         "mean_excess": float(ex.mean()),
         "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
                               if sd_ex > 0 else float("nan")),
         "excess_hit_rate": float((ex > 0).mean()),
-        "beta_to_benchmark": beta,
-        "alpha_per_period": alpha,
+        "leverage_confounded": ["mean_excess", "information_ratio",
+                                "excess_hit_rate"],
+        "leverage_proportional": ["alpha_per_period", "alpha_ann",
+                                  "beta_to_benchmark"],
+        "headline_metric": "alpha_on_deployed_ann",
     }
 
 
@@ -696,4 +812,6 @@ def _pooled_benchmark(pooled: pd.DataFrame, periods_per_year: float
     ok = np.isfinite(b) & np.isfinite(r)
     if int(ok.sum()) < 3:
         return {"benchmarked": False}
-    return _benchmark_stats(r[ok], b[ok], periods_per_year)
+    dep = (pooled["deployed_frac"].to_numpy(dtype="float64")[ok]
+           if "deployed_frac" in pooled else None)
+    return _benchmark_stats(r[ok], b[ok], periods_per_year, deployed=dep)

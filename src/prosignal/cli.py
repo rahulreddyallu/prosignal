@@ -2322,12 +2322,30 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     if not sharpe:
         _print("  no split produced a tradeable book; nothing to report")
         return 1
-    _table("Book performance across CPCV splits",
-           ["metric", "min", "p25", "median", "p75", "max"],
-           [["Sharpe"] + [f"{sharpe[k]:+.2f}" for k in ("min", "p25", "median", "p75", "max")],
-            ["return/period"] + [f"{ret[k]:+.2%}" for k in ("min", "p25", "median", "p75", "max")],
-            ["max drawdown"] + [f"{dd[k]:+.1%}" for k in ("min", "p25", "median", "p75", "max")]])
+    K = ("min", "p25", "median", "p75", "max")
+    rows = [["Sharpe"] + [f"{sharpe[k]:+.2f}" for k in K],
+            ["return/period"] + [f"{ret[k]:+.2%}" for k in K],
+            ["max drawdown"] + [f"{dd[k]:+.1%}" for k in K]]
+    # THE LEVERAGE-NEUTRAL HEADLINE, if the splits produced one. Without it
+    # this table reports a book's return with no statement of how much capital
+    # was behind it, and `mean_excess` -- which is what a reader reaches for
+    # next -- moves with `risk_per_trade_pct`. See portfolio_sim.
+    alpha = result.spread("alpha_on_deployed_ann")
+    dep = result.spread("deployed_frac")
+    if alpha:
+        rows.append(["ALPHA on deployed (ann)"] + [f"{alpha[k]:+.2%}" for k in K])
+    if dep:
+        rows.append(["capital deployed"] + [f"{dep[k]:.1%}" for k in K])
+    _table("Book performance across CPCV splits", ["metric", *K], rows)
     _print()
+    if dep and dep["median"] < 0.75:
+        _print(_tag(f"THE BOOK DEPLOYS {dep['median']:.0%} OF CAPITAL"))
+        _print("  Every raw excess figure compares that against a benchmark")
+        _print("  that is fully invested, so most of the gap is cash rather")
+        _print("  than selection. Read the ALPHA row, which is invariant to")
+        _print("  the risk budget; `mean_excess` is not and moves nine points")
+        _print("  across a sweep of `risk_per_trade_pct` alone.")
+        _print()
     _print(f"  splits scored          {sharpe['n']} of {result.n_splits}")
     _print(f"  splits with Sharpe < 0 {sharpe['share_negative']:.0%}")
     _print(f"  mean names held        {np.mean([m['avg_names'] for m in result.split_metrics]):.1f}")

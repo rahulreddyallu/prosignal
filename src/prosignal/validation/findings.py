@@ -685,6 +685,78 @@ REGISTER: Tuple[Finding, ...] = (
                      "undated statutory rate",
         moves_coefficients=False, moves_history=False, forces_restart=False,
     ),
+    # ---------------------------------------------------------------- v12 P0
+    _f(
+        fid="Q1", severity="critical",
+        title="The headline performance statistic moves with a position-sizing "
+              "knob, so every ablation selected on it is unsafe",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`mean_excess` is mean(book - benchmark) against a benchmark "
+                   "that is FULLY INVESTED, while the book is not. Sizing is "
+                   "`risk_budget / risk_per_share`, so with a 1% risk budget "
+                   "and an 8xATR stop clipped at 35% the book deploys 21.8% of "
+                   "capital. Measured over 87 periods against a universe "
+                   "returning +22.1%/yr, the reported -18.60% annual excess "
+                   "decomposes as +17.30% mechanical cash drag and -1.30% "
+                   "leverage-matched -- 93% arithmetic. Worse, holding the "
+                   "ranking, the names and every other setting fixed and moving "
+                   "ONLY `risk_per_trade_pct` from 1% to 4.6% takes deployment "
+                   "from 0.218 to 0.824 and the reported excess from -20.98% to "
+                   "-11.49%. The exit ablation, the stop multiple, the clip, "
+                   "the book size and the holding period were all selected on "
+                   "this metric.",
+        location="prosignal.validation.portfolio_sim::_benchmark_stats",
+        fix="`_benchmark_stats` now takes the deployed fraction and returns "
+            "`alpha_on_deployed = alpha / dep` as the HEADLINE, which is "
+            "invariant to leverage (writing r = dep*r_d gives beta = dep*beta_d "
+            "and alpha = dep*alpha_d, so the raw alpha is proportional to "
+            "deployment and only the ratio is invariant). `mean_excess` and "
+            "`information_ratio` are retained for reconciliation and carry a "
+            "`leverage_confounded` list; `alpha_per_period` carries a "
+            "`leverage_proportional` list. `results.SHIPPED_FIGURES` demotes "
+            "both raw figures out of the headline set, and a claim stated only "
+            "in them now judges SUPERSEDED rather than REPRODUCED.",
+        regression_test="tests/test_leverage_neutral.py",
+        before_after="headline -18.60%/yr raw excess -> -6.04%/yr alpha on "
+                     "deployed capital at t -0.65; raw spans 9.5 points across "
+                     "the risk sweep, the headline spans 2.7",
+        moves_coefficients=False, moves_history=True, forces_restart=True,
+        notes="Restart-blocking because the forward test's secondary hypothesis "
+              "was stated in the confounded unit and could have been passed by "
+              "editing a sizing parameter. Scheme v3 restates it.",
+    ),
+    _f(
+        fid="Q2", severity="critical",
+        title="Sealed window B lies inside the fit window and was read as a "
+              "second seal on the shipped weights",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`features/v3.py` records that the shipped signs and weights "
+                   "were fitted 2018-11-27..2024-10-25. `SEALED_WINDOWS['B']` "
+                   "is 2021-07-01..2022-12-27 -- entirely inside it. The two "
+                   "windows were presented as a matched pair in the module "
+                   "docstring, in `DEPLOY_REFERENCE` and in the re-check's "
+                   "verdict text, so an in-sample number corroborated an "
+                   "out-of-sample one. B is the better-looking of the two: it "
+                   "carries the positive book (+2.0%/yr against A's -2.8%) and "
+                   "the significant top-ten excess (t 2.50 against A's 0.81). "
+                   "B is legitimate evidence about the METHOD -- the pipeline "
+                   "was re-run on data ending 2021-02-17 -- and it is not "
+                   "evidence about the shipped configuration, which is a "
+                   "different fit.",
+        location="prosignal.features.v3::FIT_WINDOW",
+        fix="`FIT_WINDOW` and `window_provenance()` make the classification "
+            "computable rather than remembered; `v3_panel."
+            "SEALED_WINDOW_PROVENANCE` derives from them and "
+            "`CITABLE_SEALED_WINDOWS` names the windows a claim about the "
+            "shipped model may cite. The docstring table gains a provenance "
+            "row and the re-check's HOLDS text no longer offers B as "
+            "corroboration.",
+        regression_test="tests/test_sealed_window_provenance.py",
+        before_after="two windows quoted as two seals -> one citable window "
+                     "(A), whose own reading is: the ranking generalises, the "
+                     "book does not",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+    ),
     _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",

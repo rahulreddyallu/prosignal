@@ -319,13 +319,23 @@ def _run_book(rankings, panels, params, step_sessions: int) -> Optional[Dict[str
         "bench_return_per_period": float(m["bench_mean_return"]),
         "sharpe": float(m["sharpe"]),
         "bench_sharpe": float(m["bench_sharpe"]),
+        # -- HEADLINE: leverage-invariant. See portfolio_sim._benchmark_stats
+        # for why the raw excess below is not a performance statistic.
+        "alpha_on_deployed_ann": float(m.get("alpha_on_deployed_ann", float("nan"))),
+        "alpha_t": float(m.get("alpha_t", float("nan"))),
+        "excess_on_deployed_ann": float(m.get("excess_on_deployed_ann", float("nan"))),
+        "deployed_frac": float(m.get("deployed_frac", float("nan"))),
+        "levmatch_excess_ann": float(m.get("levmatch_excess_ann", float("nan"))),
+        # -- proportional to deployment ------------------------------------
+        "alpha_per_period": float(m["alpha_per_period"]),
+        "alpha_ann": float(m["alpha_per_period"]) * ppy,
+        "beta_to_benchmark": float(m["beta_to_benchmark"]),
+        # -- LEVERAGE-CONFOUNDED, retained for reconciliation only ---------
         "mean_excess_per_period": float(m["mean_excess"]),
         "excess_ann": float(m["mean_excess"]) * ppy,
         "gross_excess_ann": gross * ppy,
         "cost_drag_ann": float(m.get("mean_cost", 0.0) or 0.0) * ppy,
         "ir": float(m["information_ratio"]),
-        "alpha_per_period": float(m["alpha_per_period"]),
-        "beta_to_benchmark": float(m["beta_to_benchmark"]),
         "periods_beating_benchmark": float(m["excess_hit_rate"]),
         "worst_schedule_drawdown": float(m["worst_schedule_drawdown"]),
         "avg_names": float(m["avg_names"]),
@@ -659,18 +669,31 @@ def _mom_6_1_panel(panel: pd.DataFrame, close: pd.DataFrame) -> Optional[pd.Data
     return pd.concat(rows, ignore_index=True)
 
 
-#: (figure, tolerance, is_headline). HEADLINE figures decide the arm's status
-#: and are the ones the published table's own summary sentence asserts. The
-#: rest are compared and reported but do not by themselves withdraw a claim --
-#: `alpha_per_period` is the case in point: it is a near-zero residual whose
-#: sign is not stable across two different books, and letting it withdraw a
-#: table whose headline reproduces to two decimals would be as misleading as
-#: hiding it.
+#: (figure, tolerance, is_headline). HEADLINE figures decide the arm's status.
+#:
+#: THE HEADLINE FLAGS WERE ON THE WRONG ROWS AND THIS IS THE CORRECTION.
+#: `ir` and `mean_excess_per_period` were headline and `alpha_per_period` was
+#: explicitly demoted, with a note calling it "a near-zero residual whose sign
+#: is not stable". That reading is backwards. The raw excess compares a book
+#: that deploys 21.8% of capital against a benchmark that is fully invested,
+#: so it carries an additive `-(1-dep)*mean(bench)` term worth 17.3 points a
+#: year -- and it MOVES WITH `risk_per_trade_pct`, spanning 9.5 points across a
+#: sweep in which the ranking, the names and every other setting are identical.
+#: The near-zero alpha was not a nuisance residual; it was the answer.
+#:
+#: So the raw figures stay in the comparison -- every published number in this
+#: repository quotes them and a reconciliation needs them -- and they no longer
+#: decide anything. `alpha_on_deployed_ann` is leverage-invariant (see
+#: `portfolio_sim._benchmark_stats`) and is the figure a WITHDRAWN verdict now
+#: rests on.
 SHIPPED_FIGURES = (
-    ("ir", "information ratio", 0.50, True),
-    ("mean_excess_per_period", "mean excess / period", 0.05, True),
-    ("periods_beating_benchmark", "periods beating the benchmark", 0.20, True),
-    ("alpha_per_period", "alpha / period", 0.02, False),
+    ("alpha_on_deployed_ann", "alpha on deployed capital (ann)", 0.05, True),
+    ("excess_on_deployed_ann", "excess on deployed capital (ann)", 0.08, True),
+    ("ir", "information ratio [LEVERAGE-CONFOUNDED]", 0.50, False),
+    ("mean_excess_per_period", "mean excess / period [LEVERAGE-CONFOUNDED]",
+     0.05, False),
+    ("periods_beating_benchmark", "periods beating the benchmark", 0.20, False),
+    ("alpha_per_period", "alpha / period (scales with deployment)", 0.02, False),
 )
 
 
@@ -705,6 +728,7 @@ def _judge_shipped(claimed: Dict[str, Any], measured: Dict[str, Any]
     rows = _compare(claimed, measured, SHIPPED_FIGURES)
     bad = [r for r in rows if r["headline"] and r["verdict"] not in
            ("matches", "NOT_TESTABLE")]
+    testable = [r for r in rows if r["headline"] and r["verdict"] != "NOT_TESTABLE"]
     other = [r for r in rows if not r["headline"] and r["verdict"] not in
              ("matches", "NOT_TESTABLE")]
     if bad:
@@ -713,17 +737,42 @@ def _judge_shipped(claimed: Dict[str, Any], measured: Dict[str, Any]
                           f"measured {r['measured']:+.4g} -- {r['verdict']}"
                           for r in bad),
                 rows)
+
+    # NO HEADLINE FIGURE IS EVEN TESTABLE. That is the state after the
+    # leverage correction: the published table quoted `mean_excess` and `ir`,
+    # which are confounded with `risk_per_trade_pct` and are no longer what a
+    # verdict rests on, and it quoted NO leverage-neutral figure because none
+    # existed when it was written. A claim made in a unit the engine has
+    # retired cannot be reproduced OR refuted -- it is superseded, and saying
+    # "REPRODUCED" here would let a withdrawn unit ride on a green word.
+    if not testable:
+        raw = {r["key"]: r for r in rows}
+        me = raw.get("mean_excess_per_period", {})
+        return ("SUPERSEDED",
+                (f"the published claim is stated in `mean_excess` and `ir`, "
+                 f"both of which are confounded with the risk budget and are "
+                 f"no longer headline figures. Re-run on the current store the "
+                 f"book deploys {measured.get('deployed_frac', float('nan')):.1%} "
+                 f"of capital, so of its "
+                 f"{measured.get('excess_ann', float('nan')):+.1%} raw annual "
+                 f"excess, {measured.get('excess_ann', float('nan')) - measured.get('levmatch_excess_ann', float('nan')):+.1%} "
+                 f"is the cash it is not holding. The leverage-neutral reading "
+                 f"is {measured.get('alpha_on_deployed_ann', float('nan')):+.2%} "
+                 f"a year on deployed capital at t "
+                 f"{measured.get('alpha_t', float('nan')):+.2f} -- "
+                 f"indistinguishable from zero. The old claim is neither "
+                 f"confirmed nor refuted; it is expressed in a retired unit."),
+                rows)
+
     tail = ""
     if other:
-        tail = (" Note, and it is reported rather than dropped because it is "
-                "not a headline figure: "
+        tail = (" Reported rather than dropped, though not headline: "
                 + "; ".join(f"{r['figure']} claimed {r['claimed']:+.4g} against "
                             f"{r['measured']:+.4g} measured ({r['verdict']})"
                             for r in other)
-                + ". Alpha here is a near-zero residual of two different books "
-                  "with different betas, so its sign is not stable; the "
-                  "headline claim is the underperformance, and that "
-                  "reproduces.")
+                + ". The raw excess and the information ratio are confounded "
+                  "with the risk budget -- see SHIPPED_FIGURES -- so a "
+                  "disagreement there is not evidence about the signal.")
     return ("REPRODUCED",
             "the direction and magnitude of the published headline claim "
             "survive a re-run on the current store." + tail,
@@ -762,6 +811,11 @@ _STATUS_BADGE = {
     "REPRODUCED": "REPRODUCED",
     "WITHDRAWN": "WITHDRAWN",
     "NOT_TESTABLE": "NOT_TESTABLE",
+    #: The claim was stated in a unit the engine has retired. Distinct from
+    #: WITHDRAWN (measured and refuted) and from NOT_TESTABLE (could not be
+    #: measured at all): the figure was measurable, it simply no longer means
+    #: what it was quoted to mean. See `_judge_shipped`.
+    "SUPERSEDED": "SUPERSEDED",
 }
 
 
@@ -801,18 +855,46 @@ def _arm_block(a: ArmResult) -> List[str]:
         L.append("")
         return L
 
-    L += ["| | book | benchmark (equal-weight eligible universe) |",
+    # THE LEVERAGE-NEUTRAL READING LEADS. Everything below it is either
+    # proportional to deployment or additively confounded by it.
+    dep = m.get("deployed_frac", float("nan"))
+    L += ["**Headline — leverage-neutral.** The book does not hold all of its "
+          "capital, so a raw comparison against a fully-invested benchmark "
+          "measures the sizing knob as much as the signal:",
+          "",
+          "| | value |",
+          "|---|---|",
+          f"| **alpha on deployed capital (ann)** | "
+          f"**{_pct(m.get('alpha_on_deployed_ann'), 2)}** |",
+          f"| t(alpha) | {_num(m.get('alpha_t'))} |",
+          f"| excess on deployed capital (ann) | "
+          f"{_pct(m.get('excess_on_deployed_ann'), 2)} |",
+          f"| capital actually deployed | "
+          f"{dep:.1%}" + (" |" if np.isfinite(dep) else " (unknown) |"),
+          ""]
+
+    L += ["**Full reconciliation.** The rows marked *confounded* move with "
+          "`risk_per_trade_pct` even when the ranking and the names are "
+          "identical; they are retained so published figures can be traced, "
+          "not because they measure anything:",
+          "",
+          "| | book | benchmark (equal-weight eligible universe) |",
           "|---|---|---|",
           f"| mean return / period | {_pct(m['mean_return_per_period'])} | "
           f"{_pct(m['bench_return_per_period'])} |",
           f"| annualised | {_pct(m['book_return_ann'], 1)} | "
           f"{_pct(m['bench_return_ann'], 1)} |",
           f"| Sharpe | {_num(m['sharpe'])} | {_num(m['bench_sharpe'])} |",
-          f"| mean excess / period | {_pct(m['mean_excess_per_period'])} | — |",
-          f"| information ratio | {_num(m['ir'])} | — |",
           f"| beta to benchmark | {_num(m['beta_to_benchmark'])} | — |",
-          f"| alpha / period | {_pct(m['alpha_per_period'])} | — |",
-          f"| periods beating the benchmark | {m['periods_beating_benchmark']:.1%} | — |",
+          f"| alpha / period *(scales with deployment)* | "
+          f"{_pct(m['alpha_per_period'])} | — |",
+          f"| leverage-matched excess (ann) | "
+          f"{_pct(m.get('levmatch_excess_ann'), 1)} | — |",
+          f"| mean excess / period *(confounded)* | "
+          f"{_pct(m['mean_excess_per_period'])} | — |",
+          f"| information ratio *(confounded)* | {_num(m['ir'])} | — |",
+          f"| periods beating the benchmark *(confounded)* | "
+          f"{m['periods_beating_benchmark']:.1%} | — |",
           f"| worst schedule drawdown | {_pct(m['worst_schedule_drawdown'], 1)} | — |",
           f"| mean names held | {m['avg_names']:.1f} | — |",
           f"| periods scored | {m['n_periods']} | — |",

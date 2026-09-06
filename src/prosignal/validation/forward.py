@@ -69,7 +69,15 @@ REGISTRATION_NAME = "forward_test.json"
 #:     a FALSIFICATION set, which is the part an eighteen-month window can
 #:     actually decide, and a POWER statement, which says in advance that the
 #:     primary cannot be decided in that time.
-SCHEME = "v2"
+#: v3  secondary is restated on DEPLOYED CAPITAL. v2's secondary asked for mean
+#:     excess against a fully-invested benchmark while the book deploys ~21.8%
+#:     of capital, so 17.3 of its 18.6 points of measured shortfall were the
+#:     cash it was not holding -- and the figure moved from -20.98% to -11.49%
+#:     when `risk_per_trade_pct` alone went from 1% to 4.6%. A hypothesis that
+#:     can be passed by editing a sizing parameter is not a hypothesis about the
+#:     signal. A v2 registration is therefore NOT GRADEABLE under this contract;
+#:     `progress` refuses it rather than reading its result as evidence.
+SCHEME = "v3"
 
 #: Target length. Trading sessions rather than calendar days, because the
 #: observation count is what matters and holidays do not produce observations.
@@ -401,19 +409,32 @@ def register(
             "regressors as a substitute."
         ),
         secondary=(
-            "SECONDARY, and the benchmark-relative question. Mean excess return "
-            "of the LONG LEG over an equal-weight hold of the point-in-time "
-            "eligible universe it selects from, on the same holding windows. "
-            "The engine passes if that excess is positive with an "
-            "overlap-corrected t of at least 2.0. "
-            "The engine is currently expected to FAIL this and it is registered "
-            "for exactly that reason. Re-run on the current store, the shipped "
-            "six-name book loses to an equal-weight hold of its own eligible "
-            "universe in every window tested, GROSS as well as net -- cost drag "
-            "is under one point a year at this cadence, so the deficit is not a "
-            "cost problem. A forward test whose outcome is not in doubt is not "
-            "a test; this one's is, and it is the hypothesis that asks whether "
-            "running the engine beats not running it."
+            "SECONDARY, and the benchmark-relative question. ALPHA ON DEPLOYED "
+            "CAPITAL of the LONG LEG against an equal-weight hold of the "
+            "point-in-time eligible universe it selects from, on the same "
+            "holding windows: the intercept of `book = alpha + beta*universe`, "
+            "divided by the mean fraction of capital actually invested. The "
+            "engine passes if that alpha is positive with an overlap-corrected "
+            "t of at least 2.0. "
+            "IT IS STATED ON DEPLOYED CAPITAL AND THAT IS THE WHOLE POINT OF "
+            "THIS REVISION. The previous registration asked for MEAN EXCESS "
+            "against a fully-invested benchmark, and the book is not fully "
+            "invested: risk-budget sizing is `risk_budget / risk_per_share`, so "
+            "at a 1% risk budget and an 8xATR stop clipped to 35% the book "
+            "deploys about 21.8% of capital. Measured over 87 periods against a "
+            "universe returning +22.1% a year, that hypothesis was reading a "
+            "-18.6% annual excess of which +17.3 points was the cash the book "
+            "was not holding. Worse, it moves with a sizing knob: holding the "
+            "ranking, the names and every other setting fixed, raising "
+            "`risk_per_trade_pct` from 1% to 4.6% takes the reported excess "
+            "from -20.98% to -11.49%. A pre-registered hypothesis that can be "
+            "passed by editing a position-sizing parameter is not a hypothesis "
+            "about the signal, and grading the old one would have told us "
+            "nothing about whether running the engine beats not running it. "
+            "The leverage-neutral reading of the same book is about -6% a year "
+            "at t -0.7 -- still expected to fail, but now failing for a reason "
+            "that is about the strategy. A forward test whose outcome is not in "
+            "doubt is not a test; this one's is."
         ),
         instruments_required=[
             "An EXTERNAL Indian factor-return series (IIMA Fama-French + "
@@ -653,22 +674,40 @@ def progress(
     # registration that cannot compare the book against holding its own
     # universe can be passed by an engine that loses to doing nothing, and such
     # a window is never graded silently.
-    if str(reg.scheme or "v1") == "v2":
+    scheme_name = str(reg.scheme or "v1")
+    # A v2 window asked its benchmark question in a unit that moves with the
+    # risk budget. It is not merely weaker than a v3 window -- it is not
+    # gradeable, because the number it would produce is a statement about
+    # position sizing. Refusing is the same discipline `verify` applies to an
+    # edited registration: the criteria have to mean what they meant.
+    if scheme_name in ("v1", "v2"):
+        broken.append(
+            f"the registration is scheme {scheme_name}; its benchmark-relative "
+            f"hypothesis is stated as MEAN EXCESS against a fully-invested "
+            f"benchmark, which is confounded with `risk_per_trade_pct` -- the "
+            f"same book reads -20.98% or -11.49% depending on the risk budget "
+            f"alone. Re-register under scheme {SCHEME}, which states it as "
+            f"alpha on deployed capital"
+        )
+    if scheme_name in ("v2", "v3"):
         if "equal-weight" not in str(reg.secondary or ""):
             broken.append(
-                "the v2 registration's secondary hypothesis is not "
+                f"the scheme-{scheme_name} registration's secondary hypothesis "
+                "is not "
                 "benchmark-relative, so passing it would say nothing about "
                 "whether running the engine beats holding the universe it "
                 "selects from -- re-register")
         if not reg.falsification:
             broken.append(
-                "the v2 registration carries no falsification set. An "
+                f"the scheme-{scheme_name} registration carries no "
+                "falsification set. An "
                 "eighteen-month window cannot settle an alpha estimate at this "
                 "information ratio, so a registration with nothing falsifiable "
                 "in it is registered to produce no evidence at all")
         if not str(reg.power or "").strip():
             broken.append(
-                "the v2 registration carries no power statement, so its "
+                f"the scheme-{scheme_name} registration carries no power "
+                "statement, so its "
                 "eventual failure to reach t >= 2.0 could be read as a fact "
                 "about the strategy rather than about the horizon")
     elif not str(reg.tertiary or "").strip():
