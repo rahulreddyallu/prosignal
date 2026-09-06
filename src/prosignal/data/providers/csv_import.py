@@ -53,6 +53,30 @@ REFERENCE_TEMPLATES: Dict[str, List[str]] = {
         "operating_cash_flow",
         "shares_outstanding",
     ],
+    # WHAT THE BOOK ACTUALLY PAID. The only feed here that cannot come from any
+    # vendor: it is a record of YOUR OWN executions. `costs.impact_model` has
+    # never been compared to a price this engine traded at, and the outcome
+    # ledger cannot supply one -- 126 of its 128 `entry_price` values are the
+    # next session's OPEN to the tick, which is the simulator's entry rule
+    # rather than a fill. Fitting impact to those would fit it to the
+    # assumption it was built from. See `validation/fill_calibration.py`.
+    #
+    # IMPORTING A RECORD OF WHAT YOU DID IS NOT ORDER ROUTING.
+    # `docs/EXECUTION_GATE.md` governs the placing of orders; this reads a CSV.
+    #
+    # `decision_date` is the session whose CLOSE the decision was made against
+    # -- the signal date, not the fill date. Implementation shortfall is
+    # measured from that close to `price`, so a fill recorded without it can be
+    # stored but not calibrated against.
+    "fills": [
+        "symbol",
+        "decision_date",
+        "fill_date",
+        "side",
+        "quantity",
+        "price",
+        "venue",
+    ],
     "earnings_calendar": ["symbol", "earnings_date", "confirmed", "source"],
     "corporate_actions": [
         "symbol",
@@ -137,6 +161,42 @@ class CsvImportProvider:
             }
         )
         return out.dropna(subset=[SYMBOL, "as_of_date"]).reset_index(drop=True)
+
+    # =====================================================================
+    # fills  (your own executions -- the only calibration impact can have)
+    # =====================================================================
+    def load_fills(self) -> pd.DataFrame:
+        """Realised executions, as recorded by the operator or the broker.
+
+        A fill with no `decision_date` is kept -- it is still a true record of
+        a trade -- but it cannot contribute to an impact calibration, because
+        implementation shortfall is measured against the price the decision was
+        made at. `fill_calibration` drops those rows by name rather than
+        silently.
+
+        `side` is normalised to BUY/SELL. A row with a non-positive quantity or
+        price is dropped: a zero-price fill is a data error, and treating it as
+        an execution at zero would drag any fitted coefficient toward nothing.
+        """
+        path = self._path("fills_file")
+        df = _read_csv(path, REFERENCE_TEMPLATES["fills"], "fills")
+        if df is None:
+            self._note_absent("fills", path)
+            return pd.DataFrame(columns=REFERENCE_TEMPLATES["fills"])
+        out = pd.DataFrame({
+            SYMBOL: df["symbol"].map(normalise_symbol),
+            "decision_date": pd.to_datetime(df.get("decision_date"),
+                                            errors="coerce").dt.normalize(),
+            "fill_date": pd.to_datetime(df["fill_date"],
+                                        errors="coerce").dt.normalize(),
+            "side": df["side"].astype(str).str.strip().str.upper(),
+            "quantity": pd.to_numeric(df["quantity"], errors="coerce"),
+            "price": pd.to_numeric(df["price"], errors="coerce"),
+            "venue": df.get("venue", "").astype(str),
+        })
+        out = out[out["side"].isin(["BUY", "SELL"])]
+        out = out[(out["quantity"] > 0) & (out["price"] > 0)]
+        return out.dropna(subset=[SYMBOL, "fill_date", "price"]).reset_index(drop=True)
 
     # =====================================================================
     # fundamentals  (timestamped to FILING date -- the India leakage risk)
@@ -307,6 +367,7 @@ class CsvImportProvider:
             "corporate_actions": "corporate_actions_file",
             "regulatory_events": "regulatory_events_file",
             "index_membership": "index_membership_file",
+            "fills": "fills_file",
         }
         for label, attr in mapping.items():
             path = self._path(attr)

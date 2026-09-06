@@ -2418,11 +2418,23 @@ def cmd_research_impact(cfg: AppConfig, args: argparse.Namespace) -> int:
     from .stages._cfg import fv, iv
     from .validation.fill_calibration import calibrate, read_outcomes
 
+    from .validation.fill_calibration import from_fills
+
     store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
-    led = read_outcomes(Path(cfg.paths.ledger) / "outcomes.jsonl")
+
+    # REAL FILLS FIRST. `csv_import.load_fills` imports what the book actually
+    # paid; the outcome ledger cannot stand in for it, because 126 of its 128
+    # entry prices are the next session's open to the tick. If both exist the
+    # fills win -- they are executions and the ledger is the entry rule.
+    led = from_fills(store.read_fills())
+    source = "recorded fills"
     if led.empty:
-        _print("  the outcome ledger is empty; nothing to calibrate against")
+        led = read_outcomes(Path(cfg.paths.ledger) / "outcomes.jsonl")
+        source = "the outcome ledger (NOT executions -- see below)"
+    if led.empty:
+        _print("  no fills and no outcome ledger; nothing to calibrate against")
         return 1
+    _print(f"  source: {source}  ({len(led)} rows)")
 
     _rule("Reading the price store")
     px = store.read_prices()

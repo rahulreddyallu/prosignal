@@ -499,6 +499,11 @@ class CsvImportConfig(_Base):
     enabled: bool = True
     pledging_file: str
     fundamentals_file: str
+    #: Your own executions. The only feed that can calibrate
+    #: `costs.impact_model`; absent means impact stays UNCALIBRATED and
+    #: `research impact` says so rather than fitting to the simulator's own
+    #: entry rule. Reading it is not order routing -- see EXECUTION_GATE.md.
+    fills_file: str = "config/reference/fills.csv"
     earnings_calendar_file: str
     corporate_actions_file: str
     regulatory_events_file: str

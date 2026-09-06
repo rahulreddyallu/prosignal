@@ -507,6 +507,23 @@ providers:
     # Columns: symbol,filing_date,period_end,revenue,net_profit,total_equity,total_assets,
     #          total_debt,ebit,interest_expense,operating_cash_flow,shares_outstanding
     fundamentals_file: "config/reference/fundamentals_pit.csv"
+    # YOUR OWN EXECUTIONS -- the only feed that can calibrate the impact
+    # coefficient, and the only one no vendor can supply.
+    #
+    # Columns: symbol,decision_date,fill_date,side,quantity,price,venue
+    # `decision_date` is the session whose CLOSE the decision was made against
+    # (the signal date), NOT the fill date. Implementation shortfall is
+    # measured from that close to the fill price, so a row without it is stored
+    # and cannot be calibrated against.
+    #
+    # Absent means `research impact` reports UNCALIBRATED and refuses to fit --
+    # which is the honest state, because the outcome ledger cannot stand in:
+    # 126 of its 128 entry prices are the next session's open to the tick, so
+    # fitting to them would fit the model to its own assumption.
+    #
+    # Reading this file is not order routing. docs/EXECUTION_GATE.md governs
+    # the placing of orders; this is a record of orders already placed.
+    fills_file: "config/reference/fills.csv"
     # Columns: symbol,earnings_date,confirmed(bool),source
     earnings_calendar_file: "config/reference/earnings_calendar.csv"
     # Columns: symbol,ex_date,action_type(split|bonus|rights|dividend),ratio_from,ratio_to,details
