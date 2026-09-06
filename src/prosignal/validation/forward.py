@@ -453,9 +453,10 @@ def register(
             "about the signal, and grading the old one would have told us "
             "nothing about whether running the engine beats not running it. "
             "The leverage-neutral reading of the same book is about -6% a year "
-            "at t -0.7 -- still expected to fail, but now failing for a reason "
-            "that is about the strategy. A forward test whose outcome is not in "
-            "doubt is not a test; this one's is."
+            "at t -0.7, so it is still expected to FAIL -- but now failing for "
+            "a reason that is about the strategy rather than about how much "
+            "cash the sizing rule leaves on the table. A forward test whose "
+            "outcome is not in doubt is not a test; this one's is."
         ),
         instruments_required=[
             "An EXTERNAL Indian factor-return series (IIMA Fama-French + "

@@ -234,7 +234,17 @@ retired. The leverage-neutral reading is below.
 > `prosignal research results` produces from the current store and stamps with
 > the config version, the store fingerprint, the git commit, the panel span and
 > the trial count. `tests/test_readme_numbers.py` fails if this section drifts
-> from it. **These supersede every other number in this file.**
+> from it.
+>
+> **THIS TABLE MEASURES THE SHIPPED CONFIGURATION** — `ranking.source =
+> v3_composite`, six slots, entry rank 6, exit rank 18, 63-session backstop,
+> 8×ATR floor.
+>
+> It does supersede every other number in this file
+> **that is about that configuration**, and only those. It says nothing about
+> the tuning table below, which measures `measured_factor` — a single momentum
+> column the engine does not rank on. That table is labelled in its own
+> section rather than left for a reader to work out.
 
 This file used to carry two book tables that cannot both describe the same
 engine. Both configurations have now been re-run against the current store,
@@ -1292,10 +1302,13 @@ the fix for that was worse than the problem.
 > window closed: h=5 **+0.0402 → +0.0485**, h=21 **+0.0421 → +0.0562**, h=63
 > **+0.0456 → +0.0759**. Removing the lookahead RAISED the out-of-sample IC.
 >
-> And it named a peer group that mostly did not exist: `residual_bucket_size`
-> reports that 39% of a live cross-section sits in the residual bucket — 79
-> unclassified plus 71 folded in from thirteen sectors too small to rank
-> within. For two names in five, "sector-neutral" meant nothing.
+> And it named a peer group that mostly did not exist. Every name without a
+> sector, and every name in a sector holding fewer than twelve, was ranked
+> inside a single residual `UNCLASSIFIED` pool — and `residual_bucket_size`
+> reports that **39% of a live cross-section sits in it**: 79 genuinely
+> unclassified plus 71 folded in from thirteen real sectors too small to rank
+> within. A Power stock was being neutralised against Realty. For two names in
+> five, "sector-neutral" meant nothing at all.
 >
 > `sector_neutral_rank` is kept and still reachable with `sector_neutral=True`.
 > The function was never the problem; the map feeding it was, and a

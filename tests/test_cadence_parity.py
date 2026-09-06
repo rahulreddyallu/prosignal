@@ -255,7 +255,13 @@ def test_a_carried_position_spends_its_remaining_budget():
 
     src = inspect.getsource(ps.simulate)
     assert "budget = max(int(params.horizon_sessions) - int(age), 1)" in src
-    assert "min(hold_sessions, budget)" in src
+    assert "this_hold = min(hold_sessions, budget)" in src
+    # ...and ONLY where the cohort is truncated. At the default cadence a
+    # rolled position starts a fresh cohort, and subtracting its age there
+    # leaves it one session of hold -- a different simulator, not a smaller
+    # number. `test_the_default_is_the_old_cohort_schedule` catches it too;
+    # this says why.
+    assert "if hold_sessions < int(params.horizon_sessions):" in src
 
 
 def test_a_re_bought_name_gets_the_full_horizon_again():

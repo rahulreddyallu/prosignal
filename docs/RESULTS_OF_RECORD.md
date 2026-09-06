@@ -7,31 +7,31 @@
 
 | | |
 |---|---|
-| generated at | `2026-09-06T05:06:54+00:00` |
+| generated at | `2026-09-06T05:56:24+00:00` |
 | config version | `baseline-v2@25d9176dacd25857` |
 | — parameters hash | `6828f4d19d68a1ac` |
 | — store hash | `00333f4212937563` |
 | — training-window hash | `4dc2dcfe23298c98` |
 | shipped ranker | `v3_composite` |
-| git commit | `d6fdbf8ad368` **(working tree dirty)** |
+| git commit | `36e8b2798f05` |
 | engine version | `0.1.0` |
 | data manifest digest | `86f8b3d6e8865906` |
 | store fingerprint | delivery 1711s/4806n 2019-06-27..2026-09-03; fundamentals 740s/186n 2019-11-14..2025-03-11; indices 2218s/177n 2017-09-08..2026-09-03; prices 2219s/7112n 2017-09-08..2026-09-03 |
-| panel span | 2019-05-23 → 2026-08-03 |
-| panel rows | 197,940 |
-| distinct signal dates | 356 |
-| **independent observations** | **29.2** |
+| panel span | 2019-05-23 → 2026-08-24 |
+| panel rows | 200,190 |
+| distinct signal dates | 359 |
+| **independent observations** | **29.4** |
 | horizon / stride | 63 / 5 sessions |
-| cumulative trials charged | 622 |
-| trials by v10 pass | pre-v10=602 |
+| cumulative trials charged | 639 |
+| trials by v10 pass | pre-v10=619 |
 
-**Read `independent observations` before any t-statistic below.** The panel has 197,940 rows and 29.2 independent 63-session windows. Every Sharpe, every information ratio and every deflated statistic in this engine is bounded by the second number, not the first.
+**Read `independent observations` before any t-statistic below.** The panel has 200,190 rows and 29.4 independent 63-session windows. Every Sharpe, every information ratio and every deflated statistic in this engine is bounded by the second number, not the first.
 
 ## The ranking, judged apart from any book
 
 The ordering is a different object from the book built on it, and this repository's history is largely the story of the two being confused. No naive `t` is quoted: signal dates are 5 sessions apart against a 63-session label, so observations overlap and the naive statistic is inflated by roughly `sqrt(VIF)`.
 
-**`OUT_OF_SAMPLE` is the row a claim about the shipped model rests on.** The signs and weights were fitted over `v3.FIT_WINDOW`, which covers 269 of the panel's 356 signal dates, so a figure pooled across the whole panel is neither an in-sample fit statistic nor an out-of-sample result. Every published table quoted the pooled number.
+**`OUT_OF_SAMPLE` is the row a claim about the shipped model rests on.** The signs and weights were fitted over `v3.FIT_WINDOW`, which covers 269 of the panel's 359 signal dates, so a figure pooled across the whole panel is neither an in-sample fit statistic nor an out-of-sample result. Every published table quoted the pooled number.
 
 `STABLE_MODEL` is a second and independent cut. `score_frame` re-caps the theme blend over the themes a name actually has, so a name scored on three themes and a name scored on five are combined by different weight vectors. The fundamentals feed reaches almost nobody at the start of the panel and most of the universe at the end, so `FULL_PANEL` averages across structurally different models with the weighting set by a data feed. `STABLE_MODEL` is the span over which every theme stays above +40% coverage -- the composite as it now stands, and there is much less of it.
 
@@ -39,15 +39,19 @@ The ordering is a different object from the book built on it, and this repositor
 
 | window | horizon | dates | rows | themes/name | rank IC | IC t (naive) | IC t (corrected) | quintile spread | spread t (corr.) | top-decile excess | top-decile t (corr.) | decile monotonicity | indep. obs | VIF |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **OUT_OF_SAMPLE** | 5 | 90 | 67,002 | +4.80 | +0.0503 | +3.97 | **+3.97** | +0.34% | **+2.12** | +0.10% | **+0.92** | +0.156 | 90.0 | 1.00 |
 | **OUT_OF_SAMPLE** | 21 | 87 | 64,539 | +4.79 | +0.0580 | +4.66 | **+2.28** | +0.99% | **+1.46** | +0.26% | **+0.59** | +0.264 | 21.5 | 4.17 |
 | **OUT_OF_SAMPLE** | 42 | 83 | 61,283 | +4.79 | +0.0693 | +5.30 | **+1.86** | +1.79% | **+1.30** | +0.53% | **+0.62** | +0.313 | 10.8 | 8.15 |
 | **OUT_OF_SAMPLE** | 63 | 78 | 57,367 | +4.79 | +0.0781 | +5.98 | **+1.73** | +2.28% | **+1.17** | +0.36% | **+0.29** | +0.330 | 7.1 | 11.94 |
+| IN_SAMPLE | 5 | 269 | 131,870 | +4.31 | +0.0547 | +6.42 | **+6.42** | +0.51% | **+3.91** | +0.29% | **+3.98** | +0.172 | 269.0 | 1.00 |
 | IN_SAMPLE | 21 | 269 | 131,247 | +4.31 | +0.0691 | +7.59 | **+3.70** | +1.60% | **+2.64** | +0.84% | **+2.64** | +0.214 | 64.8 | 4.22 |
 | IN_SAMPLE | 42 | 269 | 130,517 | +4.31 | +0.0783 | +8.83 | **+3.06** | +2.88% | **+2.51** | +1.57% | **+2.43** | +0.279 | 32.9 | 8.34 |
 | IN_SAMPLE | 63 | 269 | 129,920 | +4.31 | +0.0843 | +9.51 | **+2.70** | +4.06% | **+2.33** | +2.40% | **+2.44** | +0.315 | 22.3 | 12.42 |
+| STABLE_MODEL | 5 | 153 | 112,499 | +4.75 | +0.0520 | +5.95 | **+5.95** | +0.39% | **+3.50** | +0.12% | **+1.57** | +0.190 | 153.0 | 1.00 |
 | STABLE_MODEL | 21 | 150 | 109,727 | +4.75 | +0.0646 | +7.41 | **+3.62** | +1.22% | **+2.52** | +0.40% | **+1.29** | +0.258 | 36.5 | 4.20 |
 | STABLE_MODEL | 42 | 146 | 106,105 | +4.75 | +0.0781 | +9.01 | **+3.13** | +2.31% | **+2.44** | +0.94% | **+1.54** | +0.341 | 18.3 | 8.27 |
 | STABLE_MODEL | 63 | 141 | 101,909 | +4.74 | +0.0912 | +11.33 | **+3.24** | +3.39% | **+2.56** | +1.20% | **+1.37** | +0.409 | 12.1 | 12.24 |
+| FULL_PANEL | 5 | 359 | 198,872 | +4.48 | +0.0536 | +7.53 | **+7.53** | +0.46% | **+4.43** | +0.24% | **+3.96** | +0.168 | 359.0 | 1.00 |
 | FULL_PANEL | 21 | 356 | 195,786 | +4.47 | +0.0664 | +8.83 | **+4.30** | +1.45% | **+2.97** | +0.70% | **+2.64** | +0.226 | 85.5 | 4.22 |
 | FULL_PANEL | 42 | 352 | 191,800 | +4.47 | +0.0762 | +10.24 | **+3.54** | +2.63% | **+2.79** | +1.33% | **+2.46** | +0.287 | 42.8 | 8.36 |
 | FULL_PANEL | 63 | 347 | 187,287 | +4.46 | +0.0829 | +11.11 | **+3.15** | +3.66% | **+2.55** | +1.94% | **+2.34** | +0.318 | 28.5 | 12.47 |
@@ -58,15 +62,19 @@ The ordering is a different object from the book built on it, and this repositor
 
 | window | horizon | D1 | D2 | D3 | D4 | D5 | D6 | D7 | D8 | D9 | D10 | peak | D10−D6 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **OUT_OF_SAMPLE** | 5 | -0.27% | -0.18% | -0.04% | +0.02% | +0.06% | +0.04% | +0.04% | +0.11% | +0.13% | +0.10% | D9 | +0.06% |
 | **OUT_OF_SAMPLE** | 21 | -0.99% | -0.45% | -0.27% | -0.26% | +0.22% | +0.51% | +0.49% | +0.24% | +0.28% | +0.24% | D6 | -0.27% |
 | **OUT_OF_SAMPLE** | 42 | -1.65% | -0.86% | -0.53% | -0.64% | +0.25% | +1.05% | +0.97% | +0.41% | +0.48% | +0.54% | D6 | -0.51% |
 | **OUT_OF_SAMPLE** | 63 | -2.31% | -1.27% | -0.60% | -0.65% | +0.31% | +1.23% | +1.73% | +0.64% | +0.58% | +0.36% | D7 | -0.87% |
+| IN_SAMPLE | 5 | -0.33% | -0.20% | -0.08% | -0.05% | -0.03% | +0.05% | +0.08% | +0.12% | +0.16% | +0.30% | D10 | +0.25% |
 | IN_SAMPLE | 21 | -1.20% | -0.50% | -0.26% | -0.02% | -0.11% | +0.05% | +0.27% | +0.32% | +0.61% | +0.87% | D10 | +0.82% |
 | IN_SAMPLE | 42 | -2.03% | -1.01% | -0.51% | -0.17% | -0.26% | +0.20% | +0.41% | +0.70% | +1.08% | +1.60% | D10 | +1.39% |
 | IN_SAMPLE | 63 | -2.77% | -1.41% | -0.93% | -0.10% | -0.22% | +0.06% | +0.70% | +0.78% | +1.44% | +2.45% | D10 | +2.39% |
+| STABLE_MODEL | 5 | -0.31% | -0.20% | -0.07% | -0.02% | +0.07% | +0.04% | +0.07% | +0.15% | +0.15% | +0.12% | D8 | +0.08% |
 | STABLE_MODEL | 21 | -1.02% | -0.57% | -0.22% | -0.24% | +0.18% | +0.28% | +0.43% | +0.34% | +0.44% | +0.39% | D9 | +0.11% |
 | STABLE_MODEL | 42 | -1.91% | -1.09% | -0.42% | -0.45% | +0.18% | +0.74% | +0.78% | +0.63% | +0.64% | +0.93% | D10 | +0.19% |
 | STABLE_MODEL | 63 | -2.97% | -1.55% | -0.69% | -0.47% | +0.19% | +0.87% | +1.37% | +1.05% | +1.05% | +1.19% | D7 | +0.32% |
+| FULL_PANEL | 5 | -0.32% | -0.20% | -0.07% | -0.03% | -0.01% | +0.05% | +0.07% | +0.11% | +0.16% | +0.25% | D10 | +0.21% |
 | FULL_PANEL | 21 | -1.15% | -0.49% | -0.26% | -0.08% | -0.03% | +0.16% | +0.32% | +0.30% | +0.53% | +0.71% | D10 | +0.55% |
 | FULL_PANEL | 42 | -1.94% | -0.97% | -0.52% | -0.28% | -0.14% | +0.40% | +0.54% | +0.64% | +0.94% | +1.35% | D10 | +0.95% |
 | FULL_PANEL | 63 | -2.66% | -1.38% | -0.85% | -0.22% | -0.10% | +0.32% | +0.93% | +0.75% | +1.25% | +1.98% | D10 | +1.65% |
@@ -121,7 +129,7 @@ README.md carried two performance tables that cannot both describe the same engi
 | cost drag | -1.2% |
 | **net excess** | **-16.3%** |
 
-*power: expected t = IR x sqrt(years) = -0.79 x sqrt(7.2) = -2.13; t=2.0 is unreachable at a non-positive IR*
+*power: expected t = IR x sqrt(years) = -0.79 x sqrt(7.3) = -2.13; t=2.0 is unreachable at a non-positive IR*
 
 **Claimed against measured**, every published figure, headline or not:
 
@@ -178,7 +186,7 @@ README.md carried two performance tables that cannot both describe the same engi
 | cost drag | -0.8% |
 | **net excess** | **-15.7%** |
 
-*power: expected t = IR x sqrt(years) = -0.79 x sqrt(7.2) = -2.13; t=2.0 is unreachable at a non-positive IR*
+*power: expected t = IR x sqrt(years) = -0.79 x sqrt(7.3) = -2.13; t=2.0 is unreachable at a non-positive IR*
 
 **Claimed against measured**, every published figure, headline or not:
 

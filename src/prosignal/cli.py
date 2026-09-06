@@ -2290,6 +2290,168 @@ def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0 if not prog.broken else 1
 
 
+def _shape_inputs(cfg, args):
+    """The v3 panel and its price frames, built once for the shape commands."""
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .stages._cfg import fv, iv
+    from .validation.results import REPORT_HORIZONS
+    from .validation.v3_panel import SIGNAL_STRIDE_SESSIONS, build_v3_panel
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = sessions[-1]
+    cache = getattr(args, "panel_cache", None)
+    if cache and Path(cache).is_file():
+        _print(f"  reading the panel from {cache}")
+        panel = pd.read_parquet(cache)
+    else:
+        _rule("Building the v3 panel")
+        u = cfg.params.universe
+        horizon = iv(cfg.params.stage4_core_score.model_horizon_sessions)
+        panel = build_v3_panel(
+            store, end=end, stride=SIGNAL_STRIDE_SESSIONS,
+            horizons=tuple(sorted(set(REPORT_HORIZONS) | {horizon})),
+            max_names=iv(u.pit_max_names),
+            min_adtv_inr=fv(u.pit_min_adtv_inr),
+            min_price_inr=fv(u.min_price_inr),
+            min_history_sessions=iv(u.min_history_sessions))
+        if cache:
+            panel.to_parquet(cache)
+    return store, sessions, end, panel
+
+
+def cmd_research_shapes(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """What a portfolio SHAPE would have earned, and whether it can carry the IC.
+
+    IR = TC x IC x sqrt(breadth). The transfer coefficient is the correlation
+    between the positions a book takes and the positions the signal implies,
+    and without it a signal that fails to appear in the book is either a broken
+    signal or a book that cannot hold the signal's opinion -- two diagnoses
+    calling for opposite responses.
+    """
+    import pandas as pd
+
+    from .features import v3
+    from .stages._cfg import iv
+    from .validation import transfer as T
+    from .validation.v3_panel import SIGNAL_STRIDE_SESSIONS
+
+    _, _, _, panel = _shape_inputs(cfg, args)
+    horizon = int(args.horizon or iv(cfg.params.stage4_core_score.model_horizon_sessions))
+    label = f"y{horizon}"
+    if label not in panel.columns:
+        raise DataError(f"the panel carries no {label} column; "
+                        f"available: {sorted(c for c in panel.columns if c.startswith('y'))}")
+
+    when = pd.to_datetime(panel["date"])
+    _, hi = v3.FIT_WINDOW
+    windows = [("OUT_OF_SAMPLE", panel[when > pd.Timestamp(hi)]),
+               ("FULL_PANEL", panel)]
+    slots = iv(cfg.params.capital.max_open_positions)
+    for name, frame in windows:
+        if frame.empty:
+            continue
+        n = int(frame.groupby("date").size().median())
+        _rule(f"{name} -- h={horizon}, {frame['date'].nunique()} dates, "
+              f"median {n} names")
+        _print(T.table(T.evaluate(frame, label, T.standard_shapes(n, slots),
+                                  stride=SIGNAL_STRIDE_SESSIONS,
+                                  horizon=horizon)))
+        _print()
+    return 0
+
+
+def cmd_research_ablate(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Exit, sizing and band arms, ranked on the statistic that does not move.
+
+    Position size is `risk_budget / risk_per_share`, so any arm that changes
+    the stop, the risk budget or the slot count changes how much capital is
+    deployed. Ranking arms on raw excess compares leverage rather than the rule
+    under test -- measured, 14.4 points across a sizing sweep in which the
+    ranking and the names are identical.
+    """
+    import pandas as pd
+
+    from .validation import ablation as A
+    from .validation.v3_panel import SIGNAL_STRIDE_SESSIONS
+
+    store, sessions, end, panel = _shape_inputs(cfg, args)
+    _rule("Building price panels")
+    prices = _portfolio_inputs(cfg, store, sessions, None, end)
+    base = _portfolio_params(cfg)
+
+    rankings = []
+    for d, g in panel.groupby("date", sort=True):
+        sc = (g.dropna(subset=["score"]).set_index("symbol")["score"]
+              .sort_values(ascending=False))
+        if len(sc):
+            rankings.append((pd.Timestamp(d), sc))
+
+    groups = [("Exit rungs", A.exit_rung_arms()),
+              ("Risk budget (a pure sizing sweep)",
+               A.risk_budget_arms(base.risk_per_trade_pct)),
+              ("Exit band", A.band_arms(base))]
+    for name, arms in groups:
+        _rule(name)
+        _print(A.table(A.run(arms, rankings, prices, base,
+                             step_sessions=SIGNAL_STRIDE_SESSIONS)))
+        _print()
+    _print("  Every arm here was a look at the same data. Record them with "
+           "`TrialRegistry.record`")
+    _print("  before quoting any of them -- see findings Q5 and Q14.")
+    return 0
+
+
+def cmd_research_impact(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Calibrate the impact coefficient against what the book actually paid.
+
+    Or say why it cannot be. `CostModel.impact_bps` is a config constant that
+    has never been compared to a price this engine traded at.
+    """
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .stages._cfg import fv, iv
+    from .validation.fill_calibration import calibrate, read_outcomes
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    led = read_outcomes(Path(cfg.paths.ledger) / "outcomes.jsonl")
+    if led.empty:
+        _print("  the outcome ledger is empty; nothing to calibrate against")
+        return 1
+
+    _rule("Reading the price store")
+    px = store.read_prices()
+    px = px[px["symbol"].isin(set(led["ticker"].astype(str)))].copy()
+    px["date"] = pd.to_datetime(px["date"])
+    px = px.set_index(["symbol", "date"]).sort_index()
+
+    m = cfg.params.costs.impact_model
+    slot = (fv(cfg.params.capital.total_capital_inr)
+            / max(iv(cfg.params.capital.max_open_positions), 1))
+    out = calibrate(led, px, config_coefficient=fv(m.coefficient),
+                    config_exponent=fv(m.exponent), position_value_inr=slot)
+
+    _rule("Impact calibration")
+    _print(f"  verdict   {out.verdict}")
+    _print(f"  {out.reason}")
+    _print()
+    _print(f"  ledger rows          {out.n_rows}")
+    _print(f"  priced               {out.n_usable}")
+    if out.usable:
+        _print(f"  fitted coefficient   {out.fitted_coefficient:.4f} "
+               f"(config {out.config_coefficient:.4f})")
+        _print(f"  fitted exponent      {out.fitted_exponent:.4f} "
+               f"(config {out.config_exponent:.4f})")
+    for row in out.rows_dropped:
+        _print(f"  dropped: {row}")
+    return 0 if out.usable else 1
+
+
 def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     """CPCV over the BOOK, not the ranking.
 
@@ -2723,6 +2885,29 @@ def build_parser() -> argparse.ArgumentParser:
                         help="extend through the reserved holdout. Spends the "
                              "one honest test")
     port_p.set_defaults(func=cmd_research_portfolio)
+
+    shapes_p = research_sub.add_parser(
+        "shapes",
+        help="what a portfolio SHAPE would have earned, and its transfer "
+             "coefficient -- can a book carry the measured IC at all?")
+    shapes_p.add_argument("--horizon", type=int, default=None,
+                          help="label horizon; defaults to the configured one")
+    shapes_p.add_argument("--panel-cache", default=None,
+                          help="parquet to read the v3 panel from, or write to")
+    shapes_p.set_defaults(func=cmd_research_shapes)
+
+    abl_p = research_sub.add_parser(
+        "ablate",
+        help="exit / sizing / band arms, ranked on alpha over DEPLOYED capital")
+    abl_p.add_argument("--panel-cache", default=None,
+                       help="parquet to read the v3 panel from, or write to")
+    abl_p.set_defaults(func=cmd_research_ablate)
+
+    imp_p = research_sub.add_parser(
+        "impact",
+        help="calibrate the impact coefficient against realised fills, or say "
+             "why it cannot be")
+    imp_p.set_defaults(func=cmd_research_impact)
 
     ep_p = research_sub.add_parser(
         "epoch",

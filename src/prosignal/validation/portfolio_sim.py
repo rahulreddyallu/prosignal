@@ -619,13 +619,22 @@ def simulate(
         if i + hold_sessions >= len(index):
             continue
         rank = {sym: r for r, sym in enumerate(scores.index, start=1)}
-        # THE TIME BACKSTOP, applied before the band. A position that has run
-        # `horizon_sessions` is closed by the engine however well it ranks, so
-        # it cannot be carried; re-selecting the name is a new round trip and
-        # `held` is cleared for it so the cost logic charges one.
-        for sym in [s for s in held
-                    if i - opened_at.get(s, i) >= params.horizon_sessions]:
-            held[sym] = EXIT_TIMEOUT_EXPIRED
+        # THE TIME BACKSTOP, applied before the band, and ONLY WHERE THE COHORT
+        # IS TRUNCATED. At the default cadence `hold_sessions == horizon`, so a
+        # position that times out has run exactly one cohort and the next
+        # rebalance rolls it -- the established semantics of this simulator,
+        # pinned by `test_a_position_carried_through_the_horizon_pays_nothing`.
+        # Expiry there would charge every roll and is simply wrong.
+        #
+        # It bites only when the book re-ranks FASTER than the horizon, which
+        # is the case cadence parity introduced: a name carried across three
+        # 21-session decisions has been held 63 sessions, the engine sells it,
+        # and re-selecting it is a new round trip. `held` is stamped with a
+        # side the cost logic does not read as "carried", so it pays.
+        if hold_sessions < int(params.horizon_sessions):
+            for sym in [s for s in held
+                        if i - opened_at.get(s, i) >= params.horizon_sessions]:
+                held[sym] = EXIT_TIMEOUT_EXPIRED
         # Hysteresis: a held name survives while inside the wider exit band.
         keep = [s for s in held if rank.get(s, 10 ** 9) <= params.exit_rank]
         room = params.max_positions - len(keep)
@@ -648,15 +657,23 @@ def simulate(
             if sized is None or sized[0] <= 0:
                 continue
             size, price, liquidity = sized
-            # A CARRIED POSITION SPENDS ITS REMAINING BUDGET, NOT A FRESH ONE.
-            # `age` is zero for a name being opened now -- including one whose
-            # previous position closed early and is being re-bought, which is a
+            # A CARRIED POSITION SPENDS ITS REMAINING BUDGET, NOT A FRESH ONE
+            # -- but only where the cohort is truncated. At the default cadence
+            # a rolled position starts a fresh cohort by construction, and
+            # subtracting its age there leaves it one session of hold, which is
+            # not a smaller number but a different simulator.
+            #
+            # `age` is zero for a name being OPENED, including one whose
+            # previous position closed early and is being re-bought: that is a
             # new position and gets the full horizon.
             carried = held.get(sym) == EXIT_TIMEOUT
-            age = (i - opened_at.get(sym, i)) if carried else 0
-            budget = max(int(params.horizon_sessions) - int(age), 1)
+            this_hold = hold_sessions
+            if hold_sessions < int(params.horizon_sessions):
+                age = (i - opened_at.get(sym, i)) if carried else 0
+                budget = max(int(params.horizon_sessions) - int(age), 1)
+                this_hold = min(hold_sessions, budget)
             outcome = _hold(sym, i, close, low, open_, ma, atr, params,
-                            high=high, horizon=min(hold_sessions, budget))
+                            high=high, horizon=this_hold)
             if outcome is None:
                 continue
             ret, side = outcome
