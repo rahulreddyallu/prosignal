@@ -1383,6 +1383,46 @@ REGISTER: Tuple[Finding, ...] = (
               "table is long-only.",
     ),
     _f(
+        fid="Q18", severity="high",
+        title="Two factor signs are backwards out of sample, and one of them "
+              "is in the theme whose weight a cap refresh would double",
+        category=Category.MODEL, status=Status.FIXED,
+        root_cause="The signs ARE the model, and nothing checked them off the "
+                   "data they were chosen on. `review_factors` watches a "
+                   "ROLLING window, which answers 'is this drifting' and not "
+                   "'was this ever true out of sample'. Measured at h=63 over "
+                   "78 dates after the fit window closed, 20 of 22 factors "
+                   "hold their shipped sign and several strongly -- "
+                   "`deliv_z_21` t +9.13, `ret_kurt_126` t -6.42, `mom_12_6` "
+                   "t +6.64. Two do not: `mom_3_1` ships +1 and reads -0.0248 "
+                   "at t -2.18, and `net_margin` ships -1 and reads +0.0207 "
+                   "at t +2.52. Both are significant in the OTHER direction, "
+                   "which is not the same failure as decaying to zero -- the "
+                   "factor still carries information and the model is using "
+                   "the sign backwards.",
+        location="prosignal.v3_monitor::out_of_sample_signs",
+        fix="`out_of_sample_signs` scores every shipped (factor, sign) pair on "
+            "the dates after `v3.FIT_WINDOW` closes and separates a FLIP -- "
+            "wrong direction at |t| >= SIGN_FLIP_T -- from a decay to zero, "
+            "because only one of those is actionable. `flipped_signs` returns "
+            "the sentences. The threshold is a significance bar rather than a "
+            "sign test: half the factors read the wrong way by chance on a "
+            "short window and flagging all of them is an alarm nobody reads.",
+        regression_test="tests/test_out_of_sample_signs.py",
+        before_after="22 shipped signs, none of them ever checked out of "
+                     "sample; 20 hold, 2 are backwards at |t| > 2",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="`net_margin` is the one that matters, and it compounds Q11. The "
+              "'quality' theme -- correctly labelled 'Low-margin tilt' -- "
+              "carries 18.99% of the composite and is itself out-of-sample "
+              "indistinguishable from zero: quality_sub reads +0.0103 at "
+              "t +1.41 against an in-sample +0.0547 at t +7.31. Q11 shows its "
+              "coverage cap has expired, so refreshing the cap would roughly "
+              "DOUBLE the weight of the one theme that does not survive its "
+              "own holdout. Nothing is changed here; the two findings together "
+              "are the argument against the refresh.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

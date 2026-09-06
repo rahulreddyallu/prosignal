@@ -178,6 +178,98 @@ def effective_breadth(panel: pd.DataFrame,
                                       if np.mean(eff) > 0 else float("nan"))}
 
 
+#: A sign that has flipped this significantly out of sample is not noise.
+SIGN_FLIP_T = 2.0
+
+
+def out_of_sample_signs(panel: pd.DataFrame, label: str,
+                        min_names: int = 50) -> pd.DataFrame:
+    """Every factor's shipped sign against what it did after the fit closed.
+
+    THE CHECK NOTHING PERFORMED. `review_factors` watches a ROLLING window,
+    which answers "is this drifting" and not "was this ever true off the data
+    it was chosen on". The signs are the model: `V3_SEARCH.md` records that two
+    of them read backwards against their own theme name and pins them with a
+    test "so nobody 'corrects' it", which is right -- a measured sign is a
+    measurement. It is also exactly why a sign that fails out of sample has to
+    be found by something other than reading it.
+
+    Measured on the shipped panel at h=63, raw Spearman against the forward
+    return, per date and averaged:
+
+                          in sample            out of sample
+        margin_stability  -0.0581 (t -5.73)    -0.0272 (t -4.74)   holds
+        net_margin        -0.0486 (t -6.42)    +0.0207 (t +2.52)   FLIPPED
+        quality_sub       +0.0547 (t +7.31)    +0.0103 (t +1.41)
+
+    `net_margin` ships at sign -1 on an in-sample t of -6.42 and comes back
+    POSITIVE out of sample at t +2.52 -- significant in the other direction,
+    which is a different thing from decaying to zero. The theme it sits in
+    carries 18.99% of the composite and is out-of-sample indistinguishable from
+    zero.
+
+    Columns: `shipped_sign`, `ic_oos`, `t_oos`, `agrees`, `flipped`.
+    """
+    from .features import v3
+
+    lo, hi = v3.FIT_WINDOW
+    if panel is None or "date" not in getattr(panel, "columns", ()):
+        return pd.DataFrame()
+    when = pd.to_datetime(panel["date"])
+    oos = panel[when > pd.Timestamp(hi)]
+    if oos.empty or label not in oos.columns:
+        return pd.DataFrame()
+
+    rows = []
+    for theme, spec in v3.THEMES.items():
+        for factor, sign in spec.factors:
+            col = factor + "_r" if factor + "_r" in oos.columns else factor
+            if col not in oos.columns:
+                continue
+            ics = []
+            for _, g in oos.groupby("date", sort=True):
+                g = g.dropna(subset=[col, label])
+                if len(g) < int(min_names):
+                    continue
+                v = g[col].corr(g[label], method="spearman")
+                if np.isfinite(v):
+                    ics.append(float(v))
+            if len(ics) < 3:
+                continue
+            a = np.asarray(ics, dtype="float64")
+            sd = float(a.std(ddof=1))
+            t = float(a.mean() / sd * np.sqrt(a.size)) if sd > 0 else float("nan")
+            agrees = bool(np.sign(a.mean()) == np.sign(sign))
+            rows.append({
+                "theme": theme, "factor": factor, "shipped_sign": float(sign),
+                "n_dates": int(a.size), "ic_oos": float(a.mean()),
+                "t_oos": t, "agrees": agrees,
+                # A DECAY TO ZERO AND A FLIP ARE DIFFERENT FAILURES. The first
+                # says the factor stopped working; the second says it works and
+                # the model has the sign backwards, which is worse and is
+                # actionable in a way the first is not.
+                "flipped": bool(not agrees and np.isfinite(t)
+                                and abs(t) >= SIGN_FLIP_T),
+            })
+    return pd.DataFrame(rows)
+
+
+def flipped_signs(panel: pd.DataFrame, label: str) -> List[str]:
+    """One sentence per factor whose sign failed out of sample. Empty is healthy."""
+    frame = out_of_sample_signs(panel, label)
+    if frame.empty:
+        return []
+    out = []
+    for _, r in frame[frame["flipped"]].iterrows():
+        out.append(
+            f"{r['factor']} ({r['theme']}) ships at sign "
+            f"{int(r['shipped_sign']):+d} and its out-of-sample IC is "
+            f"{r['ic_oos']:+.4f} at t {r['t_oos']:+.2f} over {int(r['n_dates'])} "
+            f"dates -- significant in the OTHER direction, which is not the "
+            f"same failure as decaying to zero.")
+    return out
+
+
 def stable_model_window(panel: pd.DataFrame,
                         floor: float = STABLE_MODEL_FLOOR):
     """First date from which EVERY theme stays above `floor`, or None.
