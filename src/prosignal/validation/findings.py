@@ -1416,15 +1416,32 @@ REGISTER: Tuple[Finding, ...] = (
         before_after="22 shipped signs, none of them ever checked out of "
                      "sample; 20 hold, 2 are backwards at |t| > 2",
         moves_coefficients=False, moves_history=False, forces_restart=False,
-        notes="`net_margin` is the one that matters, and it compounds Q11. The "
-              "'quality' theme -- correctly labelled 'Low-margin tilt' -- "
-              "carries 18.99% of the composite and is itself out-of-sample "
-              "indistinguishable from zero: quality_sub reads +0.0103 at "
-              "t +1.41 against an in-sample +0.0547 at t +7.31. Q11 shows its "
-              "coverage cap has expired, so refreshing the cap would roughly "
-              "DOUBLE the weight of the one theme that does not survive its "
-              "own holdout. Nothing is changed here; the two findings together "
-              "are the argument against the refresh.",
+        notes="ACTED ON 2026-09-06, and not in the way this finding first "
+              "implied. `net_margin` is dropped; the quality theme STAYS. The "
+              "obvious reading -- a theme whose own out-of-sample IC is "
+              "+0.0103 at t +1.41 should go -- is what I recommended, and "
+              "measuring it refuted it. Four dispositions, all charged to the "
+              "registry, out of sample:\\n"
+              "    shipped, 2 factors   h21 +0.0551 t +2.14   h63 +0.0748 "
+              "t +1.64\\n"
+              "    theme dropped        h21 +0.0560 t +1.97   h63 +0.0718 "
+              "t +1.38\\n"
+              "    margin_stability only h21 +0.0572 t +2.20  h63 +0.0776 "
+              "t +1.66\\n"
+              "    net_margin flipped   h21 +0.0582 t +2.15   h63 +0.0771 "
+              "t +1.57\\n"
+              "Dropping the theme is WORSE at h=63 than shipping it. "
+              "`margin_stability` holds its sign at t -4.74 and carries the "
+              "theme alone, and removing only the refuted factor wins at both "
+              "horizons on IC and on t. Flipping the sign scores nearly as "
+              "well and was not taken: a sign fitted on one window and "
+              "reversed on the next is a sign nothing supports, and refitting "
+              "it against the out-of-sample window spends the only clean "
+              "evidence there is. `mom_3_1` remains shipped at +1 against an "
+              "out-of-sample -0.0248 (t -2.18) and is now the only open sign "
+              "flip. Q11 still stands: the theme's coverage cap has expired, "
+              "so a refresh would double the weight of a theme that is now one "
+              "factor wide.",
     ),
     _f(
         fid="Q19", severity="critical",

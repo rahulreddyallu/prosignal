@@ -37,7 +37,14 @@ def test_the_shipped_themes_and_weights_are_the_deployed_configuration():
     assert sum(t.weight for t in v3.THEMES.values()) == pytest.approx(1.0)
     assert max(t.weight for t in v3.THEMES.values()) <= 0.40 + 1e-9
     assert min(t.weight for t in v3.THEMES.values()) >= 0.06 - 1e-9
-    assert len(v3.ALL_FACTORS) == 22
+    # 21 since 2026-09-06. `net_margin` was dropped from `quality`: it ships
+    # at -1 on an in-sample t of -6.42 and reads +0.0207 at t +2.52 out of
+    # sample -- significant in the OTHER direction. The theme was kept, which
+    # is what the measurement said: dropping it outright is worse at h=63
+    # (+0.0718 t +1.38 against +0.0748 t +1.64 shipped), because
+    # `margin_stability` holds its sign at t -4.74 and carries the theme
+    # alone. See v3.THEMES["quality"] and finding Q18.
+    assert len(v3.ALL_FACTORS) == 21
     # Both were frozen rounded (weight to 5dp, coverage to 4dp), so the
     # comparison is only meaningful to the coarser of the two.
     assert v3.THEMES["quality"].weight <= v3.THEMES["quality"].coverage + 5e-5
@@ -138,7 +145,7 @@ def test_theme_contributions_sum_to_the_score():
 def test_a_name_missing_a_theme_is_scored_on_the_rest_not_pushed_to_zero():
     close, open_, vwap, turnover, deliv, bench = _panel()
     raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
-    assert raw["net_margin"].isna().all(), "no fundamentals in this fixture"
+    assert raw["margin_stability"].isna().all(), "no fundamentals in this fixture"
     scored = v3.score_frame(raw, sectors=None)
     assert (scored["n_themes"] == 4).all()
     assert scored["score"].notna().any()

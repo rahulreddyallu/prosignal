@@ -644,3 +644,7 @@
 {"key": "1071b6393f8180a7", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top-half", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 0.9052}
 {"key": "029735724bfa2783", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: D10-D1", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 2.6729}
 {"key": "6b15738a4cd21204", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top-half minus bottom-half", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 1.812}
+{"key": "5dd21ed5f84d89d2", "command": "audit 2026-09 quality theme disposition", "label": "quality: shipped 2 factors", "recorded_at": "2026-09-06T10:13:37+00:00", "score": 0.0748}
+{"key": "2467039d8193bd1b", "command": "audit 2026-09 quality theme disposition", "label": "quality: theme dropped", "recorded_at": "2026-09-06T10:13:37+00:00", "score": 0.0718}
+{"key": "a89b7de630adf221", "command": "audit 2026-09 quality theme disposition", "label": "quality: margin_stability only", "recorded_at": "2026-09-06T10:13:37+00:00", "score": 0.0776}
+{"key": "e302b92ced714386", "command": "audit 2026-09 quality theme disposition", "label": "quality: net_margin sign flipped", "recorded_at": "2026-09-06T10:13:37+00:00", "score": 0.0771}
