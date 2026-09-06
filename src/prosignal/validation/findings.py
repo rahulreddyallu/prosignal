@@ -837,6 +837,48 @@ REGISTER: Tuple[Finding, ...] = (
               "sample for the shipped composite from 380 dates to 150.",
     ),
     _f(
+        fid="Q5", severity="critical",
+        title="The Deflated Sharpe charged for the tuning done after the model "
+              "shipped and for none of the search that produced it",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="The trial registry held 99 configurations and every one "
+                   "came from a research command written AFTER the v3 "
+                   "composite existed -- estimator arms, spread bands, CPCV "
+                   "folds, the 2026-08 execution re-audit. Not one row came "
+                   "from the search that chose the 22 factors, the five "
+                   "themes, the combination method, the weight caps, the "
+                   "quality floor or the book. The escape hatch, "
+                   "`cumulative_trials_logged`, shipped at 20. The reason it "
+                   "could not be reconstructed is that "
+                   "`research/V3_SEARCH.md` was DELETED in commit f1b2a9a "
+                   "along with `work/v3/` and `research/v3/` -- deleting the "
+                   "search code is defensible since it no longer chooses "
+                   "anything, and deleting the record of the search removed "
+                   "the only evidence of how much dredging the shipped model "
+                   "rests on.",
+        location="prosignal.validation.v3_search",
+        fix="`research/V3_SEARCH.md` restored from f1b2a9a^. "
+            "`validation/v3_search.py` is its machine-readable form: every "
+            "group cites the section it comes from and expands to one "
+            "registry label per configuration, so the registry's own "
+            "content-addressing keeps it idempotent. "
+            "`research trials --register-v3-search` appends them; the plain "
+            "command now prints the enumeration and flags loudly when the "
+            "rows are missing. Two grids whose arm counts the record does not "
+            "state are entered at their documented minimum and marked, so the "
+            "total prints as AT LEAST rather than an equals sign.",
+        regression_test="tests/test_v3_search_trials.py",
+        before_after="trials charged by the DSR 119 -> 622. On the shipped "
+                     "trial-score variance (0.0874 over 50 scored arms) that "
+                     "raises the Sharpe a selected configuration must beat "
+                     "from 2.59 to 3.12 per period",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This makes every deflated statistic in the engine STRICTLY "
+              "HARDER to pass. It does not change a single return, and it is "
+              "the second-largest single correction in this audit after the "
+              "leverage confound.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

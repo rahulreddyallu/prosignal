@@ -1883,7 +1883,16 @@ def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
     """
     from .validation.registry import TrialRegistry, registry_path
 
+    from .validation import v3_search as v3s
+
     reg = TrialRegistry(registry_path(cfg.paths.curated))
+    if getattr(args, "register_v3_search", False):
+        added = reg.record(v3s.COMMAND, v3s.labels())
+        _rule("Registering the v3 factor search")
+        _print(v3s.summary())
+        _print()
+        _print(f"  {added} newly recorded (the registry is idempotent by "
+               f"command and label, so re-running this adds nothing).")
     trials = reg.load()
     carried = int(cfg.params.validation.search_budget.cumulative_trials_logged)
 
@@ -1908,6 +1917,24 @@ def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
         _print("  `cumulative_trials_logged` is 0. Everything before this "
                "registry existed is therefore uncounted -- it cannot be "
                "reconstructed, and is not being silently assumed to be nothing.")
+
+    # THE SEARCH THAT CHOSE THE MODEL. Every row above came from a command
+    # written AFTER the v3 composite shipped. If the reconstruction is not on
+    # the registry, the DSR is charging for the tuning and not for the search.
+    recorded_search = reg.by_command().get(v3s.COMMAND, 0)
+    _rule("The search that chose the shipped model")
+    _print(v3s.summary())
+    _print()
+    if recorded_search >= v3s.total():
+        _print(f"  on the registry: {recorded_search} of {v3s.total()}. The "
+               f"Deflated Sharpe is charging for the search as well as for "
+               f"the tuning done after it.")
+    else:
+        _print(f"  [!] ON THE REGISTRY: {recorded_search} of "
+               f"{v3s.total()}. Until these are recorded the DSR charges the "
+               f"headline result for the {len(trials)} configurations tried "
+               f"AFTER the model existed and nothing for the search that "
+               f"produced it. Run `prosignal research trials --register-v3-search`.")
     return 0
 
 
@@ -2623,6 +2650,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     trials_p = research_sub.add_parser(
         "trials", help="every configuration compared, and what the DSR charges")
+    trials_p.add_argument(
+        "--register-v3-search", action="store_true",
+        help="append the reconstructed v3 factor search to the registry "
+             "(idempotent; see validation/v3_search.py)")
     trials_p.set_defaults(func=cmd_research_trials)
 
     v3_p = research_sub.add_parser(

@@ -3165,9 +3165,19 @@ validation:
     #  --
     #  20
     #
-    # Everything before this registry existed is still uncounted. That cannot be
-    # reconstructed and is not being silently assumed to be nothing -- see
-    # `prosignal research trials`.
+    # THIS NUMBER NO LONGER COVERS THE v3 FACTOR SEARCH. It used to be the only
+    # thing standing in for it, at 20, against a search the record puts at 503:
+    # 93 factors screened at four horizons, 33 re-tested on both halves of their
+    # own life, five themes oriented at four horizons, four combination methods,
+    # five floor gates, six cost buckets, three books. Every one of those was a
+    # look at the same data and the Deflated Sharpe was charging for none of
+    # them, because `research/V3_SEARCH.md` -- the only record of the search --
+    # was deleted with the search code in commit f1b2a9a.
+    #
+    # The document is restored and enumerated in `validation/v3_search.py`, and
+    # the 503 rows are on the registry, so they are counted there rather than
+    # here. What is left in this field is the 20 arms above: work that predates
+    # both the registry and the v3 search. See `prosignal research trials`.
     cumulative_trials_logged: 20
     # A configuration with PBO above this cannot be promoted to VALIDATED.
     # A high PBO is an instruction to SIMPLIFY the model, not to keep searching
