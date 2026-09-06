@@ -528,6 +528,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         names, _ = _reference_names()
         return build_history(rows, limit=max(1, min(int(limit), 120)),
                              company_names=names,
+                             # THE BOOK'S OWN SIZE, not a hardcoded five. A
+                             # 20-name book shown five names deep reports a
+                             # quarter of itself and calls it the record.
+                             slots=int(cfg.params.capital.max_open_positions.value),
                              since=read_mark(cfg.paths.ledger))
 
     @app.delete("/history")

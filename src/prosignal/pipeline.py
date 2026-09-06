@@ -560,6 +560,12 @@ def _build_slate(buys, watch, previous_slate, *, slots: int, exit_rank: int,
             "model_rank": rec.model_rank,
             "percentile": rec.universe_percentile,
             "score": rec.composite_score,
+            # THE VERDICT TRAVELS WITH THE CARD. Without it `select_slate` had
+            # only "is this ticker in the buys list", which is true of a HELD
+            # name too -- so the slate relabelled every hold as BUY and the
+            # screen told the operator to buy what they already own. Stage 8
+            # knows the open book; this is how the slate learns it.
+            "decision": str(getattr(rec.decision, "value", rec.decision or "")),
         }
 
     held_tickers = [str(e.get("ticker")) for e in previous_slate if e.get("ticker")]

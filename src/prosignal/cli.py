@@ -899,7 +899,18 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
             else:
                 _print(f"  {note}")
 
-    decision = f"{len(o.recommendations)} BUY / {len(o.watchlist)} WATCH"
+    # BUY AND HOLD ARE COUNTED APART. `recommendations` is the book -- names
+    # newly admitted AND names already held, which Stage 6's cadence gate
+    # exempts. Reporting both as BUY told the operator to open positions they
+    # already have.
+    _held = sum(1 for r in o.recommendations
+                if str(getattr(r.decision, "value", r.decision)) == "HOLD")
+    _new = len(o.recommendations) - _held
+    decision = " / ".join(filter(None, [
+        f"{_new} BUY" if _new or not _held else "",
+        f"{_held} HOLD" if _held else "",
+        f"{len(o.watchlist)} WATCH",
+    ]))
     _print()
     _rule("Decision")
     if o.no_trade:

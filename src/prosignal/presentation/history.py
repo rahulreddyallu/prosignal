@@ -244,6 +244,11 @@ def build_history(
     records: Iterable[Any],
     *,
     limit: int = 30,
+    # HOW MANY POSITIONS THE BOOK HOLDS. Defaulted to 5 and never passed by the
+    # API, so History truncated every day's slate to five names however large
+    # the book was -- with a 20-name book it showed a quarter of it and the
+    # returns underneath described that quarter. The caller now reads
+    # `capital.max_open_positions`.
     slots: int = 5,
     company_names: Optional[Dict[str, str]] = None,
     since: Optional[str] = None,

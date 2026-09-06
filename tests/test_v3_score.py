@@ -315,9 +315,19 @@ def test_the_three_books_are_distinct_and_the_note_says_which_one_trades():
     becomes a claim it never made."""
     assert v3.LIVE_BOOK != v3.RESEARCH_BOOK != v3.HOLDOUT_BOOK
     assert v3.BOOK is v3.RESEARCH_BOOK, "BOOK must stay the research book"
-    assert v3.LIVE_BOOK["slots"] < v3.HOLDOUT_BOOK["slots"], \
-        "the live book is the more concentrated one -- that is the point"
+    # REVERSED ON 2026-09-06, and the reversal IS the finding. This asserted
+    # the live book was the more concentrated of the two, "which is the
+    # point" -- and concentration was the defect. Six names cannot carry a
+    # ranking over 386 (transfer coefficient 0.206 against 0.296 for a wider
+    # book), and net of cost the widening moves out-of-sample alpha on
+    # deployed capital from -10.46% to -1.95%. The live book is now WIDER
+    # than the holdout book, deliberately.
+    assert v3.LIVE_BOOK["slots"] > v3.HOLDOUT_BOOK["slots"], \
+        "the live book is the wider one now -- concentration was the defect"
     note = v3.BOOK_NOTE
     assert "NO BOOK DOES" in note, "the note must not imply a book was validated"
-    assert "SIX positions" in note and "21-session" in note
+    assert "TWENTY positions" in note and "21-session" in note
+    assert "IT USED TO BE SIX" in note, (
+        "the note must say what changed and why; a book that silently widened "
+        "reads as though it was always this size")
     assert "t 0.81" in note, "the weakest holdout statistic must be named"

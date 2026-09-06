@@ -704,7 +704,15 @@ RESEARCH_BOOK = {"slots": 12, "entry_rank": 24, "exit_rank": 48,
                  "universe_max_names": 750, "floor_applies_to": "entries_only"}
 
 #: Read-only mirror of the LIVE book. The config is the source of truth.
-LIVE_BOOK = {"slots": 6, "entry_rank": 6, "exit_rank": 18,
+#:
+#: WIDENED 6 -> 20 ON 2026-09-06, following `capital.max_open_positions`.
+#: Six names cannot express a ranking over 386 -- Grinold's transfer
+#: coefficient measures 0.206 for the top-6 against 0.296 for a wider book --
+#: and net of modelled cost the wider book reads -1.95% alpha on deployed
+#: capital out of sample against the old -10.46%, Sharpe +0.15 against -0.28.
+#: `exit_rank` keeps the 3x hysteresis ratio the 6/18 configuration was
+#: measured with; whether 60 is right for a 20-name book is NOT measured.
+LIVE_BOOK = {"slots": 20, "entry_rank": 20, "exit_rank": 60,
              "entry_cadence_sessions": 21}
 
 #: Kept as the name older code imported. It is the RESEARCH book -- which is
@@ -718,19 +726,25 @@ BOOK_NOTE = (
     "filtering the whole population -- lost to the benchmark by 2.8% a year on "
     "window A and beat it by 2.0% on window B, and on both the reason was "
     "transaction costs of 9.7% and 13.7% a year. "
-    "AND THAT IS NOT THE BOOK THAT TRADES. Production runs SIX positions on a "
-    "21-session cadence with a 3x exit band (18), which is both slower and far "
-    "more concentrated than anything either window measured. Slower cuts the "
-    "cost drag that sank the tested book, and turnover needs no labels to "
-    "verify. More concentrated cuts the other way, and it leans on the "
-    "statistic that generalised LEAST: top-ten excess on window A was +0.38% "
-    "at t 0.81, indistinguishable from zero, while the quintile spread held at "
-    "t 2.89. Ordering within the top few names is the part of this model the "
-    "holdouts did not support, and a six-name book is a bet on exactly that. "
-    "Read the shortlist as drawn from an evidenced ranking; the concentration "
-    "is an operator's risk choice, not a validated one. Both windows are spent, "
-    "so no book can be settled here -- the quarterly re-check is what will do "
-    "it, once its window stops overlapping window A.")
+    "AND THAT IS NOT THE BOOK THAT TRADES. Production runs TWENTY positions on "
+    "a 21-session cadence with a 3x exit band (60), equal-weighted at a 75% "
+    "target deployment. It is slower than anything either window measured and, "
+    "since 2026-09-06, WIDER rather than more concentrated. "
+    "IT USED TO BE SIX, and that was the single worst decision in the book. "
+    "Top-ten excess on window A was +0.38% at t 0.81 -- indistinguishable from "
+    "zero -- while the quintile spread held at t 2.89, so ordering within the "
+    "top few names is precisely the part of this model the holdouts did not "
+    "support, and a six-name book was a bet on exactly that. Measured net of "
+    "cost at the live cadence, widening to twenty moves alpha on deployed "
+    "capital from -10.46% to -1.95% out of sample (Sharpe -0.28 to +0.15) and "
+    "from +3.50% to +9.68% on the full panel (+0.68 to +1.28). "
+    "THIS IS STILL NOT A VALIDATED BOOK. Out-of-sample alpha remains negative "
+    "and +0.15 Sharpe is not significant; it is less bad, not good. Both "
+    "windows are spent, so no book can be settled here, and every net figure "
+    "above divides by an impact coefficient that has never been calibrated "
+    "against a realised fill. Read the shortlist as drawn from an evidenced "
+    "ranking; the construction is an operator's choice measured against a "
+    "simulator, not a validated one.")
 
 
 def absolute_floor(scored: pd.DataFrame, dist_200dma: pd.Series,
