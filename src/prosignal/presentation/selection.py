@@ -56,9 +56,22 @@ from typing import Any, Dict, List, Optional, Sequence
 #: The card's own thesis text said "inside the top 6", which is how the
 #: disagreement stayed invisible: the prose came from the config and the list
 #: came from here.
-SLOTS = 6
+#: THE DEFAULT, AND IT MUST EQUAL THE BOOK. Every shipped caller passes `slots`
+#: explicitly, but a default that disagrees with the configuration is the exact
+#: defect `test_the_slate_is_the_book` exists to catch: it was 5 while
+#: `entry_rank` and `max_open_positions` were both 6, so every screen showed
+#: five of the six positions the engine opened, and the assertion of the day --
+#: `SLOTS == 5` -- stayed green because it pinned the stale number instead of
+#: the relationship. That test now pins SLOTS to the config, so this moves when
+#: the book moves. 6 -> 20 on 2026-09-06.
+SLOTS = 20
 
 BUY = "BUY"
+#: ALREADY IN THE BOOK. A held name passes Stage 6 on a non-entry session --
+#: the cadence gate exempts it, deliberately -- so it arrived here as BUY and
+#: the screen told the operator to buy something they own, ranked below names
+#: the same screen said to skip. See `Decision.HOLD`.
+HOLD = "HOLD"
 WATCH = "WATCH"
 
 
@@ -211,11 +224,19 @@ def select_slate(
         ticker = str(card.get("ticker"))
         row = dict(card)
         row["slate_position"] = position
-        status = BUY if ticker in buy_tickers else WATCH
+        # The card already decided this -- Stage 8 knows the open book and
+        # this does not. Reading its verdict keeps one answer in one place.
+        decided = str(card.get("decision") or "")
+        if decided.startswith("HOLD"):
+            status = HOLD
+        elif ticker in buy_tickers:
+            status = BUY
+        else:
+            status = WATCH
         row["status"] = status
         row["carried"] = ticker in carried_tickers
         row["slate_reason"] = _why_shown(card, ticker in carried_tickers, exit_rank)
-        if status == BUY:
+        if status in (BUY, HOLD):
             n_buy += 1
         else:
             n_watch += 1

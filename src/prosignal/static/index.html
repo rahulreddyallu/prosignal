@@ -38,6 +38,14 @@
   --watch-soft:    #F6EFDF;
   --watch-line:    #E2D2AC;
 
+  /* HOLD reads as a settled state, not an action: cooler and quieter than
+     BUY's green so a slate of twenty does not look like twenty instructions.
+     Defined in all three theme blocks -- a colour whose only definition sits
+     behind a media query renders one theme's ink on the other's ground. */
+  --hold:          #2C5C8A;
+  --hold-soft:     #E7EFF7;
+  --hold-line:     #BDD2E6;
+
   --neg:           #A33A32;
   --neg-soft:      #F7E9E7;
 
@@ -53,7 +61,11 @@
   --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
           "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  --maxw: 1160px;
+  /* 1160 was a phone-first choice that never grew. The slate is a grid now,
+     so a wide screen shows more of the book rather than more whitespace
+     either side of it. Prose blocks keep their own ch-based caps, so nothing
+     here makes a line of text too long to read. */
+  --maxw: 1440px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -81,6 +93,10 @@
     --watch-soft:   #2A2113;
     --watch-line:   #453620;
 
+    --hold:         #74AEE0;
+    --hold-soft:    #131F2A;
+    --hold-line:    #23394D;
+
     --neg:          #E08078;
     --neg-soft:     #2B1917;
 
@@ -96,6 +112,7 @@
   --accent:#4FB3AE; --accent-ink:#06201F; --accent-soft:#16302F; --accent-line:#244846;
   --buy:#64C08C; --buy-soft:#14291D; --buy-line:#24432F;
   --watch:#D6AC5A; --watch-soft:#2A2113; --watch-line:#453620;
+  --hold:#74AEE0; --hold-soft:#131F2A; --hold-line:#23394D;
   --neg:#E08078; --neg-soft:#2B1917;
   --focus:#4FB3AE;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
@@ -295,6 +312,7 @@ button { font: inherit; color: inherit; }
         padding: 3px 9px; border-radius: 100px; border: 1px solid transparent; }
 .pill.buy   { background: var(--buy-soft);   color: var(--buy);   border-color: var(--buy-line); }
 .pill.watch { background: var(--watch-soft); color: var(--watch); border-color: var(--watch-line); }
+.pill.hold  { background: var(--hold-soft);  color: var(--hold);  border-color: var(--hold-line); }
 .pill.info  { background: var(--accent-soft);color: var(--accent);border-color: var(--accent-line); }
 .pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%;
                 background: currentColor; }
@@ -302,7 +320,52 @@ button.pill { cursor: pointer; font-family: inherit;
               transition: filter .14s ease, box-shadow .14s ease; }
 button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 
-.cards { display: grid; gap: var(--sp-3); }
+/* THE SLATE GRID.
+   One column was right for a six-name book and is wrong for twenty: on a
+   desktop it produced 1,160px of stacked full-width cards and a page you
+   scroll for a minute. `auto-fill` lets the browser decide how many fit --
+   one on a phone, two on a tablet, three or four on a wide screen -- without
+   a breakpoint per layout. 300px is the narrowest a card can be and still fit
+   "GRWRHITECH" beside its price without wrapping. */
+.cards { display: grid; gap: var(--sp-3);
+         grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+
+/* COMPACT, because twenty cards is a list to scan and not six cards to read.
+   Padding, type scale and row gaps all come down; nothing is removed. The
+   detail is one tap away in the panel, which is where it always was. */
+.cards.compact .card { padding: var(--sp-3) var(--sp-4); gap: var(--sp-2); }
+.cards.compact .card .tk { font-size: 15px; }
+.cards.compact .card .co { font-size: 12px; }
+.cards.compact .card .px { font-size: 14px; }
+.cards.compact .card .meta { font-size: 11.5px; }
+.cards.compact .card .why { display: none; }
+/* THE SAME SQUEEZE THE PHONE RULE ALREADY SOLVES. An entry zone is two prices
+   and a dash; a third of a 300px grid cell is no more room than a third of a
+   375px screen, and it clipped mid-number -- "Rs 7,019.90-Rs 7,180". Two
+   columns, so the zone takes the line below rather than losing digits. A
+   truncated price is worse than a wrapped one: it still looks like a number. */
+.cards.compact .figs { grid-template-columns: repeat(2, minmax(0, 1fr));
+                       margin-top: var(--sp-3); padding-top: var(--sp-2); }
+/* THE ENTRY ZONE TAKES ITS OWN ROW. `.fv` is `white-space: nowrap` -- correct,
+   a price must never break mid-number -- so a zone too wide for its column
+   does not wrap, it OVERFLOWS, and 20 cards of it pushed the whole document
+   sideways (`body.scrollWidth > innerWidth`). Half of a 300px card is ~135px
+   and "Rs 7,019.90-Rs 7,180.10" needs about 140. Spanning both columns gives
+   it the room instead of taking the digits away. */
+.cards.compact .figs .fig:nth-child(3) { grid-column: 1 / -1; }
+.cards.compact .figs .fig:nth-child(3) .fv { font-size: 13.5px; }
+.cards.compact .card { align-content: start; }
+/* Even card heights, but ONLY where cards sit side by side. A reserved second
+   name line evens a row out on a desktop grid and is pure wasted height in a
+   single column, which is exactly where 20 cards are already too tall. */
+@media (min-width: 680px) {
+  .cards.compact .card .name { min-height: 2.6em; }
+}
+/* One column, twenty cards: every pixel of chrome is paid twenty times. */
+@media (max-width: 679px) {
+  .cards.compact .card { padding: var(--sp-3); }
+  .cards.compact .card .figs { margin-top: var(--sp-2); }
+}
 
 .card {
   background: var(--surface); border: 1px solid var(--line);
@@ -314,6 +377,7 @@ button.pill:hover { filter: brightness(.94); box-shadow: var(--shadow); }
 .card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
                 background: var(--line-strong); }
 .card.is-buy::before   { background: var(--buy); }
+.card.is-hold::before  { background: var(--hold); }
 .card.is-watch::before { background: var(--watch); }
 .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-lift);
               transform: translateY(-1px); }
@@ -1779,7 +1843,7 @@ function renderSettings() {
                const sc = (state.view || {}).scorer || {};
                const t = ((((state.view || {}).picks || [])[0] || {}).themes || []).length;
                if (sc.name) return esc(sc.name) + (t ? " \u00b7 scored on " + t + " themes" : "");
-               return "v3 composite \u00b7 22 factors in 5 themes, weights frozen";
+               return "v3 composite \u00b7 " + modelShape() + ", weights frozen";
              })(),
              "") +
       /* The standing disclosure, off the shortlist and next to the
@@ -2295,7 +2359,12 @@ function viewOverview(v) {
         return bits.length ? '<div class="note">' + bits.join(" \u00b7 ") + '</div>' : "";
       })() +
     '</div>' +
-    '<div class="cards">' + v.picks.map(cardHTML).join("") + '</div>' +
+    /* COMPACT ABOVE EIGHT NAMES. Six cards can afford to be roomy; twenty is a
+       list to scan, and at full size it was a screen and a half of scrolling
+       before the second row. The threshold is on the slate's real length, so a
+       book that shrinks gets its detail back without a setting. */
+    '<div class="cards' + (v.picks.length > 8 ? ' compact' : '') + '">' +
+      v.picks.map(cardHTML).join("") + '</div>' +
     '<div class="rerun">' +
       '<button class="btn ghost sm" onclick="document.getElementById(\'scan\').click()">' +
       'Re-run this scan</button>' +
@@ -2485,7 +2554,7 @@ function whyLine(p) {
     const total = th.reduce((n, r) => n + Math.abs(r.contribution || 0), 0);
     const share = total > 0 ? Math.abs(lead.contribution) / total : null;
     const pct = Math.round((lead.z + 1) / 2 * 100);
-    return esc(lead.label) + " " + pct + ordinal(pct) + " in its sector" +
+    return esc(lead.label) + " " + pct + ordinal(pct) + " in the universe" +
       (share != null ? " \u00b7 " + Math.round(share * 100) + "% of the score"
                      : "") +
       (th.length < 5 ? " \u00b7 " + th.length + " of 5 themes" : "");
@@ -2509,8 +2578,24 @@ function ordinal(n) {
   return { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th";
 }
 
+/* THE SHAPE OF THE SCORER, read rather than written down. Three places in this
+   file said "22 factors in 5 themes" as a literal; the model is 21 now
+   (`net_margin` was dropped when its sign failed out of sample) and every one
+   of them was quietly wrong. `state.view.model` carries the counts. */
+function modelShape() {
+  const m = (state.view && state.view.scorer) || {};
+  const f = m.factor_count, t = m.theme_count;
+  return (f && t) ? (f + " factors in " + t + " themes") : "the v3 composite";
+}
+
 function cardHTML(p) {
+  /* THREE STATES, NOT TWO. A name already in the book is HOLD -- it is not a
+     buy, and calling it one told the operator to buy something they own and
+     ranked it below names the same slate said to skip. See Decision.HOLD. */
+  const isHold = p.status === "HOLD";
   const isBuy = p.status === "BUY";
+  const tone = isHold ? "hold" : (isBuy ? "buy" : "watch");
+  const toneLabel = isHold ? "Hold" : (isBuy ? "Buy" : "Watch");
   const dn = downside(p);
   const L = p.levels || {};
   const band = (state.view && state.view.book && state.view.book.exit_rank) || null;
@@ -2531,14 +2616,13 @@ function cardHTML(p) {
     ? fig("Rank", "#" + p.rank, "", "")
     : "";
 
-  return '<button class="card ' + (isBuy ? "is-buy" : "is-watch") + '" ' +
+  return '<button class="card is-' + tone + '" ' +
     'data-pos="' + p.position + '">' +
     '<div class="card-top">' +
       '<div class="rank">' + p.position + ' of ' + state.slateSize +
         ' <span class="tk">\u00b7 ' + esc(p.ticker) + '</span></div>' +
       '<div class="pills">' +
-        '<span class="pill ' + (isBuy ? "buy" : "watch") + '">' +
-          (isBuy ? "Buy" : "Watch") + '</span>' +
+        '<span class="pill ' + tone + '">' + toneLabel + '</span>' +
         (function () {
           const n = heldText(p);
           return n ? '<span class="pill held" title="' + esc(p.why_shown || "") +
@@ -2772,8 +2856,14 @@ function openHTML(op) {
       '</div>';
   }
 
+  /* PER POSITION, AND THE LABEL HAS TO SAY SO. This is the average one
+     position is ahead of the index over the days it has been held. It is not
+     what an account running this engine is up: position size is
+     risk_budget / risk_per_share, so most of the account is in cash and the
+     cash earned nothing. The closed-record headline below has always carried
+     "average per position"; this one said only "vs the index". */
   const head = (op.avg_excess != null)
-    ? signed(op.avg_excess) + ' vs the index'
+    ? signed(op.avg_excess) + ' vs the index, per position'
     : (op.avg_unrealised != null ? signed(op.avg_unrealised)
                                  : '<span class="v-neu">\u2014</span>');
   const nPend = mine.filter((r) => r.state === "pending").length;
@@ -2924,6 +3014,16 @@ function viewHistory(v) {
     ? " \u00b7 " + nClosed + " closed, worth ~" + eff.toFixed(1) + " independent"
     : (nClosed ? " \u00b7 " + nClosed + " closed" : "");
 
+  /* WHAT AN ACCOUNT EARNED IS A SMALLER NUMBER, and nothing on this page can
+     compute it. Position size is risk_budget / risk_per_share, so the book
+     runs about a fifth invested and the rest of the account sat in cash while
+     the index compounded. A per-position figure is the right way to judge the
+     SELECTION -- it is not confounded by how much was deployed -- and it is
+     not a statement about a balance. Said once, next to the number, rather
+     than left for the reader to know. */
+  const CASH_NOTE = " \u00b7 not what the account earned: sizing leaves most " +
+    "of it in cash";
+
   /* A ratio without its count is a claim without evidence. 67% is three
      trades or two thousand and the page said the same thing either way. */
   const ratio = (v, n, label) => v == null ? "" :
@@ -2936,7 +3036,7 @@ function viewHistory(v) {
         '<div class="chart-h">' +
           '<div><div class="chart-v">' + signed(h.avg_excess) + '</div>' +
             '<div class="chart-s">average per position vs the index' +
-            effLine + '</div></div>' +
+            effLine + CASH_NOTE + '</div></div>' +
           ratio(h.win_rate, nClosed, "paid off") +
           ratio(h.beat_rate, h.benchmark_covered, "beat the index") +
         '</div>' +
@@ -2951,7 +3051,21 @@ function viewHistory(v) {
      The headline was gated on `curve.length > 1`, so the young record -- the
      one where the sample-size warning matters most -- showed no summary at
      all. */
-  const chart = head;
+  /* AN ABSENT SECTION IS NOT AN ANSWER. When nothing has closed but positions
+     are open, `head` was the empty string and the returns block simply was not
+     there -- which reads as a broken page rather than as "no position has
+     finished yet". It is the normal state for a month after any config change,
+     because closed calls are scoped to the configuration that made them and a
+     20-name book on a 63-session hold closes nothing for weeks. */
+  const chart = head || (openRows
+    ? '<div class="box chart"><div class="chart-h"><div>' +
+        '<div class="chart-v">\u2014</div>' +
+        '<div class="chart-s">no position has closed yet \u00b7 ' + openRows +
+        ' open, marked below</div></div></div>' +
+        '<p class="sig warn">Returns appear here when the first position ' +
+        'closes. Open marks are what the book is worth today, not a result.' +
+        '</p></div>'
+    : "");
 
   /* PER POSITION, NOT SUMMED. `avg_excess` is the average one position
      returned against the index over the days it was held -- a number an
@@ -3214,7 +3328,7 @@ function panelHTML(p) {
         (r.contribution > 0 ? "+" : "") + r.contribution.toFixed(3) +
         '</td></tr>').join("") +
       '</tbody></table></div>' +
-      '<p class="fam-lede">Pct = percentile in sector' +
+      '<p class="fam-lede">Pct = percentile in the eligible universe' +
       (themes.length < 5 ? ' \u00b7 ' + themes.length + ' of 5 themes' : '') +
       '</p>'
     : "";

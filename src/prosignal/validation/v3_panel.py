@@ -263,6 +263,21 @@ SEALED_WINDOWS = {
     "B": (dt.date(2021, 7, 1), dt.date(2022, 12, 27)),
 }
 
+#: WHICH SEALED WINDOWS ARE ACTUALLY OUT-OF-SAMPLE FOR THE SHIPPED WEIGHTS.
+#: Derived from `features.v3.FIT_WINDOW` rather than asserted here, so it
+#: cannot drift from the fit it describes. Window B is IN-SAMPLE: the signs and
+#: weights were fitted 2018-11-27..2024-10-25 and B is 2021-07..2022-12. Its
+#: numbers describe the METHOD (the pipeline was re-run on data ending
+#: 2021-02-17) and must not be quoted as a second seal on the shipped model.
+SEALED_WINDOW_PROVENANCE: Dict[str, Dict[str, object]] = {
+    name: v3.window_provenance(a, b) for name, (a, b) in SEALED_WINDOWS.items()
+}
+
+#: The sealed windows a result about the SHIPPED configuration may cite.
+CITABLE_SEALED_WINDOWS = tuple(
+    n for n, p in SEALED_WINDOW_PROVENANCE.items()
+    if p["verdict"] == v3.OUT_OF_SAMPLE)
+
 
 def sealed_overlap(start: dt.date, end: dt.date) -> Dict[str, float]:
     """Share of [start, end] that falls inside each sealed holdout window."""
@@ -278,12 +293,30 @@ def sealed_overlap(start: dt.date, end: dt.date) -> Dict[str, float]:
 #: WHAT THE DEPLOY EARNED. Window A equity-only, 2025-03-06 to 2026-08-17,
 #: evaluated once on the frozen configuration. The pre-fix run of the same
 #: window read ic 0.0586 / spread 0.0112 and is recorded in `parameters.yaml`.
+#:
+#: THE WINDOW-B ENTRIES ARE IN-SAMPLE AND ARE LABELLED AS SUCH. The shipped
+#: signs and weights were fitted 2018-11-27..2024-10-25; window B is
+#: 2021-07..2022-12, inside it. They are kept because the re-check prints them
+#: as context and deleting them would leave the comparison silently one-sided,
+#: but a claim about the shipped model may cite window A only --
+#: `CITABLE_SEALED_WINDOWS` is the machine-readable form of that rule.
+#:
+#: `book_excess_ann` is additionally a RAW excess against a fully-invested
+#: benchmark on a book that deploys about a fifth of capital, so most of it is
+#: cash rather than selection. See `portfolio_sim._benchmark_stats`.
 DEPLOY_REFERENCE = {
     "ic": 0.0493, "ic_t": 3.69, "spread": 0.0107, "spread_t": 2.89,
     "topk": 0.0038, "topk_t": 0.81,
     "book_excess_ann": -0.0283, "book_maxdd": -0.2392,
     "cost_drag_ann": 0.0966,
+    "book_excess_ann_is_leverage_confounded": True,
     "ic_window_b": 0.0357, "spread_window_b": 0.0086,
+    "window_b_is_in_sample": True,
+    "citable_windows": list(CITABLE_SEALED_WINDOWS),
+    # Q4. These were measured over the whole panel, which spans a model that
+    # scored 2.99 themes per name at the start and 4.86 at the end. See
+    # `v3_monitor.stable_model_window`.
+    "spans_variable_theme_coverage": True,
 }
 
 
@@ -419,8 +452,12 @@ def recheck(panel: pd.DataFrame, *, holdout_months: int = 3,
                 f"sessions (t {sp_t:.2f}), outside a {len(nulls)}-draw shuffled "
                 f"null at p={p:.3f}. The deploy earned "
                 f"+{DEPLOY_REFERENCE['spread']:.2%} "
-                f"(t {DEPLOY_REFERENCE['spread_t']:.2f}) on window A and "
-                f"+{DEPLOY_REFERENCE['spread_window_b']:.2%} on window B.")
+                f"(t {DEPLOY_REFERENCE['spread_t']:.2f}) on window A, which is "
+                f"the only sealed window that is out-of-sample for the shipped "
+                f"weights. Window B (+"
+                f"{DEPLOY_REFERENCE['spread_window_b']:.2%}) lies inside the "
+                f"2018-11-27..2024-10-25 fit window and is NOT a second seal "
+                f"on this configuration -- it graded a re-fit of the method.")
     elif sp > 0:
         verdict = "WEAK"
         note = (f"spread is positive (+{sp:.2%}) but inside the shuffled null "

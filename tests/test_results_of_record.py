@@ -51,15 +51,31 @@ def test_a_missing_ir_is_not_computable_rather_than_zero():
 
 
 # -------------------------------------------------------- reproduction verdict
+# The verdict rests on LEVERAGE-NEUTRAL figures. The book deploys ~22% of
+# capital against a 100%-invested benchmark, so raw excess and the information
+# ratio move with `risk_per_trade_pct` while the ranking, the names and every
+# other setting stay identical -- across a sweep the raw figure spans 9.5
+# points. They are still compared, and they no longer decide anything.
 def _measured(**over):
-    base = {"ir": -0.84, "mean_excess_per_period": -0.0446,
-            "periods_beating_benchmark": 0.326, "alpha_per_period": 0.0009}
+    base = {"alpha_on_deployed_ann": -0.0466, "excess_on_deployed_ann": -0.0247,
+            "ir": -0.84, "mean_excess_per_period": -0.0446,
+            "periods_beating_benchmark": 0.326, "alpha_per_period": 0.0009,
+            "deployed_frac": 0.218, "excess_ann": -0.1860,
+            "levmatch_excess_ann": -0.0130, "alpha_t": -0.57}
     base.update(over)
     return base
 
 
-CLAIMED = {"mean_excess_per_period": -0.0423, "ir": -0.83,
+#: A claim restated in the unit the engine now reports.
+CLAIMED = {"alpha_on_deployed_ann": -0.0450, "excess_on_deployed_ann": -0.0250,
+           "mean_excess_per_period": -0.0423, "ir": -0.83,
            "alpha_per_period": -0.0067, "periods_beating_benchmark": 0.329}
+
+#: What README.md actually published: raw excess and IR, and nothing that
+#: survives a change of risk budget.
+CLAIMED_AS_PUBLISHED = {"mean_excess_per_period": -0.0423, "ir": -0.83,
+                        "alpha_per_period": -0.0067,
+                        "periods_beating_benchmark": 0.329}
 
 
 def test_a_claim_that_lands_inside_tolerance_reproduces():
@@ -68,11 +84,34 @@ def test_a_claim_that_lands_inside_tolerance_reproduces():
     assert rows, "the per-figure comparison must be returned either way"
 
 
-def test_a_non_headline_divergence_is_reported_but_does_not_withdraw():
-    """Alpha flips sign here on a near-zero residual and is NOT a headline.
+def test_the_headline_figures_are_the_leverage_neutral_ones():
+    """The finding, as one assertion. If `ir` or `mean_excess` is ever headline
+    again, a withdrawal verdict can be flipped by changing the risk budget."""
+    headline = {k for k, _, _, h in R.SHIPPED_FIGURES if h}
+    assert headline == {"alpha_on_deployed_ann", "excess_on_deployed_ann"}
+    confounded = {k for k, lbl, _, h in R.SHIPPED_FIGURES
+                  if "LEVERAGE-CONFOUNDED" in lbl}
+    assert confounded == {"ir", "mean_excess_per_period"}
+    assert not (headline & confounded)
 
-    Letting it withdraw a table whose headline reproduces to two decimals would
-    be as misleading as hiding it, so it is reported in the reason and in the
+
+def test_a_claim_stated_only_in_retired_units_is_superseded_not_reproduced():
+    """The published table quoted no leverage-neutral figure, because none
+    existed when it was written. Calling that REPRODUCED would let a withdrawn
+    unit ride on a green word; calling it WITHDRAWN would claim a refutation
+    the re-run cannot support."""
+    status, reason, rows = R._judge_shipped(CLAIMED_AS_PUBLISHED, _measured())
+    assert status == "SUPERSEDED", reason
+    assert "retired unit" in reason
+    assert "21.8%" in reason, "the reason must show HOW MUCH capital is deployed"
+    assert any(r["headline"] and r["verdict"] == "NOT_TESTABLE" for r in rows)
+
+
+def test_a_non_headline_divergence_is_reported_but_does_not_withdraw():
+    """Alpha per period flips sign here on a near-zero residual and is NOT a
+    headline -- it is proportional to deployment, so it scales with the risk
+    budget. Letting it withdraw a table whose headline reproduces would be as
+    misleading as hiding it, so it is reported in the reason and in the
     comparison table instead.
     """
     status, reason, rows = R._judge_shipped(CLAIMED, _measured())
@@ -86,17 +125,27 @@ def test_a_non_headline_divergence_is_reported_but_does_not_withdraw():
     assert alpha["headline"] is False
 
 
-def test_a_headline_sign_flip_withdraws_the_claim():
+def test_a_confounded_figure_diverging_does_not_withdraw_the_claim():
+    """The whole point of the retirement: IR can move a long way on a change of
+    risk budget alone, so it must not be able to withdraw anything."""
     status, reason, _ = R._judge_shipped(CLAIMED, _measured(ir=+0.84))
+    assert status == "REPRODUCED"
+    assert "confounded with the risk budget" in reason
+
+
+def test_a_headline_sign_flip_withdraws_the_claim():
+    status, reason, _ = R._judge_shipped(
+        CLAIMED, _measured(alpha_on_deployed_ann=+0.0466))
     assert status == "WITHDRAWN"
     assert "OPPOSITE SIGN" in reason
+    assert "deployed capital" in reason
 
 
 def test_a_headline_magnitude_gap_withdraws_the_claim():
     status, reason, _ = R._judge_shipped(
-        CLAIMED, _measured(mean_excess_per_period=-0.30))
+        CLAIMED, _measured(excess_on_deployed_ann=-0.30))
     assert status == "WITHDRAWN"
-    assert "mean excess" in reason
+    assert "excess on deployed capital" in reason
 
 
 def test_an_unrunnable_arm_is_not_testable_and_never_a_failure():

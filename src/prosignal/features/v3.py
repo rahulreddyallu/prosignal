@@ -47,9 +47,17 @@ label the reversal sub-score came out ANTI-predictive at t -3.96. Sub-scores are
 ranks, so they blend regardless of which horizon oriented them.
 
 WHAT THE SEALED HOLDOUTS SAID, ON THE UNCAPPED BLEND. Two windows, one
-evaluation each, no re-tuning:
+evaluation each, no re-tuning -- AND THEY ARE NOT TWO INDEPENDENT
+CONFIRMATIONS. The weights below were fitted 2018-11-27..2024-10-25
+(`FIT_WINDOW`). Window A starts after that and is genuinely out-of-sample for
+them. WINDOW B LIES ENTIRELY INSIDE IT. B is evidence about the METHOD -- the
+whole pipeline was re-run on data ending 2021-02-17 and evaluated once on what
+followed -- and it is NOT evidence about the shipped configuration, because the
+model it graded was a different fit. Quoting the pair as a matched set reads an
+in-sample number as a second seal, and B is the better-looking of the two.
 
                               A 2025-03..2026-08   B 2021-07..2022-12
+    provenance vs FIT_WINDOW     OUT-OF-SAMPLE    >>> IN-SAMPLE <<<
     rank IC (t), h=21            +0.049 (3.69)        +0.036 (3.83)
     quintile spread (t)          +1.07% (2.89)        +0.86% (3.05)
     top-ten excess (t)           +0.38% (0.81)        +1.37% (2.50)
@@ -57,6 +65,17 @@ evaluation each, no re-tuning:
     ten-name book, net excess        -2.8%/yr            +2.0%/yr
     modelled cost drag                9.7%/yr           13.7%/yr
     max drawdown                     -23.9%             -16.4%
+
+READ COLUMN A ALONE AND THE HONEST SUMMARY IS: the RANKING generalises
+(IC +0.049 at t 3.69) and the BOOK does not (top-ten excess +0.38% at t 0.81,
+net excess negative). Every reassuring figure in the table comes from column B.
+
+A FURTHER CAUTION ON THE BOOK ROW. "-2.8%/yr net excess" is a raw comparison
+against a FULLY-INVESTED benchmark, and this book is not fully invested --
+risk-budget sizing deploys about a fifth of capital, so most of any such gap is
+cash rather than selection. See `validation.portfolio_sim._benchmark_stats`;
+the leverage-neutral reading of the shipped book is about -6% a year on
+deployed capital at t -0.7, i.e. not distinguishable from zero either way.
 
 For window B the ENTIRE pipeline -- screen, stability, admission, weights -- was
 re-run on data ending 2021-02-17 and evaluated once on the eighteen months that
@@ -80,6 +99,7 @@ cleaner read of the two.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -91,7 +111,71 @@ __all__ = ["Theme", "THEMES", "FACTOR_THEME", "ALL_FACTORS", "MIN_THEMES",
            "score_frame", "attribution", "absolute_floor", "cap_weights",
            "BOOK", "BOOK_NOTE", "HOLDOUT_BOOK", "RESEARCH_BOOK",
            "score_dispersion", "TYPICAL_DISPERSION", "residual_bucket_size",
-           "LIVE_BOOK", "EXCLUDED_THEMES"]
+           "LIVE_BOOK", "EXCLUDED_THEMES", "SECTOR_NEUTRAL",
+           "FIT_WINDOW", "window_provenance", "IN_SAMPLE", "OUT_OF_SAMPLE",
+           "STRADDLES_FIT_BOUNDARY"]
+
+
+#: THE WINDOW THE SHIPPED SIGNS AND WEIGHTS WERE FITTED ON. Stated as data
+#: rather than prose because a sealed-window claim has to be checkable: a
+#: holdout that lies inside this range is not a holdout for THIS model, however
+#: carefully it was sealed at the time.
+FIT_WINDOW: Tuple[dt.date, dt.date] = (dt.date(2018, 11, 27),
+                                       dt.date(2024, 10, 25))
+
+IN_SAMPLE = "IN_SAMPLE"
+OUT_OF_SAMPLE = "OUT_OF_SAMPLE"
+STRADDLES_FIT_BOUNDARY = "STRADDLES_FIT_BOUNDARY"
+
+
+def window_provenance(start: dt.date, end: dt.date) -> Dict[str, object]:
+    """Is `[start, end]` out-of-sample FOR THE SHIPPED WEIGHTS?
+
+    WHY THIS IS NOT A DETAIL. The docstring above reports two sealed windows
+    side by side, and a reader takes the pair as two independent confirmations.
+    They are not. Window A (2025-03-06..2026-08-17) begins after `FIT_WINDOW`
+    ends and is genuinely out-of-sample. Window B (2021-07-01..2022-12-27) lies
+    ENTIRELY INSIDE the window the signs and weights were fitted on.
+
+    The defence recorded for B is that "the ENTIRE pipeline was re-run on data
+    ending 2021-02-17 and evaluated once on the eighteen months that followed".
+    That is a real and valuable test -- of the METHOD. It is not a test of the
+    shipped configuration, because the model it evaluated was a different fit.
+    So B's numbers may not be quoted as evidence about what ships, and the
+    cleaner-looking of the two windows is the one that cannot be used.
+
+    Which leaves window A as the only out-of-sample evaluation of the shipped
+    weights -- and window A is the one reporting a top-ten excess of +0.38% at
+    t 0.81 and a negative book. Reading the two together as "3 of 5 themes
+    positive on B, 5 of 5 on A" averages an in-sample result with an
+    out-of-sample one.
+    """
+    lo, hi = FIT_WINDOW
+    if start > hi:
+        verdict, note = OUT_OF_SAMPLE, (
+            "begins after the fit window closed; a genuine out-of-sample "
+            "evaluation of the shipped signs and weights")
+    elif end < lo:
+        verdict, note = OUT_OF_SAMPLE, (
+            "ends before the fit window opened; out-of-sample, though the "
+            "factor SET was still chosen with knowledge of this era")
+    elif start >= lo and end <= hi:
+        verdict, note = IN_SAMPLE, (
+            "lies ENTIRELY INSIDE the window the shipped signs and weights "
+            "were fitted on. Any result here describes the fit, not a "
+            "forecast, unless the model evaluated was re-fitted on data "
+            "ending before this window -- in which case it is evidence about "
+            "the METHOD and not about the shipped configuration")
+    else:
+        verdict, note = STRADDLES_FIT_BOUNDARY, (
+            "straddles the fit boundary, so it pools in-sample and "
+            "out-of-sample dates into one statistic. Split it")
+    span = max((end - start).days, 1)
+    inside = max((min(end, hi) - max(start, lo)).days, 0)
+    return {"start": start.isoformat(), "end": end.isoformat(),
+            "fit_window": [lo.isoformat(), hi.isoformat()],
+            "verdict": verdict, "share_in_sample": min(inside / span, 1.0),
+            "note": note}
 
 
 @dataclass(frozen=True)
@@ -142,10 +226,37 @@ THEMES: Dict[str, Theme] = {
                  ("prox_52w", 1), ("prox_52w_now", 1), ("voladj_mom_12_1", 1),
                  ("voladj_mom_6_1", 1)),
     ),
+    # `net_margin` WAS DROPPED 2026-09-06. Q18 measured every shipped sign on
+    # the 78 dates after the fit window closed: 20 of 22 held, and this one did
+    # not. It ships at -1 on an in-sample IC of -0.0486 (t -6.42) and reads
+    # +0.0207 (t +2.52) out of sample -- significant in the OTHER direction,
+    # which is not the same failure as decaying to zero. The model was using a
+    # sign the data refuses.
+    #
+    # THE THEME STAYS, AND THAT IS THE MEASUREMENT TALKING. Dropping the whole
+    # theme was the obvious call and it is worse: out of sample at h=63 the
+    # composite reads +0.0718 (t +1.38) without it against +0.0748 (t +1.64)
+    # shipped. `margin_stability` holds its sign firmly (-0.0272, t -4.74) and
+    # is carrying the theme on its own. Four dispositions were compared and
+    # charged to the registry; this one wins at both horizons on IC and on t:
+    #
+    #     shipped, 2 factors   h21 +0.0551 t +2.14   h63 +0.0748 t +1.64
+    #     theme dropped        h21 +0.0560 t +1.97   h63 +0.0718 t +1.38
+    #     THIS                 h21 +0.0572 t +2.20   h63 +0.0776 t +1.66
+    #     net_margin flipped   h21 +0.0582 t +2.15   h63 +0.0771 t +1.57
+    #
+    # Flipping the sign scores nearly as well and is NOT taken: a sign fitted
+    # on one window and reversed on the next is a sign nothing supports, and
+    # re-fitting it to the out-of-sample window spends the only clean evidence
+    # there is.
+    #
+    # The weight is unchanged at 0.18991 -- dropping a factor from inside a
+    # theme changes what the theme measures, not what it is worth. See Q11 on
+    # the coverage cap that set it, which has since expired.
     "quality": Theme(
         weight=0.18991, horizon=21, coverage=0.1899,
-        label="Low-margin tilt",
-        factors=(("margin_stability", -1), ("net_margin", -1)),
+        label="Margin instability",
+        factors=(("margin_stability", -1),),
     ),
     "ownership": Theme(
         weight=0.18939, horizon=10, coverage=0.8985,
@@ -181,6 +292,48 @@ EXCLUDED_THEMES = {
                    "statistic is so persistent that a year-shifted alignment "
                    "reproduces it -- against a real t of -1.2.",
 }
+
+#: WHETHER FACTORS ARE RANKED WITHIN SECTOR. Now FALSE, on two independent
+#: grounds, and it is the rare change that removes a bias and raises the signal
+#: at the same time.
+#:
+#: 1. THE SECTOR MAP IS A FUTURE-CONDITIONED ATTRIBUTE. `_refresh_sector_map`
+#:    pools the `Industry` column of TODAY's NSE constituent files, so a name
+#:    that has since delisted or fallen out of every index has no sector and
+#:    lands in `__RESID__`. Having a sector label today is therefore correlated
+#:    with having survived, and it is worth a great deal: measured across 380
+#:    panel dates, names WITH a known sector out-returned names without by
+#:    +1.05% per 21 sessions (overlap-corrected t +3.64) and +3.36% per 63
+#:    (t +3.48). That is larger than the entire signal, and the grouping the
+#:    ranking is computed inside is defined by it.
+#:
+#: 2. IT COSTS INFORMATION. Re-scoring the whole panel both ways, on dates
+#:    AFTER the fit window closed:
+#:
+#:        horizon   sector-neutral IC        universe rank IC
+#:            5     +0.0406 (t +3.88)        +0.0485 (t +3.79)
+#:           21     +0.0427 (t +1.99)        +0.0562 (t +2.18)
+#:           63     +0.0473 (t +1.34)        +0.0759 (t +1.64)
+#:
+#:    -- and the direction independently reproduces what `features/v9r.py`
+#:    already recorded for the unneutralised composite (+0.0674 against +0.0547
+#:    at h=21).
+#:
+#: WHY IT HURTS. `residual_bucket_size` has always reported the mechanism: on a
+#: live cross-section of 386 names, 150 (38.9%) sit in `__RESID__` -- 79
+#: genuinely unclassified plus 71 drawn from THIRTEEN real sectors folded in for
+#: holding fewer than MIN_SECTOR_NAMES. A Power stock was being neutralised
+#: against Realty. For 39% of the universe "sector-neutral" named a peer group
+#: that does not exist, and the sector-level information it stripped from the
+#: other 61% was itself predictive.
+#:
+#: This CHANGES THE RANKING and therefore opens a new epoch. It is not a
+#: correctness patch that leaves the model alone. `sector_neutral_rank` is kept
+#: -- it is still the honest implementation of the idea, and a point-in-time
+#: sector source would make it usable -- and `sectors` is still threaded through
+#: `score_frame` so `residual_bucket_size` can keep reporting what a sector map
+#: would cover if one existed.
+SECTOR_NEUTRAL: bool = False
 
 #: A name needs this many themes before it is scored at all.
 MIN_THEMES = 3
@@ -270,6 +423,97 @@ def theme_subscore(ranks: pd.DataFrame, theme: Theme,
     raw = np.where(n >= min_factors, num / np.maximum(n, 1), np.nan)
     s = pd.Series(raw, index=ranks.index)
     return (s.rank(pct=True) - 0.5) * 2.0
+
+
+#: A declared coverage this far from the measured one is not the constraint the
+#: weight was chosen under any more. 1.5x is generous: quality's has drifted
+#: 4.4x.
+COVERAGE_DRIFT_TOLERANCE = 1.5
+
+
+def coverage_drift(panel: pd.DataFrame,
+                   cap: float = 0.40) -> Dict[str, Dict[str, float]]:
+    """Declared coverage against measured, per theme, and whether it still binds.
+
+    WHAT `Theme.coverage` IS. Each theme's weight was capped at the share of
+    names the theme can speak about, and that share was measured once over the
+    fit window and frozen. `V3_SEARCH.md` §6 records why: fitted without the
+    constraint, `quality` took 40%+ of the composite while only 19% of names
+    had fundamentals at all, which ranks the 19% and the 81% by two different
+    models and calls the result one score. The cap was the right call and
+    quality's shipped 0.18991 IS its 0.1899 coverage cap.
+
+    WHY THIS FUNCTION EXISTS. The fundamentals feed has since caught up.
+    Measured on the shipped panel, `quality_sub` coverage over the fit window
+    is 0.363 and over the last year of data 0.837 -- against a declared 0.1899.
+    The constraint that set the second-largest weight in the model is a
+    measurement of a data feed as it stood in 2024, and it no longer binds:
+    min(0.40, 0.837) is 0.40, so a refreshed cap would not cut quality at all
+    and its pre-cap weight was 40%+.
+
+    THIS DOES NOT REFIT ANYTHING. Refreshing the cap roughly doubles the
+    quality weight and pushes momentum off its own cap, which is a model change
+    that spends trials and opens an epoch. It is a decision to take against
+    this measurement, not a consequence of it. What this returns is the
+    arithmetic, so the staleness cannot sit unnoticed in a frozen constant.
+    """
+    out: Dict[str, Dict[str, float]] = {}
+    for name, theme in THEMES.items():
+        col = name + "_sub"
+        if panel is None or col not in getattr(panel, "columns", ()):
+            continue
+        measured = float(pd.Series(panel[col]).notna().mean())
+        declared = float(theme.coverage)
+        out[name] = {
+            "declared": declared,
+            "measured": measured,
+            "ratio": (measured / declared if declared > 0 else float("nan")),
+            "weight": float(theme.weight),
+            # The cap BINDS when the theme's coverage is the thing cutting its
+            # weight -- i.e. it sits below the 0.40 structural cap.
+            "declared_binds": float(declared < cap),
+            "measured_binds": float(measured < cap),
+            "stale": float(abs(measured - declared) > 1e-9
+                           and (max(measured, declared)
+                                / max(min(measured, declared), 1e-9))
+                           > COVERAGE_DRIFT_TOLERANCE),
+        }
+    return out
+
+
+def stale_coverage_caps(panel: pd.DataFrame) -> List[str]:
+    """Themes whose declared coverage no longer describes the data.
+
+    Empty is the healthy state; each entry is a sentence a report can print.
+
+    ONLY WHERE IT CHANGES A WEIGHT. Drift in a coverage figure that sits above
+    the structural `cap` on both readings cut nothing before and cuts nothing
+    now -- momentum's 0.9988 could halve and its weight would still be set by
+    the 0.40 cap. An alarm that fires there is an alarm nobody reads. Both
+    directions of a binding change are reported: a cap that has STOPPED binding
+    holds a weight down for an expired reason, and one that has STARTED binding
+    means a theme is weighted for a coverage it no longer has.
+    """
+    msgs: List[str] = []
+    for name, d in coverage_drift(panel).items():
+        if not d["stale"]:
+            continue
+        was, now = bool(d["declared_binds"]), bool(d["measured_binds"])
+        if not (was or now):
+            continue
+        tail = ""
+        if was and not now:
+            tail = (" The cap no longer binds, so the weight is held down by "
+                    "a constraint that has expired.")
+        elif now and not was:
+            tail = (" The cap did not bind when the weight was chosen and it "
+                    "does now, so the theme is weighted for a coverage it no "
+                    "longer has.")
+        msgs.append(
+            f"{name}: weight {d['weight']:.5f} was capped at a coverage of "
+            f"{d['declared']:.4f}; measured coverage is now {d['measured']:.4f} "
+            f"({d['ratio']:.1f}x)." + tail)
+    return msgs
 
 
 def cap_weights(raw: Dict[str, float], cap: float = 0.40, floor: float = 0.06,
@@ -368,7 +612,8 @@ def _weights_for_pattern(available: Tuple[bool, ...],
 
 
 def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
-                min_themes: int = MIN_THEMES) -> pd.DataFrame:
+                min_themes: int = MIN_THEMES,
+                sector_neutral: Optional[bool] = None) -> pd.DataFrame:
     """Rank, combine within theme, blend. One row per symbol.
 
     Weights are re-capped over the themes a name actually has -- see
@@ -380,10 +625,15 @@ def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
     that produced THIS name's contribution. Without it the presentation layer
     had only `Theme.weight` to show, so every card displayed a weight that did
     not multiply its own z into its own contribution.
+
+    `sectors` is still accepted and is used for the `residual_bucket_size`
+    diagnostic, but it no longer decides the ranking unless `sector_neutral` is
+    explicitly True. See `SECTOR_NEUTRAL` for the measurement behind that.
     """
     if raw is None or raw.empty:
         return pd.DataFrame()
-    sec = pd.Series(sectors).reindex(raw.index) if sectors else None
+    use_sec = SECTOR_NEUTRAL if sector_neutral is None else bool(sector_neutral)
+    sec = pd.Series(sectors).reindex(raw.index) if (sectors and use_sec) else None
     cols = [c for c in ALL_FACTORS if c in raw.columns]
     ranks = pd.DataFrame({c: sector_neutral_rank(raw[c], sec) for c in cols},
                          index=raw.index)
@@ -454,7 +704,15 @@ RESEARCH_BOOK = {"slots": 12, "entry_rank": 24, "exit_rank": 48,
                  "universe_max_names": 750, "floor_applies_to": "entries_only"}
 
 #: Read-only mirror of the LIVE book. The config is the source of truth.
-LIVE_BOOK = {"slots": 6, "entry_rank": 6, "exit_rank": 18,
+#:
+#: WIDENED 6 -> 20 ON 2026-09-06, following `capital.max_open_positions`.
+#: Six names cannot express a ranking over 386 -- Grinold's transfer
+#: coefficient measures 0.206 for the top-6 against 0.296 for a wider book --
+#: and net of modelled cost the wider book reads -1.95% alpha on deployed
+#: capital out of sample against the old -10.46%, Sharpe +0.15 against -0.28.
+#: `exit_rank` keeps the 3x hysteresis ratio the 6/18 configuration was
+#: measured with; whether 60 is right for a 20-name book is NOT measured.
+LIVE_BOOK = {"slots": 20, "entry_rank": 20, "exit_rank": 60,
              "entry_cadence_sessions": 21}
 
 #: Kept as the name older code imported. It is the RESEARCH book -- which is
@@ -468,19 +726,25 @@ BOOK_NOTE = (
     "filtering the whole population -- lost to the benchmark by 2.8% a year on "
     "window A and beat it by 2.0% on window B, and on both the reason was "
     "transaction costs of 9.7% and 13.7% a year. "
-    "AND THAT IS NOT THE BOOK THAT TRADES. Production runs SIX positions on a "
-    "21-session cadence with a 3x exit band (18), which is both slower and far "
-    "more concentrated than anything either window measured. Slower cuts the "
-    "cost drag that sank the tested book, and turnover needs no labels to "
-    "verify. More concentrated cuts the other way, and it leans on the "
-    "statistic that generalised LEAST: top-ten excess on window A was +0.38% "
-    "at t 0.81, indistinguishable from zero, while the quintile spread held at "
-    "t 2.89. Ordering within the top few names is the part of this model the "
-    "holdouts did not support, and a six-name book is a bet on exactly that. "
-    "Read the shortlist as drawn from an evidenced ranking; the concentration "
-    "is an operator's risk choice, not a validated one. Both windows are spent, "
-    "so no book can be settled here -- the quarterly re-check is what will do "
-    "it, once its window stops overlapping window A.")
+    "AND THAT IS NOT THE BOOK THAT TRADES. Production runs TWENTY positions on "
+    "a 21-session cadence with a 3x exit band (60), equal-weighted at a 75% "
+    "target deployment. It is slower than anything either window measured and, "
+    "since 2026-09-06, WIDER rather than more concentrated. "
+    "IT USED TO BE SIX, and that was the single worst decision in the book. "
+    "Top-ten excess on window A was +0.38% at t 0.81 -- indistinguishable from "
+    "zero -- while the quintile spread held at t 2.89, so ordering within the "
+    "top few names is precisely the part of this model the holdouts did not "
+    "support, and a six-name book was a bet on exactly that. Measured net of "
+    "cost at the live cadence, widening to twenty moves alpha on deployed "
+    "capital from -10.46% to -1.95% out of sample (Sharpe -0.28 to +0.15) and "
+    "from +3.50% to +9.68% on the full panel (+0.68 to +1.28). "
+    "THIS IS STILL NOT A VALIDATED BOOK. Out-of-sample alpha remains negative "
+    "and +0.15 Sharpe is not significant; it is less bad, not good. Both "
+    "windows are spent, so no book can be settled here, and every net figure "
+    "above divides by an impact coefficient that has never been calibrated "
+    "against a realised fill. Read the shortlist as drawn from an evidenced "
+    "ranking; the construction is an operator's choice measured against a "
+    "simulator, not a validated one.")
 
 
 def absolute_floor(scored: pd.DataFrame, dist_200dma: pd.Series,
