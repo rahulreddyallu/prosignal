@@ -933,24 +933,23 @@ REGISTER: Tuple[Finding, ...] = (
             "be quoted without its schedule. The default is unchanged for a "
             "caller that passes nothing.",
         regression_test="tests/test_cadence_parity.py",
-        before_after="measured on the whole store, same ranking and same "
-                     "params, only the cadence moved: cost 0.45% -> 1.17% a "
-                     "year and its share of gross 10.3% -> 22.6%; round trips "
-                     "15.8 -> 40.6 a year; periods per year 4.0 -> 12.0. "
-                     "Deployment is unchanged at 20%, so this is turnover "
-                     "rather than leverage. Alpha on deployed capital RISES, "
-                     "+4.50% -> +6.74%, which is consistent with the "
-                     "out-of-sample IC being strongest at the shorter "
-                     "horizons: the live book re-ranks often enough to use it",
+        before_after="RE-MEASURED after Q23. Same ranking, same params, only "
+                     "the cadence moved: cost 0.45% -> 1.19% a year and its "
+                     "share of gross 10.3% -> 24.9%; round trips 15.8 -> 41.5; "
+                     "periods per year 4.0 -> 12.0. Alpha on deployed capital "
+                     "FALLS, +4.50% -> +3.50%. The first measurement of this "
+                     "finding reported it RISING to +6.74%, and that was the "
+                     "ratcheting stop of Q23 inflating the fast cadence by 3.2 "
+                     "points, not the signal",
         moves_coefficients=False, moves_history=True, forces_restart=False,
         notes="This does not change the ranking, and it changes every cost, "
               "turnover and net-return figure the simulator has ever "
-              "produced. The cost figures all move the same way -- worse, by "
-              "more than a factor of two. The book's own alpha does not, and "
-              "that is worth noticing rather than filing away: the schedule "
-              "the engine actually runs is better than the one it was being "
-              "measured on, and it was being measured on the wrong one for "
-              "reasons that had nothing to do with which was better.",
+              "produced. Everything moves the same way: worse. The schedule "
+              "the engine actually runs costs more than twice as much to "
+              "trade AND earns a point less alpha on deployed capital than "
+              "the cohort schedule it was being measured on. An earlier "
+              "version of this finding said the opposite; see Q23 for why it "
+              "was wrong.",
     ),
     _f(
         fid="Q7", severity="high",
@@ -1234,20 +1233,20 @@ REGISTER: Tuple[Finding, ...] = (
               "shipped band is too narrow and the old metric said the "
               "opposite",
         category=Category.VALIDATION, status=Status.FIXED,
-        root_cause="PHASE 0 of the audit asked for the exit/stop/size "
-                   "ablations to be re-run on a statistic that does not move "
-                   "with the knob. Building the harness (Q8) was not the same "
-                   "as running them. Re-run on the whole store at the live "
-                   "cadence, ranked on alpha over deployed capital:\n"
-                   "  EXIT BAND   12: +6.28%  18 (shipped): +6.74%  "
-                   "36: +8.76%\n"
-                   "  raw excess  12: -17.12%  18: -16.29%  36: -17.03%\n"
-                   "The widest band earns +2.0 points more alpha on deployed "
-                   "capital AND a shallower drawdown (-10.8% against -12.2%), "
-                   "while its RAW excess is worse than the shipped band's. An "
-                   "ablation decided the old way rejects the better "
-                   "configuration -- which is not a hypothetical about the "
-                   "confound, it is the confound choosing.",
+        root_cause="PHASE 0 asked for the exit/stop/size ablations to be "
+                   "re-run on a statistic that does not move with the knob. "
+                   "Building the harness (Q8) was not the same as running "
+                   "them. RE-MEASURED after Q23, on the whole store at the "
+                   "live cadence, ranked on alpha over deployed capital:\n"
+                   "  EXIT BAND   12: +3.92%  18 (shipped): +3.50%  "
+                   "36: +5.00%\n"
+                   "  maxDD       12: -12.7%  18: -12.3%  36: -9.6%\n"
+                   "The shipped band is the WORST of the three, and the "
+                   "ordering is not monotone in width -- both a narrower and a "
+                   "wider band beat it -- so 'wider is better' is not what "
+                   "this shows. What it shows is that 18 is a local worst and "
+                   "the width was never chosen on a statistic that could see "
+                   "that.",
         location="prosignal.validation.ablation",
         fix="Ablations re-run and the arms charged to the trial registry -- "
             "11 configurations, taking the DSR count to 633. Re-measuring a "
@@ -1256,24 +1255,29 @@ REGISTER: Tuple[Finding, ...] = (
             "score was looked at is charged.",
         regression_test="tests/test_ablation_leverage_neutral.py",
         before_after="EXIT RUNGS: the shipped arm, no_target and "
-                     "no_invalidation are identical at +6.74%, which is "
-                     "correct -- both rungs are already disarmed in the "
-                     "shipped config, so disarming them again changes "
-                     "nothing. `no_stop` is +5.91%, so the ATR stop is worth "
-                     "+0.83 points and earns its place. RISK BUDGET: raw "
-                     "excess spans 14.4 points (-3.94% to -18.36%) while "
-                     "alpha on deployed spans 2.7 (+6.04% to +8.73%) -- the "
-                     "confound reproduced on the real panel at 5.3x",
+                     "no_invalidation are identical at +3.50%, which is "
+                     "correct -- both rungs are already disarmed, so "
+                     "disarming them again changes nothing. `no_stop` is "
+                     "+3.63%, so the ATR stop COSTS 0.13 points. The first "
+                     "measurement had it earning +0.83; that was Q23's "
+                     "ratchet, and the sign flipped when it came out. RISK "
+                     "BUDGET: raw excess spans 12.3 points (-6.96% to "
+                     "-19.29%) while alpha on deployed spans 1.91 (+2.79% to "
+                     "+4.70%) -- the confound reproduced on the real panel at "
+                     "6.4x",
         moves_coefficients=False, moves_history=False, forces_restart=False,
         notes="ALPHA ON DEPLOYED IS NOT PERFECTLY FLAT across the sizing "
-              "sweep -- it rises from +6.04% at 0.5% risk to +8.73% at 4%, "
-              "where deployment reaches 70% and the worst drawdown reaches "
-              "-37.2%. It is five times more stable than the raw figure and "
-              "it is not an invariant, and saying otherwise would be the same "
-              "kind of overclaim this audit exists to remove. Widening the "
-              "band is NOT applied here: it is a model change that spends "
-              "trials and opens an epoch, and it now has a measurement behind "
-              "it instead of a metric that pointed the wrong way.",
+              "sweep -- it rises from +2.79% at 0.5% risk to +4.70% at 4%, "
+              "where deployment reaches 75% and the worst drawdown reaches "
+              "-38.4%. It is six times more stable than the raw figure and it "
+              "is not an invariant, and saying otherwise would be the "
+              "overclaim this audit exists to remove. WITHDRAWN FROM THE "
+              "FIRST VERSION OF THIS FINDING: that the raw metric would have "
+              "rejected the better band. On the corrected numbers raw excess "
+              "also ranks band 36 best, so the two metrics agree here and the "
+              "claim was an artefact of the ratchet. Nothing is applied: "
+              "changing the band is a model change that spends trials and "
+              "opens an epoch.",
     ),
     _f(
         fid="Q15", severity="medium",
@@ -1283,9 +1287,9 @@ REGISTER: Tuple[Finding, ...] = (
         root_cause="`entry_rank`/`exit_rank` is 6/18 and the wider exit band "
                    "exists so a held name is kept while it stays inside it, "
                    "paying nothing. Nothing reported whether that happened. "
-                   "Measured at the live cadence, 3.39 of 4.79 held names are "
-                   "charged a round trip EVERY period -- the band carries 29% "
-                   "of the book and 40.6 round trips a year are paid anyway. "
+                   "Measured at the live cadence, 3.46 of 5.09 held names are "
+                   "charged a round trip EVERY period -- the band carries 32% "
+                   "of the book and 41.5 round trips a year are paid anyway. "
                    "The band is not the only thing that can fail to save a "
                    "position: a name whose position closed early, stopped out "
                    "or exited at the horizon, is re-bought and pays however "
@@ -1558,6 +1562,54 @@ REGISTER: Tuple[Finding, ...] = (
               "year -- the short end is where the signal is strongest AND "
               "where cost is most likely to eat it, and the two have to be "
               "decided together.",
+    ),
+    _f(
+        fid="Q23", severity="critical",
+        title="The cadence fix gave every carried position a ratcheting stop, "
+              "and inflated the live schedule by three points of alpha",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`resolve_exits` treats the index it is handed as the ENTRY "
+                   "row -- its own docstring says 'resolve every symbol's "
+                   "trade opened at row i'. Q6 truncates a cohort at the "
+                   "decision cadence and re-selects, and it resolved each "
+                   "carried name from TODAY. So a position held across three "
+                   "21-session decisions had its stop, its 3R target and its "
+                   "invalidation level re-based to the current price twice: a "
+                   "ratcheting stop, when `stage7_risk.trailing_stop.enabled` "
+                   "is false and the engine has none. A re-based stop on a "
+                   "winner sits far closer to the price than the original ever "
+                   "did. The same code also RE-SIZED carried positions to the "
+                   "risk budget at today's price each period, which is a "
+                   "rebalance to target risk every cadence that the engine "
+                   "also does not do.",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="A carried position is resolved from its OWN entry row and books "
+            "only the increment for this period, "
+            "(1+r_through)/(1+r_before) - 1, so the stop that decides its fate "
+            "is the one it was opened with. `opened_size` fixes the size at "
+            "entry and marks it to what the position is now worth. The "
+            "default cohort schedule is untouched: `truncated` gates both.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="on the fixture the ratchet made the stop look like it "
+                     "cost 4.22 points of alpha at a 21-session cadence "
+                     "against 0.40 at the default; corrected, 2.28 against "
+                     "0.40, and the residual is real -- a faster cadence "
+                     "re-buys stopped names more often. On the real store the "
+                     "live cadence read +6.74% alpha on deployed and reads "
+                     "+3.50% once the ratchet is out",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+        notes="THIS REVERSED A PUBLISHED CONCLUSION OF MY OWN. Q6 originally "
+              "reported that alpha on deployed capital RISES at the live "
+              "cadence and read that as the engine's real schedule being the "
+              "better one. It falls. Q14's headline -- that the raw metric "
+              "would have rejected the better exit band -- also did not "
+              "survive: on corrected numbers both metrics agree. Every "
+              "finding measured through `simulate` at a truncated cadence was "
+              "re-run and Q6, Q14 and Q15 rewritten. Found by re-reading my "
+              "own change against `features/exits.py` rather than against the "
+              "test I had just written; the test asserted the hold equalled "
+              "the cadence, which was true and was not the property that "
+              "mattered.",
     ),
     _f(
         fid="P0-6", severity="high",

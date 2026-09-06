@@ -7,15 +7,15 @@
 
 | | |
 |---|---|
-| generated at | `2026-09-06T05:56:24+00:00` |
+| generated at | `2026-09-06T07:05:43+00:00` |
 | config version | `baseline-v2@25d9176dacd25857` |
 | — parameters hash | `6828f4d19d68a1ac` |
 | — store hash | `00333f4212937563` |
 | — training-window hash | `4dc2dcfe23298c98` |
 | shipped ranker | `v3_composite` |
-| git commit | `36e8b2798f05` |
+| git commit | `5999c33ab002` **(working tree dirty)** |
 | engine version | `0.1.0` |
-| data manifest digest | `86f8b3d6e8865906` |
+| data manifest digest | `760658884b9d6308` |
 | store fingerprint | delivery 1711s/4806n 2019-06-27..2026-09-03; fundamentals 740s/186n 2019-11-14..2025-03-11; indices 2218s/177n 2017-09-08..2026-09-03; prices 2219s/7112n 2017-09-08..2026-09-03 |
 | panel span | 2019-05-23 → 2026-08-24 |
 | panel rows | 200,190 |
@@ -87,7 +87,7 @@ README.md carried two performance tables that cannot both describe the same engi
 
 ### RESULTS OF RECORD -- the shipped book against its own universe
 
-**Status: SUPERSEDED** — the published claim is stated in `mean_excess` and `ir`, both of which are confounded with the risk budget and are no longer headline figures. Re-run on the current store the book deploys 20.3% of capital, so of its -16.3% raw annual excess, -16.2% is the cash it is not holding. The leverage-neutral reading is +6.74% a year on deployed capital at t +1.55 -- indistinguishable from zero. The old claim is neither confirmed nor refuted; it is expressed in a retired unit.
+**Status: SUPERSEDED** — the published claim is stated in `mean_excess` and `ir`, both of which are confounded with the risk budget and are no longer headline figures. Re-run on the current store the book deploys 21.8% of capital, so of its -17.4% raw annual excess, -16.4% is the cash it is not holding. The leverage-neutral reading is +3.50% a year on deployed capital at t +0.94 -- indistinguishable from zero. The old claim is neither confirmed nor refuted; it is expressed in a retired unit.
 
 *Claimed in:* README.md, 'RESULTS OF RECORD'
 
@@ -99,52 +99,52 @@ README.md carried two performance tables that cannot both describe the same engi
 
 | | value |
 |---|---|
-| **alpha on deployed capital (ann)** | **+6.74%** |
-| t(alpha) | +1.55 |
-| excess on deployed capital (ann) | -0.60% |
-| capital actually deployed | 20.3% |
+| **alpha on deployed capital (ann)** | **+3.50%** |
+| t(alpha) | +0.94 |
+| excess on deployed capital (ann) | -4.53% |
+| capital actually deployed | 21.8% |
 
 **Full reconciliation.** The rows marked *confounded* move with `risk_per_trade_pct` even when the ranking and the names are identical; they are retained so published figures can be traced, not because they measure anything:
 
 | | book | benchmark (equal-weight eligible universe) |
 |---|---|---|
-| mean return / period | +0.33% | +1.69% |
-| annualised | +4.0% | +20.3% |
-| Sharpe | +0.73 | +0.88 |
+| mean return / period | +0.30% | +1.75% |
+| annualised | +3.6% | +21.0% |
+| Sharpe | +0.68 | +0.90 |
 | beta to benchmark | +0.13 | — |
-| alpha / period *(scales with deployment)* | +0.11% | — |
-| leverage-matched excess (ann) | -0.1% | — |
-| mean excess / period *(confounded)* | -1.36% | — |
-| information ratio *(confounded)* | -0.79 | — |
-| periods beating the benchmark *(confounded)* | 37.0% | — |
-| worst schedule drawdown | -12.2% | — |
-| mean names held | 4.8 | — |
-| periods scored | 351 | — |
+| alpha / period *(scales with deployment)* | +0.06% | — |
+| leverage-matched excess (ann) | -1.0% | — |
+| mean excess / period *(confounded)* | -1.45% | — |
+| information ratio *(confounded)* | -0.85 | — |
+| periods beating the benchmark *(confounded)* | 37.5% | — |
+| worst schedule drawdown | -12.3% | — |
+| mean names held | 5.1 | — |
+| periods scored | 355 | — |
 
 **Gross and cost, separately** — netting them and keeping the last number hides which of the two is binding:
 
 | | annualised |
 |---|---|
-| gross excess over the universe | -15.1% |
+| gross excess over the universe | -16.2% |
 | cost drag | -1.2% |
-| **net excess** | **-16.3%** |
+| **net excess** | **-17.4%** |
 
-*power: expected t = IR x sqrt(years) = -0.79 x sqrt(7.3) = -2.13; t=2.0 is unreachable at a non-positive IR*
+*power: expected t = IR x sqrt(years) = -0.85 x sqrt(7.3) = -2.28; t=2.0 is unreachable at a non-positive IR*
 
 **Claimed against measured**, every published figure, headline or not:
 
 | figure | published claim | re-run | verdict | headline? |
 |---|---|---|---|---|
-| alpha on deployed capital (ann) | n/a | +6.74% | NOT_TESTABLE | yes |
-| excess on deployed capital (ann) | n/a | -0.60% | NOT_TESTABLE | yes |
-| information ratio [LEVERAGE-CONFOUNDED] | -83.00% | -79.21% | matches | no |
-| mean excess / period [LEVERAGE-CONFOUNDED] | -4.23% | -1.36% | matches | no |
-| periods beating the benchmark | +32.90% | +37.04% | matches | no |
-| alpha / period (scales with deployment) | -0.67% | +0.11% | OPPOSITE SIGN | no |
+| alpha on deployed capital (ann) | n/a | +3.50% | NOT_TESTABLE | yes |
+| excess on deployed capital (ann) | n/a | -4.53% | NOT_TESTABLE | yes |
+| information ratio [LEVERAGE-CONFOUNDED] | -83.00% | -84.68% | matches | no |
+| mean excess / period [LEVERAGE-CONFOUNDED] | -4.23% | -1.45% | matches | no |
+| periods beating the benchmark | +32.90% | +37.46% | matches | no |
+| alpha / period (scales with deployment) | -0.67% | +0.06% | OPPOSITE SIGN | no |
 
 ### Tuning pass (2026-08-29) -- sector-neutral 6-1 momentum, 6 names
 
-**Status: WITHDRAWN** — annualised alpha: claimed +0.203, measured +0.02095; Sharpe: claimed +1.59, measured +1.052; annualised book return: claimed +0.426, measured +0.05635
+**Status: WITHDRAWN** — annualised alpha: claimed +0.203, measured +0.01127; Sharpe: claimed +1.59, measured +0.8531; annualised book return: claimed +0.426, measured +0.04905
 
 *Claimed in:* README.md, 'What changed in the tuning pass (2026-08-29)' (the section appeared twice) and config `expectancy:`
 
@@ -156,45 +156,45 @@ README.md carried two performance tables that cannot both describe the same engi
 
 | | value |
 |---|---|
-| **alpha on deployed capital (ann)** | **+12.92%** |
-| t(alpha) | +2.97 |
-| excess on deployed capital (ann) | +13.46% |
-| capital actually deployed | 16.2% |
+| **alpha on deployed capital (ann)** | **+6.18%** |
+| t(alpha) | +1.48 |
+| excess on deployed capital (ann) | +5.67% |
+| capital actually deployed | 18.2% |
 
 **Full reconciliation.** The rows marked *confounded* move with `risk_per_trade_pct` even when the ranking and the names are identical; they are retained so published figures can be traced, not because they measure anything:
 
 | | book | benchmark (equal-weight eligible universe) |
 |---|---|---|
-| mean return / period | +0.47% | +1.77% |
-| annualised | +5.6% | +21.3% |
-| Sharpe | +1.05 | +0.91 |
-| beta to benchmark | +0.17 | — |
-| alpha / period *(scales with deployment)* | +0.17% | — |
-| leverage-matched excess (ann) | +2.2% | — |
-| mean excess / period *(confounded)* | -1.30% | — |
-| information ratio *(confounded)* | -0.79 | — |
-| periods beating the benchmark *(confounded)* | 37.7% | — |
-| worst schedule drawdown | -10.4% | — |
-| mean names held | 4.9 | — |
-| periods scored | 355 | — |
+| mean return / period | +0.41% | +1.77% |
+| annualised | +4.9% | +21.2% |
+| Sharpe | +0.85 | +0.91 |
+| beta to benchmark | +0.18 | — |
+| alpha / period *(scales with deployment)* | +0.09% | — |
+| leverage-matched excess (ann) | +1.0% | — |
+| mean excess / period *(confounded)* | -1.36% | — |
+| information ratio *(confounded)* | -0.84 | — |
+| periods beating the benchmark *(confounded)* | 37.6% | — |
+| worst schedule drawdown | -10.8% | — |
+| mean names held | 5.3 | — |
+| periods scored | 356 | — |
 
 **Gross and cost, separately** — netting them and keeping the last number hides which of the two is binding:
 
 | | annualised |
 |---|---|
-| gross excess over the universe | -14.9% |
+| gross excess over the universe | -15.5% |
 | cost drag | -0.8% |
-| **net excess** | **-15.7%** |
+| **net excess** | **-16.3%** |
 
-*power: expected t = IR x sqrt(years) = -0.79 x sqrt(7.3) = -2.13; t=2.0 is unreachable at a non-positive IR*
+*power: expected t = IR x sqrt(years) = -0.84 x sqrt(7.3) = -2.25; t=2.0 is unreachable at a non-positive IR*
 
 **Claimed against measured**, every published figure, headline or not:
 
 | figure | published claim | re-run | verdict | headline? |
 |---|---|---|---|---|
-| annualised alpha | +20.30% | +2.09% | outside 0.05 | yes |
-| Sharpe | +1.59 | +1.05 | outside 0.5 | yes |
-| annualised book return | +42.60% | +5.64% | outside 0.1 | yes |
+| annualised alpha | +20.30% | +1.13% | outside 0.05 | yes |
+| Sharpe | +1.59 | +85.31% | outside 0.5 | yes |
+| annualised book return | +42.60% | +4.91% | outside 0.1 | yes |
 | excess Sharpe | +1.12 | n/a | NOT_TESTABLE | no |
 
 ## What these numbers are not

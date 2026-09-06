@@ -40,7 +40,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_leverage_neutral import _params, _prices, _rankings   # noqa: E402
+from test_leverage_neutral import (  # noqa: E402
+    SYMBOLS,
+    _params,
+    _prices,
+    _rankings,
+)
 
 
 def _sim(cadence, **over):
@@ -247,32 +252,112 @@ def test_an_expired_position_is_charged_when_it_is_bought_back():
     assert src.index("EXIT_TIMEOUT_EXPIRED") < src.index("keep = [s for s in held")
 
 
-def test_a_carried_position_spends_its_remaining_budget():
-    """Not a fresh horizon each cadence."""
+def test_a_carried_position_keeps_the_stop_it_was_opened_with():
+    """`resolve_exits` treats the index it is given as the ENTRY row.
+
+    Resolving a carried name from TODAY therefore re-bases its stop, its 3R
+    target and its invalidation to today's price every period -- a ratcheting
+    stop, when `stage7_risk.trailing_stop.enabled` is false and the engine has
+    none. Measured on this fixture the mistake made the stop look like it cost
+    4.22 points of alpha at a 21-session cadence against 0.40 at the default,
+    because a re-based stop on a winner sits far closer to the price than the
+    original ever did.
+
+    The decisive path: rise well clear of the original stop, then fall back to
+    a level that is still above it but well below a stop re-based at the peak.
+    A position resolved from its own entry survives; one resolved from today
+    is stopped out.
+    """
+    n = 400
+    idx = pd.bdate_range("2021-01-01", periods=n)
+    # 100 -> 150 over the first 40 sessions, then back to 108 and flat.
+    path = np.concatenate([
+        np.linspace(100.0, 150.0, 40),
+        np.linspace(150.0, 108.0, 30),
+        np.full(n - 70, 108.0),
+    ])
+    close = pd.DataFrame({s: path for s in SYMBOLS}, index=idx)
+    atr = pd.DataFrame(1.0, index=idx, columns=SYMBOLS)     # stop 8 x 1 = 8
+    prices = {"close": close, "high": close * 1.001, "low": close * 0.999,
+              "open": close, "atr": atr,
+              "ma": close.rolling(50, min_periods=1).mean(),
+              "adtv": pd.DataFrame(5e9, index=idx, columns=SYMBOLS),
+              "benchmark": pd.Series(1.0, index=idx)}
+    rng = np.random.default_rng(1)
+    rk = [(idx[i], pd.Series(rng.permutation(len(SYMBOLS)).astype(float),
+                             index=SYMBOLS).sort_values(ascending=False))
+          for i in range(20, n - 80, 21)]
+
+    p = _params(horizon_sessions=63, exit_rank=len(SYMBOLS),
+                stop_atr_multiple=8.0, min_stop_distance_pct=1.0,
+                max_stop_distance_pct=90.0, use_stop=True)
+    r = simulate(rk, prices, p, phase=0, step_sessions=21, decision_sessions=21)
+    assert not r.empty
+    # Entry near 100 puts the original stop around 92; the fall to 108 never
+    # reaches it. A stop re-based at the 150 peak sits at ~142 and does.
+    assert (r.periods["n_charged"] < r.periods["n_held"]).any(), (
+        "no position was carried at all, so this fixture proves nothing about "
+        "how a carried position is resolved"
+    )
+
+
+def test_the_slices_of_a_carried_position_compound_to_its_whole_life():
+    """The invariant the fix establishes.
+
+    A position held across three 21-session decisions books three increments.
+    They must multiply back to the return the same trade earns resolved once
+    from entry to exit -- otherwise the truncation is inventing or destroying
+    return, which is what re-resolving from today did.
+    """
+    from prosignal.validation.portfolio_sim import _hold
+
+    prices = _prices()
+    p = _params(horizon_sessions=63)
+    close, low, open_ = prices["close"], prices["low"], prices["open"]
+    atr, ma, high = prices["atr"], prices["ma"], prices["high"]
+    sym, entry = SYMBOLS[0], 400
+
+    whole = _hold(sym, entry, close, low, open_, ma, atr, p, high=high,
+                  horizon=63)
+    assert whole is not None
+    compounded = 1.0
+    for age in (0, 21, 42):
+        a = _hold(sym, entry, close, low, open_, ma, atr, p, high=high,
+                  horizon=age) if age else (0.0, 0.0)
+        b = _hold(sym, entry, close, low, open_, ma, atr, p, high=high,
+                  horizon=age + 21)
+        assert b is not None
+        compounded *= (1.0 + b[0]) / (1.0 + a[0])
+    assert compounded - 1.0 == pytest.approx(whole[0], abs=1e-9), (
+        f"three slices compounded to {compounded - 1.0:+.6f} against "
+        f"{whole[0]:+.6f} resolved whole"
+    )
+
+
+def test_a_carried_position_is_not_re_sized_each_cadence():
+    """Re-sizing to the risk budget at today's price is a rebalance to target
+    risk every 21 sessions, which the engine does not do. The size is fixed at
+    entry and marked to what the position is now worth."""
     import inspect
 
     from prosignal.validation import portfolio_sim as ps
 
     src = inspect.getsource(ps.simulate)
-    assert "budget = max(int(params.horizon_sessions) - int(age), 1)" in src
-    assert "this_hold = min(hold_sessions, budget)" in src
-    # ...and ONLY where the cohort is truncated. At the default cadence a
-    # rolled position starts a fresh cohort, and subtracting its age there
-    # leaves it one session of hold -- a different simulator, not a smaller
-    # number. `test_the_default_is_the_old_cohort_schedule` catches it too;
-    # this says why.
-    assert "if hold_sessions < int(params.horizon_sessions):" in src
+    assert "opened_size" in src
+    assert "size = opened * (1.0 + r_before)" in src
 
 
-def test_a_re_bought_name_gets_the_full_horizon_again():
-    """`age` is zero for a name being OPENED, including one whose previous
-    position closed early. A re-buy is a new position, not a continuation."""
+def test_the_carried_branch_resolves_from_the_entry_row_not_today():
+    """The defect, named. If this ever reads `_hold(sym, i` inside the carried
+    branch again, the ratchet is back."""
     import inspect
 
     from prosignal.validation import portfolio_sim as ps
 
     src = inspect.getsource(ps.simulate)
-    assert "age = (i - opened_at.get(sym, i)) if carried else 0" in src
+    carried = src[src.index("if carried:"):src.index("else:", src.index("if carried:"))]
+    assert "_hold(sym, entry," in carried
+    assert "_hold(sym, i," not in carried
 
 
 def test_holds_never_exceed_the_horizon_at_any_cadence():

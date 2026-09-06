@@ -609,6 +609,10 @@ def simulate(
     #: then be holding winners past the point the engine sells them, which
     #: flatters exactly the tail this audit found does not generalise.
     opened_at: Dict[str, int] = {}
+    #: symbol -> the rupee size its CURRENT position was opened at, after the
+    #: equity and volatility scaling that applied on that day. A carried
+    #: position keeps it; only a new entry is sized afresh.
+    opened_size: Dict[str, float] = {}
     rows: List[Dict[str, float]] = []
 
     for j in range(phase, len(rankings), stride):
@@ -650,34 +654,67 @@ def simulate(
         pnl = deployed = charged = 0.0
         filled = new_or_reopened = 0
         outcomes: Dict[str, float] = {}
+        # A POSITION CARRIED ACROSS A TRUNCATED COHORT IS STILL THE SAME TRADE.
+        # `resolve_exits` treats the index it is given as the ENTRY row, so
+        # resolving a carried name from TODAY re-bases its stop, its 3R target
+        # and its invalidation level to today's price every period. That is a
+        # ratcheting stop, and `stage7_risk.trailing_stop.enabled` is false --
+        # the engine does not have one. Measured on the fixture, the mistake
+        # made the stop look like it cost 4.22 points of alpha at a 21-session
+        # cadence against 0.40 at the default, because a re-based stop on a
+        # winner sits far closer to the price than the original ever did.
+        #
+        # So a carried position is resolved from its OWN entry row and this
+        # period books only the increment: (1+r_through)/(1+r_before) - 1. The
+        # stop that decides its fate is the one it was opened with.
+        truncated = hold_sessions < int(params.horizon_sessions)
         for sym in book:
             if sym not in close.columns:
                 continue
-            sized = _position(sym, i, close, atr, adtv, params)
-            if sized is None or sized[0] <= 0:
-                continue
-            size, price, liquidity = sized
-            # A CARRIED POSITION SPENDS ITS REMAINING BUDGET, NOT A FRESH ONE
-            # -- but only where the cohort is truncated. At the default cadence
-            # a rolled position starts a fresh cohort by construction, and
-            # subtracting its age there leaves it one session of hold, which is
-            # not a smaller number but a different simulator.
-            #
             # `age` is zero for a name being OPENED, including one whose
             # previous position closed early and is being re-bought: that is a
-            # new position and gets the full horizon.
-            carried = held.get(sym) == EXIT_TIMEOUT
-            this_hold = hold_sessions
-            if hold_sessions < int(params.horizon_sessions):
-                age = (i - opened_at.get(sym, i)) if carried else 0
+            # new position, and it gets a fresh stop and the full horizon.
+            carried = truncated and held.get(sym) == EXIT_TIMEOUT
+            price = liquidity = 0.0
+            if carried:
+                entry = opened_at.get(sym, i)
+                age = i - entry
                 budget = max(int(params.horizon_sessions) - int(age), 1)
-                this_hold = min(hold_sessions, budget)
-            outcome = _hold(sym, i, close, low, open_, ma, atr, params,
-                            high=high, horizon=this_hold)
-            if outcome is None:
-                continue
-            ret, side = outcome
-            size *= scale
+                span = min(hold_sessions, budget)
+                before = _hold(sym, entry, close, low, open_, ma, atr, params,
+                               high=high, horizon=age)
+                through = _hold(sym, entry, close, low, open_, ma, atr, params,
+                                high=high, horizon=age + span)
+                if before is None or through is None:
+                    continue
+                r_before, _ = before
+                r_through, side = through
+                if 1.0 + r_before <= 0.0:
+                    continue
+                ret = (1.0 + r_through) / (1.0 + r_before) - 1.0
+                # AND ITS SIZE IS THE ONE IT WAS OPENED AT, marked to what the
+                # position is worth now. Re-sizing to the risk budget at
+                # today's price would be a rebalance to target risk every
+                # cadence, which the engine also does not do.
+                opened = opened_size.get(sym, 0.0)
+                if opened <= 0.0:
+                    continue
+                size = opened * (1.0 + r_before)
+            else:
+                sized = _position(sym, i, close, atr, adtv, params)
+                if sized is None or sized[0] <= 0:
+                    continue
+                size, price, liquidity = sized
+                this_hold = hold_sessions
+                if truncated:
+                    this_hold = min(hold_sessions, int(params.horizon_sessions))
+                outcome = _hold(sym, i, close, low, open_, ma, atr, params,
+                                high=high, horizon=this_hold)
+                if outcome is None:
+                    continue
+                ret, side = outcome
+                size *= scale
+                opened_size[sym] = size
             pnl += size * ret
             deployed += size
             filled += 1

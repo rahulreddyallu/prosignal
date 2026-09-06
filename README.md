@@ -265,11 +265,11 @@ budget does:
 
 | | annualised |
 |---|---|
-| **alpha on deployed capital** | <!--shipped_alpha_on_deployed-->+6.74% |
-| excess on deployed capital | <!--shipped_excess_on_deployed-->-0.60% |
-| capital deployed | <!--shipped_deployed-->20.3% |
+| **alpha on deployed capital** | <!--shipped_alpha_on_deployed-->+3.50% |
+| excess on deployed capital | <!--shipped_excess_on_deployed-->-4.53% |
+| capital deployed | <!--shipped_deployed-->21.8% |
 
-Alpha of +6.74% a year sounds like a result and is not one: `t` is **+1.55** on
+Alpha of +3.50% a year sounds like a result and is not one: `t` is **+0.94** on
 7.2 years, which is indistinguishable from zero and stays that way for years yet
 — see the power statement in the record.
 
@@ -279,29 +279,30 @@ decide anything:
 
 | | |
 |---|---|
-| mean excess per 21-session period | <!--shipped_mean_excess-->-1.36% |
-| information ratio | <!--shipped_ir-->-0.79 |
-| alpha per period | <!--shipped_alpha-->+0.11% |
-| periods beating the benchmark | <!--shipped_beat_rate-->37.0% |
+| mean excess per 21-session period | <!--shipped_mean_excess-->-1.45% |
+| information ratio | <!--shipped_ir-->-0.85 |
+| alpha per period | <!--shipped_alpha-->+0.06% |
+| periods beating the benchmark | <!--shipped_beat_rate-->37.5% |
 
 **Gross and cost, separately.** Netting them and keeping the last number hides
 which of the two is binding:
 
 | | annualised |
 |---|---|
-| gross excess over the universe | <!--shipped_gross_excess_ann-->-15.1% |
+| gross excess over the universe | <!--shipped_gross_excess_ann-->-16.2% |
 | cost drag | <!--shipped_cost_drag_ann-->1.2% |
-| **net excess** | <!--shipped_net_excess_ann-->-16.3% |
+| **net excess** | <!--shipped_net_excess_ann-->-17.4% |
 
 <!-- RESULTS_OF_RECORD:END -->
 
-**What that says.** Almost the whole of that −16.3% is cash. The book deploys
-20.3% of capital against a benchmark that is fully invested in a market that
-compounded, so the leverage-matched comparison is −0.60% a year and the alpha on
-deployed capital is positive. **The raw deficit was never a measurement of the
-signal.** Cost is a real 1.2% a year — double what this repository used to
-report, because the simulator was deciding four times a year while the engine
-decides twelve — and it is still not the binding constraint.
+**What that says.** Most of that −17.4% is cash. The book deploys 21.8% of
+capital against a benchmark that is fully invested in a market that compounded,
+so the leverage-matched comparison is −4.53% a year and the alpha on deployed
+capital is +3.50% at t +0.94 — positive, and indistinguishable from zero.
+**The raw deficit was never a measurement of the signal.** Cost is a real 1.2%
+a year of equity, which is **5.5% of the capital that actually traded** — more
+than double what this repository used to report, because the simulator was
+deciding four times a year while the engine decides twelve.
 
 **The ranking carries information and the tail does not.** Out of sample, after
 the fit window closed, rank IC is **+0.058 at h=21 (t +2.28)** and **+0.078 at
