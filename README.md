@@ -223,13 +223,28 @@ are correct. The input is the problem.
 
 ## RESULTS OF RECORD
 
+**Verdict: SUPERSEDED.** The claim this section used to make was stated in raw
+excess and the information ratio. Both move with the risk budget, so neither
+can be confirmed or refuted — they are expressed in a unit the engine has
+retired. The leverage-neutral reading is below.
+
 > [!IMPORTANT]
 > **The numbers below are GENERATED, not written.** They come from
 > [`docs/RESULTS_OF_RECORD.md`](docs/RESULTS_OF_RECORD.md), which
 > `prosignal research results` produces from the current store and stamps with
 > the config version, the store fingerprint, the git commit, the panel span and
 > the trial count. `tests/test_readme_numbers.py` fails if this section drifts
-> from it. **These supersede every other number in this file.**
+> from it.
+>
+> **THIS TABLE MEASURES THE SHIPPED CONFIGURATION** — `ranking.source =
+> v3_composite`, six slots, entry rank 6, exit rank 18, 63-session backstop,
+> 8×ATR floor.
+>
+> It does supersede every other number in this file
+> **that is about that configuration**, and only those. It says nothing about
+> the tuning table below, which measures `measured_factor` — a single momentum
+> column the engine does not rank on. That table is labelled in its own
+> section rather than left for a reader to work out.
 
 This file used to carry two book tables that cannot both describe the same
 engine. Both configurations have now been re-run against the current store,
@@ -240,41 +255,75 @@ not quoted.
 <!-- RESULTS_OF_RECORD:BEGIN -->
 
 **The shipped book — `v3_composite`, six names — against an equal-weight hold of
-the eligible universe it selects from.** Re-run: **REPRODUCED.**
+the eligible universe it selects from.**
 
-| | |
-|---|---|
-| mean excess per 63-session period | <!--shipped_mean_excess-->-4.46% |
-| information ratio | <!--shipped_ir-->-0.84 |
-| alpha per period | <!--shipped_alpha-->+0.09% |
-| periods beating the benchmark | <!--shipped_beat_rate-->32.6% |
-
-**Gross and cost, separately.** Netting them and keeping the last number hides
-which of the two is binding — and here it is emphatically not cost:
+**The headline, on the capital actually at risk.** Position size is
+`risk_budget / risk_per_share`, so the book holds a fifth of its capital and the
+benchmark holds all of its own. Dividing by deployment is what makes the two
+comparable, and it is the only figure here that does not move when the risk
+budget does:
 
 | | annualised |
 |---|---|
-| gross excess over the universe | <!--shipped_gross_excess_ann-->-17.4% |
-| cost drag | <!--shipped_cost_drag_ann-->0.5% |
-| **net excess** | <!--shipped_net_excess_ann-->-17.8% |
+| **alpha on deployed capital** | <!--shipped_alpha_on_deployed-->+3.50% |
+| excess on deployed capital | <!--shipped_excess_on_deployed-->-4.53% |
+| capital deployed | <!--shipped_deployed-->21.8% |
+
+Alpha of +3.50% a year sounds like a result and is not one: `t` is **+0.94** on
+7.2 years, which is indistinguishable from zero and stays that way for years yet
+— see the power statement in the record.
+
+**The raw figures, kept for reconciliation.** Every earlier write-up quotes
+these. They are reported so an old number can be traced, and they no longer
+decide anything:
+
+| | |
+|---|---|
+| mean excess per 21-session period | <!--shipped_mean_excess-->-1.45% |
+| information ratio | <!--shipped_ir-->-0.85 |
+| alpha per period | <!--shipped_alpha-->+0.06% |
+| periods beating the benchmark | <!--shipped_beat_rate-->37.5% |
+
+**Gross and cost, separately.** Netting them and keeping the last number hides
+which of the two is binding:
+
+| | annualised |
+|---|---|
+| gross excess over the universe | <!--shipped_gross_excess_ann-->-16.2% |
+| cost drag | <!--shipped_cost_drag_ann-->1.2% |
+| **net excess** | <!--shipped_net_excess_ann-->-17.4% |
 
 <!-- RESULTS_OF_RECORD:END -->
 
-**What that says.** The ranking carries information — rank IC +0.077 at h=63,
-overlap-corrected t +3.11, and its deciles are monotone at Spearman +0.29. The
-six-name book built on it loses to buying the same universe equal-weighted, and
-it loses **gross**: cost drag at this cadence is about half a point a year
-against a deficit of seventeen. **This is not a cost problem and it cannot be
-fixed by trading more cheaply.** The gap is selection plus the concentration of
-six names plus sitting in cash while the universe compounded.
+**What that says.** Most of that −17.4% is cash. The book deploys 21.8% of
+capital against a benchmark that is fully invested in a market that compounded,
+so the leverage-matched comparison is −4.53% a year and the alpha on deployed
+capital is +3.50% at t +0.94 — positive, and indistinguishable from zero.
+**The raw deficit was never a measurement of the signal.** Cost is a real 1.2%
+a year of equity, which is **5.5% of the capital that actually traded** — more
+than double what this repository used to report, because the simulator was
+deciding four times a year while the engine decides twelve.
+
+**The ranking carries information and the tail does not.** Out of sample, after
+the fit window closed, rank IC is **+0.058 at h=21 (t +2.28)** and **+0.078 at
+h=63 (t +1.73)**, overlap-corrected. The out-of-sample top-decile excess is
+**+0.36% at t +0.29** — indistinguishable from zero, against an in-sample +2.40%
+at t +2.44. The decile profile inverts: in sample it climbs monotonically to
+D10, out of sample it **peaks at D6/D7** and D10 is the sixth-best decile.
+
+The six-name book is drawn from the very top of D10. It is a concentrated bet on
+the one part of this model that the out-of-sample evidence does not support, and
+the part that generalises best — the bottom decile, −2.31% out of sample against
+−2.77% in — is a leg this engine cannot trade.
 
 **Read the independent-observation count before any t-statistic here.** The
-panel is 204,425 rows and **31.1** independent 63-session windows. Every Sharpe,
+panel is 197,940 rows and **29.2** independent 63-session windows. Every Sharpe,
 information ratio and deflated statistic this engine reports is bounded by the
-second number.
+second number. The Deflated Sharpe now charges **622** trials, of which 503 are
+the reconstructed v3 factor search — see `research/V3_SEARCH.md`.
 
-For the ranking table at every horizon, the full claimed-against-measured
-comparison, and the withdrawn arm, see
+For the ranking table at every horizon and window, the decile profile, the full
+claimed-against-measured comparison, and the withdrawn arm, see
 [`docs/RESULTS_OF_RECORD.md`](docs/RESULTS_OF_RECORD.md).
 
 ---
@@ -703,8 +752,10 @@ family negates it, so it contributes correctly.
 a hit rate of 0/17**. That is not a factor, it is three windows in which small
 caps happened to win, and giving it a family coefficient equal in weight to
 momentum would rebuild by hand the small-cap tilt the point-in-time panel fix
-removed. The unintended-sector-bet problem size was raised against is solved by
-ranking within sector, which is done.
+removed. The unintended-sector-bet problem size was raised against is **not**
+solved by ranking within sector — that was removed, because the sector map is
+built from today's index files and a name that has since delisted carries no
+sector at all. See "Ranks are taken across the universe" below.
 
 **Continuous volatility-scaled momentum exposure** is approximated by Stage 2's
 regime multiplier, which now actually reaches the fitted model — it did not
@@ -1233,22 +1284,36 @@ correlated members is supposed to do:
 
 Run it yourself: `prosignal research factors`.
 
-**Every rank is taken within a group.** A sector holding at least 12 names is
-its own group; every other name — no sector at all, or a sector below that
-floor — is ranked within a single residual `UNCLASSIFIED` pool. Ranking across
-the whole market compares a bank's leverage with an IT firm's, so every factor
-would otherwise carry an unintended sector bet on top of what it measures.
+**Ranks are taken across the eligible universe, not within sector.** Ranking
+across the whole market does compare a bank's leverage with an IT firm's, and
+the fix for that was worse than the problem.
 
-> [!NOTE]
-> This sentence used to read *"all ranks are taken within sector [...] a thin or
-> absent sector falls back to the universe rank"*, and the two halves
-> contradicted each other. The fallback was not a detail: **58% of rows carried
-> a sector label and a median 46% of names per date were ranked within one**, so
-> roughly half of every cross-section was on the OTHER scale. A within-sector
-> rank of +0.9 in a fourteen-name sector and a universe rank of +0.9 are
-> different quantities, and both were averaged into the same family aggregate.
-> The residual pool now fixes that; `sector_rank_coverage()` reports the split.
-> Within-sector coverage on the current panel: median 41.2%, range 0–54.9%.
+> [!WARNING]
+> **Within-sector ranking was removed, and it was a lookahead.**
+> `_refresh_sector_map` pools the `Industry` column of TODAY's NSE constituent
+> files, so a name that has since delisted or left every index has no sector
+> and fell into the residual pool. Holding a sector label is therefore
+> correlated with having survived, and the correlation is bigger than the
+> signal: across 380 panel dates, names with a known sector out-returned names
+> without by **+1.05% per 21 sessions (t +3.64)** and **+3.36% per 63
+> (t +3.48)**. The groups the ranking was computed inside were defined by
+> future information.
+>
+> It was also costing accuracy. Re-scored both ways on dates after the fit
+> window closed: h=5 **+0.0402 → +0.0485**, h=21 **+0.0421 → +0.0562**, h=63
+> **+0.0456 → +0.0759**. Removing the lookahead RAISED the out-of-sample IC.
+>
+> And it named a peer group that mostly did not exist. Every name without a
+> sector, and every name in a sector holding fewer than twelve, was ranked
+> inside a single residual `UNCLASSIFIED` pool — and `residual_bucket_size`
+> reports that **39% of a live cross-section sits in it**: 79 genuinely
+> unclassified plus 71 folded in from thirteen real sectors too small to rank
+> within. A Power stock was being neutralised against Realty. For two names in
+> five, "sector-neutral" meant nothing at all.
+>
+> `sector_neutral_rank` is kept and still reachable with `sector_neutral=True`.
+> The function was never the problem; the map feeding it was, and a
+> point-in-time sector source would make it the right call again.
 
 ### The flat-day gate
 

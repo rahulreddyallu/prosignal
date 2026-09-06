@@ -124,3 +124,523 @@
 {"key": "1bb9eebf985e1716", "command": "research volscale", "label": "target=0.25", "recorded_at": "2026-08-28T19:36:37+00:00", "score": 0.5229721028913717}
 {"key": "927b869ef51983fc", "command": "audit remediation R9 refit", "label": "train-population=all_eligible", "recorded_at": "2026-08-29T00:31:47+00:00", "score": 0.5382023988793943}
 {"key": "071354edc25494cd", "command": "audit remediation R9 refit", "label": "train-population=admissible", "recorded_at": "2026-08-29T00:31:47+00:00", "score": 0.31426295657202363}
+{"key": "02542602c5bba33c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [1/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "76cfa29f34adb925", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [2/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f65d1fcc3bae65db", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [3/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a3589090f90d792a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [4/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "67861d77e13fe777", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [5/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6800537e7a46a220", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [6/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ecb5b3a43d6ff599", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [7/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ac892bd7664f540b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [8/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a9665c4ec11b092f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [9/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9e28b805f0af9483", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [10/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "50c2396204ded280", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [11/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ffb52ccd8d0ce1ee", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [12/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "25a0299aa64eae43", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [13/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6f4cf586db00a6c8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [14/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4f39f8fdb6041178", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [15/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dc3ec0462335229d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [16/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "07bef0b641e44474", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [17/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "be278ee70c6cdf4f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [18/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b496aa41a73db5c6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [19/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c4851c97e6f5dbaf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [20/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9628d403288c698d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [21/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cb2f3f3f374b3221", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [22/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7b8272b6af1436ad", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [23/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0be7892a154ccfdf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [24/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "74720a4ffb98147e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [25/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ed4843aac872049c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [26/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2c3680a80e5718ff", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [27/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "517d056ce9af182b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [28/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "948af30e9f1136bc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [29/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9ff57feef22aff9e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [30/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cbc7a5d5cc56a174", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [31/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b6bd2d195f81a0f3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [32/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1d7d5875fc39b3fa", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [33/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3d3e4c2d8b58ba27", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [34/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "eb80a0426e200cb7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [35/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "904fac3ed7706dd6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [36/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e96e4d7011f0024d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [37/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "caed4d696feef6c5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [38/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "679f544378e6def7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [39/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5722572bb06ec92f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [40/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a146975dee2b005d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [41/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "16e374d6496e2186", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [42/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "083d2854cfceeeaf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [43/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0f9b0bc9cc887171", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [44/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "eaa71a34b897ff47", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [45/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b6497a04d92eb44a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [46/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e5422ef85e703051", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [47/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4b0024e1af592883", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [48/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e63eaaa59fbdd55c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [49/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8504998ed67553f9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [50/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d6144952e6b00342", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [51/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "92283d0f152aa1d3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [52/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d54e202c31887690", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [53/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "164454c8a8d4b523", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [54/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d7075d7ffca55ba1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [55/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "145cee9ee98219c2", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [56/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "791541b27a9651e6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [57/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f3079f450e99af15", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [58/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bb56d708eef47aa6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [59/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dce274615343a7ba", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [60/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bba48bb72bb65cf8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [61/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "64c1df5d797271b8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [62/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4e3f0b96c5956cec", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [63/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "72f17d959964b179", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [64/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "40d2d3c22c59f28b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [65/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4ca4f000c4cfdf51", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [66/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2cd37a606519b184", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [67/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4d4c79f8824a5caf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [68/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "46c2d1f729bbd6b1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [69/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1ecaf345e8289d69", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [70/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1ffe352340041ba9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [71/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8b974f12370fe831", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [72/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "71145f428275bb73", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [73/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "906e6cdfb383b598", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [74/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "863e74b9ebf7134c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [75/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "002415d5450acdd4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [76/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "651c403f11e0a7bb", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [77/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "62fc265890a11245", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [78/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5b727b9007bb6500", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [79/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0462f4115f86740b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [80/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bab40722f02de8ec", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [81/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c4f510d6499101b1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [82/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7f05a0317727e2da", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [83/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d1d506a97a0fe417", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [84/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "438e2d56dc2e3595", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [85/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "689364f3287d92e8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [86/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a8db12b75b78cc9b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [87/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4f8151930f67e995", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [88/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7ca3bd36799c7d20", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [89/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1dbad76715eed2e7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [90/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bb5ec681423becb2", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [91/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0ee4ac603b719120", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [92/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "536c6e3c7864704d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [93/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8f31bfe7355f7020", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [94/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "35892560136b0f02", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [95/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "df30b06664703337", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: momentum x 4 horizons [96/96]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "048460ef1cede116", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [1/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "02f1471d54f586ab", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [2/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8012bc6895dd80e9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [3/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "88e7cddf2c3b14e4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [4/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d3cf4a30cd9ef8aa", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [5/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a299fcd6f43932c1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [6/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3d8ba7802b276de4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [7/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e0c42b960696073e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [8/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d965af1c541524ab", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [9/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f03bbbdbf0329cdc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [10/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1fe3cb5a5ad375e9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [11/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7251ee0275471de4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [12/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "904d1372d844cb15", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [13/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c64182cc827e03a8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [14/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ade539062b07f95a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [15/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4b8b85b53c7259b1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [16/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3f5b0489f490dd0a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [17/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "afb9fb02976b43d0", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [18/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "05aed276b589a1ff", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [19/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f5bf81821ee1d042", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [20/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bc78e8eadf3a8c68", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [21/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f766f2e2692d08f6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [22/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e0d4e1f751c62f07", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [23/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d6640dcee7346869", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [24/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6f15b64c298cc9c3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [25/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e9c917db3ff9ef7f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [26/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "821416e1c6e31607", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [27/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ca6a0622b1abac2d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [28/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "644c78ffc7c803a3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [29/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bdb4614202c4278f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [30/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ddbb36c96bd5ba9d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [31/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6410a70f94d0e0f1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [32/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "136695d0a80a7dbf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [33/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9ba9f29b7348fe54", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [34/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d15a025571c9e322", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [35/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9bb81943e0d6e66e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [36/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f8e815ca4e1cd5ba", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [37/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b702bc0867c32274", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [38/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ab68726e0c490232", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [39/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dac0038ac0cfd32a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [40/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3998ca5da4eaaeec", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [41/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0a815be6afaa93dc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [42/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c2e49daf161e4312", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [43/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c93d1e1cae00177e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [44/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ea87244a3430f4e1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [45/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c511e24251f5b2e6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [46/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0cab5bbb596bb58a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [47/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ae4a699a23356c82", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [48/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "84af6a74136e1bdf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [49/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f33c053b8c0c3048", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [50/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b9d48635de7fc923", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [51/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b81faee2b568c804", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [52/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fccb2e531a3d303b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [53/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ae9120e3c7b7af3e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [54/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3b3831541966b77b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [55/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "19cde37492d220a1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [56/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b2b8c14c6d271f58", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [57/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f868603202c02086", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [58/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "52f93fee669665a8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [59/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7ee912f514ffc1b3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [60/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "08f602dbccd945b9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [61/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cb1f62baa05119de", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [62/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "41d0934d51aa397f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [63/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "60db554145dc3133", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [64/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0eead1b65d552a82", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [65/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dfd0e83ff9f98623", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [66/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "df55f5cf4bfc3694", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [67/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1db625a5dc659388", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [68/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "10fca991c09dfd49", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [69/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bbc9c9a24c700a0d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [70/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c56e078bd3462dea", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [71/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "75ab60e990e5eb5b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [72/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "22ef26d5ce572c41", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [73/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "03e1149993e7bd4b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [74/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "00522d8ae45e7505", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [75/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c256786af3464476", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: risk x 4 horizons [76/76]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "512b37abb2bf3c51", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [1/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dc38c663645d94ff", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [2/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0671c52af70e89f5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [3/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "81bd10e5fcd83270", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [4/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fee65bf6b6751008", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [5/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e5bce8d8569fb706", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [6/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "11939c887ea8d983", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [7/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "964e20640244c6dd", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [8/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e1fa2a01f03a45bb", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [9/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cf62242cecb98e75", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [10/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a6759b4f63bb854d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [11/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "79ce65544b7c7f7b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [12/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ea5f813e352477b8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [13/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "456899ecf26594c4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [14/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ce4a2a5246c83035", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [15/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "09a5955420994ba2", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [16/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cdfa227ac1c72c65", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [17/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9ecb4f4071e576fa", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [18/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "741b4a72a5799082", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [19/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "30de6348db92c0ac", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [20/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4a0b07d2d0c3779c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [21/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7a081aa7d91175d6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [22/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2c948299f43ea62e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [23/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "77402c37c15254e1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [24/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "12650cc3ec0530dc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [25/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d21ff2a976a1f9b5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [26/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "67268bac752609e5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [27/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "adf1e05c56dd0a98", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [28/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "40940c34ff15fd7a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [29/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "493c481003404535", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [30/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d360087e2b72c98f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [31/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d79b5b84b0de7a93", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [32/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5dd14ce011dbfe69", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [33/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "20d2511d5ca3f61c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [34/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "026777e90483c93f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [35/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f75990cee361d2fd", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [36/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6e0d334fc4de8695", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [37/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "05acc7428af32112", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [38/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "28622fb2bfe30ed8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [39/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "53764920619d5bb6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [40/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cdf59f4794d6772a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [41/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5fce3f9bd183b01e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [42/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dd0b031d819a17b8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [43/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "60382cfef2257872", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [44/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "64a83bd09f2a0d86", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [45/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "27f16c79c0d42e58", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [46/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fe8d1da3c17bb308", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [47/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3f769ac4e1fc821b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [48/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "99616bc57c2fc95e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [49/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9e78903df8dcfdcf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [50/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c018627efd32a205", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [51/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4f42a484764df8fb", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [52/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1f82ff53a187a964", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [53/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b4863406a35daac7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [54/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "22d3092f1449c7a2", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [55/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3756d585a81f8aed", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [56/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bc62f3686e1ae5b4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [57/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "73968d6e4a9bf573", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [58/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d70453d3b1048c0a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [59/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fa16cd094c99fe83", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: quality x 4 horizons [60/60]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0f0039fb960d4199", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [1/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2644ec583d97529a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [2/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fa1b1d7bef746ff5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [3/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8923fb3003d047e0", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [4/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d08b0e614635abf2", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [5/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bbdb646a35a0d7b4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [6/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "68124511c2acb71b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [7/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9f1d199c75b6d382", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [8/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8d790ca310c69f09", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [9/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "432c1e5435b3b060", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [10/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b1cd6a7843a385a6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [11/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "74e00e42180d99b4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [12/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7914a099935ebf53", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [13/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7193cd3a21e7611f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [14/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7d108eea42302943", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [15/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "395e31d3861d56f2", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [16/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "aaf3329ab8a89ddf", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [17/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "343c46db7543eda8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [18/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6248f621701b5b9f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [19/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d01974f20d2dcf35", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [20/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9380dd6688ad34d1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [21/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6b36c82c188ab605", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [22/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8e040a669efe58e4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [23/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "52196db8501bb3ad", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [24/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8a1430497a2f1abd", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [25/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "db6b4b902a0b8204", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [26/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fdaf7a58329e031a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [27/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d5cd3d735edd9a25", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [28/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "626a46dcc877c151", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [29/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8248a4e8ee5d76a6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [30/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7b2387778be73541", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [31/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "249281a3ee86ac1e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [32/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "36bfc35853563f3b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [33/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "01d52544fa81ae7a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [34/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f373b823cfc66545", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [35/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "13084bbee7c36070", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: liquidity x 4 horizons [36/36]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "48c99cd93de38f3c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [1/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "119efc96adb12cb4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [2/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8198061751d1ea67", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [3/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "007ab03778f51689", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [4/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "eeb4265573c5e273", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [5/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "58679bf6ff215654", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [6/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "77e4acf99d863ef5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [7/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "88127ea73d4d472d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [8/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "613602c9762ffb5b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [9/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4af4a789da9152f9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [10/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2faf09d49e6389d7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [11/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a1d2f7b20cf5ee9b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [12/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "24e7be93fb789c0e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [13/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f485371df76cbe89", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [14/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "263cbf220fd6c49d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [15/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f188151ebf4f00d1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [16/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5f9735fe704e8045", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [17/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9ffdf14b7cefb8a3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [18/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "83f777e2832786b3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [19/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "feb22a82d843438c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [20/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fdc469bbc71a9993", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [21/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cec22ae64ef36a04", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [22/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9017b49ec5a30653", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [23/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cbb6ece1e16d1065", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [24/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b71f0ccdb823b7d1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [25/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bb281356413215f5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [26/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "df9eeb73536eb6ab", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [27/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4e4fa876059daa56", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [28/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4f02c37e644955d5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [29/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "09278d2303fd69bc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [30/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b8ac805cba7d19ed", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [31/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "418742077e5147b5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: value x 4 horizons [32/32]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b6985710af84cee3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [1/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cc3d438b4e9ed7d8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [2/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6493963f1c4a143d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [3/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5156ced29bba4dff", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [4/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9827a560745eb6d4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [5/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ceded0aa1a9679d4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [6/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "06e11fdaad3c2ab9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [7/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0e6e47ad5570b964", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [8/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "533e23eb76a807af", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [9/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8a09712e3fcab1a6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [10/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fd89a81bd2190af9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [11/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1ff82adebd0a9046", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [12/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "45cb8e9939baecd3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [13/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8b6cfd7ddbd4b4af", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [14/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c40f30b6ff53d5b1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [15/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c9e5562bf801efb1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [16/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "720331cb528f5db5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [17/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "23e9b4fb75b7c01e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [18/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9851d302578315b4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [19/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9d9aa351b6d26682", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [20/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2188bd521bceac86", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [21/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9d9b878a33a9ad4b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [22/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d6c58de9c23c4b77", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [23/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2d8b18ca730ba184", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [24/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e4179bd88571b9fc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [25/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a65131dab931b947", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [26/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cf02853c4f41b4c6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [27/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "77f7316897d9706e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [28/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a7e5b1c9cb651e5b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [29/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "698d5f69dbb83de4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [30/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2396b2d92753d53e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [31/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2928802f82cf11e2", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [32/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "01326f272c7297ee", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [33/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a08e5025b2b888e7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [34/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2f058daac6be12bc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [35/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2bf7e62e890d4f13", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [36/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a0537da03b34d7ab", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [37/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6f683adbded5e897", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [38/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0cc13fda7b8e074d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [39/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8b11a783a01fe6df", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: reversal x 4 horizons [40/40]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "18e028f21c41ea44", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [1/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4e8f50a1513c0829", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [2/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d36053974a7b3310", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [3/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4f7e7c273f088722", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [4/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d060b36038b62eb0", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [5/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5662529e8888d23a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [6/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1f87cdf380ca9dca", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [7/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a24270b718e81f2c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [8/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ae967c0666f428e7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [9/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "776e11302b2907f4", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [10/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9a4623b5290ef751", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [11/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2cb0908a9f7ee5ca", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [12/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d2a2cdac35f9adbe", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [13/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5a9551f8213a8a52", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [14/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d330f6f621f135bd", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [15/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0f734ad9ad3b9159", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [16/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f3cd1af787089f27", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [17/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "adca6225ec68daa9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [18/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "60ef15ed0be1f6dd", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [19/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "07649c5eaf402204", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [20/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1d3606ace023c654", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [21/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9c7434b577a62412", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [22/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8305f0c558c59851", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [23/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fbb96c85e7f6a303", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: ownership x 4 horizons [24/24]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5aee5719e167122c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [1/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cc8b16e7d773410a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [2/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2f2cfaf16fc1bd6f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [3/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3e1f9730681643b3", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [4/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0a664aa9a061c9be", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [5/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cbffbb4feacb265c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [6/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "26ecd2633616d968", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [7/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8f77a90cde89daa1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 factor screen: seasonality x 4 horizons [8/8]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d9a4bde2a2459188", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [1/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "99e6dafed6f832d5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [2/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7ab16d22f8cea9a1", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [3/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "04affbc9a2137eb0", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [4/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "143ad1af0c429591", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [5/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "59ce30786926c42f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [6/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7af61461e761f503", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [7/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "357f210f095b8fdc", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [8/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dc76954d29b05d50", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [9/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ec852593335d2ee7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [10/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "edd0e64aeceb2968", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [11/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "58524f5e68661472", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [12/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1641364be0241656", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [13/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5c9931392752e237", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [14/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0c4e04ccc5e06b3c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [15/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "059be72ce252732c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [16/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "afeab4cf6d168914", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [17/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0dced6814c823eca", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [18/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fd18ba9a7ef1c43e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [19/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "51d50cc505f7aad5", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [20/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d989a542b08331a9", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [21/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "78d33c485b570d47", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [22/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "975100426e845874", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [23/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "cff86ebaca0ef5fb", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [24/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "db632870d167d3d8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [25/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d23fcfc974a080ee", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [26/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3ee7810b7fd73406", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [27/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3b65d026cbf8ff03", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [28/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ec634616363a0c78", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [29/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7ffe26631124b752", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [30/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4124785621c9b006", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [31/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b60b4e49b887dbd6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [32/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0f6c6bb71bc7c975", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [33/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b69eb2ead1ce3a84", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [34/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a5ef1a2fdef95bdb", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [35/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b62302236b1821d8", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [36/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5e627466dfd4f134", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [37/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "23c5f79ad45a1232", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [38/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e70ab0a20bdcef69", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [39/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d160d3cd75fc139f", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [40/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e65b065277afc307", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [41/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "74b858f6abaa8967", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [42/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "64ddbcb2eedc5e3b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [43/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2efa0cac2ce6c635", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [44/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7dc96173f8553ecd", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [45/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "51ad679133b632e0", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [46/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "34646671c9f97234", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [47/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3bfde2df541f25d0", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [48/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "69494e4ec7dbd47d", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [49/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5d89d86f7874718c", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [50/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "86b37187d19c06c6", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [51/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "01b4cc2afe6e9380", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [52/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "42758d738d92bd54", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [53/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e16128f721d454ad", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [54/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "639beec94be5fc3b", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [55/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b834131cc1ee3f17", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [56/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bed02bc10d961b3e", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [57/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "7c2d3656476de048", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [58/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b54f3a49caa20188", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [59/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fd14de2aaef08131", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [60/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4f587cc4f6014e13", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [61/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f983da04bb10184a", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [62/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "78349a58920b27b7", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [63/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3a9f1defc4254150", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [64/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3e7b5c6118a84f58", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [65/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e0cb8f24105f6d31", "command": "v3 factor search (reconstructed)", "label": "\u00a74 both-halves sign stability on the 33 survivors x 2 halves [66/66]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "147d36336bb4673f", "command": "v3 factor search (reconstructed)", "label": "\u00a75 redundancy threshold |rho| >= 0.80", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bf8f91f63dc3a76a", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [1/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8fe8f2de115aecff", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [2/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2d9d1112f57e983e", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [3/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "fa6dcce645d99622", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [4/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "45911708c70f11b6", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [5/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1925feb1eb5e3944", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [6/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "469f6d377b5eaf48", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [7/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "2c6e59b7a1b6fb3e", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [8/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "10df923238d35552", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [9/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4b019ea207b98468", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [10/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4b0eeb83d077d880", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [11/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "51dde72cfc5f4c9e", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [12/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b49a8947a4a55e28", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [13/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "16b54a6e41457ec7", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [14/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "ae0aa224c8a0c958", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [15/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d220d5aac58dc6fc", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [16/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "893a67333b02fc3a", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [17/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "d081d1442a138714", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [18/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a20f5ab94422ee03", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [19/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "47c60902cee91efd", "command": "v3 factor search (reconstructed)", "label": "\u00a76 theme orientation: 5 themes x 4 horizons [20/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8abff7ef8e733ec0", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [1/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "223698a88ad6bea2", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [2/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1eabaca7eb167b20", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [3/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "11251dc8265de77e", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [4/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "547d18bc1a94811b", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [5/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "07c9801b6c47469e", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [6/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "38f13ffb380716db", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [7/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bf31500521546de2", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [8/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "4a09c83cbe481b0d", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [9/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c37497f38a75f39b", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [10/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "397ac3b867726442", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [11/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6d7ed91dfd6815a1", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [12/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3dcab16eebb275f6", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [13/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e986649811783a7b", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [14/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "27cf61dd0b07bdd7", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [15/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "35e40bbeb512f25e", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [16/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "e8d1a588230b0423", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [17/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5989845f8985b9f6", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [18/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "93318f47eac6eeac", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [19/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c0ac637a88808ff3", "command": "v3 factor search (reconstructed)", "label": "\u00a76 within-theme combination: 4 methods x 5 themes [20/20]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9fc8baa60e4a3694", "command": "v3 factor search (reconstructed)", "label": "\u00a76 level-2 weight cap", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "a758fe718c8d09a9", "command": "v3 factor search (reconstructed)", "label": "\u00a76 level-2 weight floor", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c5b8b0d0d670e4c4", "command": "v3 factor search (reconstructed)", "label": "\u00a76 coverage cap on / off [1/2]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0a2cc2db86719f0d", "command": "v3 factor search (reconstructed)", "label": "\u00a76 coverage cap on / off [2/2]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "979614f4613ba4d5", "command": "v3 factor search (reconstructed)", "label": "\u00a77 absolute quality floor gates [1/5]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "dc4d84e282bd29a9", "command": "v3 factor search (reconstructed)", "label": "\u00a77 absolute quality floor gates [2/5]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "101896a074f97845", "command": "v3 factor search (reconstructed)", "label": "\u00a77 absolute quality floor gates [3/5]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "af83e5f4c0af5096", "command": "v3 factor search (reconstructed)", "label": "\u00a77 absolute quality floor gates [4/5]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "c4113c1d2acd26d7", "command": "v3 factor search (reconstructed)", "label": "\u00a77 absolute quality floor gates [5/5]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "f3f9fe5d75bc3c1f", "command": "v3 factor search (reconstructed)", "label": "\u00a77 floor applied to entries only vs the whole population [1/2]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "0f88a07fc454c41a", "command": "v3 factor search (reconstructed)", "label": "\u00a77 floor applied to entries only vs the whole population [2/2]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "b146983275f182f4", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book cost sweep [1/6]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8293101714f96da7", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book cost sweep [2/6]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "bf60def9db0f1157", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book cost sweep [3/6]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "1377479aabde2032", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book cost sweep [4/6]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "8242227a87eb7ef0", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book cost sweep [5/6]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "5ce3601cf3ba683e", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book cost sweep [6/6]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "6a2ff33dfd161558", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book specification [1/3]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "973acda9de287760", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book specification [2/3]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "9f5414eef4b0277c", "command": "v3 factor search (reconstructed)", "label": "\u00a78 book specification [3/3]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "3b0b7d643b3c1e23", "command": "v3 factor search (reconstructed)", "label": "\u00a713 dividend yield screen x 4 horizons [1/4]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "eac9f64310684123", "command": "v3 factor search (reconstructed)", "label": "\u00a713 dividend yield screen x 4 horizons [2/4]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "164d34a82e65411a", "command": "v3 factor search (reconstructed)", "label": "\u00a713 dividend yield screen x 4 horizons [3/4]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "196e0d8f6b56f60e", "command": "v3 factor search (reconstructed)", "label": "\u00a713 dividend yield screen x 4 horizons [4/4]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "22f050150d6ece96", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: shipped", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "c6e851a7cab891cb", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: no_target", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "98e7c78153ac2f1c", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: no_invalidation", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "136906baeed4b0a1", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: no_stop", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 5.91}
+{"key": "f7f048cc2d881120", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 0.5pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.04}
+{"key": "cfe29ff65fecd2a4", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 1pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "2d72aad7b716000f", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 2pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.34}
+{"key": "1d49fa90cbaae93f", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 4pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 8.73}
+{"key": "70f2c7afaff80739", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 12", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.28}
+{"key": "5da91d774936bd02", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 18", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "13ec2deb31fe1049", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 36", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 8.76}
+{"key": "940c7f22a0f67cd8", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top6", "recorded_at": "2026-09-06T05:32:46+00:00", "score": -1.5196}
+{"key": "abee4c7feabde960", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: D10", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 0.3242}
+{"key": "bb8cf60e79ad525a", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: D6-D8", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 1.1934}
+{"key": "1071b6393f8180a7", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top-half", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 0.9052}
+{"key": "029735724bfa2783", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: D10-D1", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 2.6729}
+{"key": "6b15738a4cd21204", "command": "audit 2026-09 transfer-coefficient shapes", "label": "portfolio shape OOS h=63: top-half minus bottom-half", "recorded_at": "2026-09-06T05:32:46+00:00", "score": 1.812}

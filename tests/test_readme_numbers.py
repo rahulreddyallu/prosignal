@@ -53,6 +53,20 @@ END = "<!-- RESULTS_OF_RECORD:END -->"
 #: friction: an unlisted number is one nothing checks, which is how the two
 #: tables drifted apart in the first place.
 FIGURES = {
+    # THE HEADLINE, and it is the leverage-neutral one. The book deploys about
+    # a fifth of capital against a fully-invested benchmark, so raw excess and
+    # the information ratio move with `risk_per_trade_pct` -- nine points
+    # across a sweep in which the ranking and the names are identical. README
+    # must carry the figure that does not move, or a reader comparing it to
+    # anything is comparing leverage. See portfolio_sim._benchmark_stats.
+    "shipped_alpha_on_deployed": ("arm:results_of_record",
+                                  "alpha_on_deployed_ann",
+                                  lambda v: f"{v:+.2%}"),
+    "shipped_excess_on_deployed": ("arm:results_of_record",
+                                   "excess_on_deployed_ann",
+                                   lambda v: f"{v:+.2%}"),
+    "shipped_deployed": ("arm:results_of_record", "deployed_frac",
+                         lambda v: f"{v:.1%}"),
     "shipped_mean_excess": ("arm:results_of_record", "mean_excess_per_period",
                             lambda v: f"{v:+.2%}"),
     "shipped_ir": ("arm:results_of_record", "ir", lambda v: f"{v:+.2f}"),

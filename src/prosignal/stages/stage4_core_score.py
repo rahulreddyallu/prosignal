@@ -198,15 +198,26 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
             f"re-cap and are not re-run: both windows are spent. The RANKING is "
             f"what generalised there; a ten-name book at these transaction costs "
             f"did not -- see CHANGELOG.md.")
-        # AND HOW MUCH OF THE UNIVERSE "SECTOR-NEUTRAL" ACTUALLY COVERS. The
-        # card says the score is a sector-neutral rank; for the residual bucket
-        # it is a rank against a pool of unrelated industries. Reported rather
-        # than fixed, because raising sector coverage is a data job (D-019) and
-        # a claim that is true for 61% of the book should not be silent about
-        # the other 39%.
+        # SECTOR NEUTRALISATION IS OFF, and the note says so rather than
+        # letting the card keep an old claim. See `v3.SECTOR_NEUTRAL`: the
+        # sector map is drawn from TODAY's constituent files, so holding a
+        # sector label is correlated with having survived (+3.36% per 63
+        # sessions, t +3.48) -- and neutralising against it also COST the
+        # signal 0.029 of IC at h=63. The bucket report is kept because it
+        # measures what a sector map would cover if a point-in-time one
+        # existed, which is the condition for turning this back on.
         try:
             _rb = v3feat.residual_bucket_size(covered.index, sectors)
-            if _rb["resid"]:
+            if not v3feat.SECTOR_NEUTRAL:
+                notes.append(
+                    f"Ranked across the whole eligible universe, NOT within "
+                    f"sector. The sector map is current-vintage, so it is "
+                    f"future information; neutralising against it also "
+                    f"measured worse (OOS rank IC +0.0473 with, +0.0759 "
+                    f"without, at h=63). For reference a sector map would "
+                    f"cover {len(covered) - _rb['resid']} of {len(covered)} "
+                    f"names today, with {_rb['resid']} in a residual bucket.")
+            elif _rb["resid"]:
                 notes.append(
                     f"Sector-neutral for {len(covered) - _rb['resid']} of "
                     f"{len(covered)} names. The other {_rb['resid']} "
@@ -1223,11 +1234,45 @@ def _v3_redundancy(v3_scored, cfg):
         notes.append("fewer than two scored columns carried enough values to "
                      "correlate; overlap not measurable this run")
 
+    # HOW MANY INDEPENDENT COLUMNS ARE ACTUALLY THERE. Pair breaches catch the
+    # duplicates; they say nothing about the aggregate. Grinold's
+    # IR = IC * sqrt(breadth) takes breadth to be independent bets, and this
+    # engine describes itself as 22 factors across 5 themes. Measured across
+    # 380 panel dates the factors carry 6.94 effective and the themes 3.96 --
+    # so a breadth argument made on the factor count overstates by 1.74x, and
+    # the theme level is close to honest, which is the two-level structure
+    # doing its job.
+    from ..v3_monitor import effective_count
+
+    eff: Dict[str, float] = {}
+    if factors is not None:
+        e = effective_count(factors)
+        if np.isfinite(e):
+            eff["factors_declared"] = float(factors.shape[1])
+            eff["factors_effective"] = round(float(e), 3)
+    if theme_block is not None:
+        e = effective_count(theme_block)
+        if np.isfinite(e):
+            eff["themes_declared"] = float(theme_block.shape[1])
+            eff["themes_effective"] = round(float(e), 3)
+    if "factors_effective" in eff and eff["factors_effective"] > 0:
+        eff["breadth_overstatement"] = round(
+            float(np.sqrt(eff["factors_declared"] / eff["factors_effective"])), 3)
+        notes.append(
+            f"EFFECTIVE BREADTH: {eff['factors_declared']:.0f} factors carry "
+            f"{eff['factors_effective']:.2f} independent columns"
+            + (f" and {eff['themes_declared']:.0f} themes carry "
+               f"{eff['themes_effective']:.2f}" if "themes_effective" in eff
+               else "")
+            + f". Any IR computed from the declared count overstates by "
+              f"{eff['breadth_overstatement']:.2f}x.")
+
     combined = {f"theme:{k}": round(v, 4) for k, v in theme_pairs.items()}
     combined.update({k: round(v, 4) for k, v in factor_pairs.items()})
     return RedundancyReport(
         pairwise_spearman=combined, breaches=breaches, cutoff=cutoff,
-        action_taken=str(v(cfg.redundancy.on_breach)), notes=notes)
+        action_taken=str(v(cfg.redundancy.on_breach)), notes=notes,
+        effective_breadth=eff)
 
 
 def _redundancy(frame: pd.DataFrame, cfg,
