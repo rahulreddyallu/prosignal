@@ -828,7 +828,7 @@ def _resolve_as_of(calendar, requested: Optional[str]):
 
 def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     """RUN MARKET ANALYSIS -- the full eight-stage decision pipeline."""
-    from .pipeline import PipelineBlocked, run_analysis
+    from .pipeline import STAGE_LABELS, PipelineBlocked, run_analysis
     from .stages.stage8_final_signal import PROBABILITY_UNAVAILABLE
 
     _rule("RUN MARKET ANALYSIS")
@@ -847,7 +847,7 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
         run = run_analysis(
             cfg,
             as_of=_resolve_arg_date(getattr(args, "date", None)),
-            progress=lambda i, label: _print(f"  [{i+1}/9] {label}"),
+            progress=lambda i, label: _print(f"  [{i+1}/{len(STAGE_LABELS)}] {label}"),
         )
     except PipelineBlocked as blocked:
         _print()
@@ -2678,6 +2678,20 @@ def build_parser() -> argparse.ArgumentParser:
     ep_close.add_argument("--superseded-by", default="",
                           dest="superseded_by")
 
+    conv_p = research_sub.add_parser(
+        "conviction",
+        help="replay the 0-2 conviction gate across history and report what "
+             "it decides, which gate bound, and the BUY frequency it produces")
+    conv_p.add_argument("--start", help="first session (YYYY-MM-DD)")
+    conv_p.add_argument("--end", help="last session (YYYY-MM-DD)")
+    conv_p.add_argument("--stride", type=int, default=21,
+                        help="sessions between sampled dates (default 21)")
+    conv_p.add_argument("--limit", type=int, default=0,
+                        help="keep only the last N sampled dates")
+    conv_p.add_argument("--out", help="write the full book to this JSON path")
+    conv_p.add_argument("--quiet-progress", action="store_true")
+    conv_p.set_defaults(func=cmd_research_conviction)
+
     find_p = research_sub.add_parser(
         "findings",
         help="the defect register: category, disposition, regression test and "
@@ -3142,3 +3156,164 @@ def cmd_research_record(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
+
+
+# =============================================================================
+# research conviction -- the historical signal book
+# =============================================================================
+
+
+def cmd_research_conviction(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Replay the conviction gate across history and report what it decides.
+
+    THE QUESTION THIS ANSWERS. Every threshold in `stage9_conviction` is
+    UNVALIDATED. This is the instrument that moves them: it reports the BUY
+    frequency the current bar produces, which gate bound on the days it
+    refused, and how the decisions distribute across regimes. Signal frequency
+    must be a CONSEQUENCE of the thresholds, so this reports it rather than
+    targeting it.
+
+    Nothing is written to the ledger. This is a measurement, not a run.
+    """
+    import collections
+    import json as _json
+
+    from .conviction import gate as _cgate
+    from .costs import CostModel as _CostModel
+    from .data.store import DataStore as _DataStore
+    from .core.calendar import TradingCalendar as _Cal
+    from . import pipeline as _pl
+    from .stages import (stage1_data_quality as _s1, stage2_regime as _s2,
+                         stage3_eligibility as _s3, stage4_core_score as _s4,
+                         stage5_false_signal as _s5, stage6_entry as _s6,
+                         stage7_risk as _s7, stage9_conviction as _s9)
+
+    store = _DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        _print("no price sessions in the store")
+        return 1
+    cfg.bind_store(store)
+    cal = _Cal(sessions)
+
+    start = _resolve_arg_date(args.start)
+    end = _resolve_arg_date(args.end)
+    span = [d for d in sessions
+            if (start is None or d >= start) and (end is None or d <= end)]
+    stride = max(int(args.stride), 1)
+    dates = span[::stride]
+    if args.limit:
+        dates = dates[-int(args.limit):]
+    if not dates:
+        _print("no sessions in the requested range")
+        return 1
+
+    _rule(f"CONVICTION BOOK -- {len(dates)} sessions, "
+          f"{dates[0]} to {dates[-1]}, stride {stride}")
+
+    book = []
+    for i, as_of in enumerate(dates):
+        row = {"date": as_of.isoformat()}
+        try:
+            uni = _pl._universe(store, cfg, as_of)
+            man = _pl._manifest_from_store(store, cfg, "conviction", as_of, uni)
+            q = _s1.run(man, store, cal, uni, cfg)
+            reg = _s2.run(store, cal, uni.symbols, cfg, as_of=as_of)
+            el = _s3.run(uni, store, cal, q, cfg, as_of=as_of, held=[])
+            sc = _s4.run(el, store, cal, reg, cfg, as_of=as_of)
+            df = _s5.run(sc, store, cal, reg, cfg, as_of=as_of)
+            defended = list(df.per_stock)
+            frames = _pl._frames(store, cal, defended, cfg, as_of)
+            closes = _pl._closes(frames)
+            ranks = {s.ticker: s.rank for s in sc.ranked_scores}
+            ent = _s6.run(defended, frames, cfg, as_of, ranks=ranks, held=[],
+                          entries_open=True)
+            costs = _CostModel(cfg)
+            plans = {}
+            for sym in defended:
+                fr, d = frames.get(sym), ent.decisions.get(sym)
+                if fr is None or d is None or d.reference_price is None:
+                    continue
+                s0 = next((x for x in sc.ranked_scores if x.ticker == sym), None)
+                if s0 is None:
+                    continue
+                plans[sym] = _s7.build_plan(
+                    ticker=sym, frame=fr,
+                    reference_price=float(d.reference_price),
+                    composite_score=df.per_stock[sym].score_after,
+                    adtv_inr=el.adtv_inr.get(sym), config=cfg, costs=costs)
+            v = _s9.run(sc, df, plans, reg, closes, cfg, as_of=as_of)
+            row.update(regime=reg.regime_bucket,
+                       eligible=len(el.eligible_universe),
+                       buys=len(v.buys),
+                       names=[c.ticker for c in v.buys],
+                       grades=[c.grade() for c in v.buys],
+                       cause=v.cause,
+                       candidates=_cgate.to_record(v))
+        except Exception as exc:                       # noqa: BLE001
+            row["error"] = f"{type(exc).__name__}: {exc}"
+        book.append(row)
+        if not args.quiet_progress:
+            _print(f"  [{i + 1}/{len(dates)}] {row['date']}  "
+                   f"buys={row.get('buys', '-')}  {row.get('regime', '')}"
+                   f"{'  ' + row['error'] if 'error' in row else ''}")
+
+    ok = [r for r in book if "error" not in r]
+    if not ok:
+        _print("every session errored")
+        return 1
+
+    # -- frequency ---------------------------------------------------------
+    dist = collections.Counter(r["buys"] for r in ok)
+    total = len(ok)
+    _rule("BUY FREQUENCY")
+    _table("Sessions by BUY count", ["buys", "sessions", "share"],
+           [[str(k), str(dist.get(k, 0)), f"{dist.get(k, 0) / total:.1%}"]
+            for k in sorted(dist)])
+    per = sum(k * n for k, n in dist.items()) / total
+    _print(f"  {per:.2f} BUYs per scanned session; "
+           f"{dist.get(0, 0) / total:.0%} of sessions are NO TRADE.")
+    _print("  Frequency is a CONSEQUENCE of the thresholds, not a target. "
+           "See stage9_conviction in parameters.yaml.")
+
+    # -- which gate bound --------------------------------------------------
+    binding = collections.Counter()
+    for r in ok:
+        for c in r.get("candidates") or []:
+            if c["failures"]:
+                f = c["failures"][0]
+                key = ("independent evidence" if "independent direction" in f
+                       else "evidence concentration" if "single direction" in f
+                       else "separation from next" if "clear of the next" in f
+                       else "separation from median" if "above the median" in f
+                       else "robustness" if "alternative theme" in f
+                       else "cost" if "cost" in f
+                       else "momentum crash" if "momentum crash" in f.lower()
+                       or "Daniel" in f else "other")
+                binding[key] += 1
+    _rule("WHICH GATE REFUSED (first failure per candidate)")
+    tot = sum(binding.values()) or 1
+    _table("Binding constraint", ["gate", "candidates", "share"],
+           [[k, str(n), f"{n / tot:.1%}"]
+            for k, n in binding.most_common()])
+
+    # -- by regime ---------------------------------------------------------
+    by_regime = collections.defaultdict(lambda: [0, 0])
+    for r in ok:
+        b = by_regime[r.get("regime") or "?"]
+        b[0] += 1
+        b[1] += r["buys"]
+    _rule("BY REGIME")
+    _table("Decisions by regime", ["regime", "sessions", "buys", "per session"],
+           [[k, str(v[0]), str(v[1]), f"{v[1] / v[0]:.2f}"]
+            for k, v in sorted(by_regime.items())])
+
+    if args.out:
+        path = Path(args.out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_json.dumps(book, indent=1))
+        _print(f"\n  wrote {len(book)} sessions to {path}")
+
+    _print()
+    _print(rec_warning())
+    return 0

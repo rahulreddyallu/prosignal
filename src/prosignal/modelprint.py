@@ -58,6 +58,20 @@ MODEL_SOURCES: List[str] = [
     # those are decisions.
     "presentation/selection.py",
     "positions.py",
+    # THE CONVICTION LAYER, which since 2026-09-06 IS the decision. Stage 9
+    # decides which names are bought; the rank band and the entry cadence no
+    # longer do. By this list's own rule -- "the files whose contents decide a
+    # ranking" -- these belong here more than anything above them, and without
+    # them a change to a threshold in `gate.py` would move the live output
+    # while leaving the fingerprint and the config hash both untouched. That is
+    # exactly the blind spot this fingerprint exists to close.
+    "stages/stage9_conviction.py",
+    "conviction/gate.py",
+    "conviction/evidence.py",
+    "conviction/separation.py",
+    "conviction/robustness.py",
+    "conviction/economics.py",
+    "conviction/independence.py",
 ]
 
 #: Training depth is bucketed rather than exact. A store gains a session a

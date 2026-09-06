@@ -229,7 +229,22 @@ are correct. The input is the problem.
 > `prosignal research results` produces from the current store and stamps with
 > the config version, the store fingerprint, the git commit, the panel span and
 > the trial count. `tests/test_readme_numbers.py` fails if this section drifts
-> from it. **These supersede every other number in this file.**
+> from it.
+
+> [!WARNING]
+> **NEITHER TABLE IN THIS FILE DESCRIBES WHAT SHIPS.** The executive summary
+> measures `mom_6_1_r` traded alone. RESULTS OF RECORD measures the fitted
+> Fama-MacBeth composite with a 2.5xATR stop, a 3R target and risk-budget
+> sizing. The engine ranks on `v3_composite` and uses none of those exits.
+>
+> Since 2026-09-06 the gap is wider still: the BUY decision is made by
+> `stage9_conviction` (see [docs/CONVICTION.md](docs/CONVICTION.md)), which
+> emits **0, 1 or 2** names on evidence, separation, specification-survival and
+> net-of-cost grounds. Every table below was generated under the SIX-name book
+> admitted by a rank band and a 21-session entry cadence -- a configuration the
+> engine no longer runs. The ranking numbers (rank IC, top-decile excess by
+> horizon) still describe the live scorer, because the scorer did not change.
+> The BOOK numbers describe a book that no longer exists.
 
 This file used to carry two book tables that cannot both describe the same
 engine. Both configurations have now been re-run against the current store,
