@@ -384,6 +384,70 @@ def by_ticker(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
     return rows
 
 
+def account_curve(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
+                  book_size: int = 20, target_deployment: float = 0.75,
+                  benchmark: str = "Nifty 200") -> List[Dict[str, Any]]:
+    """What the ACCOUNT did, not what the average position did.
+
+    WHY THIS EXISTS ALONGSIDE `equity_curve`. That function accumulates
+    per-trade returns unweighted: twenty trades at +5% read +100%. On an
+    account those twenty positions were a slot each, so the same trades moved
+    the balance by `20 x (0.75/20) x 5% = +3.75%`. Both numbers are true and
+    they answer different questions -- "was the selection any good" and "what
+    happened to my money" -- and the History page only ever showed the first,
+    which reads as the second. That is finding Q16 at the account level.
+
+    THE WEIGHT IS `target_deployment / book_size`. A name is one slot of a book
+    that deliberately holds cash: at twenty names and 75% deployment each
+    position is 3.75% of capital, so a trade's contribution to the account is
+    its return times that. The uninvested quarter earns nothing and is why the
+    account curve sits below a fully-invested benchmark even when the
+    selection is good -- which is the cash drag Q1 is about, shown rather than
+    argued.
+
+    NOT COMPOUNDED, for the same reason `equity_curve` is not: positions
+    overlap, and compounding overlapping holds implies leverage the book never
+    took. This is the running weighted sum, which is what an equal-slot book
+    accumulates to first order.
+
+    THE BENCHMARK IS WEIGHTED THE SAME WAY, and an earlier draft of this got
+    it wrong. Summing per-trade benchmark returns unweighted is not "what the
+    index did": 128 trades over about a year count the same index days dozens
+    of times and produce +30% where the index moved a fraction of that. It is
+    the same unweighted-sum artifact the book side has, so leaving it unscaled
+    would compare a weighted book against an unweighted index and flatter
+    neither consistently.
+
+    Weighted identically, this line answers "what would the same capital, held
+    the same way, in the index instead" -- the leverage-matched comparison the
+    rest of this engine reports alpha against. It is NOT the return on a fully
+    invested index hold, which is higher and is the other question worth
+    asking; `performance()` reports the index over the calendar span for that.
+    """
+    idx = _index_frame(store, benchmark) if store is not None else None
+    trades = sorted(_trades(merge_reentries(outcomes), idx),
+                    key=lambda t: t.exit_date or "")
+    weight = (float(target_deployment) / max(int(book_size), 1))
+    curve: List[Dict[str, Any]] = []
+    run = bench_run = 0.0
+    for t in trades:
+        if not t.exit_date:
+            continue
+        run += t.net_return * weight
+        if t.benchmark_return is not None:
+            bench_run += t.benchmark_return * weight
+        curve.append({
+            "date": t.exit_date,
+            "ticker": t.ticker,
+            "cumulative": run,
+            "benchmark_cumulative": (bench_run if t.benchmark_return is not None
+                                     else None),
+            "trade_contribution": t.net_return * weight,
+            "position_weight": weight,
+        })
+    return curve
+
+
 def equity_curve(outcomes: Sequence[Dict[str, Any]], store: Any = None, *,
                  benchmark: str = "Nifty 200") -> List[Dict[str, Any]]:
     """Cumulative return by exit date, against the same days in the index.

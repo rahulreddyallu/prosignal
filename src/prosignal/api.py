@@ -1471,6 +1471,30 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                                           benchmark=bench),
             "by_ticker": _perf.by_ticker(rows, store, benchmark=bench),
             "curve": _perf.equity_curve(rows, store, benchmark=bench),
+            # WHAT THE ACCOUNT DID, weighted by the slot each name occupies.
+            # `curve` above accumulates per-trade returns unweighted, which
+            # reads as an account balance and is not one: twenty trades at +5%
+            # show +100% there and moved a 20-name book at 75% deployment by
+            # +3.75%. Both are served so the page can say which is which.
+            "account_curve": _perf.account_curve(
+                rows, store, benchmark=bench,
+                book_size=int(cfg.params.capital.max_open_positions.value),
+                target_deployment=float(
+                    getattr(cfg.params.capital, "target_deployment", None).value
+                    if getattr(cfg.params.capital, "target_deployment", None)
+                    is not None else 1.0)),
+            "book": {
+                "size": int(cfg.params.capital.max_open_positions.value),
+                "position_value_inr": float(
+                    cfg.params.capital.position_value_inr()),
+                "sizing_mode": str(getattr(
+                    getattr(cfg.params.capital, "sizing_mode", None),
+                    "value", "risk_budget")),
+                "target_deployment": float(
+                    getattr(cfg.params.capital, "target_deployment", None).value
+                    if getattr(cfg.params.capital, "target_deployment", None)
+                    is not None else 1.0),
+            },
             "calibration": _out.calibration(rows),
             "cohort_cutoff": cutoff,
             "recent": _perf.recent_activity(partial),

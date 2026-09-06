@@ -291,6 +291,33 @@ def _position_size(price, risk_per_share, adtv, category, params, costs
     qty_risk = int(risk_budget / risk_per_share) if risk_per_share > 0 else 0
     qty_slot = int((slot * frac) / price) if price > 0 else 0
 
+    # EQUAL WEIGHT DROPS THE RISK TERM, DELIBERATELY.
+    #
+    # Under `risk_budget` the size is `min(risk, slot, liquidity)` and the risk
+    # term binds on nearly every name -- which is why the old six-name book
+    # held about 22% of capital and why every performance figure it produced
+    # moved with `risk_per_trade_pct` (finding Q1). Under `equal_weight` the
+    # SLOT is the intended size and `position_value_inr` has already divided
+    # the target deployment across the book, so applying the risk cap on top
+    # would silently restore the confound the mode exists to remove.
+    #
+    # WHAT IS GIVEN UP. Per-name risk control: a wide-stop name now carries the
+    # same rupees as a tight-stop one. The ATR stop still governs the EXIT, so
+    # the loss on any single position is still bounded by the disaster floor --
+    # it is the equalisation of loss across names that goes.
+    #
+    # LIQUIDITY STILL BINDS. A name whose ADTV cannot be measured is refused
+    # under either mode; that gate is not a sizing preference.
+    if str(getattr(params.capital.sizing_mode, "value",
+                   params.capital.sizing_mode)) == "equal_weight":
+        qty_risk = qty_slot
+        notes.append(
+            f"Equal weight: sized at the slot of Rs {slot * frac:,.0f} rather "
+            f"than the risk budget of Rs {risk_budget:,.0f}. The book targets "
+            f"{fv(params.capital.target_deployment):.0%} deployed across "
+            f"{iv(params.capital.max_open_positions)} names."
+        )
+
     cap_pct = fv(params.capital.max_participation_of_adtv)
     view = assess(adtv)
     if view.adtv_inr is None or price <= 0:
