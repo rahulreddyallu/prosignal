@@ -800,10 +800,16 @@ REGISTER: Tuple[Finding, ...] = (
     ),
     _f(
         fid="Q4", severity="high",
-        title="Every panel-wide statistic averaged across structurally "
-              "different models, weighted by a data feed",
+        title="Every panel-wide statistic pooled the dates the model was "
+              "chosen on with the dates that tested it, and averaged across "
+              "structurally different models while doing it",
         category=Category.VALIDATION, status=Status.FIXED,
-        root_cause="`score_frame` re-caps the theme blend over the themes a "
+        root_cause="TWO CUTS, both missing. The signs and weights were fitted "
+                   "2018-11-27..2024-10-25, which is 293 of the panel's 380 "
+                   "signal dates, and the ranking table pooled those with the "
+                   "87 that followed -- so the published figure was neither an "
+                   "in-sample fit statistic nor an out-of-sample result. "
+                   "Separately, `score_frame` re-caps the theme blend over the themes a "
                    "name actually has, which is right per name and turns into "
                    "a validation problem across time. The fundamentals feed "
                    "reaches almost nobody early in the panel and most of the "
@@ -817,7 +823,12 @@ REGISTER: Tuple[Finding, ...] = (
                    "nobody chose: it was set by when a vendor's coverage "
                    "improved.",
         location="prosignal.validation.results::_ranking_results",
-        fix="`v3_monitor.theme_availability` reports the coverage per date "
+        fix="`_ranking_windows` reports four spans, headline first: "
+            "OUT_OF_SAMPLE (the claim), IN_SAMPLE, STABLE_MODEL and "
+            "FULL_PANEL. A span holding fewer than `MIN_STABLE_DATES` signal "
+            "dates is not reported at all, because a handful of dates is not "
+            "an out-of-sample result. "
+            "`v3_monitor.theme_availability` reports the coverage per date "
             "and `stable_model_window` returns the first date from which "
             "EVERY theme stays above 40% -- 2023-07-21, leaving 150 of 380 "
             "dates. The ranking table now carries both windows side by side "
@@ -826,15 +837,19 @@ REGISTER: Tuple[Finding, ...] = (
             "not replaced: it is the longer record, and hiding it would be "
             "the same class of selection this register exists to stop.",
         regression_test="tests/test_model_stability_window.py",
-        before_after="rank IC at h=21, overlap-corrected: FULL_PANEL +0.0541 "
-                     "t +7.74 on 380 dates; STABLE_MODEL +0.0468 t +6.22 on "
-                     "150. The ordering survives the restriction -- which is "
-                     "the finding's answer, and it could equally have gone "
-                     "the other way",
+        before_after="rank IC at h=21, overlap-corrected: OUT_OF_SAMPLE "
+                     "+0.0411 t +3.91 on 87 non-overlapping observations; "
+                     "IN_SAMPLE +0.0579 t +6.82 on 293; STABLE_MODEL +0.0468 "
+                     "t +6.22 on 150; FULL_PANEL +0.0541 t +7.74 on 380. The "
+                     "ordering survives both restrictions and the "
+                     "out-of-sample t clears the Harvey-Liu-Zhu 3.0 bar; the "
+                     "in-sample-to-out-of-sample decay is 29%. It could "
+                     "equally have gone the other way",
         moves_coefficients=False, moves_history=False, forces_restart=False,
         notes="This does not move a coefficient. It changes what the evidence "
               "is understood to be evidence ABOUT, and it cuts the honest "
-              "sample for the shipped composite from 380 dates to 150.",
+              "sample behind a claim about the shipped composite from 380 "
+              "dates to 87.",
     ),
     _f(
         fid="Q5", severity="critical",

@@ -66,9 +66,19 @@ __all__ = ["ArmResult", "RankingResult", "Stamp", "ResultsOfRecord",
 
 DOC_RELPATH = "docs/RESULTS_OF_RECORD.md"
 
-#: Below this many signal dates the restricted window is not a measurement, and
+#: Below this many signal dates a restricted window is not a measurement, and
 #: printing an IC over it invites the reader to compare a number against noise.
 MIN_STABLE_DATES = 60
+
+#: The window a claim about the shipped model rests on. The others are context.
+#:
+#: WHY THIS AND NOT `FULL_PANEL`. The signs and weights were fitted
+#: 2018-11-27..2024-10-25 (`v3.FIT_WINDOW`), so 293 of the panel's 380 dates
+#: are dates the model was chosen on. Pooling them with the 87 that followed
+#: produces one number that is neither an in-sample fit statistic nor an
+#: out-of-sample result, and it is the pooled number every published table
+#: quoted.
+HEADLINE_WINDOW = "OUT_OF_SAMPLE"
 
 #: Mirrored from `v3_monitor` so `render` can name the bar without importing
 #: the monitor at module scope; `tests/test_model_stability_window.py` pins the
@@ -439,6 +449,39 @@ def _theme_shape(sub: pd.DataFrame) -> Tuple[float, float]:
     return n_mean, cov
 
 
+def _ranking_windows(panel: pd.DataFrame) -> List[Tuple[str, pd.DataFrame]]:
+    """The spans the ranking is reported over, headline first.
+
+    Two independent cuts, and they answer different questions:
+
+      OUT_OF_SAMPLE / IN_SAMPLE split on `v3.FIT_WINDOW` -- was this measured
+      on dates the model was CHOSEN on? 293 of 380 panel dates are.
+
+      STABLE_MODEL splits on theme availability -- is this the model that
+      ships, or an earlier one that could not see fundamentals? See
+      `v3_monitor.stable_model_window`.
+
+    `FULL_PANEL` is kept and reported last. It is the longer record and the
+    one every published figure was quoted from; dropping it would hide what is
+    being corrected.
+    """
+    from ..features import v3 as v3feat
+    from ..v3_monitor import stable_model_window
+
+    d = pd.to_datetime(panel["date"])
+    lo, hi = v3feat.FIT_WINDOW
+    out: List[Tuple[str, pd.DataFrame]] = [
+        ("OUT_OF_SAMPLE", panel[d > pd.Timestamp(hi)]),
+        ("IN_SAMPLE", panel[(d >= pd.Timestamp(lo)) & (d <= pd.Timestamp(hi))]),
+    ]
+    start = stable_model_window(panel)
+    if start is not None:
+        out.append(("STABLE_MODEL", panel[d >= pd.Timestamp(start)]))
+    out.append(("FULL_PANEL", panel))
+    return [(name, frame) for name, frame in out
+            if not frame.empty and int(frame["date"].nunique()) >= MIN_STABLE_DATES]
+
+
 def _ranking_results(panel: pd.DataFrame, horizons: Sequence[int],
                      stride: int, window: str = "FULL_PANEL"
                      ) -> List[RankingResult]:
@@ -541,21 +584,10 @@ def build(cfg, store, *, panel: Optional[pd.DataFrame] = None,
     close = price_panels["close"]
 
     say("scoring the ranking")
-    ranking = _ranking_results(panel, (21, 42, horizon), stride)
-
-    # THE SAME RANKING OVER THE SPAN ON WHICH IT IS THE SAME MODEL.
-    # `score_frame` re-caps the blend over the themes a name has, so a
-    # three-theme score and a five-theme score are different functions. The
-    # fundamentals feed reaches 0% of names in 2018 and 86% in 2026, so the
-    # full-panel row is an average over models, weighted by a data feed. The
-    # restricted row is the evidence that describes the shipped composite.
-    from ..v3_monitor import stable_model_window
-    stable_from = stable_model_window(panel)
-    if stable_from is not None:
-        stable = panel[pd.to_datetime(panel["date"]) >= pd.Timestamp(stable_from)]
-        if int(stable["date"].nunique()) >= MIN_STABLE_DATES:
-            ranking += _ranking_results(stable, (21, 42, horizon), stride,
-                                        window="STABLE_MODEL")
+    ranking: List[RankingResult] = []
+    for name, frame in _ranking_windows(panel):
+        ranking += _ranking_results(frame, (21, 42, horizon), stride,
+                                    window=name)
 
     n_dates = int(panel["date"].nunique())
     independent = _independent(n_dates, stride, horizon)
@@ -979,6 +1011,18 @@ def _arm_block(a: ArmResult) -> List[str]:
     return L
 
 
+def _in_sample_dates(rec: ResultsOfRecord) -> int:
+    """Signal dates inside the fit window, from the ranking rows themselves.
+
+    Read off the report rather than recomputed, so the sentence in the prose
+    cannot disagree with the table under it.
+    """
+    for r in rec.ranking:
+        if r.window == "IN_SAMPLE":
+            return r.n_dates
+    return 0
+
+
 def render(rec: ResultsOfRecord) -> str:
     """The whole document. Regenerated end to end; never hand-edited."""
     s = rec.stamp
@@ -1033,8 +1077,15 @@ def render(rec: ResultsOfRecord) -> str:
           f"{s.stride_sessions} sessions apart against a "
           f"{s.horizon_sessions}-session label, so observations overlap and the "
           "naive statistic is inflated by roughly `sqrt(VIF)`.", "",
-          "`window` splits the same measurement two ways, and the split is not "
-          "cosmetic. `score_frame` re-caps the theme blend over the themes a "
+          "**`" + HEADLINE_WINDOW + "` is the row a claim about the shipped "
+          "model rests on.** The signs and weights were fitted over "
+          f"`v3.FIT_WINDOW`, which covers {_in_sample_dates(rec)} of the "
+          f"panel's {s.panel_distinct_dates} signal dates, so a figure pooled "
+          "across the whole panel is neither an in-sample fit statistic nor "
+          "an out-of-sample result. Every published table quoted the pooled "
+          "number.", "",
+          "`STABLE_MODEL` is a second and independent cut. `score_frame` "
+          "re-caps the theme blend over the themes a "
           "name actually has, so a name scored on three themes and a name "
           "scored on five are combined by different weight vectors. The "
           "fundamentals feed reaches almost nobody at the start of the panel "
@@ -1042,16 +1093,19 @@ def render(rec: ResultsOfRecord) -> str:
           "across structurally different models with the weighting set by a "
           "data feed. `STABLE_MODEL` is the span over which every theme stays "
           "above "
-          f"{_pct(_STABLE_FLOOR, 0)} coverage -- the evidence that describes "
-          "the composite as it now stands, and there is much less of it.", "",
+          f"{_pct(_STABLE_FLOOR, 0)} coverage -- the composite as it now "
+          "stands, and there is much less of it.", "",
+          "`FULL_PANEL` is reported last rather than dropped. It is the longer "
+          "record and the one every superseded figure came from.", "",
           "| window | horizon | dates | rows | themes/name | rank IC | "
           "IC t (naive) | IC t (corrected) | "
           "quintile spread | spread t (corr.) | top-decile excess | "
           "top-decile t (corr.) | decile monotonicity | indep. obs | VIF |",
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rec.ranking:
+        name = (f"**{r.window}**" if r.window == HEADLINE_WINDOW else r.window)
         L.append(
-            f"| {r.window} | {r.horizon} | {r.n_dates} | {r.n_rows:,} | "
+            f"| {name} | {r.horizon} | {r.n_dates} | {r.n_rows:,} | "
             f"{_num(r.n_themes_mean)} | {r.ic:+.4f} | "
             f"{_num(r.ic_t_naive)} | **{_num(r.ic_t_corrected)}** | "
             f"{_pct(r.spread)} | **{_num(r.spread_t_corrected)}** | "

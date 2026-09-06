@@ -130,3 +130,79 @@ def test_a_short_stable_window_is_not_published_as_a_measurement():
 def test_the_deploy_reference_admits_which_span_it_covers():
     from prosignal.validation import v3_panel as vp
     assert vp.DEPLOY_REFERENCE["spans_variable_theme_coverage"] is True
+
+
+# ------------------------------------------------- the fit-window provenance
+# A second and independent cut. The signs and weights were fitted over
+# `v3.FIT_WINDOW`, which covers 293 of the shipped panel's 380 signal dates, so
+# a figure pooled across the whole panel is neither an in-sample fit statistic
+# nor an out-of-sample result. Every published table quoted the pooled number.
+#
+# Measured on the shipped panel at h=21, overlap-corrected:
+#
+#     OUT_OF_SAMPLE    87 dates   IC +0.0411   t +3.91
+#     IN_SAMPLE       293 dates   IC +0.0579   t +6.82
+#     STABLE_MODEL    150 dates   IC +0.0468   t +6.22
+#     FULL_PANEL      380 dates   IC +0.0541   t +7.74
+#
+# The out-of-sample t clears Harvey-Liu-Zhu's 3.0 bar on 87 NON-OVERLAPPING
+# observations, and the in-sample-to-out-of-sample decay is 29%.
+
+def _dated_panel() -> pd.DataFrame:
+    """A panel straddling the real fit window, so the split has both sides."""
+    from prosignal.features import v3
+
+    lo, hi = v3.FIT_WINDOW
+    p = _panel(n_dates=300)
+    # The panel is long -- one row per (date, name) -- so the dates are
+    # remapped through the distinct values rather than assigned positionally.
+    fresh = pd.bdate_range(str(lo), periods=p["date"].nunique(), freq="21B")
+    p["date"] = p["date"].map(dict(zip(sorted(p["date"].unique()), fresh)))
+    assert p["date"].max() > pd.Timestamp(hi), "fixture must reach past the fit"
+    return p
+
+
+def test_the_headline_window_is_the_out_of_sample_one():
+    assert R.HEADLINE_WINDOW == "OUT_OF_SAMPLE"
+
+
+def test_the_ranking_is_split_on_the_fit_window():
+    from prosignal.features import v3
+
+    names = [n for n, _ in R._ranking_windows(_dated_panel())]
+    assert names[0] == R.HEADLINE_WINDOW, (
+        "the out-of-sample row is reported first because it is the one a "
+        "claim about the shipped model rests on"
+    )
+    assert "IN_SAMPLE" in names
+    assert names[-1] == "FULL_PANEL", (
+        "FULL_PANEL is reported last rather than dropped -- it is the longer "
+        "record and the one every superseded figure came from"
+    )
+
+    lo, hi = v3.FIT_WINDOW
+    by = dict(R._ranking_windows(_dated_panel()))
+    assert (pd.to_datetime(by["OUT_OF_SAMPLE"]["date"]) > pd.Timestamp(hi)).all()
+    assert (pd.to_datetime(by["IN_SAMPLE"]["date"]) <= pd.Timestamp(hi)).all()
+
+
+def test_a_window_too_small_to_measure_is_not_reported():
+    """A handful of dates is not an out-of-sample result, and printing one
+    invites a comparison against noise."""
+    p = _dated_panel()
+    from prosignal.features import v3
+
+    _, hi = v3.FIT_WINDOW
+    after = [d for d in sorted(pd.to_datetime(p["date"]).unique())
+             if d > pd.Timestamp(hi)]
+    assert len(after) > 1
+    p = p[~pd.to_datetime(p["date"]).isin(after[1:])]   # one OOS date left
+    names = [n for n, _ in R._ranking_windows(p)]
+    assert "OUT_OF_SAMPLE" not in names
+
+
+def test_the_windows_do_not_silently_overlap_on_the_fit_split():
+    by = dict(R._ranking_windows(_dated_panel()))
+    ins = set(pd.to_datetime(by["IN_SAMPLE"]["date"]))
+    oos = set(pd.to_datetime(by["OUT_OF_SAMPLE"]["date"]))
+    assert not (ins & oos)
