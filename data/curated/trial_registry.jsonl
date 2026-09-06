@@ -648,3 +648,13 @@
 {"key": "2467039d8193bd1b", "command": "audit 2026-09 quality theme disposition", "label": "quality: theme dropped", "recorded_at": "2026-09-06T10:13:37+00:00", "score": 0.0718}
 {"key": "a89b7de630adf221", "command": "audit 2026-09 quality theme disposition", "label": "quality: margin_stability only", "recorded_at": "2026-09-06T10:13:37+00:00", "score": 0.0776}
 {"key": "e302b92ced714386", "command": "audit 2026-09 quality theme disposition", "label": "quality: net_margin sign flipped", "recorded_at": "2026-09-06T10:13:37+00:00", "score": 0.0771}
+{"key": "45bd7ec4b25a676b", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: top-6 shipped risk-budget", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -10.46}
+{"key": "9f1de1b22cc4ce08", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: D6-D8 top-20 equal wt 100pct", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -5.62}
+{"key": "80109441e25c38d5", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: D6-D8 top-20 equal wt 50pct", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -6.1}
+{"key": "ba3467ba82b3ca38", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: D10 20 slots equal wt", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -1.94}
+{"key": "8ec10c1dfd2a8c71", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: top-6 equal wt 100pct", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -11.73}
+{"key": "556d22feb93d2ec0", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: D6-D8 200 slots", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -7.65}
+{"key": "17513075f791aa88", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: D10 75 slots", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -5.8}
+{"key": "883c47b8a8768a73", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: D10 40 slots", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -2.83}
+{"key": "ff13a0e9fe58c8ab", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: D10 10 slots", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -2.9}
+{"key": "ced0581e93ac01a3", "command": "audit 2026-09 book shape, net of modelled cost", "label": "book shape OOS net: top-half 350 slots", "recorded_at": "2026-09-06T11:39:12+00:00", "score": -12.96}

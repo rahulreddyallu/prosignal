@@ -125,7 +125,7 @@ def test_the_dossier_s_own_open_items_are_all_present():
         assert f.status is not Status.OPEN, f"{fid} is still open"
 
 
-def test_exactly_two_things_are_left_open_and_both_are_named():
+def test_exactly_three_things_are_left_open_and_all_are_named():
     """The honest state of this engine. If another finding opens, this fails
     and somebody has to say which.
 
@@ -135,9 +135,18 @@ def test_exactly_two_things_are_left_open_and_both_are_named():
     session's OPEN to the tick, which is the engine's own entry rule rather
     than an execution. It stays OPEN because no amount of code closes it; it
     closes when the ledger holds broker fills. The harness that will do the
-    calibration is built and refuses to report one until then.
+    calibration is built and refuses to report one until then, and the CSV
+    route that would supply them now exists.
+
+    Q24 joined on 2026-09-06: the book shapes were priced net of cost and the
+    audit's D6-D8 target turned +1.19% gross into -7.65% net, while a
+    20-name top-decile book at full deployment reads -1.94% out of sample
+    against the shipped -10.46%. It stays OPEN because that candidate is
+    LESS BAD rather than good -- out-of-sample alpha is still negative -- and
+    because every net figure in it rests on the uncalibrated coefficient Q7 is
+    about, over arms that differ twenty-fold in turnover. Q7 gates Q24.
     """
-    assert [f.fid for f in open_findings()] == ["R1", "Q7"]
+    assert [f.fid for f in open_findings()] == ["R1", "Q7", "Q24"]
 
 
 def test_every_restart_blocker_changes_the_engine_its_identity_or_the_question():

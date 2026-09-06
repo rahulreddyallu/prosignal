@@ -1629,6 +1629,68 @@ REGISTER: Tuple[Finding, ...] = (
               "mattered.",
     ),
     _f(
+        fid="Q24", severity="critical",
+        title="D6-D8 does not survive costing, and the change that matters is "
+              "the number of names, not the band",
+        category=Category.MODEL, status=Status.OPEN,
+        root_cause="Q17 measured portfolio SHAPES gross and found D6-D8 the "
+                   "only one clearing t=2 (+1.19%, t +2.42). The audit's §18 "
+                   "target architecture is built on that number and so was my "
+                   "own recommendation. Gross was doing all the work. "
+                   "`portfolio_sim` can now express a percentile band and "
+                   "equal-weight sizing, so the same shapes were re-run "
+                   "through the real simulator NET of the modelled cost, at "
+                   "the live cadence. Alpha on deployed capital, out of "
+                   "sample over 87 dates:\\n"
+                   "    top-6 shipped        -10.46%  sh -0.28   40 RT/yr\\n"
+                   "    D6-D8, 200 slots      -7.65%  sh -0.12  908 RT/yr  "
+                   "cost 10.19% of deployed\\n"
+                   "    D10, 75 slots         -5.80%  sh -0.07  346 RT/yr\\n"
+                   "    D10, 40 slots         -2.83%  sh +0.11  175 RT/yr\\n"
+                   "    D10, 20 slots         -1.94%  sh +0.15   85 RT/yr\\n"
+                   "    D10, 10 slots         -2.90%  sh +0.06   43 RT/yr\\n"
+                   "    top-half, 350 slots  -12.96%  sh -0.47 1412 RT/yr  "
+                   "cost 14.47% of deployed\\n"
+                   "D6-D8 at its natural size turns +1.19% gross into -7.65% "
+                   "net, because band membership churns: 908 round trips a "
+                   "year against 85 for a 20-name top-decile book. On the "
+                   "full panel it is WORSE than the shipped book (+0.39% "
+                   "against +3.50%).",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="OPEN. Nothing is changed in the shipped book. What exists now is "
+            "the capability to price these shapes -- `entry_pct_band`, "
+            "`exit_pct_band`, `equal_weight_slots` and `target_deployment` on "
+            "`PortfolioParams`, all opt-in, with the rank-and-risk-budget "
+            "default byte-identical. Ten shapes were charged to the registry.",
+        regression_test="tests/test_band_book.py",
+        before_after="the best shape measured is the TOP DECILE at ~20 names, "
+                     "equal weight, fully deployed: -1.94% alpha on deployed "
+                     "out of sample against the shipped -10.46%, Sharpe +0.15 "
+                     "against -0.28; and on the full panel +9.48% against "
+                     "+3.50% with excess on deployed turning positive "
+                     "(+1.87%) and Sharpe +1.27 against +0.68",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="THREE THINGS THIS REFUTES, TWO OF THEM MINE. §18's target "
+              "architecture (D6-D8, equal weight, ~100% deployed) is worse "
+              "than the shipped book on the full panel and worse than every "
+              "top-decile variant in both windows. Equal weight ALONE is not "
+              "the fix: top-6 at full deployment is the worst arm tested "
+              "(-11.73% out of sample, -43.1% drawdown on the full panel) -- "
+              "removing the leverage confound reveals the book rather than "
+              "repairing it. And the name count has an interior optimum near "
+              "20; 10 is worse and 75 is much worse.\\n"
+              "WHY THIS STAYS OPEN. Out-of-sample alpha is still NEGATIVE at "
+              "-1.94% and Sharpe +0.15 is not significant, so the best shape "
+              "measured is less bad rather than good. More importantly every "
+              "figure here is net of an UNCALIBRATED impact coefficient (Q7), "
+              "and the arms differ by twenty-fold in turnover -- 43 to 1412 "
+              "round trips a year -- which is exactly where that assumption "
+              "bites hardest. The ranking between these arms is a function of "
+              "a number nobody has validated. Q7 is the gating item for "
+              "acting on any of this, which is why the fills feed was built "
+              "first.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,
