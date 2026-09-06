@@ -842,6 +842,21 @@ class DataStore:
     def read_results_calendar(self) -> pd.DataFrame:
         return self.read_table("results_calendar")
 
+    def write_fills(self, df: pd.DataFrame) -> int:
+        """Realised executions. Keyed on (symbol, fill_date, side, price).
+
+        NOT on (symbol, fill_date) alone: a position is routinely filled in
+        several tranches at different prices on one day, and keying on the day
+        would keep one of them and silently discard the rest -- which is
+        exactly the population an impact calibration needs, since the tranches
+        that moved the price are the expensive ones.
+        """
+        return self.write_table("fills", df,
+                                [SYMBOL, "fill_date", "side", "price"])
+
+    def read_fills(self) -> pd.DataFrame:
+        return self.read_table("fills")
+
     def write_shareholding(self, df: pd.DataFrame) -> int:
         """Quarterly shareholding patterns -- promoter, public, free float.
 

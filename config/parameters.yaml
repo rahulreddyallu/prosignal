@@ -208,8 +208,37 @@ capital:
     status: OPERATIONAL
     note: "Total deployable equity book. Set this to your real number."
 
+  # WIDENED 6 -> 20 ON 2026-09-06. The single change with the largest measured
+  # effect in this audit, and it is a construction change, not a model one --
+  # the same ranking, the same names at the top, more of them held.
+  #
+  # Measured out of sample (87 dates after the fit window closed) and on the
+  # full 356-date panel, net of the modelled cost, at the live 21-session
+  # cadence. Alpha is on DEPLOYED capital, which is the figure that does not
+  # move with the sizing knob (see Q1):
+  #
+  #                              OOS alpha  OOS SR  OOS DD | full alpha  SR    DD
+  #   top-6, risk-budget sizing   -10.46%   -0.28   -10.3% |   +3.50%  +0.68 -12.3%
+  #   top-20, risk-budget sizing   -3.07%   +0.06   -15.2% |   +6.78%  +1.14 -18.2%
+  #   top-20, equal wt, 100% dep   -1.94%   +0.15   -20.1% |   +9.48%  +1.27 -21.8%
+  #   top-20, equal wt,  75% dep   -1.95%   +0.15   -15.1% |   +9.68%  +1.28 -16.5%
+  #
+  # WHY 20 AND NOT 6. Six names cannot express a cross-sectional ranking over
+  # 386 -- Grinold's transfer coefficient measures 0.206 for the top-6 against
+  # 0.296 for a wider book. The ranking is the part of this engine with
+  # out-of-sample evidence (rank IC +0.050 at h=5, t +3.97 on 90
+  # non-overlapping observations); the six-name book was the part that could
+  # not carry it.
+  #
+  # WHY NOT WIDER. There is an interior optimum. 10 names reads +9.88% on the
+  # full panel and 75 reads +7.25%, and cost rises monotonically with the
+  # count: 43 round trips a year at 10, 85 at 20, 346 at 75.
+  #
+  # THE DRAWDOWN IS WORSE AND THAT IS NOT A DEFECT. The old book held 22% of
+  # capital, so its -12.3% was a drawdown on a fifth of the account. This one
+  # holds about two thirds. Deeper drawdowns are what being invested costs.
   max_open_positions:
-    value: 6
+    value: 20
     status: MEASURED
     optimization_tier: A_SEARCH
     search_points: 3
@@ -227,6 +256,30 @@ capital:
 
   # Value of a single new position, in rupees. If null, computed as
   # total_capital_inr / max_open_positions.
+  # HOW EACH NAME IS SIZED. "risk_budget" is what this engine always did:
+  # min(risk_budget / risk_per_share, slot, liquidity), where the risk term
+  # binds on nearly every name -- which is why the old book held 22% of
+  # capital and why every figure it printed moved with risk_per_trade_pct.
+  #
+  # "equal_weight" gives each name capital * target_deployment / n and lets
+  # liquidity still refuse it. Measured out of sample against the same
+  # ranking at 20 names: alpha on deployed -3.07% under risk_budget against
+  # -1.95% under equal weight, Sharpe +0.06 against +0.15.
+  sizing_mode:
+    value: "equal_weight"
+    status: MEASURED
+    note: >-
+      risk_budget | equal_weight. Switching back to risk_budget restores the
+      old sizing exactly; nothing else in the engine reads this.
+  # 0.75, and the quarter left in cash is not timidity. Alpha on deployed
+  # capital does not move with deployment while drawdown does: 100% deployed
+  # reads -1.94% alpha and -20.1% worst drawdown out of sample, 75% reads
+  # -1.95% and -15.1%. The cash costs nothing measurable and buys five points.
+  target_deployment:
+    value: 0.75
+    status: MEASURED
+    search_range: [0.25, 1.0]
+
   per_position_inr:
     value: null
     status: OPERATIONAL
@@ -507,6 +560,23 @@ providers:
     # Columns: symbol,filing_date,period_end,revenue,net_profit,total_equity,total_assets,
     #          total_debt,ebit,interest_expense,operating_cash_flow,shares_outstanding
     fundamentals_file: "config/reference/fundamentals_pit.csv"
+    # YOUR OWN EXECUTIONS -- the only feed that can calibrate the impact
+    # coefficient, and the only one no vendor can supply.
+    #
+    # Columns: symbol,decision_date,fill_date,side,quantity,price,venue
+    # `decision_date` is the session whose CLOSE the decision was made against
+    # (the signal date), NOT the fill date. Implementation shortfall is
+    # measured from that close to the fill price, so a row without it is stored
+    # and cannot be calibrated against.
+    #
+    # Absent means `research impact` reports UNCALIBRATED and refuses to fit --
+    # which is the honest state, because the outcome ledger cannot stand in:
+    # 126 of its 128 entry prices are the next session's open to the tick, so
+    # fitting to them would fit the model to its own assumption.
+    #
+    # Reading this file is not order routing. docs/EXECUTION_GATE.md governs
+    # the placing of orders; this is a record of orders already placed.
+    fills_file: "config/reference/fills.csv"
     # Columns: symbol,earnings_date,confirmed(bool),source
     earnings_calendar_file: "config/reference/earnings_calendar.csv"
     # Columns: symbol,ex_date,action_type(split|bonus|rights|dividend),ratio_from,ratio_to,details
@@ -2028,7 +2098,7 @@ stage6_entry:
         entry date in the recorded history relative to the live one.
 
     entry_rank:
-      value: 6
+      value: 20
       status: MEASURED
       search_range: [3, 30]
       note: >-
@@ -2041,8 +2111,12 @@ stage6_entry:
         (1.11 against 1.25) and five points of relative drawdown (-22.3%
         against -17.4%); it buys the only stem on the surface that never had a
         losing year.
+    # Held at 3x the entry band, which is the ratio the shipped configuration
+    # was measured with (6/18). Widening the entry band without widening this
+    # would shrink the hysteresis and hand back the turnover the band exists to
+    # save.
     exit_rank:
-      value: 18
+      value: 60
       status: MEASURED
       search_range: [4, 60]
       note: >-
@@ -2550,7 +2624,7 @@ stage8_final_signal:
       status: OPERATIONAL
       search_range: [1, 5]
     max_signals_per_run:
-      value: 8
+      value: 20
       status: OPERATIONAL
       search_range: [1, 20]
       note: >-

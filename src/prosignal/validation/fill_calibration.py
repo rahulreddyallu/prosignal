@@ -48,10 +48,20 @@ SYNTHETIC_SHARE = 0.75
 #: calibration. Two points define a line and say nothing about a coefficient.
 MIN_FILLS = 60
 
+#: Participation buckets the power law is fitted over. Ten is enough to see a
+#: curve and few enough that each holds a real average.
+IMPACT_BUCKETS = 10
+
+#: Below this many buckets with a positive mean, there is no curve to fit and
+#: saying so beats fitting one to noise.
+MIN_IMPACT_BUCKETS = 4
+
 CALIBRATED = "CALIBRATED"
 SYNTHETIC = "SYNTHETIC_FILLS"
 INSUFFICIENT = "INSUFFICIENT_FILLS"
 NO_DATA = "NO_DATA"
+#: A fit came back, and it describes something impact cannot do.
+IMPLAUSIBLE = "IMPLAUSIBLE_FIT"
 
 
 @dataclass
@@ -88,6 +98,39 @@ class ImpactCalibration:
                 "config_exponent": self.config_exponent,
                 "median_shortfall_bps": self.median_shortfall_bps,
                 "rows_dropped": list(self.rows_dropped)}
+
+
+def from_fills(fills: pd.DataFrame) -> pd.DataFrame:
+    """Recorded executions, in the shape `calibrate` reads.
+
+    THE FEED THIS MODULE WAS WAITING FOR. `data/providers/csv_import.load_fills`
+    imports what the book actually paid; this maps it onto the same columns the
+    outcome ledger uses so one calibration path serves both, and so a store
+    that acquires real fills starts calibrating without anything else changing.
+
+    BUY SIDE ONLY. Implementation shortfall on a sell is a different quantity
+    with a different sign, and mixing the two fits a coefficient to neither.
+    Rows without a `decision_date` are dropped here rather than in `calibrate`,
+    because shortfall is measured from the decision close and a fill that
+    cannot name one is a record of a trade rather than a measurement of it.
+    """
+    if fills is None or fills.empty:
+        return pd.DataFrame()
+    need = {"symbol", "fill_date", "price", "side"}
+    if not need <= set(fills.columns):
+        return pd.DataFrame()
+    buys = fills[fills["side"].astype(str).str.upper() == "BUY"]
+    if "decision_date" not in buys.columns:
+        return pd.DataFrame()
+    buys = buys.dropna(subset=["decision_date"])
+    if buys.empty:
+        return pd.DataFrame()
+    return pd.DataFrame({
+        "ticker": buys["symbol"].astype(str),
+        "signal_date": pd.to_datetime(buys["decision_date"]),
+        "entry_date": pd.to_datetime(buys["fill_date"]),
+        "entry_price": pd.to_numeric(buys["price"], errors="coerce"),
+    }).reset_index(drop=True)
 
 
 def read_outcomes(path: Path) -> pd.DataFrame:
@@ -209,28 +252,96 @@ def calibrate(outcomes: pd.DataFrame, prices: pd.DataFrame, *,
             median_shortfall_bps=float(f["shortfall_bps"].median()),
             rows_dropped=dropped)
 
-    part = position_value_inr / f["decision_turnover"].replace(0.0, np.nan)
-    ok = (part > 0) & np.isfinite(part) & (f["shortfall_bps"] > 0)
-    if int(ok.sum()) < MIN_FILLS:
+    f["participation"] = (position_value_inr
+                          / f["decision_turnover"].replace(0.0, np.nan))
+    usable = f[(f["participation"] > 0) & np.isfinite(f["participation"])]
+    if len(usable) < MIN_FILLS:
         return ImpactCalibration(
             INSUFFICIENT,
-            f"only {int(ok.sum())} fills carry both a positive shortfall and a "
-            f"usable participation",
+            f"only {len(usable)} fills carry a usable participation",
             n_rows=int(len(outcomes)), n_usable=int(len(f)),
             config_coefficient=config_coefficient,
             config_exponent=config_exponent,
             median_shortfall_bps=float(f["shortfall_bps"].median()),
             rows_dropped=dropped)
 
-    x = np.log(part[ok].to_numpy(dtype="float64"))
-    y = np.log(f.loc[ok, "shortfall_bps"].to_numpy(dtype="float64") / 1e4)
+    # FIT ON BUCKET MEANS, NOT ON INDIVIDUAL FILLS.
+    #
+    # The obvious regression -- log(shortfall) on log(participation) over every
+    # fill -- has to drop rows whose shortfall is non-positive, because log()
+    # needs a positive. That conditions the sample ON THE DEPENDENT VARIABLE,
+    # and it is not a small effect: a real fill beats the decision price about
+    # as often as it misses it, so the drop keeps the half that went against
+    # you and fits impact to that half alone. Every coefficient it produces is
+    # biased upward, which is the direction that makes a strategy look more
+    # expensive than it is and a cost model look better calibrated than it is.
+    #
+    # Bucketing by participation and taking the MEAN shortfall in each bucket
+    # is well defined with negatives in it. Impact is a property of the
+    # average fill at a participation level, not of the unlucky ones, so the
+    # bucket mean is also the quantity the coefficient is supposed to predict.
+    # Buckets whose mean is still non-positive are reported and excluded from
+    # the log fit rather than silently dropped -- at low participation that is
+    # the honest reading: no measurable impact.
+    n_buckets = min(IMPACT_BUCKETS, max(len(usable) // 10, 2))
+    q = pd.qcut(usable["participation"].rank(method="first"), n_buckets,
+                labels=False, duplicates="drop")
+    grouped = usable.groupby(q).agg(
+        participation=("participation", "mean"),
+        shortfall_bps=("shortfall_bps", "mean"),
+        n=("shortfall_bps", "size"))
+    positive = grouped[grouped["shortfall_bps"] > 0]
+    if len(positive) < MIN_IMPACT_BUCKETS:
+        return ImpactCalibration(
+            INSUFFICIENT,
+            f"only {len(positive)} of {len(grouped)} participation buckets "
+            f"show positive mean shortfall, which is too few to fit a "
+            f"power law. At this size the book may simply not have measurable "
+            f"impact -- the median shortfall is "
+            f"{float(usable['shortfall_bps'].median()):+.1f} bps -- and "
+            f"reporting that is more useful than fitting a curve to noise",
+            n_rows=int(len(outcomes)), n_usable=int(len(usable)),
+            synthetic_share=share, synthetic_against=against,
+            config_coefficient=config_coefficient,
+            config_exponent=config_exponent,
+            median_shortfall_bps=float(usable["shortfall_bps"].median()),
+            rows_dropped=dropped)
+
+    x = np.log(positive["participation"].to_numpy(dtype="float64"))
+    y = np.log(positive["shortfall_bps"].to_numpy(dtype="float64") / 1e4)
     expo, log_c = np.polyfit(x, y, 1)
+
+    # A NEGATIVE EXPONENT IS NOT AN IMPACT CURVE. It says a larger trade moves
+    # the price LESS, and fed back into `CostModel.impact_bps` it would make
+    # size cheaper than a small order -- the one direction a cost model must
+    # never be wrong in. It is what a fit returns when the shortfall is noise
+    # around a level, which at this book's participation (0.014% of ADTV) is
+    # the expected result rather than a surprise. Report the level and refuse
+    # the curve.
+    if not np.isfinite(expo) or expo <= 0.0:
+        return ImpactCalibration(
+            IMPLAUSIBLE,
+            f"the fitted exponent is {expo:+.3f}, which says a larger trade "
+            f"moves the price less. That is not an impact curve; it is what "
+            f"comes back when shortfall is noise around a level. Median "
+            f"shortfall is "
+            f"{float(usable['shortfall_bps'].median()):+.1f} bps across "
+            f"{len(usable)} fills, and quoting THAT as a flat cost is honest "
+            f"where quoting a downward-sloping power law is not",
+            n_rows=int(len(outcomes)), n_usable=int(len(usable)),
+            synthetic_share=share, synthetic_against=against,
+            config_coefficient=config_coefficient,
+            config_exponent=config_exponent,
+            median_shortfall_bps=float(usable["shortfall_bps"].median()),
+            rows_dropped=dropped)
+
     return ImpactCalibration(
         CALIBRATED,
-        f"fitted on {int(ok.sum())} fills",
-        n_rows=int(len(outcomes)), n_usable=int(ok.sum()),
+        f"fitted on {len(positive)} participation buckets covering "
+        f"{int(positive['n'].sum())} of {len(usable)} fills",
+        n_rows=int(len(outcomes)), n_usable=int(len(usable)),
         synthetic_share=share, synthetic_against=against,
         fitted_coefficient=float(np.exp(log_c)), fitted_exponent=float(expo),
         config_coefficient=config_coefficient, config_exponent=config_exponent,
-        median_shortfall_bps=float(f["shortfall_bps"].median()),
+        median_shortfall_bps=float(usable["shortfall_bps"].median()),
         rows_dropped=dropped)

@@ -92,6 +92,28 @@ class PortfolioParams:
     #: turnover the cohort schedule never sees. See `simulate`.
     decision_sessions: Optional[int] = None
 
+    # -- band admission and equal weight (the §18 target book) -------------
+    #: SELECT BY SCORE PERCENTILE INSTEAD OF BY RANK, as (lo, hi) measured from
+    #: the BOTTOM of the cross-section -- so D6-D8 is (0.5, 0.8), matching
+    #: `validation/transfer.py`. `None` keeps rank admission, which is what
+    #: ships.
+    #:
+    #: WHY THIS EXISTS. Q10 measured the out-of-sample decile profile peaking
+    #: at D6/D7 while the book buys the very top of D10, and Q17 measured
+    #: D6-D8 as the only shape of six clearing t=2 -- long-only, tradeable,
+    #: and GROSS. A percentile band cannot be expressed as a top-K, so the
+    #: simulator could not price it and that gross figure could not be turned
+    #: into a net one. It can now.
+    entry_pct_band: Optional[Tuple[float, float]] = None
+    #: Hold while inside this wider band -- the percentile analogue of
+    #: `exit_rank`. Defaults to `entry_pct_band` widened by 10 points on each
+    #: side when a band is given and this is not.
+    exit_pct_band: Optional[Tuple[float, float]] = None
+    #: Size every name at `capital * target_deployment / equal_weight_slots`
+    #: rather than off the risk budget. Zero keeps the shipped rule.
+    equal_weight_slots: int = 0
+    target_deployment: float = 1.0
+
     # -- portfolio-level volatility scaling (Moreira & Muir 2017) -----------
     #: Annualised volatility the BOOK is scaled toward. `None` disables the
     #: overlay entirely and every position keeps its own size.
@@ -455,7 +477,27 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
     else:
         qty_liq = (view.adtv_inr * p.max_participation_of_adtv) / entry
         known = view.adtv_inr
-    qty = max(min(p.risk_budget / risk_per_share, p.slot / entry, qty_liq), 0.0)
+    # EQUAL WEIGHT AT A TARGET DEPLOYMENT, when asked for.
+    #
+    # The shipped rule is `risk_budget / risk_per_share`, and it is the reason
+    # the book holds about a fifth of its capital: at a 1% risk budget and an
+    # 8xATR stop clipped to 35%, the risk term binds on essentially every name.
+    # That is a sizing decision that sets LEVERAGE, and Q1 is the whole story
+    # of what it did to the reported numbers.
+    #
+    # Equal weight removes the confound at source rather than dividing it out
+    # afterwards: every name gets the same rupees and the book is invested to
+    # `target_deployment`. It is not obviously better -- it abandons per-name
+    # risk control, and a wide stop on a volatile name now carries the same
+    # capital as a tight one -- which is exactly why it is measured rather than
+    # assumed. Liquidity still binds, and a name that cannot be sized is still
+    # refused.
+    if p.equal_weight_slots:
+        target = (p.capital * p.target_deployment) / max(p.equal_weight_slots, 1)
+        qty = max(min(target / entry, qty_liq), 0.0)
+    else:
+        qty = max(min(p.risk_budget / risk_per_share, p.slot / entry, qty_liq),
+                  0.0)
     return float(qty * entry), float(entry), float(known)
 
 
@@ -639,11 +681,31 @@ def simulate(
             for sym in [s for s in held
                         if i - opened_at.get(s, i) >= params.horizon_sessions]:
                 held[sym] = EXIT_TIMEOUT_EXPIRED
-        # Hysteresis: a held name survives while inside the wider exit band.
-        keep = [s for s in held if rank.get(s, 10 ** 9) <= params.exit_rank]
-        room = params.max_positions - len(keep)
-        add = [s for s in list(scores.index)[: params.entry_rank]
-               if s not in keep][: max(room, 0)]
+        if params.entry_pct_band is None:
+            # Hysteresis: a held name survives while inside the wider exit band.
+            keep = [s for s in held if rank.get(s, 10 ** 9) <= params.exit_rank]
+            room = params.max_positions - len(keep)
+            add = [s for s in list(scores.index)[: params.entry_rank]
+                   if s not in keep][: max(room, 0)]
+        else:
+            # BAND ADMISSION. `scores` is sorted best first, so a name's
+            # percentile FROM THE BOTTOM is 1 - (position + 0.5)/n -- the same
+            # convention `validation/transfer.py` measures deciles in, so
+            # D6-D8 is (0.5, 0.8) in both places and the two cannot drift.
+            n = len(scores)
+            lo, hi = params.entry_pct_band
+            xlo, xhi = params.exit_pct_band or (max(lo - 0.10, 0.0),
+                                                min(hi + 0.10, 1.0))
+            pct = {s: 1.0 - (j + 0.5) / n
+                   for j, s in enumerate(scores.index)}
+            keep = [s for s in held
+                    if xlo <= pct.get(s, -1.0) < xhi]
+            room = params.max_positions - len(keep)
+            # Best first WITHIN the band, so a book too small to hold the whole
+            # band takes the top of it rather than an arbitrary slice.
+            eligible = [s for s in scores.index
+                        if lo <= pct[s] < hi and s not in keep]
+            add = eligible[: max(room, 0)]
         book = keep + add
 
         scale = equity / params.capital

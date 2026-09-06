@@ -226,10 +226,37 @@ THEMES: Dict[str, Theme] = {
                  ("prox_52w", 1), ("prox_52w_now", 1), ("voladj_mom_12_1", 1),
                  ("voladj_mom_6_1", 1)),
     ),
+    # `net_margin` WAS DROPPED 2026-09-06. Q18 measured every shipped sign on
+    # the 78 dates after the fit window closed: 20 of 22 held, and this one did
+    # not. It ships at -1 on an in-sample IC of -0.0486 (t -6.42) and reads
+    # +0.0207 (t +2.52) out of sample -- significant in the OTHER direction,
+    # which is not the same failure as decaying to zero. The model was using a
+    # sign the data refuses.
+    #
+    # THE THEME STAYS, AND THAT IS THE MEASUREMENT TALKING. Dropping the whole
+    # theme was the obvious call and it is worse: out of sample at h=63 the
+    # composite reads +0.0718 (t +1.38) without it against +0.0748 (t +1.64)
+    # shipped. `margin_stability` holds its sign firmly (-0.0272, t -4.74) and
+    # is carrying the theme on its own. Four dispositions were compared and
+    # charged to the registry; this one wins at both horizons on IC and on t:
+    #
+    #     shipped, 2 factors   h21 +0.0551 t +2.14   h63 +0.0748 t +1.64
+    #     theme dropped        h21 +0.0560 t +1.97   h63 +0.0718 t +1.38
+    #     THIS                 h21 +0.0572 t +2.20   h63 +0.0776 t +1.66
+    #     net_margin flipped   h21 +0.0582 t +2.15   h63 +0.0771 t +1.57
+    #
+    # Flipping the sign scores nearly as well and is NOT taken: a sign fitted
+    # on one window and reversed on the next is a sign nothing supports, and
+    # re-fitting it to the out-of-sample window spends the only clean evidence
+    # there is.
+    #
+    # The weight is unchanged at 0.18991 -- dropping a factor from inside a
+    # theme changes what the theme measures, not what it is worth. See Q11 on
+    # the coverage cap that set it, which has since expired.
     "quality": Theme(
         weight=0.18991, horizon=21, coverage=0.1899,
-        label="Low-margin tilt",
-        factors=(("margin_stability", -1), ("net_margin", -1)),
+        label="Margin instability",
+        factors=(("margin_stability", -1),),
     ),
     "ownership": Theme(
         weight=0.18939, horizon=10, coverage=0.8985,

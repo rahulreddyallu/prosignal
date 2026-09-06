@@ -34,28 +34,50 @@ SYMBOLS = [f"S{i:02d}" for i in range(30)]
 
 
 def _prices() -> pd.DataFrame:
+    """Flat per symbol, with turnover spanning three decades.
+
+    FLAT ON PURPOSE. Shortfall is measured from the decision close to the fill
+    price, so close-to-open drift lands in the dependent variable -- at 1%
+    daily vol that is ~140bps of noise per fill, far larger than any impact
+    curve at this book's participation. A fixture carrying it tests the noise.
+
+    WIDE TURNOVER ON PURPOSE. The original fixture ran 2e8 to 4e8, so
+    participation barely varied and there was no curve to fit in either
+    direction. `calibrate` now fits a power law over participation buckets and
+    correctly refuses a sample that has no participation range.
+    """
     rng = np.random.default_rng(5)
     rows = []
     for s in SYMBOLS:
-        base = 100.0 * (1 + rng.normal(0, 0.2))
+        base = 100.0 * (1 + rng.uniform(-0.2, 0.2))
+        turnover = 10.0 ** rng.uniform(7.0, 10.0)
         for d in DATES:
-            c = base * (1 + rng.normal(0, 0.01))
-            rows.append({"symbol": s, "date": d, "open": c * 1.001,
-                         "close": c, "vwap": c * 1.0005,
-                         "turnover": 2.0e8 * (1 + rng.random())})
+            rows.append({"symbol": s, "date": d, "open": base,
+                         "close": base, "vwap": base, "turnover": turnover})
     return pd.DataFrame(rows).set_index(["symbol", "date"]).sort_index()
 
 
 def _ledger(prices: pd.DataFrame, n: int = 100, *, fill: str) -> pd.DataFrame:
     """`fill='open'` reproduces the shipped ledger; `fill='slipped'` writes a
-    price that is neither a reference nor a constant offset from one."""
+    price carrying a real, participation-dependent impact curve.
+
+    The slipped case used to be `o * (1 + |N(0, 0.004)|)` -- slippage
+    uncorrelated with size. That is not impact, and `calibrate` now says so
+    rather than fitting a coefficient to it, which is the whole point of
+    fitting over participation buckets.
+    """
     rng = np.random.default_rng(9)
     rows = []
     for i in range(n):
         s = SYMBOLS[i % len(SYMBOLS)]
         sd, ed = DATES[i % 30], DATES[(i % 30) + 1]
         o = float(prices.loc[(s, ed), "open"])
-        px = o if fill == "open" else o * (1 + abs(rng.normal(0, 0.004)))
+        if fill == "open":
+            px = o
+        else:
+            part = 125_000.0 / float(prices.loc[(s, sd), "turnover"])
+            slip = 0.10 * (part ** 0.5) * 1e4 + rng.normal(0, 2.0)
+            px = o * (1 + slip / 1e4)
         rows.append({"ticker": s, "signal_date": sd, "entry_date": ed,
                      "entry_price": px})
     return pd.DataFrame(rows)

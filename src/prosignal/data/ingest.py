@@ -1233,6 +1233,31 @@ class DataIngestor:
             if self._refresh_statements(symbols):
                 self.store.update_feed_state("statements", as_of, "yfinance", 0)
 
+        # REALISED EXECUTIONS. The only feed that can calibrate the impact
+        # coefficient, and the only one no vendor supplies. Absent is the
+        # normal state and is recorded as such -- `research impact` then
+        # reports UNCALIBRATED rather than fitting to the simulator's own
+        # entry rule.
+        fills = self.csv.load_fills()
+        if not fills.empty:
+            written = self.store.write_fills(fills)
+            self.store.update_feed_state("fills", as_of, "csv_import", written)
+            log.info("fills imported",
+                     extra={"rows": written,
+                            "symbols": int(fills[SYMBOL].nunique()),
+                            "calibratable": int(fills["decision_date"].notna().sum())})
+        self._record_feed(
+            "fills",
+            FeedStatus.OK if not fills.empty else FeedStatus.MISSING,
+            SourceName.CSV_IMPORT,
+            notes=[
+                "no realised fills supplied, so `costs.impact_model` stays "
+                "UNCALIBRATED. Drop a CSV at "
+                f"{p.providers.csv_import.fills_file} to enable it -- see "
+                "validation/fill_calibration.py."
+            ] if fills.empty else [],
+        )
+
         fundamentals = self.csv.load_fundamentals()
         if not fundamentals.empty:
             self.store.write_fundamentals(fundamentals)

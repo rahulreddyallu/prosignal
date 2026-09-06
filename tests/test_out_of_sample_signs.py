@@ -75,10 +75,10 @@ def test_a_panel_where_every_sign_holds_flags_nothing():
 def test_a_flipped_sign_is_found_and_named():
     """The finding, as one assertion."""
     signs = _agreeing()
-    signs["net_margin"] = -signs["net_margin"]
+    signs["margin_stability"] = -signs["margin_stability"]
     msgs = vm.flipped_signs(_panel(signs), "y63")
     assert len(msgs) == 1
-    assert msgs[0].startswith("net_margin (quality)")
+    assert msgs[0].startswith("margin_stability (quality)")
     assert "OTHER direction" in msgs[0]
 
 
@@ -87,9 +87,9 @@ def test_a_decay_to_zero_is_not_reported_as_a_flip():
     factor that stopped working needs dropping; a factor whose sign is
     backwards is still carrying information the model is using wrongly."""
     signs = _agreeing()
-    signs["net_margin"] = 0.0
+    signs["margin_stability"] = 0.0
     frame = vm.out_of_sample_signs(_panel(signs), "y63")
-    row = frame[frame["factor"] == "net_margin"].iloc[0]
+    row = frame[frame["factor"] == "margin_stability"].iloc[0]
     assert abs(row["t_oos"]) < vm.SIGN_FLIP_T
     assert row["flipped"] is False or not bool(row["flipped"])
 
@@ -130,6 +130,11 @@ def test_the_shipped_panel_still_holds_twenty_of_twenty_two_signs():
         f"sample:\n{frame[~frame['agrees']][['factor', 'ic_oos', 't_oos']]}"
     )
     flipped = set(frame[frame["flipped"]]["factor"])
-    assert flipped == {"mom_3_1", "net_margin"}, (
+    # `net_margin` was the other one and has since been DROPPED -- see
+    # v3.THEMES["quality"] and finding Q18. `mom_3_1` is still shipped at +1
+    # against an out-of-sample -0.0248 (t -2.18) and is the open question this
+    # assertion now guards: if it disappears, somebody acted on it, and if
+    # anything joins it the model has started drifting.
+    assert flipped == {"mom_3_1"}, (
         f"the set of out-of-sample sign flips has moved: {sorted(flipped)}"
     )

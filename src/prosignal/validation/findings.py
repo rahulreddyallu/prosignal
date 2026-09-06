@@ -1416,15 +1416,32 @@ REGISTER: Tuple[Finding, ...] = (
         before_after="22 shipped signs, none of them ever checked out of "
                      "sample; 20 hold, 2 are backwards at |t| > 2",
         moves_coefficients=False, moves_history=False, forces_restart=False,
-        notes="`net_margin` is the one that matters, and it compounds Q11. The "
-              "'quality' theme -- correctly labelled 'Low-margin tilt' -- "
-              "carries 18.99% of the composite and is itself out-of-sample "
-              "indistinguishable from zero: quality_sub reads +0.0103 at "
-              "t +1.41 against an in-sample +0.0547 at t +7.31. Q11 shows its "
-              "coverage cap has expired, so refreshing the cap would roughly "
-              "DOUBLE the weight of the one theme that does not survive its "
-              "own holdout. Nothing is changed here; the two findings together "
-              "are the argument against the refresh.",
+        notes="ACTED ON 2026-09-06, and not in the way this finding first "
+              "implied. `net_margin` is dropped; the quality theme STAYS. The "
+              "obvious reading -- a theme whose own out-of-sample IC is "
+              "+0.0103 at t +1.41 should go -- is what I recommended, and "
+              "measuring it refuted it. Four dispositions, all charged to the "
+              "registry, out of sample:\\n"
+              "    shipped, 2 factors   h21 +0.0551 t +2.14   h63 +0.0748 "
+              "t +1.64\\n"
+              "    theme dropped        h21 +0.0560 t +1.97   h63 +0.0718 "
+              "t +1.38\\n"
+              "    margin_stability only h21 +0.0572 t +2.20  h63 +0.0776 "
+              "t +1.66\\n"
+              "    net_margin flipped   h21 +0.0582 t +2.15   h63 +0.0771 "
+              "t +1.57\\n"
+              "Dropping the theme is WORSE at h=63 than shipping it. "
+              "`margin_stability` holds its sign at t -4.74 and carries the "
+              "theme alone, and removing only the refuted factor wins at both "
+              "horizons on IC and on t. Flipping the sign scores nearly as "
+              "well and was not taken: a sign fitted on one window and "
+              "reversed on the next is a sign nothing supports, and refitting "
+              "it against the out-of-sample window spends the only clean "
+              "evidence there is. `mom_3_1` remains shipped at +1 against an "
+              "out-of-sample -0.0248 (t -2.18) and is now the only open sign "
+              "flip. Q11 still stands: the theme's coverage cap has expired, "
+              "so a refresh would double the weight of a theme that is now one "
+              "factor wide.",
     ),
     _f(
         fid="Q19", severity="critical",
@@ -1610,6 +1627,68 @@ REGISTER: Tuple[Finding, ...] = (
               "test I had just written; the test asserted the hold equalled "
               "the cadence, which was true and was not the property that "
               "mattered.",
+    ),
+    _f(
+        fid="Q24", severity="critical",
+        title="D6-D8 does not survive costing, and the change that matters is "
+              "the number of names, not the band",
+        category=Category.MODEL, status=Status.OPEN,
+        root_cause="Q17 measured portfolio SHAPES gross and found D6-D8 the "
+                   "only one clearing t=2 (+1.19%, t +2.42). The audit's §18 "
+                   "target architecture is built on that number and so was my "
+                   "own recommendation. Gross was doing all the work. "
+                   "`portfolio_sim` can now express a percentile band and "
+                   "equal-weight sizing, so the same shapes were re-run "
+                   "through the real simulator NET of the modelled cost, at "
+                   "the live cadence. Alpha on deployed capital, out of "
+                   "sample over 87 dates:\\n"
+                   "    top-6 shipped        -10.46%  sh -0.28   40 RT/yr\\n"
+                   "    D6-D8, 200 slots      -7.65%  sh -0.12  908 RT/yr  "
+                   "cost 10.19% of deployed\\n"
+                   "    D10, 75 slots         -5.80%  sh -0.07  346 RT/yr\\n"
+                   "    D10, 40 slots         -2.83%  sh +0.11  175 RT/yr\\n"
+                   "    D10, 20 slots         -1.94%  sh +0.15   85 RT/yr\\n"
+                   "    D10, 10 slots         -2.90%  sh +0.06   43 RT/yr\\n"
+                   "    top-half, 350 slots  -12.96%  sh -0.47 1412 RT/yr  "
+                   "cost 14.47% of deployed\\n"
+                   "D6-D8 at its natural size turns +1.19% gross into -7.65% "
+                   "net, because band membership churns: 908 round trips a "
+                   "year against 85 for a 20-name top-decile book. On the "
+                   "full panel it is WORSE than the shipped book (+0.39% "
+                   "against +3.50%).",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="OPEN. Nothing is changed in the shipped book. What exists now is "
+            "the capability to price these shapes -- `entry_pct_band`, "
+            "`exit_pct_band`, `equal_weight_slots` and `target_deployment` on "
+            "`PortfolioParams`, all opt-in, with the rank-and-risk-budget "
+            "default byte-identical. Ten shapes were charged to the registry.",
+        regression_test="tests/test_band_book.py",
+        before_after="the best shape measured is the TOP DECILE at ~20 names, "
+                     "equal weight, fully deployed: -1.94% alpha on deployed "
+                     "out of sample against the shipped -10.46%, Sharpe +0.15 "
+                     "against -0.28; and on the full panel +9.48% against "
+                     "+3.50% with excess on deployed turning positive "
+                     "(+1.87%) and Sharpe +1.27 against +0.68",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="THREE THINGS THIS REFUTES, TWO OF THEM MINE. §18's target "
+              "architecture (D6-D8, equal weight, ~100% deployed) is worse "
+              "than the shipped book on the full panel and worse than every "
+              "top-decile variant in both windows. Equal weight ALONE is not "
+              "the fix: top-6 at full deployment is the worst arm tested "
+              "(-11.73% out of sample, -43.1% drawdown on the full panel) -- "
+              "removing the leverage confound reveals the book rather than "
+              "repairing it. And the name count has an interior optimum near "
+              "20; 10 is worse and 75 is much worse.\\n"
+              "WHY THIS STAYS OPEN. Out-of-sample alpha is still NEGATIVE at "
+              "-1.94% and Sharpe +0.15 is not significant, so the best shape "
+              "measured is less bad rather than good. More importantly every "
+              "figure here is net of an UNCALIBRATED impact coefficient (Q7), "
+              "and the arms differ by twenty-fold in turnover -- 43 to 1412 "
+              "round trips a year -- which is exactly where that assumption "
+              "bites hardest. The ranking between these arms is a function of "
+              "a number nobody has validated. Q7 is the gating item for "
+              "acting on any of this, which is why the fills feed was built "
+              "first.",
     ),
     _f(
         fid="P0-6", severity="high",
