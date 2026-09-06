@@ -146,3 +146,58 @@ def test_a_carried_name_still_owes_nothing():
     assert r.periods["n_charged"].lt(r.periods["n_held"]).any(), (
         "if every position is charged every period the carry is not working"
     )
+
+
+# ------------------------------------------------------ what the band saves
+# `entry_rank`/`exit_rank` is 6/18, and the point of the wider exit band is
+# that a held name is kept while it stays inside it and pays nothing. Measured
+# on the shipped configuration at the live cadence, 3.39 of 4.79 held names are
+# charged EVERY period: the band carries 29% of the book, and 40.6 round trips
+# a year are paid anyway.
+#
+# The band is not the only thing that can fail to save a position. A name whose
+# position closed early -- stopped out, or exited at the truncated horizon --
+# is re-bought and pays however comfortably it sits inside the band. So a
+# hysteresis band cannot be judged by its width; it has to be measured.
+
+def test_the_share_carried_free_is_reported():
+    m = phase_summary(_rankings(_prices()), _prices(), _params(),
+                      step_sessions=21, decision_sessions=21)
+    assert 0.0 <= m["carried_free_share"] <= 1.0
+    assert np.isfinite(m["round_trips_per_year"])
+
+
+def test_round_trips_a_year_follows_the_cadence():
+    """It is the number a cost figure is built from, and nothing reported it."""
+    prices, rk = _prices(), None
+    rk = _rankings(prices)
+    slow = phase_summary(rk, prices, _params(), step_sessions=21,
+                         decision_sessions=63)
+    fast = phase_summary(rk, prices, _params(), step_sessions=21,
+                         decision_sessions=21)
+    assert fast["round_trips_per_year"] > slow["round_trips_per_year"]
+    assert fast["round_trips_per_year"] == pytest.approx(
+        fast["avg_charged"] * fast["periods_per_year"])
+
+
+def test_a_wider_band_carries_more_of_the_book_free():
+    """The band's intended effect, as a direction rather than a level. If a
+    wider band does not raise the carried share, it is not doing its job and
+    the width is decoration."""
+    prices = _prices()
+    rk = _rankings(prices)
+    narrow = phase_summary(rk, prices, _params(entry_rank=6, exit_rank=8),
+                           step_sessions=21, decision_sessions=21)
+    wide = phase_summary(rk, prices, _params(entry_rank=6, exit_rank=20),
+                         step_sessions=21, decision_sessions=21)
+    assert wide["carried_free_share"] > narrow["carried_free_share"]
+
+
+def test_carrying_free_is_not_the_same_as_sitting_inside_the_band():
+    """A name that stopped out is re-bought and pays, however comfortably it
+    sits inside the band -- so the carried share must stay below 1 even when
+    the band is wide enough to hold everything."""
+    m = phase_summary(_rankings(_prices()), _prices(),
+                      _params(entry_rank=6, exit_rank=24),
+                      step_sessions=21, decision_sessions=21)
+    assert m["carried_free_share"] < 1.0

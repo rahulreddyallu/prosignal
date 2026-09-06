@@ -627,3 +627,14 @@
 {"key": "eac9f64310684123", "command": "v3 factor search (reconstructed)", "label": "\u00a713 dividend yield screen x 4 horizons [2/4]", "recorded_at": "2026-09-06T00:32:42+00:00"}
 {"key": "164d34a82e65411a", "command": "v3 factor search (reconstructed)", "label": "\u00a713 dividend yield screen x 4 horizons [3/4]", "recorded_at": "2026-09-06T00:32:42+00:00"}
 {"key": "196e0d8f6b56f60e", "command": "v3 factor search (reconstructed)", "label": "\u00a713 dividend yield screen x 4 horizons [4/4]", "recorded_at": "2026-09-06T00:32:42+00:00"}
+{"key": "22f050150d6ece96", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: shipped", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "c6e851a7cab891cb", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: no_target", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "98e7c78153ac2f1c", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: no_invalidation", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "136906baeed4b0a1", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit rungs: no_stop", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 5.91}
+{"key": "f7f048cc2d881120", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 0.5pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.04}
+{"key": "cfe29ff65fecd2a4", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 1pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "2d72aad7b716000f", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 2pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.34}
+{"key": "1d49fa90cbaae93f", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "risk budget: 4pct", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 8.73}
+{"key": "70f2c7afaff80739", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 12", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.28}
+{"key": "5da91d774936bd02", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 18", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 6.74}
+{"key": "13ec2deb31fe1049", "command": "audit 2026-09 ablations re-run leverage-neutral", "label": "exit band: 36", "recorded_at": "2026-09-06T05:28:58+00:00", "score": 8.76}

@@ -1229,6 +1229,114 @@ REGISTER: Tuple[Finding, ...] = (
               "re-register needs both.",
     ),
     _f(
+        fid="Q14", severity="high",
+        title="Re-run leverage-neutral, the exit-band ablation reverses: the "
+              "shipped band is too narrow and the old metric said the "
+              "opposite",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="PHASE 0 of the audit asked for the exit/stop/size "
+                   "ablations to be re-run on a statistic that does not move "
+                   "with the knob. Building the harness (Q8) was not the same "
+                   "as running them. Re-run on the whole store at the live "
+                   "cadence, ranked on alpha over deployed capital:\n"
+                   "  EXIT BAND   12: +6.28%  18 (shipped): +6.74%  "
+                   "36: +8.76%\n"
+                   "  raw excess  12: -17.12%  18: -16.29%  36: -17.03%\n"
+                   "The widest band earns +2.0 points more alpha on deployed "
+                   "capital AND a shallower drawdown (-10.8% against -12.2%), "
+                   "while its RAW excess is worse than the shipped band's. An "
+                   "ablation decided the old way rejects the better "
+                   "configuration -- which is not a hypothetical about the "
+                   "confound, it is the confound choosing.",
+        location="prosignal.validation.ablation",
+        fix="Ablations re-run and the arms charged to the trial registry -- "
+            "11 configurations, taking the DSR count to 633. Re-measuring a "
+            "configuration already tried is still a look at the same data, "
+            "and the registry's rule is that anything whose out-of-sample "
+            "score was looked at is charged.",
+        regression_test="tests/test_ablation_leverage_neutral.py",
+        before_after="EXIT RUNGS: the shipped arm, no_target and "
+                     "no_invalidation are identical at +6.74%, which is "
+                     "correct -- both rungs are already disarmed in the "
+                     "shipped config, so disarming them again changes "
+                     "nothing. `no_stop` is +5.91%, so the ATR stop is worth "
+                     "+0.83 points and earns its place. RISK BUDGET: raw "
+                     "excess spans 14.4 points (-3.94% to -18.36%) while "
+                     "alpha on deployed spans 2.7 (+6.04% to +8.73%) -- the "
+                     "confound reproduced on the real panel at 5.3x",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="ALPHA ON DEPLOYED IS NOT PERFECTLY FLAT across the sizing "
+              "sweep -- it rises from +6.04% at 0.5% risk to +8.73% at 4%, "
+              "where deployment reaches 70% and the worst drawdown reaches "
+              "-37.2%. It is five times more stable than the raw figure and "
+              "it is not an invariant, and saying otherwise would be the same "
+              "kind of overclaim this audit exists to remove. Widening the "
+              "band is NOT applied here: it is a model change that spends "
+              "trials and opens an epoch, and it now has a measurement behind "
+              "it instead of a metric that pointed the wrong way.",
+    ),
+    _f(
+        fid="Q15", severity="medium",
+        title="The hysteresis band carries less than a third of the book, and "
+              "nothing measured what it saved",
+        category=Category.EXECUTION, status=Status.FIXED,
+        root_cause="`entry_rank`/`exit_rank` is 6/18 and the wider exit band "
+                   "exists so a held name is kept while it stays inside it, "
+                   "paying nothing. Nothing reported whether that happened. "
+                   "Measured at the live cadence, 3.39 of 4.79 held names are "
+                   "charged a round trip EVERY period -- the band carries 29% "
+                   "of the book and 40.6 round trips a year are paid anyway. "
+                   "The band is not the only thing that can fail to save a "
+                   "position: a name whose position closed early, stopped out "
+                   "or exited at the horizon, is re-bought and pays however "
+                   "comfortably it sits inside the band.",
+        location="prosignal.validation.portfolio_sim::phase_summary",
+        fix="`carried_free_share` and `round_trips_per_year` on the phase "
+            "summary. The second is the number every cost figure is built "
+            "from and nothing reported it.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="`avg_new` was reported and undercounted turnover by "
+                     "excluding re-entries; the share of the book the band "
+                     "actually carries was not reported at all",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="A hysteresis band cannot be judged by its width. Q14 measures "
+              "that a wider one is worth +2.0 points of alpha here; this "
+              "measures why a band of any width leaves most of the turnover "
+              "in place.",
+    ),
+    _f(
+        fid="Q16", severity="medium",
+        title="The interface headline read as the account's return and was a "
+              "per-position average",
+        category=Category.UI, status=Status.FIXED,
+        root_cause="The open-positions headline read `+X% vs the index`. That "
+                   "figure is the average one POSITION is ahead of the index "
+                   "over the days it was held -- the right way to judge the "
+                   "SELECTION, since a position's return does not depend on "
+                   "how large the position was, and not what an account "
+                   "running this engine is up. Position size is "
+                   "`risk_budget / risk_per_share`, so the book runs about a "
+                   "fifth invested and the rest sat in cash while the index "
+                   "compounded. The closed-record headline had always said "
+                   "'average per position'; the open one said only 'vs the "
+                   "index', and neither said anything about the cash.",
+        location="prosignal.static.index.html",
+        fix="The open headline reads 'vs the index, per position', and both "
+            "headlines carry a note that this is not what the account earned "
+            "because sizing leaves most of it in cash. A test asserts that no "
+            "leverage-confounded BOOK figure -- `mean_excess`, "
+            "`information_ratio` -- ever reaches the interface.",
+        regression_test="tests/test_ui_headline_is_honest.py",
+        before_after="'+X% vs the index' -> '+X% vs the index, per position "
+                     "... not what the account earned: sizing leaves most of "
+                     "it in cash'",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="No number changes. What changes is what the page claims one "
+              "means. The per-position figure is kept as the headline because "
+              "it is the honest measure of selection; it is the missing "
+              "sentence about cash that made it read as a balance.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

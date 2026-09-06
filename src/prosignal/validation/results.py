@@ -74,6 +74,17 @@ MIN_STABLE_DATES = 60
 #: cross-sections of at least this many scored names.
 MIN_NAMES_FOR_DECILES = 100
 
+#: Horizons the ranking is reported at, shortest first.
+#:
+#: WHY 5 IS ON THIS LIST. The engine holds for `model_horizon_sessions`, which
+#: is 63, and the ranking was only ever reported at 21 and above -- so the one
+#: question the horizon choice turns on could not be asked. The IC MAGNITUDE
+#: rises with horizon (+0.058 at 21, +0.078 at 63 out of sample) while its
+#: SIGNIFICANCE falls (+2.28 to +1.73), because a longer label leaves fewer
+#: independent windows in the same span. Those two facts point opposite ways
+#: and a table that starts at 21 shows only one of them.
+REPORT_HORIZONS: Tuple[int, ...] = (5, 21, 42)
+
 #: The window a claim about the shipped model rests on. The others are context.
 #:
 #: WHY THIS AND NOT `FULL_PANEL`. The signs and weights were fitted
@@ -625,7 +636,7 @@ def build(cfg, store, *, panel: Optional[pd.DataFrame] = None,
         say("building the v3 score panel over the whole store")
         panel = build_v3_panel(
             store, end=end, stride=stride,
-            horizons=(21, 42, horizon),
+            horizons=tuple(sorted(set(REPORT_HORIZONS) | {horizon})),
             max_names=int(getattr(u.pit_max_names, "value", u.pit_max_names)),
             min_adtv_inr=float(getattr(u.pit_min_adtv_inr, "value",
                                        u.pit_min_adtv_inr)),
@@ -646,9 +657,9 @@ def build(cfg, store, *, panel: Optional[pd.DataFrame] = None,
 
     say("scoring the ranking")
     ranking: List[RankingResult] = []
+    report_at = tuple(sorted(set(REPORT_HORIZONS) | {horizon}))
     for name, frame in _ranking_windows(panel):
-        ranking += _ranking_results(frame, (21, 42, horizon), stride,
-                                    window=name)
+        ranking += _ranking_results(frame, report_at, stride, window=name)
 
     n_dates = int(panel["date"].nunique())
     independent = _independent(n_dates, stride, horizon)

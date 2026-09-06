@@ -847,6 +847,28 @@ def phase_summary(
         #: book closes before the horizon and is bought back.
         "avg_charged": (float(pooled["n_charged"].mean())
                         if "n_charged" in pooled else float("nan")),
+        #: WHAT THE HYSTERESIS BAND ACTUALLY SAVES. `entry_rank`/`exit_rank` is
+        #: 6/18, and the point of the wider exit band is that a held name is
+        #: kept while it stays inside it, paying nothing. This is the share of
+        #: held positions that were NOT charged a round trip -- the band's
+        #: measured effect, as opposed to its intended one.
+        #:
+        #: The band is not the only thing that can fail to save a position. A
+        #: name whose position CLOSED early -- stopped out, or hit the
+        #: truncated horizon and exited -- is re-bought and pays, however
+        #: comfortably it sits inside the band. Measured on the shipped
+        #: configuration at the live cadence, 3.39 of 4.79 held names are
+        #: charged every period: the band carries 29% of the book and 40.6
+        #: round trips a year are paid anyway.
+        "carried_free_share": (
+            float(1.0 - pooled["n_charged"].sum() / pooled["n_held"].sum())
+            if "n_charged" in pooled and float(pooled["n_held"].sum()) > 0
+            else float("nan")),
+        #: Round trips a year, which is the number a cost figure is built from
+        #: and the one nothing reported.
+        "round_trips_per_year": (
+            float(pooled["n_charged"].mean()) * periods_per_year
+            if "n_charged" in pooled else float("nan")),
         #: Share of equity deployed. The benchmark is fully invested; anything
         #: below 1.0 here is return the book gave up by holding cash, and the
         #: decomposition attributes it to "sizing" unless it is read separately.
