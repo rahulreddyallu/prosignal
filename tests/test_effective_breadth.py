@@ -108,3 +108,88 @@ def test_the_report_carries_it_and_says_how_much_the_count_overstates():
         "the default must be empty rather than a placeholder count; an absent "
         "measurement and a measured 22 are different things"
     )
+
+
+# ------------------------------------------------- overlap at the THEME level
+# `_v3_redundancy` compares factor pairs against a 0.60 cutoff and reports
+# theme pairs against the same bar. The themes are what the blend weights
+# multiply, so two themes that move together are ONE BET carrying two weights
+# -- and they do that at a correlation far below the level at which two factors
+# would matter, because nothing downstream ever nets them.
+#
+# Measured on the shipped panel, per date and averaged:
+#
+#     momentum  <-> risk       +0.389   (weights 40.0% and 11.1%)
+#     ownership <-> reversal   +0.306   (weights 18.9% and 11.0%)
+#
+# `ulcer_120` enters risk at sign -1 and `prox_52w` enters momentum at +1, and
+# the two correlate -0.773 raw -- so ORIENTED they reinforce. The risk theme is
+# substantially a second momentum vote. The two-level structure exists to stop
+# "a momentum bet with decoration" and at 0.389 it has not fully succeeded.
+
+def _theme_panel(rho: float, n_dates: int = 12, n_names: int = 300,
+                 seed: int = 8) -> pd.DataFrame:
+    """momentum and risk sub-scores correlated at `rho`; everything else free."""
+    from prosignal.features import v3
+
+    rng = np.random.default_rng(seed)
+    rows = []
+    for d in pd.bdate_range("2025-01-01", periods=n_dates, freq="21B"):
+        m = rng.normal(size=n_names)
+        r = rho * m + np.sqrt(max(1 - rho ** 2, 0.0)) * rng.normal(size=n_names)
+        f = {"date": d, "symbol": [f"S{i}" for i in range(n_names)],
+             "momentum_sub": m, "risk_sub": r}
+        for t in v3.THEMES:
+            if t not in ("momentum", "risk"):
+                f[t + "_sub"] = rng.normal(size=n_names)
+        rows.append(pd.DataFrame(f))
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_independent_themes_raise_nothing():
+    assert vm.overlapping_themes(_theme_panel(0.0)) == []
+
+
+def test_an_overlapping_pair_is_found_and_carries_both_weights():
+    msgs = vm.overlapping_themes(_theme_panel(0.6))
+    assert len(msgs) == 1
+    assert "momentum and risk" in msgs[0]
+    assert "40.0%" in msgs[0] and "11.1%" in msgs[0], (
+        "the sentence has to carry the weights: a 0.39 correlation between two "
+        "6% themes and between a 40% and an 11% theme are different problems"
+    )
+
+
+def test_the_theme_bar_is_stricter_than_the_factor_cutoff():
+    """Two factors inside a theme are SUPPOSED to overlap -- the theme averages
+    them. Two themes are not, and nothing downstream nets them."""
+    assert vm.THEME_OVERLAP_ALERT < 0.60
+    assert vm.THEME_OVERLAP_ALERT >= 0.25
+
+
+def test_the_report_is_ordered_by_absolute_correlation():
+    frame = vm.theme_sub_score_overlap(_theme_panel(0.6))
+    assert not frame.empty
+    assert frame["rho"].abs().is_monotonic_decreasing
+
+
+def test_a_negative_overlap_is_flagged_too():
+    """Two themes that move opposite each other are also one bet, taken from
+    both ends, and the cap sees neither."""
+    frame = vm.theme_sub_score_overlap(_theme_panel(-0.6))
+    row = frame.iloc[0]
+    assert row["rho"] < -0.3
+    assert bool(row["alert"])
+
+
+def test_the_shipped_panel_still_shows_the_two_known_pairs():
+    from pathlib import Path
+
+    cache = Path("/tmp/panel_cad.parquet")
+    if not cache.is_file():
+        pytest.skip("no cached panel in this checkout")
+    frame = vm.theme_sub_score_overlap(pd.read_parquet(cache))
+    alerts = {tuple(sorted((r["theme_a"], r["theme_b"])))
+              for _, r in frame[frame["alert"]].iterrows()}
+    assert ("momentum", "risk") in alerts
+    assert ("ownership", "reversal") in alerts

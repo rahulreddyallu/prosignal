@@ -38,6 +38,13 @@ import numpy as np
 import pandas as pd
 
 from ..features.exits import EXIT_TIMEOUT
+
+#: A position closed by the TIME BACKSTOP rather than still running at the
+#: truncated cohort horizon. It is deliberately not `EXIT_TIMEOUT`: that value
+#: is what the cost logic reads as "carried, owes nothing", and a position the
+#: engine has sold at `max_holding_sessions` is not carried. Re-selecting the
+#: name buys it again and pays a round trip. See `simulate`'s `opened_at`.
+EXIT_TIMEOUT_EXPIRED = -3.0
 from ..liquidity import assess
 
 __all__ = ["PortfolioParams", "PortfolioResult", "simulate", "phase_summary"]
@@ -592,6 +599,16 @@ def simulate(
     #: position was still open at the horizon and a re-selection genuinely costs
     #: nothing; anything else means it closed and re-buying is a new round trip.
     held: Dict[str, float] = {}
+    #: symbol -> the index position its CURRENT position was opened at.
+    #:
+    #: THE TIME BACKSTOP HAS TO SURVIVE THE SHORTER COHORT. Truncating the hold
+    #: at the decision cadence and re-selecting is what gives cadence parity,
+    #: and on its own it also removes `max_holding_sessions`: a name that stays
+    #: inside the exit band for five 21-session periods would be carried 105
+    #: sessions, while the live engine closes it at 63. The simulator would
+    #: then be holding winners past the point the engine sells them, which
+    #: flatters exactly the tail this audit found does not generalise.
+    opened_at: Dict[str, int] = {}
     rows: List[Dict[str, float]] = []
 
     for j in range(phase, len(rankings), stride):
@@ -602,6 +619,13 @@ def simulate(
         if i + hold_sessions >= len(index):
             continue
         rank = {sym: r for r, sym in enumerate(scores.index, start=1)}
+        # THE TIME BACKSTOP, applied before the band. A position that has run
+        # `horizon_sessions` is closed by the engine however well it ranks, so
+        # it cannot be carried; re-selecting the name is a new round trip and
+        # `held` is cleared for it so the cost logic charges one.
+        for sym in [s for s in held
+                    if i - opened_at.get(s, i) >= params.horizon_sessions]:
+            held[sym] = EXIT_TIMEOUT_EXPIRED
         # Hysteresis: a held name survives while inside the wider exit band.
         keep = [s for s in held if rank.get(s, 10 ** 9) <= params.exit_rank]
         room = params.max_positions - len(keep)
@@ -624,8 +648,15 @@ def simulate(
             if sized is None or sized[0] <= 0:
                 continue
             size, price, liquidity = sized
+            # A CARRIED POSITION SPENDS ITS REMAINING BUDGET, NOT A FRESH ONE.
+            # `age` is zero for a name being opened now -- including one whose
+            # previous position closed early and is being re-bought, which is a
+            # new position and gets the full horizon.
+            carried = held.get(sym) == EXIT_TIMEOUT
+            age = (i - opened_at.get(sym, i)) if carried else 0
+            budget = max(int(params.horizon_sessions) - int(age), 1)
             outcome = _hold(sym, i, close, low, open_, ma, atr, params,
-                            high=high, horizon=hold_sessions)
+                            high=high, horizon=min(hold_sessions, budget))
             if outcome is None:
                 continue
             ret, side = outcome
@@ -642,6 +673,7 @@ def simulate(
             # early, so the second case is most of the book's real turnover. The
             # old test -- `sym not in held` -- charged none of it, and credited
             # the hysteresis band with a saving it does not make.
+            opened_at[sym] = opened_at.get(sym, i) if carried else i
             reopened = held.get(sym)
             if reopened is None or reopened != EXIT_TIMEOUT:
                 bps = params.cost_bps(price, size / price if price > 0 else 0.0,
@@ -869,6 +901,17 @@ def phase_summary(
         "round_trips_per_year": (
             float(pooled["n_charged"].mean()) * periods_per_year
             if "n_charged" in pooled else float("nan")),
+        #: COST ON THE CAPITAL THAT ACTUALLY TRADED. `mean_cost` is a share of
+        #: total equity, and the book deploys about a fifth of it, so the
+        #: annualised figure understates what the traded rupees paid by that
+        #: factor. A 1.2%-of-equity cost is 5.8% of deployed capital, and it is
+        #: the second number that has to clear the gross return -- the cash was
+        #: never going to pay for anything.
+        "cost_ann_on_deployed": (
+            float(pooled["cost_ret"].mean()) * periods_per_year
+            / float(pooled["deployed_frac"].mean())
+            if "cost_ret" in pooled and "deployed_frac" in pooled
+            and float(pooled["deployed_frac"].mean()) > 1e-9 else float("nan")),
         #: Share of equity deployed. The benchmark is fully invested; anything
         #: below 1.0 here is return the book gave up by holding cash, and the
         #: decomposition attributes it to "sizing" unless it is read separately.

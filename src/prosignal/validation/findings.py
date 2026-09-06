@@ -1423,6 +1423,143 @@ REGISTER: Tuple[Finding, ...] = (
               "are the argument against the refresh.",
     ),
     _f(
+        fid="Q19", severity="critical",
+        title="Cadence parity, applied naively, deleted the time backstop",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="Q6 truncates each cohort at the decision cadence and "
+                   "re-selects, which is what gives the simulator the live "
+                   "engine's 21-session clock. On its own it also removes "
+                   "`stage7_risk.max_holding_sessions`: `_hold` was re-run "
+                   "every 21 sessions with no memory of when the position "
+                   "opened, so a name that stayed inside the exit band for "
+                   "five periods was carried 105 sessions while the live "
+                   "engine closes it at 63. The simulator would hold winners "
+                   "past the point the engine sells them -- flattering exactly "
+                   "the tail Q10 and Q17 found does not generalise. A fix for "
+                   "one parity break that opens another is worse than the "
+                   "break it fixed, because it looks corrected.",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="`opened_at` tracks the index position each CURRENT position was "
+            "opened at. A carried name spends its REMAINING budget "
+            "(`horizon_sessions - age`) rather than a fresh horizon; a "
+            "position that has run the full backstop is closed however well it "
+            "ranks and stamped `EXIT_TIMEOUT_EXPIRED`, which is deliberately "
+            "not `EXIT_TIMEOUT` -- that value is what the cost logic reads as "
+            "'carried, owes nothing', and a position the engine has sold is "
+            "not carried. Re-selecting it pays a round trip. `age` is zero for "
+            "any name being opened, including a re-buy after an early exit, "
+            "because that is a new position.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="holds were unbounded above the 63-session backstop at "
+                     "any cadence shorter than the horizon; they are now "
+                     "bounded by it at every cadence, asserted at 7, 21 and 63",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+        notes="Found by re-checking my own change against the config rather "
+              "than against the test I had just written. The test passed "
+              "throughout: it asserted the hold equalled the cadence, which "
+              "was true and was not the property that mattered.",
+    ),
+    _f(
+        fid="Q20", severity="high",
+        title="Two theme sub-scores are one bet, and the redundancy check "
+              "judged them by the factor-pair bar",
+        category=Category.FEATURE, status=Status.FIXED,
+        root_cause="`_v3_redundancy` compares factor pairs against "
+                   "`max_abs_spearman` (0.60) and reports THEME pairs against "
+                   "the same bar. Two factors inside a theme are supposed to "
+                   "overlap -- the theme averages them, and the average is "
+                   "what carries a weight. Two themes are not, and nothing "
+                   "downstream nets them: the cap is applied per theme, so "
+                   "shared exposure is weighted twice. That makes the theme "
+                   "level matter at a correlation a factor pair would shrug "
+                   "off, and the 0.60 bar meant nothing was ever flagged. "
+                   "Measured per date across the shipped panel: momentum <-> "
+                   "risk +0.389 (weights 40.0% and 11.1%) and ownership <-> "
+                   "reversal +0.306 (18.9% and 11.0%). `ulcer_120` enters risk "
+                   "at -1 and `prox_52w` enters momentum at +1 and the two "
+                   "correlate -0.773 raw, so ORIENTED they reinforce: the risk "
+                   "theme is substantially a second momentum vote.",
+        location="prosignal.v3_monitor::theme_sub_score_overlap",
+        fix="`theme_sub_score_overlap` and `overlapping_themes`, against "
+            "`THEME_OVERLAP_ALERT = 0.30` -- half the factor cutoff, on "
+            "purpose. Each sentence carries BOTH weights, because 0.39 between "
+            "two 6% themes and 0.39 between a 40% and an 11% theme are "
+            "different problems. Negative overlap is flagged too: two themes "
+            "moving opposite each other are also one bet, taken from both "
+            "ends, and the cap sees neither.",
+        regression_test="tests/test_effective_breadth.py",
+        before_after="every theme pair passed a 0.60 bar and nothing was "
+                     "reported; two pairs now alert, and one of them is the "
+                     "40% theme",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="The audit named momentum <-> risk at +0.341. Measured on the "
+              "full 356-date panel it is +0.389, and there is a second pair "
+              "the audit did not name. Neither theme is dropped here: that is "
+              "a model change, and Q9 already records that the theme level is "
+              "close to honest on effective count (3.96 of 4.59) even with "
+              "this overlap in it.",
+    ),
+    _f(
+        fid="Q21", severity="high",
+        title="Cost was reported on total equity while only a fifth of it "
+              "traded",
+        category=Category.EXECUTION, status=Status.FIXED,
+        root_cause="`mean_cost` is a share of TOTAL equity, and the book "
+                   "deploys about 20% of it. So an annualised cost of 1.2% of "
+                   "equity is 5.8% of the rupees that actually traded, and it "
+                   "is the second number that has to clear the gross return -- "
+                   "the cash was never going to pay for anything. Every cost "
+                   "figure in the repository was quoted on the first basis and "
+                   "compared against gross returns earned on the second.",
+        location="prosignal.validation.portfolio_sim::phase_summary",
+        fix="`cost_ann_on_deployed` on the phase summary, alongside the "
+            "existing figure rather than replacing it. Both are true and they "
+            "answer different questions: what the account paid, and what the "
+            "trading cost.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="cost quoted only as a share of equity; now also on "
+                     "deployed capital, which at 20.3% deployment is 4.9x "
+                     "larger",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This is the same class of error as Q1 in the opposite "
+              "direction: Q1 was a return figure flattered by cash, this is a "
+              "cost figure flattered by the same cash. Both are fixed by "
+              "dividing by deployment.",
+    ),
+    _f(
+        fid="Q22", severity="high",
+        title="The signal is strongest at the horizon the engine does not "
+              "trade, and the table started past it",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="The ranking was only ever reported at h >= 21 while the "
+                   "book holds for 63, so the one question the horizon choice "
+                   "turns on could not be asked. IC MAGNITUDE rises with "
+                   "horizon and its SIGNIFICANCE falls, because a longer label "
+                   "leaves fewer independent windows in the same span. Those "
+                   "point opposite ways and a table starting at 21 shows only "
+                   "one of them. On the 21-session panel where the "
+                   "observations do not overlap, out-of-sample h=5 reads "
+                   "+0.0388 at t +3.66 -- clearing the Harvey-Liu-Zhu 3.0 bar "
+                   "without an overlap correction doing any work -- against "
+                   "t +1.20 at h=63.",
+        location="prosignal.validation.results::REPORT_HORIZONS",
+        fix="`REPORT_HORIZONS = (5, 21, 42)` unioned with the configured "
+            "horizon, so the record builds and reports the short end "
+            "alongside the traded one, in every window.",
+        regression_test="tests/test_model_stability_window.py",
+        before_after="the ranking table began at h=21 and the engine trades "
+                     "63; it now begins at 5",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Reporting it is not the same as trading it, and moving the "
+              "horizon is a model change that spends trials and opens an "
+              "epoch. What was missing was the evidence to take that decision "
+              "against. Note the cost side: Q21 measures cost on deployed "
+              "capital, and a 5-session horizon means roughly 50 rebalances a "
+              "year -- the short end is where the signal is strongest AND "
+              "where cost is most likely to eat it, and the two have to be "
+              "decided together.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

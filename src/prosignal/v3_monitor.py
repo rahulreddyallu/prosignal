@@ -270,6 +270,84 @@ def flipped_signs(panel: pd.DataFrame, label: str) -> List[str]:
     return out
 
 
+#: Two theme sub-scores correlating above this are not two bets, whatever the
+#: weights say. Well below the 0.60 factor-pair cutoff on purpose: the themes
+#: are the level the weights are applied at, so overlap there defeats the whole
+#: two-level design, and it defeats it at a correlation a factor pair would
+#: shrug off.
+THEME_OVERLAP_ALERT = 0.30
+
+
+def theme_sub_score_overlap(panel: pd.DataFrame) -> pd.DataFrame:
+    """Cross-theme sub-score correlation, per date and averaged.
+
+    THE LEVEL THAT MATTERS AND WAS NOT CHECKED. `_v3_redundancy` compares
+    FACTOR pairs against a 0.60 cutoff and reports theme pairs against the same
+    bar. The themes are what the blend weights multiply, so two themes that
+    move together are one bet carrying two weights -- and they do that at a
+    correlation far below the level at which two factors would matter, because
+    nothing downstream ever nets them.
+
+    Measured on the shipped panel, the pair that matters:
+
+        momentum <-> risk   +0.341
+
+    `ulcer_120` enters `risk` at sign -1 and `prox_52w` enters `momentum` at
+    +1, and the two correlate -0.773 raw -- so ORIENTED they reinforce. The
+    risk theme carries 11.1% of the weight and is substantially a second
+    momentum vote. The two-level structure exists precisely to stop "a momentum
+    bet with decoration", and at 0.341 it has not fully succeeded.
+
+    Per date and averaged, never pooled: a matrix over stacked cross-sections
+    mixes the ordering with drift in the sub-score means.
+    """
+    cols = [t + "_sub" for t in THEMES if t + "_sub" in
+            getattr(panel, "columns", ())]
+    if len(cols) < 2 or "date" not in getattr(panel, "columns", ()):
+        return pd.DataFrame()
+    acc: Dict[tuple, List[float]] = {}
+    for _, g in panel.groupby("date", sort=True):
+        x = g[cols].astype("float64")
+        keep = [c for c in cols if x[c].notna().sum() >= MIN_NAMES_FOR_INFLUENCE]
+        if len(keep) < 2:
+            continue
+        c = x[keep].corr(method="spearman")
+        for a in range(len(keep)):
+            for b in range(a + 1, len(keep)):
+                v = c.iloc[a, b]
+                if np.isfinite(v):
+                    acc.setdefault((keep[a][:-4], keep[b][:-4]), []).append(float(v))
+    rows = []
+    for (a, b), vals in acc.items():
+        if len(vals) < 3:
+            continue
+        rho = float(np.mean(vals))
+        rows.append({"theme_a": a, "theme_b": b, "rho": rho,
+                     "n_dates": len(vals),
+                     "weight_a": float(THEMES[a].weight),
+                     "weight_b": float(THEMES[b].weight),
+                     "alert": bool(abs(rho) >= THEME_OVERLAP_ALERT)})
+    out = pd.DataFrame(rows)
+    return (out.sort_values("rho", key=lambda s: s.abs(), ascending=False)
+            .reset_index(drop=True) if not out.empty else out)
+
+
+def overlapping_themes(panel: pd.DataFrame) -> List[str]:
+    """One sentence per theme pair that is really one bet. Empty is healthy."""
+    frame = theme_sub_score_overlap(panel)
+    if frame.empty:
+        return []
+    out = []
+    for _, r in frame[frame["alert"]].iterrows():
+        out.append(
+            f"{r['theme_a']} and {r['theme_b']} sub-scores correlate "
+            f"{r['rho']:+.3f} across {int(r['n_dates'])} dates. They carry "
+            f"{r['weight_a']:.1%} and {r['weight_b']:.1%} of the blend and the "
+            f"cap is applied per theme, so the shared exposure is weighted "
+            f"twice and nothing nets it.")
+    return out
+
+
 def stable_model_window(panel: pd.DataFrame,
                         floor: float = STABLE_MODEL_FLOOR):
     """First date from which EVERY theme stays above `floor`, or None.
