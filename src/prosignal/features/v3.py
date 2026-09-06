@@ -111,7 +111,7 @@ __all__ = ["Theme", "THEMES", "FACTOR_THEME", "ALL_FACTORS", "MIN_THEMES",
            "score_frame", "attribution", "absolute_floor", "cap_weights",
            "BOOK", "BOOK_NOTE", "HOLDOUT_BOOK", "RESEARCH_BOOK",
            "score_dispersion", "TYPICAL_DISPERSION", "residual_bucket_size",
-           "LIVE_BOOK", "EXCLUDED_THEMES",
+           "LIVE_BOOK", "EXCLUDED_THEMES", "SECTOR_NEUTRAL",
            "FIT_WINDOW", "window_provenance", "IN_SAMPLE", "OUT_OF_SAMPLE",
            "STRADDLES_FIT_BOUNDARY"]
 
@@ -265,6 +265,48 @@ EXCLUDED_THEMES = {
                    "statistic is so persistent that a year-shifted alignment "
                    "reproduces it -- against a real t of -1.2.",
 }
+
+#: WHETHER FACTORS ARE RANKED WITHIN SECTOR. Now FALSE, on two independent
+#: grounds, and it is the rare change that removes a bias and raises the signal
+#: at the same time.
+#:
+#: 1. THE SECTOR MAP IS A FUTURE-CONDITIONED ATTRIBUTE. `_refresh_sector_map`
+#:    pools the `Industry` column of TODAY's NSE constituent files, so a name
+#:    that has since delisted or fallen out of every index has no sector and
+#:    lands in `__RESID__`. Having a sector label today is therefore correlated
+#:    with having survived, and it is worth a great deal: measured across 380
+#:    panel dates, names WITH a known sector out-returned names without by
+#:    +1.05% per 21 sessions (overlap-corrected t +3.64) and +3.36% per 63
+#:    (t +3.48). That is larger than the entire signal, and the grouping the
+#:    ranking is computed inside is defined by it.
+#:
+#: 2. IT COSTS INFORMATION. Re-scoring the whole panel both ways, on dates
+#:    AFTER the fit window closed:
+#:
+#:        horizon   sector-neutral IC        universe rank IC
+#:            5     +0.0406 (t +3.88)        +0.0485 (t +3.79)
+#:           21     +0.0427 (t +1.99)        +0.0562 (t +2.18)
+#:           63     +0.0473 (t +1.34)        +0.0759 (t +1.64)
+#:
+#:    -- and the direction independently reproduces what `features/v9r.py`
+#:    already recorded for the unneutralised composite (+0.0674 against +0.0547
+#:    at h=21).
+#:
+#: WHY IT HURTS. `residual_bucket_size` has always reported the mechanism: on a
+#: live cross-section of 386 names, 150 (38.9%) sit in `__RESID__` -- 79
+#: genuinely unclassified plus 71 drawn from THIRTEEN real sectors folded in for
+#: holding fewer than MIN_SECTOR_NAMES. A Power stock was being neutralised
+#: against Realty. For 39% of the universe "sector-neutral" named a peer group
+#: that does not exist, and the sector-level information it stripped from the
+#: other 61% was itself predictive.
+#:
+#: This CHANGES THE RANKING and therefore opens a new epoch. It is not a
+#: correctness patch that leaves the model alone. `sector_neutral_rank` is kept
+#: -- it is still the honest implementation of the idea, and a point-in-time
+#: sector source would make it usable -- and `sectors` is still threaded through
+#: `score_frame` so `residual_bucket_size` can keep reporting what a sector map
+#: would cover if one existed.
+SECTOR_NEUTRAL: bool = False
 
 #: A name needs this many themes before it is scored at all.
 MIN_THEMES = 3
@@ -452,7 +494,8 @@ def _weights_for_pattern(available: Tuple[bool, ...],
 
 
 def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
-                min_themes: int = MIN_THEMES) -> pd.DataFrame:
+                min_themes: int = MIN_THEMES,
+                sector_neutral: Optional[bool] = None) -> pd.DataFrame:
     """Rank, combine within theme, blend. One row per symbol.
 
     Weights are re-capped over the themes a name actually has -- see
@@ -464,10 +507,15 @@ def score_frame(raw: pd.DataFrame, sectors: Optional[Dict[str, str]] = None,
     that produced THIS name's contribution. Without it the presentation layer
     had only `Theme.weight` to show, so every card displayed a weight that did
     not multiply its own z into its own contribution.
+
+    `sectors` is still accepted and is used for the `residual_bucket_size`
+    diagnostic, but it no longer decides the ranking unless `sector_neutral` is
+    explicitly True. See `SECTOR_NEUTRAL` for the measurement behind that.
     """
     if raw is None or raw.empty:
         return pd.DataFrame()
-    sec = pd.Series(sectors).reindex(raw.index) if sectors else None
+    use_sec = SECTOR_NEUTRAL if sector_neutral is None else bool(sector_neutral)
+    sec = pd.Series(sectors).reindex(raw.index) if (sectors and use_sec) else None
     cols = [c for c in ALL_FACTORS if c in raw.columns]
     ranks = pd.DataFrame({c: sector_neutral_rank(raw[c], sec) for c in cols},
                          index=raw.index)

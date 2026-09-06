@@ -198,15 +198,26 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
             f"re-cap and are not re-run: both windows are spent. The RANKING is "
             f"what generalised there; a ten-name book at these transaction costs "
             f"did not -- see CHANGELOG.md.")
-        # AND HOW MUCH OF THE UNIVERSE "SECTOR-NEUTRAL" ACTUALLY COVERS. The
-        # card says the score is a sector-neutral rank; for the residual bucket
-        # it is a rank against a pool of unrelated industries. Reported rather
-        # than fixed, because raising sector coverage is a data job (D-019) and
-        # a claim that is true for 61% of the book should not be silent about
-        # the other 39%.
+        # SECTOR NEUTRALISATION IS OFF, and the note says so rather than
+        # letting the card keep an old claim. See `v3.SECTOR_NEUTRAL`: the
+        # sector map is drawn from TODAY's constituent files, so holding a
+        # sector label is correlated with having survived (+3.36% per 63
+        # sessions, t +3.48) -- and neutralising against it also COST the
+        # signal 0.029 of IC at h=63. The bucket report is kept because it
+        # measures what a sector map would cover if a point-in-time one
+        # existed, which is the condition for turning this back on.
         try:
             _rb = v3feat.residual_bucket_size(covered.index, sectors)
-            if _rb["resid"]:
+            if not v3feat.SECTOR_NEUTRAL:
+                notes.append(
+                    f"Ranked across the whole eligible universe, NOT within "
+                    f"sector. The sector map is current-vintage, so it is "
+                    f"future information; neutralising against it also "
+                    f"measured worse (OOS rank IC +0.0473 with, +0.0759 "
+                    f"without, at h=63). For reference a sector map would "
+                    f"cover {len(covered) - _rb['resid']} of {len(covered)} "
+                    f"names today, with {_rb['resid']} in a residual bucket.")
+            elif _rb["resid"]:
                 notes.append(
                     f"Sector-neutral for {len(covered) - _rb['resid']} of "
                     f"{len(covered)} names. The other {_rb['resid']} "

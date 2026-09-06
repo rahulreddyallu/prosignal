@@ -758,6 +758,47 @@ REGISTER: Tuple[Finding, ...] = (
         moves_coefficients=False, moves_history=True, forces_restart=False,
     ),
     _f(
+        fid="Q3", severity="high",
+        title="Factors were ranked inside groups defined by TODAY's sector map, "
+              "which is future information and also cost the signal",
+        category=Category.FEATURE, status=Status.FIXED,
+        root_cause="`_refresh_sector_map` pools the `Industry` column of the "
+                   "CURRENT NSE constituent files, so a name that has since "
+                   "delisted or left every index carries no sector and is "
+                   "ranked inside `__RESID__`. Holding a sector label is "
+                   "therefore correlated with having survived, and the "
+                   "correlation is large: across 380 panel dates, names with a "
+                   "known sector out-returned names without by +1.05% per 21 "
+                   "sessions (overlap-corrected t +3.64) and +3.36% per 63 "
+                   "(t +3.48) -- bigger than the signal itself. The groups the "
+                   "ranking was computed inside were defined by that attribute. "
+                   "Separately, `residual_bucket_size` had always reported that "
+                   "39% of a live cross-section sits in the residual bucket "
+                   "(79 unclassified plus 71 folded in from THIRTEEN sectors "
+                   "too small to rank within), so for two names in five "
+                   "'sector-neutral' named a peer group that does not exist.",
+        location="prosignal.features.v3::SECTOR_NEUTRAL",
+        fix="`SECTOR_NEUTRAL = False`. `score_frame` ranks across the eligible "
+            "universe and still accepts `sectors` so `residual_bucket_size` can "
+            "report what a point-in-time map would cover -- which is the "
+            "condition for turning it back on. `sector_neutral_rank` is kept "
+            "and reachable via `sector_neutral=True`; the function was never "
+            "the problem, the map feeding it was. Three surviving user-facing "
+            "claims were corrected: the stage-4 run note, `FactorMember.rank`'s "
+            "contract docstring, and two strings in the interface.",
+        regression_test="tests/test_no_sector_neutralisation.py",
+        before_after="out-of-sample rank IC, measured through the shipped "
+                     "score_frame: h=5 +0.0402 -> +0.0485, h=21 +0.0421 -> "
+                     "+0.0562 (t +1.97 -> +2.18), h=63 +0.0456 -> +0.0759. "
+                     "Removing a lookahead RAISED the signal, and the direction "
+                     "reproduces what features/v9r.py recorded independently",
+        moves_coefficients=True, moves_history=True, forces_restart=True,
+        notes="This CHANGES THE RANKING and therefore opens a new epoch -- it "
+              "is not a correctness patch that leaves the model alone. The "
+              "sealed windows do not describe it, which is already true of the "
+              "shipped configuration after the cap repair.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

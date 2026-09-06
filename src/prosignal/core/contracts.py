@@ -296,8 +296,10 @@ class FactorMember(_Contract):
     -1.81 sd" says nothing about WHICH lottery moment moved, and the reader
     cannot check the theme against the measurements without them.
 
-    `rank` is the cross-sectional rank in [-1, +1], taken within sector where
-    the sector is large enough -- the same number the family averages.
+    `rank` is the cross-sectional rank in [-1, +1] across the whole eligible
+    universe -- the same number the family averages. It was taken WITHIN
+    SECTOR until the sector map was found to be current-vintage (and so future
+    information) and to cost the signal 0.029 of IC; see `v3.SECTOR_NEUTRAL`.
     """
 
     name: str
