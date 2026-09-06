@@ -206,3 +206,78 @@ def test_the_windows_do_not_silently_overlap_on_the_fit_split():
     ins = set(pd.to_datetime(by["IN_SAMPLE"]["date"]))
     oos = set(pd.to_datetime(by["OUT_OF_SAMPLE"]["date"]))
     assert not (ins & oos)
+
+
+# ------------------------------------------------------- the decile profile
+# `decile_monotonicity` compresses the whole shape into one rank correlation,
+# and a profile that rises to D7 and falls away scores +0.33 there and looks
+# healthy. The profile itself, measured on the shipped panel at h=63 as mean
+# excess over each date's own cross-section:
+#
+#            D1     D2     D3     D4     D5     D6     D7     D8     D9    D10
+#     IS  -2.77  -1.41  -0.93  -0.10  -0.22  +0.06  +0.70  +0.78  +1.44  +2.45
+#     OOS -2.31  -1.27  -0.60  -0.65  +0.31  +1.23  +1.73  +0.64  +0.58  +0.36
+#
+# In sample it is monotone and D10 wins by a distance. Out of sample it PEAKS
+# AT D7 and D10 is the sixth-best decile: D10-D6 is +2.39 in sample and -0.87
+# out of it. The bottom generalises almost perfectly; the top does not
+# generalise at all.
+#
+# The shipped book holds six names off the very top of D10.
+
+def _wide_panel(n_dates: int = 40, n_names: int = 200) -> pd.DataFrame:
+    """Cross-sections wide enough to actually cut into ten deciles.
+
+    Carries two labels: one monotone in the score and one that rises to the
+    70th percentile and falls away past it -- the shape the real panel has out
+    of sample.
+    """
+    rng = np.random.default_rng(7)
+    rows = []
+    for d in pd.bdate_range("2020-01-01", periods=n_dates, freq="21B"):
+        sc = rng.normal(size=n_names)
+        pct = sc.argsort().argsort() / (n_names - 1)
+        rows.append(pd.DataFrame({
+            "date": d, "symbol": [f"S{i}" for i in range(n_names)],
+            "score": sc,
+            "y21": pct * 0.10 + rng.normal(0, 0.001, n_names),
+            "y_hump": -abs(pct - 0.7) * 0.10 + rng.normal(0, 0.001, n_names),
+        }))
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_the_profile_reports_every_decile_not_just_the_top():
+    out = R._ranking_results(_wide_panel(), (21,), 21)[0].decile_profile
+    assert {f"d{i}" for i in range(1, 11)} <= set(out)
+    assert out["n_dates"] > 0
+
+
+def test_the_peak_decile_is_reported_rather_than_assumed():
+    """The whole point. A report that only ever prints D10 cannot say that D10
+    is not where the information is."""
+    prof = R._decile_profile(_wide_panel(), "y21")
+    assert 1 <= prof["peak_decile"] <= 10
+    assert np.isfinite(prof["top_minus_d6"])
+
+
+def test_top_minus_d6_is_d10_minus_d6():
+    prof = R._decile_profile(_wide_panel(), "y21")
+    assert prof["top_minus_d6"] == pytest.approx(prof["d10"] - prof["d6"])
+
+
+def test_a_monotone_ranking_peaks_at_the_top_and_an_inverted_one_does_not():
+    """The detector, exercised in both directions -- a peak-decile report that
+    always says D10 would be indistinguishable from a broken one."""
+    p = _wide_panel()
+    assert R._decile_profile(p, "y21")["peak_decile"] == 10
+    assert R._decile_profile(p, "y_hump")["peak_decile"] in (7, 8)
+    assert R._decile_profile(p, "y21")["top_minus_d6"] > 0
+    assert R._decile_profile(p, "y_hump")["top_minus_d6"] < 0
+
+
+def test_a_thin_cross_section_produces_no_profile():
+    """Ten names cannot be cut into ten deciles, and a decile of one name is a
+    name."""
+    p = _wide_panel().groupby("date").head(20)
+    assert R._decile_profile(p, "y21") == {}
+    assert R.MIN_NAMES_FOR_DECILES >= 100

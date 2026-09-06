@@ -70,6 +70,10 @@ DOC_RELPATH = "docs/RESULTS_OF_RECORD.md"
 #: printing an IC over it invites the reader to compare a number against noise.
 MIN_STABLE_DATES = 60
 
+#: A decile of fewer than ten names is not a decile. The profile is built from
+#: cross-sections of at least this many scored names.
+MIN_NAMES_FOR_DECILES = 100
+
 #: The window a claim about the shipped model rests on. The others are context.
 #:
 #: WHY THIS AND NOT `FULL_PANEL`. The signs and weights were fitted
@@ -172,6 +176,12 @@ class RankingResult:
     n_themes_mean: float = float("nan")
     #: The least-covered theme's share of names, over the same rows.
     min_theme_coverage: float = float("nan")
+    #: Mean excess of every decile over its own date's cross-section, plus
+    #: `peak_decile` and `top_minus_d6`. See `_decile_profile`: in sample the
+    #: profile is monotone and D10 wins; out of sample it peaks at D6/D7 and
+    #: D10 is the sixth-best decile, which is the part of the model the shipped
+    #: six-name book is concentrated in.
+    decile_profile: Dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -272,6 +282,56 @@ def _decile_monotonicity(panel: pd.DataFrame, label: str,
         rhos.append(float(idx.corr(pd.Series(means.to_numpy()),
                                    method="spearman")))
     return float(np.mean(rhos)) if rhos else float("nan")
+
+
+def _decile_profile(panel: pd.DataFrame, label: str,
+                    score: str = "score") -> Dict[str, float]:
+    """Mean excess of EVERY decile, not just the top one, per date and averaged.
+
+    WHY THE WHOLE PROFILE AND NOT THE TOP DECILE. The book holds six names off
+    the very top of D10, and `decile_monotonicity` compresses the entire shape
+    into one rank correlation -- a profile that rises to D7 and falls away can
+    score +0.33 there and look healthy. Measured on the shipped panel at h=63,
+    excess over each date's own cross-section:
+
+               D1     D2     D3     D4     D5     D6     D7     D8     D9    D10
+        IS  -2.77  -1.41  -0.93  -0.10  -0.22  +0.06  +0.70  +0.78  +1.44  +2.45
+        OOS -2.31  -1.27  -0.60  -0.65  +0.31  +1.23  +1.73  +0.64  +0.58  +0.36
+
+    In sample the profile is monotone and D10 is the best decile by a distance.
+    Out of sample it PEAKS AT D7 and D10 is the sixth-best decile, so D10-D6 is
+    +2.39 in sample and -0.87 out of it. The bottom of the distribution
+    generalises almost perfectly (-2.77 -> -2.31); the top does not generalise
+    at all.
+
+    That is a fact about the book, not only about the ranking: a six-name book
+    from the very top of D10 is a concentrated bet on the one part of this
+    model the out-of-sample evidence does not support. It corroborates
+    Stambaugh-Yu-Yuan -- the alpha is in the short leg -- from a long-only
+    panel that was never constructed to test it.
+    """
+    rows: List[pd.Series] = []
+    for _, g in panel.groupby("date", sort=True):
+        g = g.dropna(subset=[score, label])
+        if len(g) < MIN_NAMES_FOR_DECILES:
+            continue
+        d = pd.qcut(g[score].rank(method="first"), 10, labels=False,
+                    duplicates="drop")
+        means = g.groupby(d)[label].mean() - float(g[label].mean())
+        if len(means) < 10:
+            continue
+        rows.append(means)
+    if not rows:
+        return {}
+    m = pd.DataFrame(rows).mean()
+    out = {f"d{i + 1}": float(m.get(i, float("nan"))) for i in range(10)}
+    out["n_dates"] = float(len(rows))
+    out["top_minus_d6"] = float(m.get(9, float("nan")) - m.get(5, float("nan")))
+    finite = {k: v for k, v in out.items()
+              if k.startswith("d") and np.isfinite(v)}
+    out["peak_decile"] = (float(max(finite, key=finite.get)[1:]) if finite
+                          else float("nan"))
+    return out
 
 
 def _top_decile_excess(panel: pd.DataFrame, label: str,
@@ -515,6 +575,7 @@ def _ranking_results(panel: pd.DataFrame, horizons: Sequence[int],
             window=window,
             n_themes_mean=_theme_shape(sub)[0],
             min_theme_coverage=_theme_shape(sub)[1],
+            decile_profile=_decile_profile(sub, label),
         ))
     return out
 
@@ -1113,6 +1174,38 @@ def render(rec: ResultsOfRecord) -> str:
             f"{r.decile_monotonicity:+.3f} | {r.independent_observations} | "
             f"{r.vif:.2f} |")
     L.append("")
+
+    # -- where in the ordering the information actually is -------------------
+    prof = [r for r in rec.ranking if r.decile_profile]
+    if prof:
+        L += ["### Where in the ordering the information actually is", "",
+              "`decile monotonicity` above compresses the whole shape into one "
+              "rank correlation, and a profile that rises to D7 and falls away "
+              "can score well there. Each row below is the mean excess of that "
+              "decile over its own date's cross-section, averaged across "
+              "dates. **The shipped book holds six names off the very top of "
+              "D10.**", "",
+              "| window | horizon | " + " | ".join(f"D{i}" for i in range(1, 11))
+              + " | peak | D10−D6 |",
+              "|---|---|" + "---|" * 12]
+        for r in prof:
+            d = r.decile_profile
+            name = (f"**{r.window}**" if r.window == HEADLINE_WINDOW
+                    else r.window)
+            L.append(
+                f"| {name} | {r.horizon} | "
+                + " | ".join(_pct(d.get(f"d{i}"), 2) for i in range(1, 11))
+                + f" | D{d.get('peak_decile', float('nan')):.0f} | "
+                  f"{_pct(d.get('top_minus_d6'), 2)} |")
+        L += ["",
+              "Read the `peak` and `D10−D6` columns against each other across "
+              "the two windows. In sample the profile is monotone and D10 wins "
+              "by a distance; out of sample it peaks in the middle of the "
+              "upper half and D10 is not the best decile. The BOTTOM of the "
+              "distribution generalises closely -- which is the "
+              "Stambaugh-Yu-Yuan result, reproduced from a long-only panel "
+              "that was never built to test it, and it is not a leg this "
+              "engine can trade.", ""]
 
     # -- the arms -----------------------------------------------------------
     L += ["## The two book tables, re-run", "",

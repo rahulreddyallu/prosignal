@@ -837,14 +837,19 @@ REGISTER: Tuple[Finding, ...] = (
             "not replaced: it is the longer record, and hiding it would be "
             "the same class of selection this register exists to stop.",
         regression_test="tests/test_model_stability_window.py",
-        before_after="rank IC at h=21, overlap-corrected: OUT_OF_SAMPLE "
-                     "+0.0411 t +3.91 on 87 non-overlapping observations; "
-                     "IN_SAMPLE +0.0579 t +6.82 on 293; STABLE_MODEL +0.0468 "
-                     "t +6.22 on 150; FULL_PANEL +0.0541 t +7.74 on 380. The "
-                     "ordering survives both restrictions and the "
-                     "out-of-sample t clears the Harvey-Liu-Zhu 3.0 bar; the "
-                     "in-sample-to-out-of-sample decay is 29%. It could "
-                     "equally have gone the other way",
+        before_after="rank IC at h=21, overlap-corrected, from the "
+                     "regenerated docs/RESULTS_OF_RECORD.md (the 5-session "
+                     "panel the shipped generator builds): OUT_OF_SAMPLE "
+                     "+0.0580 t +2.28 on 87 dates; IN_SAMPLE +0.0691 t +3.70 "
+                     "on 269; STABLE_MODEL +0.0646 t +3.62 on 150. The "
+                     "ordering survives both restrictions with a 16% decay, "
+                     "and the out-of-sample t does NOT clear the "
+                     "Harvey-Liu-Zhu 3.0 bar on this panel -- 87 dates five "
+                     "sessions apart against a 21-session label carry VIF "
+                     "4.17. Re-measured on a 21-session panel, where the same "
+                     "87 observations do not overlap, the reading is +0.0411 "
+                     "at t +3.91. Both are true of their own sampling and the "
+                     "document is the authority",
         moves_coefficients=False, moves_history=False, forces_restart=False,
         notes="This does not move a coefficient. It changes what the evidence "
               "is understood to be evidence ABOUT, and it cuts the honest "
@@ -1063,6 +1068,52 @@ REGISTER: Tuple[Finding, ...] = (
               "a model change that spends trials and opens an epoch, and it is "
               "an operator's decision taken against this measurement rather "
               "than a consequence of it.",
+    ),
+    _f(
+        fid="Q10", severity="critical",
+        title="The book is concentrated in the one part of the ranking that "
+              "did not generalise",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`decile_monotonicity` compresses the whole shape of the "
+                   "ranking into one rank correlation, so a profile that rises "
+                   "to D7 and falls away past it scores +0.33 and reads as "
+                   "healthy. The profile itself, mean excess over each date's "
+                   "own cross-section at h=63:\n"
+                   "        D1     D2     D3     D4     D5     D6     D7     "
+                   "D8     D9    D10\n"
+                   "  IS  -2.77  -1.41  -0.93  -0.10  -0.22  +0.06  +0.70  "
+                   "+0.78  +1.44  +2.45\n"
+                   "  OOS -2.31  -1.27  -0.60  -0.65  +0.31  +1.23  +1.73  "
+                   "+0.64  +0.58  +0.36\n"
+                   "In sample it is monotone and D10 wins by a distance. Out "
+                   "of sample it PEAKS AT D7 and D10 is the sixth-best decile: "
+                   "D10 minus D6 is +2.39 in sample and -0.87 out of it, and "
+                   "the same inversion appears at h=21 (+0.82 -> -0.27). The "
+                   "shipped book holds six names off the very top of D10.",
+        location="prosignal.validation.results::_decile_profile",
+        fix="Every ranking row carries `decile_profile` -- all ten deciles, "
+            "the peak decile and D10 minus D6 -- and the document renders it "
+            "as its own table under the ranking, split by fit-window "
+            "provenance. A report that only ever prints the top decile cannot "
+            "say that the top decile is not where the information is, so the "
+            "peak is reported rather than assumed and "
+            "`test_a_monotone_ranking_peaks_at_the_top_and_an_inverted_one_"
+            "does_not` exercises the detector in both directions.",
+        regression_test="tests/test_model_stability_window.py",
+        before_after="the out-of-sample top-decile t in the regenerated "
+                     "document is +0.59 (h=21), +0.62 (h=42), +0.29 (h=63) "
+                     "against an in-sample +2.64, +2.43, +2.44. The quintile "
+                     "spread and the rank IC hold up; the tail does not",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="The BOTTOM of the distribution generalises closely, -2.77 to "
+              "-2.31 at h=63. That is the Stambaugh-Yu-Yuan result -- anomaly "
+              "alpha concentrates in the short leg -- reproduced from a "
+              "long-only panel that was never built to test it, and it is not "
+              "a leg this engine can trade. Nothing here changes the book: "
+              "widening it to D6-D8 is a model decision that spends trials "
+              "and opens an epoch, and it is now a decision somebody can take "
+              "against a measurement instead of against a monotonicity "
+              "coefficient that hid the shape.",
     ),
     _f(
         fid="P0-6", severity="high",
