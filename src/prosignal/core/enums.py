@@ -96,6 +96,19 @@ class BreadthState(str, Enum):
 
 class Decision(str, Enum):
     BUY_CANDIDATE = "BUY CANDIDATE"
+    #: ALREADY OWNED, and still passing every test. Added 2026-09-06.
+    #:
+    #: Without it a held position was reported as BUY CANDIDATE, because
+    #: Stage 6's cadence gate exempts held names -- correctly, a closed entry
+    #: clock must never keep a position open that the band would have released
+    #: -- and Stage 8 then mapped TRIGGERED to BUY without asking whether the
+    #: name was already in the book.
+    #:
+    #: On a non-entry session that produced the reading that started this: the
+    #: rank-11 name showed BUY while ranks 1 to 10 showed WATCHLIST. Both
+    #: labels were right about the ENGINE and together they were unreadable,
+    #: because "buy this" and "you own this" had one word between them.
+    HOLD = "HOLD"
     WATCHLIST = "WATCHLIST"
     NO_TRADE = "NO TRADE"
 

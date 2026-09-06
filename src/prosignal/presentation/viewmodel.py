@@ -14,6 +14,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..core.logging import get_logger
+from ..features.v3 import ALL_FACTORS as _V3_FACTORS
 from ..features.v3 import THEMES as _V3_THEMES
 from .evidence import build_evidence, category_summary, confirmation_count
 from .narrative import build_narrative
@@ -146,6 +147,10 @@ def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     if "v3_theme" in tiers:
         return {
             "model": "v3_composite",
+            # THE SHAPE, so the interface can state it instead of hardcoding a
+            # literal that goes stale the next time a factor is dropped.
+            "factor_count": len(_V3_FACTORS),
+            "theme_count": len(_V3_THEMES),
             "validated": False,
             # A DISCLOSURE, not an alarm -- see the render in index.html. The
             # ranking is what the sealed windows evidenced; the six-name book
@@ -157,9 +162,11 @@ def _scorer_used(picks: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             # around them are gone. A caveat nobody finishes reading is not a
             # caveat.
             "points": [
-                "v3 composite \u00b7 22 factors \u00b7 5 themes \u00b7 40% cap per name",
+                (f"v3 composite \u00b7 {len(_V3_FACTORS)} factors \u00b7 "
+                 f"{len(_V3_THEMES)} themes \u00b7 40% cap per name"),
                 "Ranking: rank IC +0.049 and +0.036, both t > 3.6, two sealed holdouts",
-                "Six-name book: top-ten excess +0.38%, t 0.81 \u2014 not validated",
+                "Book: 20 names, equal weight, 75% deployed \u2014 measured, "
+                "not validated: OOS alpha on deployed -1.95%, Sharpe +0.15",
             ],
             "note": "The ranking is evidenced. A book this concentrated is not.",
         }
