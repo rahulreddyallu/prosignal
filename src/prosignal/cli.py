@@ -1111,8 +1111,9 @@ def cmd_analyse_regime(cfg: AppConfig, args: argparse.Namespace) -> int:
         rows.append(["  ", component])
     _table("Regime", ["read", "value"], rows)
 
+    inert = state.multiplier_note()
     _table(
-        "Factor multipliers",
+        "Factor multipliers" + (" [INERT]" if inert else ""),
         ["factor", "multiplier"],
         [
             ["momentum", f"{state.momentum_multiplier:.3f}"],
@@ -1121,6 +1122,9 @@ def cmd_analyse_regime(cfg: AppConfig, args: argparse.Namespace) -> int:
             ["dampener applied", f"{state.dampener_applied:.2f}"],
         ],
     )
+    if inert:
+        _print(_tag("THESE MULTIPLIERS DID NOT SCALE THE BOOK"))
+        _print("  " + inert)
 
     _print()
     _print(f"New entries allowed : {'YES' if state.allow_new_entries else 'NO'}")
@@ -1167,7 +1171,8 @@ def _regime_history(cfg, store, calendar, symbols, as_of, history: int) -> int:
                 f"{state.vol_tercile.value}/{state.vol_context.value}",
                 _opt_num(state.breadth_pct_above_ma, "%"),
                 "T" if state.transition_flag else "",
-                f"{state.momentum_multiplier:.2f}",
+                (f"{state.momentum_multiplier:.2f}"
+                 + ("" if state.scores_the_shipped_book else "*")),
                 "" if state.allow_new_entries else "BLOCKED",
             ]
         )
@@ -1178,6 +1183,10 @@ def _regime_history(cfg, store, calendar, symbols, as_of, history: int) -> int:
         ["date", "bucket", "trend", "volatility", "breadth", "trn", "mom", "entries"],
         rows,
     )
+    if any(r[6].endswith("*") for r in rows):
+        _print("  * the momentum multiplier scales the family block, which the "
+               "shipped `v3_composite` ranking discards. It did not tilt the "
+               "book on those dates.")
 
     changes = sum(1 for a, b in zip(buckets, buckets[1:]) if a != b)
     _print()
@@ -2267,6 +2276,13 @@ def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     ])
     _print()
     _print(f"  {prog.summary()}")
+    # TRUE STATEMENTS THAT DO NOT VOID THE WINDOW. `broken` stops the test;
+    # these travel with any count taken from it. Printed even when the window
+    # IS broken -- a reader deciding how to re-register needs both.
+    for caveat in prog.caveats():
+        _print()
+        _print(_tag("READ THE COUNT WITH THIS"))
+        _print(f"  {caveat}")
     if not prog.complete and not prog.broken:
         _print()
         _print("  No performance figure is shown by design. The pre-registered "

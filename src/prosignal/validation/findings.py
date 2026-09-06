@@ -1116,6 +1116,119 @@ REGISTER: Tuple[Finding, ...] = (
               "coefficient that hid the shape.",
     ),
     _f(
+        fid="Q11", severity="high",
+        title="The second-largest weight in the model is held down by a "
+              "coverage cap that expired",
+        category=Category.FEATURE, status=Status.FIXED,
+        root_cause="Each theme's weight was capped at the share of names it "
+                   "can speak about, measured once over the fit window and "
+                   "frozen on `Theme.coverage`. That was the right call: "
+                   "V3_SEARCH.md §6 records that fitted without the "
+                   "constraint, `quality` took 40%+ of the composite while "
+                   "only 19% of names had fundamentals at all, which ranks the "
+                   "19% and the 81% by two different models and calls the "
+                   "result one score. Quality's shipped 0.18991 IS its 0.1899 "
+                   "coverage cap. The feed has since caught up: measured "
+                   "`quality_sub` coverage is 0.363 over the fit window and "
+                   "0.837 over the last year, a 4.4x drift. min(0.40, 0.837) "
+                   "is 0.40, so a refreshed cap would not cut quality at all "
+                   "-- the weight is held down by a constraint that no longer "
+                   "binds, and the constant recording it says nothing about "
+                   "that.",
+        location="prosignal.features.v3::coverage_drift",
+        fix="`coverage_drift` reports declared against measured per theme with "
+            "the binding status of each, and `stale_coverage_caps` returns a "
+            "sentence per theme whose BINDING STATUS has changed. Only that: "
+            "momentum's 0.9988 could halve and its weight would still be set "
+            "by the structural 0.40 cap, and an alarm that fires there is one "
+            "nobody reads. Both directions are reported -- a cap that has "
+            "stopped binding holds a weight down for an expired reason, and "
+            "one that has started binding means a theme is weighted for "
+            "coverage it no longer has.",
+        regression_test="tests/test_coverage_cap_is_stale.py",
+        before_after="quality: declared coverage 0.1899, measured 0.8372 over "
+                     "the last year (4.4x). The cap bound when the weight was "
+                     "chosen and does not now",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="NOTHING IS REFITTED. Refreshing the cap roughly doubles the "
+              "quality weight and pushes momentum off its own cap, which is a "
+              "model change that spends trials and opens an epoch. It is a "
+              "decision to take against this measurement, not a consequence "
+              "of it. `test_the_shipped_weight_still_equals_the_declared_cap` "
+              "fails if the weights move, so acting on this cannot happen "
+              "quietly either.",
+    ),
+    _f(
+        fid="Q12", severity="medium",
+        title="The regime factor multipliers are computed, logged, printed and "
+              "inert on the shipped path",
+        category=Category.UI, status=Status.FIXED,
+        root_cause="Stage 2 derives three factor multipliers from the regime "
+                   "read and scales the FAMILY block with them. "
+                   "`_apply_ranking_policy` discards that block under "
+                   "`ranking.source = v3_composite`, which is the shipped "
+                   "setting. The stage-4 run NOTE was already fixed this way "
+                   "-- deferred until the ranking source is known -- because "
+                   "'Regime range_lowvol multipliers applied (momentum x0.75)' "
+                   "on a run ordered by an unmodified v3 blend tells an "
+                   "operator the engine leaned against momentum today, and it "
+                   "did not. Every other surface the number reaches was left: "
+                   "the CLI regime table, the regime history row, and the "
+                   "ledger.",
+        location="prosignal.core.contracts::RegimeState.multiplier_note",
+        fix="`RegimeState.scores_the_shipped_book`, set in stage 2 from "
+            "`ranking.source`, defaulting FALSE -- the shipped configuration "
+            "is the one where the multipliers do not reach the book, so an "
+            "unset flag must read that way or every caller who forgets "
+            "restores the misreading. `multiplier_note()` returns the sentence "
+            "or None; the CLI marks the table [INERT] and the history column "
+            "with an asterisk; the ledger row carries "
+            "`momentum_multiplier_scored_the_book`.",
+        regression_test="tests/test_regime_multipliers_are_inert.py",
+        before_after="a ledger row carried `momentum_multiplier: 0.75` and "
+                     "nothing else; it now carries whether that 0.75 reached "
+                     "the book",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Not deleted. They work on the `fitted_composite` path, which is "
+              "still selectable, and the regime READ itself -- trend, "
+              "volatility, breadth, and the hard entry gate -- is live on "
+              "every path. `compatibility()` is deliberately not gated on the "
+              "flag: it reads the regime, and suppressing it would remove a "
+              "live signal to fix an inert one.",
+    ),
+    _f(
+        fid="Q13", severity="medium",
+        title="99% of ledger rows carry a mode that was inferred afterwards, "
+              "and nothing downstream could tell",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`repair_lineage` stamps each row's `mode` from what its "
+                   "own timestamps prove -- `logged_at` against `date` -- and "
+                   "writes `mode_source` saying so. That is the right repair "
+                   "and it does not make the label a recording. On the shipped "
+                   "ledger 250 of 253 rows carry it. Nothing could see that: "
+                   "`outcomes.load_outcomes` partitions on `exit_model` and on "
+                   "the research epoch, both recorded at write time, and never "
+                   "on `mode`; `forward.progress` counted observations without "
+                   "asking how their liveness was established. A forward test "
+                   "reporting 'N sessions elapsed' was resting on an inference "
+                   "with no way to say so.",
+        location="prosignal.ledger::Ledger.mode_provenance",
+        fix="`mode_provenance` and `live_evidence_warning` on the ledger; "
+            "`Progress.reconstructed_mode_rows`, counted AFTER the "
+            "`when < start` guard so a window opened since the repair inherits "
+            "none of it, and surfaced through `Progress.caveats()` and the "
+            "forward CLI.",
+        regression_test="tests/test_reconstructed_mode_is_visible.py",
+        before_after="250 of 253 rows (99%) reconstructed, reported nowhere; "
+                     "now reported wherever a count is taken",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Reported, not refused. A hard failure would void a window for a "
+              "defect in how its rows were LABELLED rather than in what they "
+              "contain, and the inference rule is sound. Caveats print even "
+              "when the window is already broken: a reader deciding how to "
+              "re-register needs both.",
+    ),
+    _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",
         category=Category.VALIDATION, status=Status.FIXED,

@@ -398,6 +398,97 @@ def theme_subscore(ranks: pd.DataFrame, theme: Theme,
     return (s.rank(pct=True) - 0.5) * 2.0
 
 
+#: A declared coverage this far from the measured one is not the constraint the
+#: weight was chosen under any more. 1.5x is generous: quality's has drifted
+#: 4.4x.
+COVERAGE_DRIFT_TOLERANCE = 1.5
+
+
+def coverage_drift(panel: pd.DataFrame,
+                   cap: float = 0.40) -> Dict[str, Dict[str, float]]:
+    """Declared coverage against measured, per theme, and whether it still binds.
+
+    WHAT `Theme.coverage` IS. Each theme's weight was capped at the share of
+    names the theme can speak about, and that share was measured once over the
+    fit window and frozen. `V3_SEARCH.md` §6 records why: fitted without the
+    constraint, `quality` took 40%+ of the composite while only 19% of names
+    had fundamentals at all, which ranks the 19% and the 81% by two different
+    models and calls the result one score. The cap was the right call and
+    quality's shipped 0.18991 IS its 0.1899 coverage cap.
+
+    WHY THIS FUNCTION EXISTS. The fundamentals feed has since caught up.
+    Measured on the shipped panel, `quality_sub` coverage over the fit window
+    is 0.363 and over the last year of data 0.837 -- against a declared 0.1899.
+    The constraint that set the second-largest weight in the model is a
+    measurement of a data feed as it stood in 2024, and it no longer binds:
+    min(0.40, 0.837) is 0.40, so a refreshed cap would not cut quality at all
+    and its pre-cap weight was 40%+.
+
+    THIS DOES NOT REFIT ANYTHING. Refreshing the cap roughly doubles the
+    quality weight and pushes momentum off its own cap, which is a model change
+    that spends trials and opens an epoch. It is a decision to take against
+    this measurement, not a consequence of it. What this returns is the
+    arithmetic, so the staleness cannot sit unnoticed in a frozen constant.
+    """
+    out: Dict[str, Dict[str, float]] = {}
+    for name, theme in THEMES.items():
+        col = name + "_sub"
+        if panel is None or col not in getattr(panel, "columns", ()):
+            continue
+        measured = float(pd.Series(panel[col]).notna().mean())
+        declared = float(theme.coverage)
+        out[name] = {
+            "declared": declared,
+            "measured": measured,
+            "ratio": (measured / declared if declared > 0 else float("nan")),
+            "weight": float(theme.weight),
+            # The cap BINDS when the theme's coverage is the thing cutting its
+            # weight -- i.e. it sits below the 0.40 structural cap.
+            "declared_binds": float(declared < cap),
+            "measured_binds": float(measured < cap),
+            "stale": float(abs(measured - declared) > 1e-9
+                           and (max(measured, declared)
+                                / max(min(measured, declared), 1e-9))
+                           > COVERAGE_DRIFT_TOLERANCE),
+        }
+    return out
+
+
+def stale_coverage_caps(panel: pd.DataFrame) -> List[str]:
+    """Themes whose declared coverage no longer describes the data.
+
+    Empty is the healthy state; each entry is a sentence a report can print.
+
+    ONLY WHERE IT CHANGES A WEIGHT. Drift in a coverage figure that sits above
+    the structural `cap` on both readings cut nothing before and cuts nothing
+    now -- momentum's 0.9988 could halve and its weight would still be set by
+    the 0.40 cap. An alarm that fires there is an alarm nobody reads. Both
+    directions of a binding change are reported: a cap that has STOPPED binding
+    holds a weight down for an expired reason, and one that has STARTED binding
+    means a theme is weighted for a coverage it no longer has.
+    """
+    msgs: List[str] = []
+    for name, d in coverage_drift(panel).items():
+        if not d["stale"]:
+            continue
+        was, now = bool(d["declared_binds"]), bool(d["measured_binds"])
+        if not (was or now):
+            continue
+        tail = ""
+        if was and not now:
+            tail = (" The cap no longer binds, so the weight is held down by "
+                    "a constraint that has expired.")
+        elif now and not was:
+            tail = (" The cap did not bind when the weight was chosen and it "
+                    "does now, so the theme is weighted for a coverage it no "
+                    "longer has.")
+        msgs.append(
+            f"{name}: weight {d['weight']:.5f} was capped at a coverage of "
+            f"{d['declared']:.4f}; measured coverage is now {d['measured']:.4f} "
+            f"({d['ratio']:.1f}x)." + tail)
+    return msgs
+
+
 def cap_weights(raw: Dict[str, float], cap: float = 0.40, floor: float = 0.06,
                 coverage: Optional[Dict[str, float]] = None) -> Dict[str, float]:
     """Normalise, floor, then cap -- per theme, at `cap` and at its coverage."""

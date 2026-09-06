@@ -234,18 +234,55 @@ class RegimeState(_Contract):
     transition_flag: bool = False
     transition_components: List[str] = Field(default_factory=list)
 
+    #: FACTOR MULTIPLIERS, AND THEY SCALE NOTHING THE SHIPPED BOOK IS ORDERED
+    #: BY. They multiply the FAMILY block in `stage4_core_score`, which
+    #: `_apply_ranking_policy` then discards under `ranking.source =
+    #: v3_composite` -- the shipped setting. They are still computed, logged to
+    #: the ledger and printed, and on the shipped path a reader who sees
+    #: "momentum x0.75" is being told the engine leaned against momentum today,
+    #: which it did not. `scores_the_shipped_book` is the flag that says so;
+    #: anything DISPLAYING these must call it. The run note was already fixed
+    #: this way -- it is emitted only after the ranking source is known.
     momentum_multiplier: float
     quality_multiplier: float
     sector_rs_multiplier: float
     dampener_applied: float = 1.0
+    #: True only when a ranking source exists that these multipliers reach.
+    #: Default False: an unset flag must read as "does not scale the book",
+    #: because the shipped configuration is the one where it does not, and a
+    #: default of True would restore the misreading on every caller that
+    #: forgets to set it.
+    scores_the_shipped_book: bool = False
 
     allow_new_entries: bool = True
     block_reason: Optional[str] = None
 
     notes: List[str] = Field(default_factory=list)
 
+    def multiplier_note(self) -> Optional[str]:
+        """Why the multipliers below did not change the ranking, or None.
+
+        Returned rather than raised or hidden: the regime read is real and
+        worth printing -- trend, volatility, breadth, the entry gate -- and it
+        is only the FACTOR MULTIPLIERS that go nowhere. Deleting them would
+        also delete them from the `fitted_composite` path, where they work.
+        """
+        if self.scores_the_shipped_book:
+            return None
+        return ("INERT ON THIS RUN. These scale the family block, which the "
+                "shipped `v3_composite` ranking discards -- the book was not "
+                "tilted by them. The regime read itself, and the entry gate, "
+                "are live.")
+
     def compatibility(self) -> RegimeCompatibility:
-        """Human-facing 'Regime Compatibility' line on the recommendation card."""
+        """Human-facing 'Regime Compatibility' line on the recommendation card.
+
+        NOT gated on `scores_the_shipped_book`. This reads the regime, which is
+        live on every path; it is the multipliers that are inert, and it uses
+        `momentum_multiplier` only as a compact encoding of the regime's own
+        read. Every branch below is reachable from the trend/vol/breadth state
+        alone.
+        """
         if not self.allow_new_entries:
             return RegimeCompatibility.UNFAVORABLE
         if self.momentum_multiplier >= 0.9 and not self.transition_flag:

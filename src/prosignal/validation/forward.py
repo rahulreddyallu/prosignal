@@ -244,6 +244,13 @@ class Progress:
     #: Distinct config_versions seen since the start. More than one means the
     #: model moved and the window is not one experiment.
     config_versions: List[str] = field(default_factory=list)
+    #: Rows inside the window whose `mode` was RECONSTRUCTED by
+    #: `Ledger.repair_lineage` from `logged_at` against `date`, rather than
+    #: recorded as the engine ran. A forward test counts observations, and an
+    #: observation whose liveness is inferred is a weaker thing than one that
+    #: was written down. Reported rather than treated as breakage: the
+    #: inference rule is sound, and this window's own rows are what matter.
+    reconstructed_mode_rows: int = 0
     broken: List[str] = field(default_factory=list)
 
     @property
@@ -257,6 +264,20 @@ class Progress:
         if self.sessions_target <= 0:
             return 1.0
         return min(self.sessions_elapsed / self.sessions_target, 1.0)
+
+    def caveats(self) -> List[str]:
+        """True statements that do not invalidate the window, and must travel
+        with any count taken from it."""
+        out: List[str] = []
+        if self.reconstructed_mode_rows:
+            out.append(
+                f"{self.reconstructed_mode_rows} of {self.runs_recorded} runs "
+                f"inside the window carry a mode RECONSTRUCTED from their own "
+                f"timestamps rather than recorded as the engine ran. The "
+                f"inference is sound; it is still an inference, and "
+                f"`sessions_elapsed` rests on it."
+            )
+        return out
 
     def summary(self) -> str:
         if self.broken:
@@ -634,6 +655,9 @@ def progress(
     dates: List[dt.date] = []
     versions: set = set()
     prints: set = set()
+    #: Rows whose `mode` was inferred afterwards rather than written as the
+    #: engine ran. See `Progress.reconstructed_mode_rows`.
+    reconstructed = 0
     for record in ledger_rows:
         row = record if isinstance(record, dict) else dict(
             getattr(record, "__dict__", {}))
@@ -652,6 +676,8 @@ def progress(
         if when < start:
             continue
         dates.append(when)
+        if str(row.get("mode_source") or "").startswith("repair_lineage"):
+            reconstructed += 1
         if row.get("config_version"):
             versions.add(str(row["config_version"]))
         fp = row.get("model_fingerprint")
@@ -762,6 +788,7 @@ def progress(
         months_elapsed=max(months, 0),
         months_target=reg.target_months,
         runs_recorded=len(dates),
+        reconstructed_mode_rows=reconstructed,
         sessions_expected=(int(sessions_printed) if sessions_printed else None),
         config_versions=sorted(versions),
         model_fingerprints=sorted(prints),
