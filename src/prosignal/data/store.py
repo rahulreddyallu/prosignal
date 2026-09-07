@@ -842,36 +842,26 @@ class DataStore:
     def read_results_calendar(self) -> pd.DataFrame:
         return self.read_table("results_calendar")
 
-    def write_shareholding(self, df: pd.DataFrame) -> int:
-        """Quarterly shareholding patterns -- promoter, public, free float.
-
-        Keyed on (symbol, period_end): one pattern per quarter. A revised
-        filing for the same quarter replaces the original, which is correct
-        here and is the opposite of the rule for RESULTS -- a restated income
-        statement must not backdate itself onto the date the original was
-        published, but a corrected shareholding pattern supersedes a wrong one
-        and both carry their own broadcast date.
-        """
-        return self.write_table("shareholding", df, [SYMBOL, "period_end"])
-
-    def read_shareholding(self) -> pd.DataFrame:
-        return self.read_table("shareholding")
-
-    def write_security_list(self, df: pd.DataFrame) -> int:
-        """Surveillance state per security, as DATED SNAPSHOTS.
-
-        Keyed on (symbol, snapshot_date) rather than symbol alone, because NSE
-        publishes only the current list: membership accumulates going forward
-        and cannot be reconstructed backwards. Keeping every snapshot is what
-        makes it point-in-time from the first one onward. Overwriting on symbol
-        would leave one undated list that silently claims to describe every
-        date, which is the survivorship error the universe screen already
-        refuses for index membership.
-        """
-        return self.write_table("security_list", df, [SYMBOL, "snapshot_date"])
-
-    def read_security_list(self) -> pd.DataFrame:
-        return self.read_table("security_list")
+    # REMOVED 2026-09-07: write_shareholding / read_shareholding /
+    # write_security_list / read_security_list.
+    #
+    # Four accessors, two provider modules (nse_shareholding, nse_surveillance),
+    # a config path and 1.1 MB of parquet in the curated store -- and not one
+    # caller anywhere in src/, tests/ or research/. The capability was built end
+    # to end except for the wiring, and nothing ever consumed it.
+    #
+    # Kept out rather than wired up, on the evidence: free float was to sharpen
+    # `costs.impact_model`, and the cost model is not what binds -- measured
+    # drag is 0.35% a year against 17% a year of cash drag (docs/
+    # REBUILD_2026_09.md 3.3). Surveillance gating is argued in its own
+    # docstring to matter "more on the short side than the long", and this is a
+    # long-only product. Neither answers "what measurable problem does this
+    # solve" today.
+    #
+    # The parquet files are LEFT IN PLACE -- they are data, the manifest
+    # describes them, and deleting data is not a code decision. The config key
+    # `providers.nse.shareholding_path` goes in Phase 7, with the rest of the
+    # config collapse, so `config_hash` moves once rather than twice.
 
     def write_fo_lots(self, df: pd.DataFrame) -> int:
         """F&O eligibility and lot size, as dated snapshots. See above."""

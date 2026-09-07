@@ -177,20 +177,52 @@ def test_an_unreadable_feed_is_unknown_and_not_empty(tmp_path):
 def test_loading_a_config_does_not_require_a_store(cfg):
     """`config validate` and the schema tests have no data at all."""
     assert cfg.identity is None
-    assert cfg.version == cfg.params_version
+    assert cfg.identity_is_complete is False
     assert cfg.version.endswith(cfg.hash)
+
+
+def test_an_unbound_version_says_so_in_the_string(cfg):
+    """A parameters-only identity must be unmistakable, not merely different.
+
+    THE DEFECT THIS PINS, found 2026-09-07. `version` returned `label@H(params)`
+    unbound and `label@XOR(params, store, train)` bound -- the same shape, both
+    printing as `baseline-v2@<16 hex>`. `bind_store` justified the fallback as
+    honest because "a caller can tell", but that was only true of `identity`,
+    which callers do not read; they read `version`, and stamp it into records.
+
+    `create_app` bound no store at all, so the forward test registered a
+    parameters-only identity -- while its entire integrity check is "did
+    config_version change", which a parameters-only identity cannot answer,
+    because the store is exactly what it does not cover. The ledger rows
+    written by the same process carried the full identity. Nothing compared
+    them, and nothing could have: they are the same shape.
+    """
+    assert cfg.version != cfg.params_version, (
+        "an identity covering only parameters is indistinguishable from one "
+        "covering the data and the training window"
+    )
+    assert "params-only" in cfg.version
+    assert cfg.params_version in (cfg.version.replace("params-only:", ""),), (
+        "the marked form must still carry the same underlying parameter hash"
+    )
 
 
 def test_binding_a_store_moves_the_version_and_keeps_params_reachable(cfg, tmp_path):
     fresh = load_config(use_cache=False)
     before = fresh.version
+    assert "params-only" in before
     fresh.bind_store(FakeStore(tmp_path / _u(), sessions=sessions(900)))
+
     assert fresh.version != before
-    assert fresh.params_version == before, (
+    assert "params-only" not in fresh.version, (
+        "a bound identity must not carry the degraded marker"
+    )
+    assert fresh.identity is not None
+    assert fresh.identity_is_complete is True
+    assert fresh.params_version == before.replace("params-only:", ""), (
         "`params_version` must stay the parameters-only answer: 'did the knobs "
         "move' is a real question and it is not the same question as 'is this "
         "the same model'.")
-    assert fresh.identity is not None
 
 
 def test_bind_store_returns_self_for_chaining(cfg, tmp_path):
@@ -217,3 +249,42 @@ def test_reverifying_an_unchanged_statutory_rate_does_not_move_the_hash():
     assert config_hash(a.params) != before, (
         "changing a statutory RATE left the config hash identical. The rate is "
         "an input to every net figure the engine produces.")
+
+
+# =========================================================================
+# The server has to resolve the same identity the CLI and the pipeline do
+# =========================================================================
+
+def test_the_api_stamps_a_complete_identity_not_a_parameters_only_one():
+    """THE DEFECT THIS PINS, found 2026-09-07.
+
+    `cli.main` binds a store on every invocation and `pipeline.run_analysis`
+    binds one before anything reads `config.version`. `create_app` bound none.
+    So the server stamped `label@H(params)` into `/ready`, the forward test's
+    registration, the performance cache key, the live/research parity check at
+    `/measurement` and every measurement record -- while the ledger rows written
+    by the very same process, through the pipeline, carried
+    `label@XOR(params, store, train)`.
+
+    The forward test is the sharp edge. Its entire integrity check is "did
+    config_version change", and it was registered under an identity that by
+    construction cannot see the store -- so a store that grew, which is exactly
+    what invalidates a forward test, was invisible to it.
+
+    `load_config()` is a process-wide singleton, so this test asserts a property
+    of the app rather than of a fresh config: after `create_app`, the identity
+    the server will stamp must be the complete one.
+    """
+    from prosignal.api import create_app
+
+    cfg = load_config(use_cache=False)
+    assert cfg.identity_is_complete is False, "precondition: nothing bound yet"
+
+    create_app(cfg)
+
+    assert cfg.identity_is_complete is True, (
+        "create_app left the config unbound, so every identity the server "
+        "stamps covers parameters only while the pipeline's ledger rows cover "
+        "the store and training window too"
+    )
+    assert "params-only" not in cfg.version

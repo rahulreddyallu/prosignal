@@ -214,3 +214,49 @@ def test_the_shipped_store_is_manifested_and_verifies():
         "no file records a row count, so the manifest describes bytes and not "
         "data -- a truncated table would verify"
     )
+
+
+# =============================================================================
+# Ingest settles what it disturbs
+# =============================================================================
+
+def test_ingest_settles_the_manifest_and_reports_epoch_drift(tmp_path, monkeypatch):
+    """WHY INGEST OWNS THIS, added 2026-09-07.
+
+    `config_version` is `label@XOR(params_hash, store_hash, train_hash)`, so
+    pulling one day of prices moves the identity of the model by construction --
+    no parameter has to change. `cmd_data_ingest` used to end by printing the
+    feed table and returning 0, leaving the store manifest describing a store
+    that no longer existed.
+
+    The drift was then discovered days later by whichever guard ran first. On
+    2026-09-07 that was four at once -- the store manifest, the restart gate,
+    the open epoch and the research panel -- reported as four separate failures
+    when they were one routine ingest.
+
+    The contract asserted here: after settling, the manifest describes the store
+    on disk, and if the identity has moved away from the open epoch the exit
+    code says an operator decision is owed rather than reporting success. The
+    epoch is NOT opened automatically; that judgement stays with a person.
+    """
+    from prosignal.cli import _settle_after_ingest
+    from prosignal.config.loader import load_config
+    from prosignal.data.manifest import load as load_manifest, verify
+
+    cfg = load_config()
+    root = Path(cfg.paths.curated)
+    if not root.is_dir() or not any(root.glob("*.parquet")):
+        pytest.skip("no curated store in this checkout")
+
+    rc = _settle_after_ingest(cfg)
+
+    ok, drift = verify(root, quick=True)
+    assert ok, (
+        "ingest returned without leaving the manifest describing the store: "
+        f"{[d.path for d in drift[:5]]}"
+    )
+    assert load_manifest(root) is not None
+    assert rc in (0, 3), (
+        "settling reports 0 when the engine still matches its epoch and 3 when "
+        "an epoch decision is owed; nothing else is a defined outcome"
+    )

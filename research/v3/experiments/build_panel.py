@@ -30,7 +30,7 @@ sys.path.insert(0, str(HERE))
 from _panel_guard import stamp                                   # noqa: E402
 from prosignal.config.loader import load_config                  # noqa: E402
 from prosignal.data.store import DataStore                       # noqa: E402
-from prosignal.validation.v3_panel import build_panel         # noqa: E402
+from prosignal.validation.v3_panel import build_v3_panel      # noqa: E402
 
 
 def main() -> int:
@@ -51,8 +51,25 @@ def main() -> int:
         keep.write_bytes(out.read_bytes())
         print(f"previous panel kept at {keep.name}")
 
-    print("building ...")
-    panel = build_v3_panel(store)
+    # THE HORIZONS THE ENGINE IS JUDGED AT, not the builder's default.
+    #
+    # `build_v3_panel` defaults to `(LABEL_HORIZON_SESSIONS, 42)` = (21, 42),
+    # so this script produced a panel with NO COLUMN FOR THE HORIZON THE BOOK
+    # TRADES. `stage4_core_score.model_horizon_sessions` is 63, every headline
+    # row in RESULTS_OF_RECORD is the 63-session one, and `validation.results.
+    # build` therefore asks for `(21, 42, horizon)` and builds its OWN panel.
+    #
+    # Two different frames were both called "the v3 panel", and `research
+    # results --panel-cache` accepts either -- so handing it the experiments
+    # panel yields a results document missing its own headline horizon. The two
+    # are reconciled here rather than documented: one builder, one label set.
+    c4 = cfg.params.stage4_core_score
+    horizon = int(getattr(c4.model_horizon_sessions, "value",
+                          c4.model_horizon_sessions))
+    horizons = tuple(sorted({21, 42, horizon}))
+
+    print(f"building ... horizons {horizons}")
+    panel = build_v3_panel(store, horizons=horizons)
     if panel is None or panel.empty:
         print("the panel came back empty; the store served nothing usable")
         return 2

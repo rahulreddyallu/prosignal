@@ -1,9 +1,9 @@
 {
  "root": "/Users/rahulreddyallu/Desktop/Pro Stock Signal BOT/data/curated",
- "built_at": "2026-09-05T10:04:41+00:00",
- "digest": "86f8b3d6e8865906",
+ "built_at": "2026-09-07T13:59:39+00:00",
+ "digest": "808e9c104f856f7f",
  "n_files": 51,
- "total_bytes": 257686878,
+ "total_bytes": 257899305,
  "files": [
   {
    "path": "corporate_actions.parquet",
@@ -117,13 +117,13 @@
   },
   {
    "path": "delivery/year=2026.parquet",
-   "bytes": 5585439,
-   "sha256": "a7320c588e23a06bfa20763df0827fe6c0c7cea7c981782531c11d057cc5aca6",
-   "rows": 534787,
+   "bytes": 5617323,
+   "sha256": "fba588802e1c5064361e341d9c41ae94fe33cafc81e633a11a82c9142559f2de",
+   "rows": 538293,
    "min_date": "2026-01-01",
-   "max_date": "2026-09-03",
+   "max_date": "2026-09-04",
    "schema_sha": "3c73a17f7f52c981",
-   "mtime_ms": 1788487541978
+   "mtime_ms": 1788732252315
   },
   {
    "path": "earnings_calendar.parquet",
@@ -147,23 +147,23 @@
   },
   {
    "path": "fo_lots.parquet",
-   "bytes": 10590,
-   "sha256": "4622ecd4fbc5a625e0daeb73ecc32eb5e15db2246d3689a1dd79a79a6011cde8",
+   "bytes": 10588,
+   "sha256": "a332f97d34ba11ea472c9b55e944b3d8fe3dbff4d8706f0a363981bd1ffb14a3",
    "rows": 216,
    "min_date": null,
    "max_date": null,
    "schema_sha": "8768724028ec37c1",
-   "mtime_ms": 1788535687875
+   "mtime_ms": 1788732329797
   },
   {
    "path": "fundamentals.parquet",
-   "bytes": 275759,
-   "sha256": "e6b3794d3a24597c8c53a02f3bf4fe0ff6822ee49cba436a6e420f08f620d040",
+   "bytes": 296867,
+   "sha256": "07bc56a196370f9bc9f61a7b1b60e74681c2a1f795452f377984b4ece3d5f2b0",
    "rows": 3504,
    "min_date": null,
    "max_date": null,
-   "schema_sha": "127e9720b5009b6f",
-   "mtime_ms": 1788487634545
+   "schema_sha": "4e52725c63a381b5",
+   "mtime_ms": 1788732492269
   },
   {
    "path": "indices/year=2017.parquet",
@@ -257,13 +257,13 @@
   },
   {
    "path": "indices/year=2026.parquet",
-   "bytes": 1241919,
-   "sha256": "9365af7a8b018d8b7b891c326a34d9bb272cb040843259d77e5e8363d3b1a7e0",
-   "rows": 25127,
+   "bytes": 1248836,
+   "sha256": "640ffff860eacb2fd6e954d8487b4f94e1b61e7a47cfdc780756ce9f5efbb811",
+   "rows": 25292,
    "min_date": "2026-01-01",
-   "max_date": "2026-09-03",
+   "max_date": "2026-09-04",
    "schema_sha": "d0c07531bcab5c29",
-   "mtime_ms": 1788487540331
+   "mtime_ms": 1788732251069
   },
   {
    "path": "prices/year=2017.parquet",
@@ -357,23 +357,23 @@
   },
   {
    "path": "prices/year=2026.parquet",
-   "bytes": 22580636,
-   "sha256": "32c340a534d53d62e30d48c8cb46497523a50a46bce83cb5253de350d441c44e",
-   "rows": 562324,
+   "bytes": 22706721,
+   "sha256": "62bcbfbf9a80ad1c050eb882c3d93d410452dabd6657912cac3b6eabf4cabf06",
+   "rows": 565979,
    "min_date": "2026-01-01",
-   "max_date": "2026-09-03",
+   "max_date": "2026-09-04",
    "schema_sha": "07096bc03e077f69",
-   "mtime_ms": 1788487541422
+   "mtime_ms": 1788732251920
   },
   {
    "path": "prices_secondary.parquet",
-   "bytes": 131432,
-   "sha256": "84e91b006d52b6dd5cefb0a9ebd69e786fa41550700d514aa61f9740db175b5e",
-   "rows": 3754,
+   "bytes": 138732,
+   "sha256": "bd9165198a150cb65766e73010b6916000d6bbb402518552f41e2f48341ee12e",
+   "rows": 4000,
    "min_date": "2026-08-10",
-   "max_date": "2026-09-03",
+   "max_date": "2026-09-04",
    "schema_sha": "c217ffa8c4502007",
-   "mtime_ms": 1788487557730
+   "mtime_ms": 1788732329567
   },
   {
    "path": "results_calendar.parquet",
@@ -387,33 +387,33 @@
   },
   {
    "path": "sector_map.parquet",
-   "bytes": 9838,
-   "sha256": "f27081a3332cff9727641e7e6c8296bf31048c0e18e3b39a7e6efe98af414dd0",
-   "rows": 754,
+   "bytes": 9851,
+   "sha256": "67e8ce1816c18f47f2c7adf94f68d6523b6c635f77801884ca11a4b30868bd7b",
+   "rows": 755,
    "min_date": null,
    "max_date": null,
    "schema_sha": "a8f25e6f5e8a08a1",
-   "mtime_ms": 1788492295598
+   "mtime_ms": 1788732329637
   },
   {
    "path": "security_list.parquet",
-   "bytes": 99406,
-   "sha256": "2117cf70fb2934eda48ebbe968a67525a2445a68d73b91e2b0592eb572619c60",
+   "bytes": 99419,
+   "sha256": "a7024e95699de517e04de4e292c6ae21a80b5d4c3ca88f3d353597f7f8400b37",
    "rows": 3534,
    "min_date": null,
    "max_date": null,
    "schema_sha": "33c7e0d86d2ceefe",
-   "mtime_ms": 1788535647301
+   "mtime_ms": 1788732329670
   },
   {
    "path": "shareholding.parquet",
-   "bytes": 994181,
-   "sha256": "183cc22c4d021c8f27c003f7f372878af822820dcf89ac2a16ce96303c1e8297",
-   "rows": 22787,
+   "bytes": 1013290,
+   "sha256": "6298e12407ce7327b3e0077176a1525e53cbab94f13225300674ffda6bd7cf51",
+   "rows": 23256,
    "min_date": null,
    "max_date": null,
    "schema_sha": "a5e98930a37c9c3a",
-   "mtime_ms": 1788543763955
+   "mtime_ms": 1788732406264
   },
   {
    "path": "statements.parquet",

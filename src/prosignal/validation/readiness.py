@@ -174,6 +174,23 @@ def _model_gate(cfg, epoch) -> Gate:
                     "refit and open a new epoch")
     cfg_was = str(epoch.identity.get("config_version") or "")
     cfg_now = str(getattr(cfg, "version", ""))
+
+    # A parameters-only identity cannot answer this gate's question. It omits
+    # the store and the training window, which is most of what "is this the
+    # same model" means -- so an inequality here is not evidence that the
+    # configuration changed, and reporting it as such is how this gate spent
+    # two days blaming a config change that had not happened. See
+    # `AppConfig.version` and `epoch.Identity.differences`.
+    mark = "@params-only:"
+    if mark in cfg_now or mark in cfg_was:
+        which = "the running engine" if mark in cfg_now else "the epoch"
+        return Gate("MODEL", False,
+                    f"the config_version for {which} covers parameters only "
+                    f"({cfg_now if mark in cfg_now else cfg_was}), so it cannot "
+                    f"be compared against one that includes the store",
+                    "bind a store before resolving the identity; "
+                    "`AppConfig.bind_store`")
+
     if cfg_was != cfg_now:
         return Gate("MODEL", False,
                     f"configuration changed since the epoch opened "
@@ -363,6 +380,20 @@ def restart_refusals(cfg) -> List[str]:
     out: List[str] = []
     for f in _find.unresolved_restart_blockers():
         out.append(f"{f.fid} is open and blocks a restart: {f.title}")
+
+    # Resolve the FULL identity before any gate reads `cfg.version`, for the
+    # same reason `epoch.current_identity` does: unbound, `version` covers
+    # parameters only, and every caller that forgot to bind got a different
+    # answer to "which engine is this" than `cli.main` and `pipeline` did.
+    # Whether the engine may restart must not depend on how the caller happened
+    # to construct its config.
+    if not getattr(cfg, "identity_is_complete", True):
+        try:
+            from ..data.store import DataStore
+
+            cfg.bind_store(DataStore(cfg.paths.curated, cfg.paths.snapshots))
+        except Exception:                          # noqa: BLE001
+            pass
 
     r = assess(cfg)
     for name in RESTART_GATES:

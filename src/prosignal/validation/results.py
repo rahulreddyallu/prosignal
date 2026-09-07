@@ -486,6 +486,26 @@ def build(cfg, store, *, panel: Optional[pd.DataFrame] = None,
                                              u.min_history_sessions)))
     if panel is None or panel.empty:
         raise RuntimeError("the v3 panel came back empty; nothing can be regenerated")
+
+    # AN INJECTED PANEL HAS TO CARRY THE HORIZONS THIS DOCUMENT REPORTS.
+    #
+    # `--panel-cache` takes any parquet, and two different frames in this
+    # repository are both called "the v3 panel": the one built here, labelled
+    # (21, 42, horizon), and `research/v3/experiments/panel_*.parquet`, which
+    # `build_v3_panel`'s DEFAULT horizons make (21, 42) -- no column for the 63
+    # sessions the book actually trades. Handing the second to this function
+    # produced a results document silently missing its own headline row, and
+    # nothing said so, because a missing label column reads exactly like a
+    # horizon that happened to score no dates.
+    missing = [f"y{h}" for h in (21, 42, horizon) if f"y{h}" not in panel.columns]
+    if missing:
+        raise RuntimeError(
+            f"the supplied v3 panel has no {', '.join(missing)} column(s). "
+            f"This document reports horizons 21, 42 and {horizon}, and a panel "
+            f"built at the builder's default horizons cannot answer for the "
+            f"one the book trades. Rebuild it with "
+            f"`horizons=(21, 42, {horizon})`, or drop --panel-cache and let "
+            f"this build its own.")
     if built is not None:
         built["panel"] = panel
 
