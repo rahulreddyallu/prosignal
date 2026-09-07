@@ -240,7 +240,8 @@ def run(
                      plans.get(sym), regime, eligibility, scores,
                      defense_res.score_after, cfg, position=positions[sym],
                      config=config,
-                     earnings_note=(earnings_notes or {}).get(sym))
+                     earnings_note=(earnings_notes or {}).get(sym),
+                     is_held=sym in open_book)
 
     # =====================================================================
     # STAGE 9 HAS ALREADY DECIDED.
@@ -717,7 +718,8 @@ def _ordinal(n: int) -> str:
 
 def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
           scores, final_score, cfg, position: int = 0,
-          config=None, earnings_note: Optional[str] = None) -> Recommendation:
+          config=None, earnings_note: Optional[str] = None,
+          is_held: bool = False) -> Recommendation:
     """Build the recommendation, including the evidence AGAINST it."""
     why: List[str] = []
     # WHAT PUT THIS NAME HERE, first, before any theme attribution. Under
@@ -731,9 +733,15 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 if config is not None else None)
     source = str(rank_cfg.source) if rank_cfg is not None else "fitted_composite"
     if source == "v3_composite":
+        # COUNTED FROM THE MODEL, NOT WRITTEN DOWN. This said "22 factors in 5
+        # themes" as a literal and the model is now 21 -- `net_margin` was
+        # dropped when its sign failed out of sample. A card that states the
+        # shape of the scorer has to read it.
+        from ..features import v3 as v3feat
         why.append(
             f"Ranked #{score.rank} of {scores.universe_size} eligible names by the "
-            f"v3 composite -- 22 factors in 5 themes, each theme combined on its "
+            f"v3 composite -- {len(v3feat.ALL_FACTORS)} factors in "
+            f"{len(v3feat.THEMES)} themes, each theme combined on its "
             f"own and then blended with weights capped at 40%, floored at 6% and "
             f"capped again at the share of names the theme can speak about. The "
             f"THEME rows below sum to the score; the factor rows under each are "
@@ -955,8 +963,17 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
         ticker=sym,
         company_name=name,
         sector=score.sector,
-        decision=Decision.BUY_CANDIDATE if decision.status is EntryStatus.TRIGGERED
-        else Decision.WATCHLIST,
+        # A NAME YOU ALREADY OWN IS NOT A BUY. Stage 6's cadence gate exempts
+        # held positions -- correctly: a closed entry clock must never keep a
+        # position open that the rank band would have released -- so on a
+        # non-entry session a held name stays TRIGGERED while every new name is
+        # demoted. Mapping both to BUY_CANDIDATE told the operator to buy
+        # something already in the book, and ranked it below names the same
+        # card said to skip.
+        decision=(
+            (Decision.HOLD if is_held else Decision.BUY_CANDIDATE)
+            if decision.status is EntryStatus.TRIGGERED
+            else Decision.WATCHLIST),
         signal_strength_band=_band(final_score, cfg),
         regime_compatibility=regime.compatibility(),
         expected_holding_period=(

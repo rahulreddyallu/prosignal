@@ -137,9 +137,18 @@ def test_an_unrecognised_scorer_still_fails_loudly():
 
 def test_the_screen_and_the_model_agree_about_what_a_theme_is_called():
     """These were two independent tables. The screen said "Low-margin tilt"
-    while the scoring note written into the same run's record said "quality"."""
+    while the scoring note written into the same run's record said "quality".
+
+    The first assertion is the one that matters and it is structural:
+    `V3_THEME_LABELS` is DERIVED from the model, so the two cannot diverge
+    again. The second pins today's label, and it moved on 2026-09-06 --
+    "Low-margin tilt" -> "Margin instability" -- because `net_margin` was
+    dropped when its sign failed out of sample (Q18) and the theme is now
+    `margin_stability` alone. It no longer tilts on the LEVEL of margin, only
+    on how steady it is, so the old label had stopped being true.
+    """
     assert V3_THEME_LABELS == {n: t.label for n, t in v3.THEMES.items()}
-    assert V3_THEME_LABELS["quality"] == "Low-margin tilt"
+    assert V3_THEME_LABELS["quality"] == "Margin instability"
 
 
 # =============================================================================

@@ -38,6 +38,13 @@ import numpy as np
 import pandas as pd
 
 from ..features.exits import EXIT_TIMEOUT
+
+#: A position closed by the TIME BACKSTOP rather than still running at the
+#: truncated cohort horizon. It is deliberately not `EXIT_TIMEOUT`: that value
+#: is what the cost logic reads as "carried, owes nothing", and a position the
+#: engine has sold at `max_holding_sessions` is not carried. Re-selecting the
+#: name buys it again and pays a round trip. See `simulate`'s `opened_at`.
+EXIT_TIMEOUT_EXPIRED = -3.0
 from ..liquidity import assess
 
 __all__ = ["PortfolioParams", "PortfolioResult", "simulate", "phase_summary"]
@@ -77,6 +84,35 @@ class PortfolioParams:
     use_stop: bool = True
     use_target: bool = True
     use_invalidation: bool = True
+    #: SESSIONS BETWEEN DECISIONS, from `stage6_entry.entry_cadence_sessions`.
+    #: `None` keeps the historical behaviour: decide once per horizon, which is
+    #: a NON-OVERLAPPING COHORT schedule and four decisions a year at H=63. The
+    #: live engine decides every 21 sessions -- three times as often -- and
+    #: carries names across decisions through the exit band, so it pays
+    #: turnover the cohort schedule never sees. See `simulate`.
+    decision_sessions: Optional[int] = None
+
+    # -- band admission and equal weight (the §18 target book) -------------
+    #: SELECT BY SCORE PERCENTILE INSTEAD OF BY RANK, as (lo, hi) measured from
+    #: the BOTTOM of the cross-section -- so D6-D8 is (0.5, 0.8), matching
+    #: `validation/transfer.py`. `None` keeps rank admission, which is what
+    #: ships.
+    #:
+    #: WHY THIS EXISTS. Q10 measured the out-of-sample decile profile peaking
+    #: at D6/D7 while the book buys the very top of D10, and Q17 measured
+    #: D6-D8 as the only shape of six clearing t=2 -- long-only, tradeable,
+    #: and GROSS. A percentile band cannot be expressed as a top-K, so the
+    #: simulator could not price it and that gross figure could not be turned
+    #: into a net one. It can now.
+    entry_pct_band: Optional[Tuple[float, float]] = None
+    #: Hold while inside this wider band -- the percentile analogue of
+    #: `exit_rank`. Defaults to `entry_pct_band` widened by 10 points on each
+    #: side when a band is given and this is not.
+    exit_pct_band: Optional[Tuple[float, float]] = None
+    #: Size every name at `capital * target_deployment / equal_weight_slots`
+    #: rather than off the risk budget. Zero keeps the shipped rule.
+    equal_weight_slots: int = 0
+    target_deployment: float = 1.0
 
     # -- portfolio-level volatility scaling (Moreira & Muir 2017) -----------
     #: Annualised volatility the BOOK is scaled toward. `None` disables the
@@ -191,11 +227,13 @@ class PortfolioResult:
         ok = np.isfinite(b) & np.isfinite(r)
         if int(ok.sum()) < 3:
             return {"benchmarked": False}
-        return _benchmark_stats(r[ok], b[ok], periods_per_year)
+        dep = (self.periods["deployed_frac"].to_numpy(dtype="float64")[ok]
+               if "deployed_frac" in self.periods else None)
+        return _benchmark_stats(r[ok], b[ok], periods_per_year, deployed=dep)
 
 
-def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float
-                     ) -> Dict[str, float]:
+def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float,
+                     deployed: Optional[np.ndarray] = None) -> Dict[str, float]:
     """The single definition of every benchmark-relative figure.
 
     One function, used by `PortfolioResult.metrics` and by `phase_summary`, so
@@ -203,27 +241,141 @@ def _benchmark_stats(r: np.ndarray, b: np.ndarray, periods_per_year: float
     things. That divergence is how the repository ended up with three
     incompatible CPCV results.
 
-    `information_ratio` is mean excess over the standard deviation of excess,
-    annualised. `beta_to_benchmark` and `alpha_per_period` come from the same
-    regression, so a book that is only long beta shows it.
+    THE RAW EXCESS IS NOT A PERFORMANCE STATISTIC. `mean_excess` is
+    `mean(r - b)` against a benchmark that is FULLY INVESTED, while this book
+    is not: risk-budget sizing is `risk_budget / risk_per_share`, so with a 1%
+    risk budget and an 8xATR stop clipped at 35% the position that clears is
+    about Rs 28,600 against a Rs 166,667 slot and the book runs at roughly a
+    fifth of capital. Measured on the shipped configuration over 87 periods,
+    mean deployed capital is 0.2177 and the equal-weight eligible universe
+    returned +22.1% a year, so
+
+        raw excess           -18.60% a year
+        mechanical cash drag (1 - 0.2177) x 22.11%  =  +17.30%
+        leverage-matched      -1.30% a year
+
+    -- that is, 93% of the "underperformance" the engine has been reporting
+    about itself is arithmetic. Worse, the raw figure MOVES WITH A SIZING KNOB
+    that has nothing to do with the signal: holding the ranking, the names and
+    every other setting fixed and raising `risk_per_trade_pct` from 1% to 4.6%
+    takes deployed capital from 0.218 to 0.824 and the reported excess from
+    -20.98% to -11.49%, while the beta-adjusted alpha barely moves
+    (-1.32% to -3.81%). Every ablation ever selected on `mean_excess` -- the
+    stop multiple, the clip, the book size, the holding period -- was selected
+    on a metric confounded with leverage.
+
+    WHICH FIGURE IS ACTUALLY INVARIANT, derived rather than assumed. Write the
+    book's return as `r = dep * r_d`, where `r_d` is the return on the capital
+    actually at risk and cash earns nothing. Then
+
+        beta  = cov(dep*r_d, b)/var(b) = dep * beta_d
+        alpha = dep*mean(r_d) - dep*beta_d*mean(b) = dep * alpha_d
+
+    so the RAW ALPHA SCALES LINEARLY WITH DEPLOYMENT and is NOT invariant --
+    it is merely free of the additive `-(1-dep)*mean(b)` term that dominates
+    `mean_excess`. The quantity that does not move is alpha per unit of
+    deployed capital, `alpha / dep = alpha_d`. Measured across the same
+    risk-budget sweep:
+
+        risk/trade   deployed   mean_excess   alpha_ann   alpha_on_deployed
+            1%         0.218      -20.98%      -1.32%          -6.05%
+            2%         0.434      -18.73%      -3.05%          -7.03%
+            3%         0.633      -16.51%      -4.60%          -7.27%
+          4.6%         0.824      -11.49%      -3.81%          -4.62%
+
+    Raw excess spans 9.5 points, raw alpha 3.3, alpha-on-deployed 2.7 -- and
+    what residual movement the last one has is real (as leverage rises the
+    capital slot starts binding on individual names, which changes the weights,
+    not just the scale).
+
+    So this function returns FOUR readings and names which one leads:
+
+      alpha_on_deployed  alpha / deployed. Leverage-invariant. THE HEADLINE.
+      alpha_per_period   r - beta*b. Free of the cash-drag term but still
+                         proportional to deployment. Reported for continuity.
+      levmatch_excess    mean_excess + (1 - deployed) * mean(b). The raw
+                         comparison with the cash drag added back.
+      mean_excess        kept, because every published figure in this
+                         repository quotes it and a reconciliation needs it --
+                         but flagged `leverage_confounded` so no caller can
+                         use it without meeting that word.
+
+    `alpha_t` is the regression t of the intercept. It is scale-free -- both
+    alpha and its standard error carry the same factor of `dep` -- so it is
+    the significance of `alpha_on_deployed` as well.
     """
     ex = r - b
+    n = int(len(r))
     sd_ex = float(ex.std(ddof=1))
     sd_b = float(b.std(ddof=1))
     var_b = float(b.var(ddof=1))
     beta = float(np.cov(r, b, ddof=1)[0, 1] / var_b) if var_b > 0 else float("nan")
     alpha = float(r.mean() - beta * b.mean()) if np.isfinite(beta) else float("nan")
+
+    # t of the intercept from the same OLS. se(alpha) = sd(resid) *
+    # sqrt(1/n + mean(b)^2 / ((n-1) var(b))). Reported so the headline cannot
+    # be quoted as a point estimate with no error bar.
+    alpha_t = float("nan")
+    if np.isfinite(beta) and n > 2 and var_b > 0:
+        resid = r - alpha - beta * b
+        sd_e = float(resid.std(ddof=2)) if n > 2 else float("nan")
+        if np.isfinite(sd_e) and sd_e > 0:
+            se_a = sd_e * np.sqrt(1.0 / n + (b.mean() ** 2) / ((n - 1) * var_b))
+            alpha_t = float(alpha / se_a) if se_a > 0 else float("nan")
+
+    dep = (float(np.nanmean(deployed)) if deployed is not None
+           and np.isfinite(np.asarray(deployed, dtype="float64")).any()
+           else float("nan"))
+    cash_drag = (1.0 - dep) * float(b.mean()) if np.isfinite(dep) else float("nan")
+    levmatch = float(ex.mean()) + cash_drag if np.isfinite(cash_drag) else float("nan")
+
+    # THE HEADLINE. alpha / dep, i.e. the alpha of the capital actually at
+    # risk. NaN when deployment is unknown -- never silently 1.0, because that
+    # would assert a full-investment claim nobody checked.
+    on_dep = (alpha / dep if np.isfinite(alpha) and np.isfinite(dep) and dep > 1e-9
+              else float("nan"))
+    # The same question without the beta charge: what the deployed capital
+    # returned against the benchmark, straight. Reported beside the headline
+    # because the two disagree in SIGN here (+2.6% vs -2.5% a year on the
+    # shipped book) and the disagreement IS the finding -- the deployed book
+    # carries beta 0.77, so charging it for that beta flips the verdict, and
+    # neither figure is distinguishable from zero.
+    ex_on_dep = (float(r.mean()) / dep - float(b.mean()) if np.isfinite(dep)
+                 and dep > 1e-9 else float("nan"))
+
     return {
         "benchmarked": True,
         "bench_mean_return": float(b.mean()),
         "bench_sharpe": (float(b.mean() / sd_b * np.sqrt(periods_per_year))
                          if sd_b > 0 else float("nan")),
+        # -- HEADLINE: leverage-invariant ----------------------------------
+        "alpha_on_deployed": on_dep,
+        "alpha_on_deployed_ann": (on_dep * periods_per_year
+                                  if np.isfinite(on_dep) else float("nan")),
+        "alpha_t": alpha_t,
+        "excess_on_deployed": ex_on_dep,
+        "excess_on_deployed_ann": (ex_on_dep * periods_per_year
+                                   if np.isfinite(ex_on_dep) else float("nan")),
+        # -- proportional to deployment; kept for continuity ---------------
+        "alpha_per_period": alpha,
+        "alpha_ann": alpha * periods_per_year if np.isfinite(alpha) else float("nan"),
+        "beta_to_benchmark": beta,
+        # -- the raw comparison, with the cash drag added back -------------
+        "deployed_frac": dep,
+        "cash_drag_per_period": cash_drag,
+        "levmatch_excess": levmatch,
+        "levmatch_excess_ann": (levmatch * periods_per_year
+                                if np.isfinite(levmatch) else float("nan")),
+        # -- LEVERAGE-CONFOUNDED. Retained only for reconciliation. --------
         "mean_excess": float(ex.mean()),
         "information_ratio": (float(ex.mean() / sd_ex * np.sqrt(periods_per_year))
                               if sd_ex > 0 else float("nan")),
         "excess_hit_rate": float((ex > 0).mean()),
-        "beta_to_benchmark": beta,
-        "alpha_per_period": alpha,
+        "leverage_confounded": ["mean_excess", "information_ratio",
+                                "excess_hit_rate"],
+        "leverage_proportional": ["alpha_per_period", "alpha_ann",
+                                  "beta_to_benchmark"],
+        "headline_metric": "alpha_on_deployed_ann",
     }
 
 
@@ -325,12 +477,33 @@ def _position(sym: str, i: int, close, atr, adtv, p: PortfolioParams
     else:
         qty_liq = (view.adtv_inr * p.max_participation_of_adtv) / entry
         known = view.adtv_inr
-    qty = max(min(p.risk_budget / risk_per_share, p.slot / entry, qty_liq), 0.0)
+    # EQUAL WEIGHT AT A TARGET DEPLOYMENT, when asked for.
+    #
+    # The shipped rule is `risk_budget / risk_per_share`, and it is the reason
+    # the book holds about a fifth of its capital: at a 1% risk budget and an
+    # 8xATR stop clipped to 35%, the risk term binds on essentially every name.
+    # That is a sizing decision that sets LEVERAGE, and Q1 is the whole story
+    # of what it did to the reported numbers.
+    #
+    # Equal weight removes the confound at source rather than dividing it out
+    # afterwards: every name gets the same rupees and the book is invested to
+    # `target_deployment`. It is not obviously better -- it abandons per-name
+    # risk control, and a wide stop on a volatile name now carries the same
+    # capital as a tight one -- which is exactly why it is measured rather than
+    # assumed. Liquidity still binds, and a name that cannot be sized is still
+    # refused.
+    if p.equal_weight_slots:
+        target = (p.capital * p.target_deployment) / max(p.equal_weight_slots, 1)
+        qty = max(min(target / entry, qty_liq), 0.0)
+    else:
+        qty = max(min(p.risk_budget / risk_per_share, p.slot / entry, qty_liq),
+                  0.0)
     return float(qty * entry), float(entry), float(known)
 
 
 def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
-          high=None) -> Optional[Tuple[float, float]]:
+          high=None, horizon: Optional[int] = None
+          ) -> Optional[Tuple[float, float]]:
     """(realised return, exit side) of one position, from the SHARED resolver.
 
     This used to carry its own copy of the exit logic -- stop, invalidation,
@@ -358,6 +531,14 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
     charges a round trip only to names absent from the previous book, which is
     correct for a position carried through -- and wrong for the 84% that close
     early and are re-bought. Without the side it cannot tell the two apart.
+
+    ``horizon`` overrides `p.horizon_sessions` so a cohort can be TRUNCATED at
+    the next decision date. A book that re-ranks every 21 sessions does not
+    carry a name blindly for 63 of them; it looks again, and the hysteresis
+    band decides whether the name is kept. A position still open when the
+    truncated horizon arrives exits at EXIT_TIMEOUT, which is exactly the side
+    the caller reads as "carried, owes no round trip". See
+    `simulate(decision_sessions=...)`.
     """
     from ..features.exits import ExitRules, resolve_exits
 
@@ -368,7 +549,7 @@ def _hold(sym: str, i: int, close, low, open_, ma, atr, p: PortfolioParams,
         target_r_multiple=p.target_r_multiple,
         invalidation_ma_sessions=p.invalidation_ma_sessions,
         invalidation_buffer_atr=p.invalidation_buffer_atr,
-        horizon=p.horizon_sessions,
+        horizon=int(horizon) if horizon else p.horizon_sessions,
         use_stop=p.use_stop,
         use_target=p.use_target,
         use_invalidation=p.use_invalidation,
@@ -392,12 +573,35 @@ def simulate(
     phase: int = 0,
     step_sessions: int = 21,
     dates_allowed: Optional[Sequence[pd.Timestamp]] = None,
+    decision_sessions: Optional[int] = None,
 ) -> PortfolioResult:
     """Run the book across rebalances, one cohort at a time.
 
     ``rankings`` is (date, score series sorted best first). ``prices`` holds the
     aligned panels: close, low, open, atr, ma, adtv. ``phase`` selects which
     offset of the non-overlapping schedule to walk.
+
+    ``decision_sessions`` IS THE CADENCE THE BOOK RE-RANKS AT, and defaults to
+    `params.horizon_sessions`, which is what this simulator has always done.
+    That default is a NON-OVERLAPPING COHORT schedule: form a book, hold it for
+    the whole horizon, liquidate, form the next. At the shipped horizon of 63
+    that is four decisions a year.
+
+    THE LIVE ENGINE DECIDES EVERY 21 SESSIONS -- twelve times a year, three
+    times as often -- and carries names across decisions through the exit band.
+    The two schedules pay different amounts of cost for the same signal, and
+    the simulator's is the cheaper one: it cannot re-rank a held name for 63
+    sessions, so it never pays the turnover the hysteresis band generates. Cost
+    measured on the default schedule and quoted about the live book is a
+    number about a different strategy.
+
+    Passing `decision_sessions` shorter than the horizon truncates each cohort
+    at the next decision date and re-selects. A name still inside the exit band
+    is kept and owes nothing; a name that has left it, or whose position closed
+    early, is replaced and pays a round trip. That is the live book's
+    arithmetic, and `metrics(periods_per_year=...)` must then be annualised on
+    the DECISION cadence rather than on the horizon -- `phase_summary` does
+    this from `hold_sessions`.
     """
     close, low, open_ = prices["close"], prices["low"], prices["open"]
     atr, ma, adtv = prices["atr"], prices["ma"], prices["adtv"]
@@ -426,12 +630,31 @@ def simulate(
     pos = {d: i for i, d in enumerate(index)}
     allowed = set(dates_allowed) if dates_allowed is not None else None
 
-    stride = max(int(np.ceil(params.horizon_sessions / step_sessions)), 1)
+    # THE DECISION CADENCE, and the hold it implies. `stride` counts ranking
+    # dates, which arrive `step_sessions` apart.
+    decision = int(decision_sessions or params.decision_sessions
+                   or params.horizon_sessions)
+    stride = max(int(np.ceil(decision / step_sessions)), 1)
+    hold_sessions = min(int(params.horizon_sessions), decision)
     equity = params.capital
     #: symbol -> the side its last position exited on. EXIT_TIMEOUT means the
     #: position was still open at the horizon and a re-selection genuinely costs
     #: nothing; anything else means it closed and re-buying is a new round trip.
     held: Dict[str, float] = {}
+    #: symbol -> the index position its CURRENT position was opened at.
+    #:
+    #: THE TIME BACKSTOP HAS TO SURVIVE THE SHORTER COHORT. Truncating the hold
+    #: at the decision cadence and re-selecting is what gives cadence parity,
+    #: and on its own it also removes `max_holding_sessions`: a name that stays
+    #: inside the exit band for five 21-session periods would be carried 105
+    #: sessions, while the live engine closes it at 63. The simulator would
+    #: then be holding winners past the point the engine sells them, which
+    #: flatters exactly the tail this audit found does not generalise.
+    opened_at: Dict[str, int] = {}
+    #: symbol -> the rupee size its CURRENT position was opened at, after the
+    #: equity and volatility scaling that applied on that day. A carried
+    #: position keeps it; only a new entry is sized afresh.
+    opened_size: Dict[str, float] = {}
     rows: List[Dict[str, float]] = []
 
     for j in range(phase, len(rankings), stride):
@@ -439,14 +662,50 @@ def simulate(
         if date not in pos or (allowed is not None and date not in allowed):
             continue
         i = pos[date]
-        if i + params.horizon_sessions >= len(index):
+        if i + hold_sessions >= len(index):
             continue
         rank = {sym: r for r, sym in enumerate(scores.index, start=1)}
-        # Hysteresis: a held name survives while inside the wider exit band.
-        keep = [s for s in held if rank.get(s, 10 ** 9) <= params.exit_rank]
-        room = params.max_positions - len(keep)
-        add = [s for s in list(scores.index)[: params.entry_rank]
-               if s not in keep][: max(room, 0)]
+        # THE TIME BACKSTOP, applied before the band, and ONLY WHERE THE COHORT
+        # IS TRUNCATED. At the default cadence `hold_sessions == horizon`, so a
+        # position that times out has run exactly one cohort and the next
+        # rebalance rolls it -- the established semantics of this simulator,
+        # pinned by `test_a_position_carried_through_the_horizon_pays_nothing`.
+        # Expiry there would charge every roll and is simply wrong.
+        #
+        # It bites only when the book re-ranks FASTER than the horizon, which
+        # is the case cadence parity introduced: a name carried across three
+        # 21-session decisions has been held 63 sessions, the engine sells it,
+        # and re-selecting it is a new round trip. `held` is stamped with a
+        # side the cost logic does not read as "carried", so it pays.
+        if hold_sessions < int(params.horizon_sessions):
+            for sym in [s for s in held
+                        if i - opened_at.get(s, i) >= params.horizon_sessions]:
+                held[sym] = EXIT_TIMEOUT_EXPIRED
+        if params.entry_pct_band is None:
+            # Hysteresis: a held name survives while inside the wider exit band.
+            keep = [s for s in held if rank.get(s, 10 ** 9) <= params.exit_rank]
+            room = params.max_positions - len(keep)
+            add = [s for s in list(scores.index)[: params.entry_rank]
+                   if s not in keep][: max(room, 0)]
+        else:
+            # BAND ADMISSION. `scores` is sorted best first, so a name's
+            # percentile FROM THE BOTTOM is 1 - (position + 0.5)/n -- the same
+            # convention `validation/transfer.py` measures deciles in, so
+            # D6-D8 is (0.5, 0.8) in both places and the two cannot drift.
+            n = len(scores)
+            lo, hi = params.entry_pct_band
+            xlo, xhi = params.exit_pct_band or (max(lo - 0.10, 0.0),
+                                                min(hi + 0.10, 1.0))
+            pct = {s: 1.0 - (j + 0.5) / n
+                   for j, s in enumerate(scores.index)}
+            keep = [s for s in held
+                    if xlo <= pct.get(s, -1.0) < xhi]
+            room = params.max_positions - len(keep)
+            # Best first WITHIN the band, so a book too small to hold the whole
+            # band takes the top of it rather than an arbitrary slice.
+            eligible = [s for s in scores.index
+                        if lo <= pct[s] < hi and s not in keep]
+            add = eligible[: max(room, 0)]
         book = keep + add
 
         scale = equity / params.capital
@@ -457,18 +716,67 @@ def simulate(
         pnl = deployed = charged = 0.0
         filled = new_or_reopened = 0
         outcomes: Dict[str, float] = {}
+        # A POSITION CARRIED ACROSS A TRUNCATED COHORT IS STILL THE SAME TRADE.
+        # `resolve_exits` treats the index it is given as the ENTRY row, so
+        # resolving a carried name from TODAY re-bases its stop, its 3R target
+        # and its invalidation level to today's price every period. That is a
+        # ratcheting stop, and `stage7_risk.trailing_stop.enabled` is false --
+        # the engine does not have one. Measured on the fixture, the mistake
+        # made the stop look like it cost 4.22 points of alpha at a 21-session
+        # cadence against 0.40 at the default, because a re-based stop on a
+        # winner sits far closer to the price than the original ever did.
+        #
+        # So a carried position is resolved from its OWN entry row and this
+        # period books only the increment: (1+r_through)/(1+r_before) - 1. The
+        # stop that decides its fate is the one it was opened with.
+        truncated = hold_sessions < int(params.horizon_sessions)
         for sym in book:
             if sym not in close.columns:
                 continue
-            sized = _position(sym, i, close, atr, adtv, params)
-            if sized is None or sized[0] <= 0:
-                continue
-            size, price, liquidity = sized
-            outcome = _hold(sym, i, close, low, open_, ma, atr, params, high=high)
-            if outcome is None:
-                continue
-            ret, side = outcome
-            size *= scale
+            # `age` is zero for a name being OPENED, including one whose
+            # previous position closed early and is being re-bought: that is a
+            # new position, and it gets a fresh stop and the full horizon.
+            carried = truncated and held.get(sym) == EXIT_TIMEOUT
+            price = liquidity = 0.0
+            if carried:
+                entry = opened_at.get(sym, i)
+                age = i - entry
+                budget = max(int(params.horizon_sessions) - int(age), 1)
+                span = min(hold_sessions, budget)
+                before = _hold(sym, entry, close, low, open_, ma, atr, params,
+                               high=high, horizon=age)
+                through = _hold(sym, entry, close, low, open_, ma, atr, params,
+                                high=high, horizon=age + span)
+                if before is None or through is None:
+                    continue
+                r_before, _ = before
+                r_through, side = through
+                if 1.0 + r_before <= 0.0:
+                    continue
+                ret = (1.0 + r_through) / (1.0 + r_before) - 1.0
+                # AND ITS SIZE IS THE ONE IT WAS OPENED AT, marked to what the
+                # position is worth now. Re-sizing to the risk budget at
+                # today's price would be a rebalance to target risk every
+                # cadence, which the engine also does not do.
+                opened = opened_size.get(sym, 0.0)
+                if opened <= 0.0:
+                    continue
+                size = opened * (1.0 + r_before)
+            else:
+                sized = _position(sym, i, close, atr, adtv, params)
+                if sized is None or sized[0] <= 0:
+                    continue
+                size, price, liquidity = sized
+                this_hold = hold_sessions
+                if truncated:
+                    this_hold = min(hold_sessions, int(params.horizon_sessions))
+                outcome = _hold(sym, i, close, low, open_, ma, atr, params,
+                                high=high, horizon=this_hold)
+                if outcome is None:
+                    continue
+                ret, side = outcome
+                size *= scale
+                opened_size[sym] = size
             pnl += size * ret
             deployed += size
             filled += 1
@@ -481,6 +789,7 @@ def simulate(
             # early, so the second case is most of the book's real turnover. The
             # old test -- `sym not in held` -- charged none of it, and credited
             # the hysteresis band with a saving it does not make.
+            opened_at[sym] = opened_at.get(sym, i) if carried else i
             reopened = held.get(sym)
             if reopened is None or reopened != EXIT_TIMEOUT:
                 bps = params.cost_bps(price, size / price if price > 0 else 0.0,
@@ -498,7 +807,7 @@ def simulate(
         # than annualised afterwards so it lines up period for period.
         bench_ret = float("nan")
         if bench is not None:
-            j_exit = min(i + params.horizon_sessions, len(index) - 1)
+            j_exit = min(i + hold_sessions, len(index) - 1)
             try:
                 b0 = float(bench.iloc[i]); b1 = float(bench.iloc[j_exit])
                 if np.isfinite(b0) and np.isfinite(b1) and b0 > 0:
@@ -527,6 +836,11 @@ def simulate(
             #: three quarters invested.
             "deployed_frac": deployed / opening,
             "vol_scale": vol_scale, "realised_vol": realised_vol,
+            #: Sessions this cohort was actually held. Equal to the horizon on
+            #: the default schedule; equal to the decision cadence when the
+            #: book re-ranks faster than the horizon. Every annualisation
+            #: downstream has to divide by THIS, not by the horizon.
+            "hold_sessions": float(hold_sessions),
         })
         # Carry the EXIT SIDE, not a bare 1. A name still open at the horizon
         # costs nothing to keep; one that stopped out and is re-bought is a new
@@ -591,12 +905,20 @@ def phase_summary(
     *,
     step_sessions: int = 21,
     dates_allowed: Optional[Sequence[pd.Timestamp]] = None,
+    decision_sessions: Optional[int] = None,
 ) -> Dict[str, float]:
-    """Every phase offset, pooled. One offset is one arbitrary schedule."""
-    stride = max(int(np.ceil(params.horizon_sessions / step_sessions)), 1)
+    """Every phase offset, pooled. One offset is one arbitrary schedule.
+
+    ``decision_sessions`` is forwarded to `simulate` and defaults to the
+    horizon, which is the non-overlapping cohort schedule this has always run.
+    See `simulate` for why that is NOT the live book's cadence.
+    """
+    decision = int(decision_sessions or params.decision_sessions
+                   or params.horizon_sessions)
+    stride = max(int(np.ceil(decision / step_sessions)), 1)
     results = [
         simulate(rankings, prices, params, phase=p, step_sessions=step_sessions,
-                 dates_allowed=dates_allowed)
+                 dates_allowed=dates_allowed, decision_sessions=decision)
         for p in range(stride)
     ]
     usable = [r for r in results if not r.empty and len(r.periods) >= 3]
@@ -610,13 +932,24 @@ def phase_summary(
     # factor is sqrt(12), so a fixed 4 understates a short horizon by 1.73x and
     # overstates a long one. That error made Sharpe look like it rose
     # monotonically with horizon; corrected, it peaks near 63 and falls away.
-    periods_per_year = 252.0 / float(params.horizon_sessions)
+    # ANNUALISE ON THE HOLD, NOT ON THE HORIZON. They are the same number on
+    # the default schedule and they are not when the book re-ranks faster than
+    # the horizon: at a 21-session cadence there are twelve periods a year, not
+    # four, and using the horizon would understate every annualised figure --
+    # cost included, which is the figure this cadence exists to get right.
+    hold = float(pooled["hold_sessions"].iloc[0]) if "hold_sessions" in pooled \
+        else float(params.horizon_sessions)
+    periods_per_year = 252.0 / max(hold, 1.0)
     per_phase = [x.metrics(periods_per_year=periods_per_year) for x in usable]
     drawdowns = [m["max_drawdown"] for m in per_phase]
     return {
         "mean_return": float(r.mean()),
         "sharpe": float(r.mean() / sd * np.sqrt(periods_per_year)) if sd > 0 else 0.0,
         "periods_per_year": periods_per_year,
+        #: The cadence this was run at, so a caller cannot quote a cost figure
+        #: without knowing which schedule produced it.
+        "decision_sessions": float(decision),
+        "hold_sessions": hold,
         # A MEAN OF SCHEDULES IS NOT A DRAWDOWN. Each phase is a different,
         # complete rebalance schedule -- one of them is the one that would have
         # been run -- so averaging their worst moments describes an experience
@@ -662,6 +995,39 @@ def phase_summary(
         #: book closes before the horizon and is bought back.
         "avg_charged": (float(pooled["n_charged"].mean())
                         if "n_charged" in pooled else float("nan")),
+        #: WHAT THE HYSTERESIS BAND ACTUALLY SAVES. `entry_rank`/`exit_rank` is
+        #: 6/18, and the point of the wider exit band is that a held name is
+        #: kept while it stays inside it, paying nothing. This is the share of
+        #: held positions that were NOT charged a round trip -- the band's
+        #: measured effect, as opposed to its intended one.
+        #:
+        #: The band is not the only thing that can fail to save a position. A
+        #: name whose position CLOSED early -- stopped out, or hit the
+        #: truncated horizon and exited -- is re-bought and pays, however
+        #: comfortably it sits inside the band. Measured on the shipped
+        #: configuration at the live cadence, 3.39 of 4.79 held names are
+        #: charged every period: the band carries 29% of the book and 40.6
+        #: round trips a year are paid anyway.
+        "carried_free_share": (
+            float(1.0 - pooled["n_charged"].sum() / pooled["n_held"].sum())
+            if "n_charged" in pooled and float(pooled["n_held"].sum()) > 0
+            else float("nan")),
+        #: Round trips a year, which is the number a cost figure is built from
+        #: and the one nothing reported.
+        "round_trips_per_year": (
+            float(pooled["n_charged"].mean()) * periods_per_year
+            if "n_charged" in pooled else float("nan")),
+        #: COST ON THE CAPITAL THAT ACTUALLY TRADED. `mean_cost` is a share of
+        #: total equity, and the book deploys about a fifth of it, so the
+        #: annualised figure understates what the traded rupees paid by that
+        #: factor. A 1.2%-of-equity cost is 5.8% of deployed capital, and it is
+        #: the second number that has to clear the gross return -- the cash was
+        #: never going to pay for anything.
+        "cost_ann_on_deployed": (
+            float(pooled["cost_ret"].mean()) * periods_per_year
+            / float(pooled["deployed_frac"].mean())
+            if "cost_ret" in pooled and "deployed_frac" in pooled
+            and float(pooled["deployed_frac"].mean()) > 1e-9 else float("nan")),
         #: Share of equity deployed. The benchmark is fully invested; anything
         #: below 1.0 here is return the book gave up by holding cash, and the
         #: decomposition attributes it to "sizing" unless it is read separately.
@@ -696,4 +1062,6 @@ def _pooled_benchmark(pooled: pd.DataFrame, periods_per_year: float
     ok = np.isfinite(b) & np.isfinite(r)
     if int(ok.sum()) < 3:
         return {"benchmarked": False}
-    return _benchmark_stats(r[ok], b[ok], periods_per_year)
+    dep = (pooled["deployed_frac"].to_numpy(dtype="float64")[ok]
+           if "deployed_frac" in pooled else None)
+    return _benchmark_stats(r[ok], b[ok], periods_per_year, deployed=dep)

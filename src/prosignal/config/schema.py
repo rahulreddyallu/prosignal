@@ -380,14 +380,52 @@ class CapitalConfig(_Base):
     max_open_positions: TI
     per_position_inr: TOF
     max_participation_of_adtv: TF
+    #: "risk_budget" sizes each name at `risk_budget / risk_per_share`, which
+    #: is what this engine has always done and is the reason the old book held
+    #: about a fifth of its capital: at a 1% budget and an 8xATR stop clipped
+    #: to 35%, the risk term binds on essentially every name. That made the
+    #: SIZING RULE the largest determinant of every performance figure the
+    #: engine printed -- see finding Q1.
+    #:
+    #: "equal_weight" gives every name `capital * target_deployment / n` and
+    #: lets liquidity still refuse it. It removes the leverage confound at
+    #: source rather than dividing it out afterwards.
+    sizing_mode: TS = Field(default_factory=lambda: Tunable[str](
+        value="risk_budget", status=ParamStatus.MEASURED))
+    #: Share of capital the book aims to hold under `equal_weight`. Ignored by
+    #: `risk_budget`, which arrives at its deployment as a by-product.
+    #:
+    #: 0.75 RATHER THAN 1.0, and the 25% is not timidity. Alpha on deployed
+    #: capital is invariant to deployment while drawdown scales with it, so
+    #: measured out of sample the two read -1.95% against -1.94% on alpha and
+    #: -15.1% against -20.1% on the worst drawdown. The cash costs nothing and
+    #: buys five points of drawdown.
+    target_deployment: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.75, status=ParamStatus.MEASURED))
+
+    @field_validator("sizing_mode")
+    @classmethod
+    def _sizing(cls, v):
+        allowed = {"risk_budget", "equal_weight"}
+        if str(getattr(v, "value", v)) not in allowed:
+            raise ValueError(f"capital.sizing_mode must be one of {sorted(allowed)}")
+        return v
 
     def position_value_inr(self) -> float:
-        """Rupee value of one new position -- explicit override or an even split."""
+        """Rupee value of one new position -- explicit override or an even split.
+
+        Under `equal_weight` the split is over the TARGET DEPLOYMENT rather
+        than the whole account, so 20 names at 75% is Rs 37,500 each on a Rs 10
+        lakh book and the remaining quarter is deliberately uninvested.
+        """
         explicit = self.per_position_inr.value
         if explicit is not None and explicit > 0:
             return float(explicit)
         n = max(int(self.max_open_positions.value), 1)
-        return float(self.total_capital_inr.value) / n
+        capital = float(self.total_capital_inr.value)
+        if str(self.sizing_mode.value) == "equal_weight":
+            capital *= float(self.target_deployment.value)
+        return capital / n
 
 
 # =============================================================================
@@ -499,6 +537,11 @@ class CsvImportConfig(_Base):
     enabled: bool = True
     pledging_file: str
     fundamentals_file: str
+    #: Your own executions. The only feed that can calibrate
+    #: `costs.impact_model`; absent means impact stays UNCALIBRATED and
+    #: `research impact` says so rather than fitting to the simulator's own
+    #: entry rule. Reading it is not order routing -- see EXECUTION_GATE.md.
+    fills_file: str = "config/reference/fills.csv"
     earnings_calendar_file: str
     corporate_actions_file: str
     regulatory_events_file: str

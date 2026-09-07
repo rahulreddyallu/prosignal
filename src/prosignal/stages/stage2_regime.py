@@ -243,7 +243,19 @@ def run(
             f"hard market-wide gate, not a score penalty."
         )
 
+    # DO THE MULTIPLIERS BELOW REACH ANYTHING? They scale the family block,
+    # and only `fitted_composite` ranks on that block. The shipped setting is
+    # `v3_composite`, which discards it -- so on every shipped run the factor
+    # multipliers are computed, logged, printed and inert. Read here rather
+    # than left for the display layer to work out: a caller that has to derive
+    # it is a caller that will forget to.
+    ranking_source = str(getattr(
+        getattr(config.params.stage4_core_score, "ranking", None),
+        "source", "fitted_composite"))
+    multipliers_reach_the_book = (ranking_source == "fitted_composite")
+
     state = RegimeState(
+        scores_the_shipped_book=multipliers_reach_the_book,
         as_of_date=as_of,
         trend_regime=trend.regime,
         trend_slope_annualised=trend.slope_annualised,

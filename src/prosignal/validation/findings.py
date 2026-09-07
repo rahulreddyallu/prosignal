@@ -685,6 +685,1011 @@ REGISTER: Tuple[Finding, ...] = (
                      "undated statutory rate",
         moves_coefficients=False, moves_history=False, forces_restart=False,
     ),
+    # ---------------------------------------------------------------- v12 P0
+    _f(
+        fid="Q1", severity="critical",
+        title="The headline performance statistic moves with a position-sizing "
+              "knob, so every ablation selected on it is unsafe",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`mean_excess` is mean(book - benchmark) against a benchmark "
+                   "that is FULLY INVESTED, while the book is not. Sizing is "
+                   "`risk_budget / risk_per_share`, so with a 1% risk budget "
+                   "and an 8xATR stop clipped at 35% the book deploys 21.8% of "
+                   "capital. Measured over 87 periods against a universe "
+                   "returning +22.1%/yr, the reported -18.60% annual excess "
+                   "decomposes as +17.30% mechanical cash drag and -1.30% "
+                   "leverage-matched -- 93% arithmetic. Worse, holding the "
+                   "ranking, the names and every other setting fixed and moving "
+                   "ONLY `risk_per_trade_pct` from 1% to 4.6% takes deployment "
+                   "from 0.218 to 0.824 and the reported excess from -20.98% to "
+                   "-11.49%. The exit ablation, the stop multiple, the clip, "
+                   "the book size and the holding period were all selected on "
+                   "this metric.",
+        location="prosignal.validation.portfolio_sim::_benchmark_stats",
+        fix="`_benchmark_stats` now takes the deployed fraction and returns "
+            "`alpha_on_deployed = alpha / dep` as the HEADLINE, which is "
+            "invariant to leverage (writing r = dep*r_d gives beta = dep*beta_d "
+            "and alpha = dep*alpha_d, so the raw alpha is proportional to "
+            "deployment and only the ratio is invariant). `mean_excess` and "
+            "`information_ratio` are retained for reconciliation and carry a "
+            "`leverage_confounded` list; `alpha_per_period` carries a "
+            "`leverage_proportional` list. `results.SHIPPED_FIGURES` demotes "
+            "both raw figures out of the headline set, and a claim stated only "
+            "in them now judges SUPERSEDED rather than REPRODUCED.",
+        regression_test="tests/test_leverage_neutral.py",
+        before_after="headline -18.60%/yr raw excess -> -6.04%/yr alpha on "
+                     "deployed capital at t -0.65; raw spans 9.5 points across "
+                     "the risk sweep, the headline spans 2.7",
+        moves_coefficients=False, moves_history=True, forces_restart=True,
+        notes="Restart-blocking because the forward test's secondary hypothesis "
+              "was stated in the confounded unit and could have been passed by "
+              "editing a sizing parameter. Scheme v3 restates it.",
+    ),
+    _f(
+        fid="Q2", severity="critical",
+        title="Sealed window B lies inside the fit window and was read as a "
+              "second seal on the shipped weights",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`features/v3.py` records that the shipped signs and weights "
+                   "were fitted 2018-11-27..2024-10-25. `SEALED_WINDOWS['B']` "
+                   "is 2021-07-01..2022-12-27 -- entirely inside it. The two "
+                   "windows were presented as a matched pair in the module "
+                   "docstring, in `DEPLOY_REFERENCE` and in the re-check's "
+                   "verdict text, so an in-sample number corroborated an "
+                   "out-of-sample one. B is the better-looking of the two: it "
+                   "carries the positive book (+2.0%/yr against A's -2.8%) and "
+                   "the significant top-ten excess (t 2.50 against A's 0.81). "
+                   "B is legitimate evidence about the METHOD -- the pipeline "
+                   "was re-run on data ending 2021-02-17 -- and it is not "
+                   "evidence about the shipped configuration, which is a "
+                   "different fit.",
+        location="prosignal.features.v3::FIT_WINDOW",
+        fix="`FIT_WINDOW` and `window_provenance()` make the classification "
+            "computable rather than remembered; `v3_panel."
+            "SEALED_WINDOW_PROVENANCE` derives from them and "
+            "`CITABLE_SEALED_WINDOWS` names the windows a claim about the "
+            "shipped model may cite. The docstring table gains a provenance "
+            "row and the re-check's HOLDS text no longer offers B as "
+            "corroboration.",
+        regression_test="tests/test_sealed_window_provenance.py",
+        before_after="two windows quoted as two seals -> one citable window "
+                     "(A), whose own reading is: the ranking generalises, the "
+                     "book does not",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+    ),
+    _f(
+        fid="Q3", severity="high",
+        title="Factors were ranked inside groups defined by TODAY's sector map, "
+              "which is future information and also cost the signal",
+        category=Category.FEATURE, status=Status.FIXED,
+        root_cause="`_refresh_sector_map` pools the `Industry` column of the "
+                   "CURRENT NSE constituent files, so a name that has since "
+                   "delisted or left every index carries no sector and is "
+                   "ranked inside `__RESID__`. Holding a sector label is "
+                   "therefore correlated with having survived, and the "
+                   "correlation is large: across 380 panel dates, names with a "
+                   "known sector out-returned names without by +1.05% per 21 "
+                   "sessions (overlap-corrected t +3.64) and +3.36% per 63 "
+                   "(t +3.48) -- bigger than the signal itself. The groups the "
+                   "ranking was computed inside were defined by that attribute. "
+                   "Separately, `residual_bucket_size` had always reported that "
+                   "39% of a live cross-section sits in the residual bucket "
+                   "(79 unclassified plus 71 folded in from THIRTEEN sectors "
+                   "too small to rank within), so for two names in five "
+                   "'sector-neutral' named a peer group that does not exist.",
+        location="prosignal.features.v3::SECTOR_NEUTRAL",
+        fix="`SECTOR_NEUTRAL = False`. `score_frame` ranks across the eligible "
+            "universe and still accepts `sectors` so `residual_bucket_size` can "
+            "report what a point-in-time map would cover -- which is the "
+            "condition for turning it back on. `sector_neutral_rank` is kept "
+            "and reachable via `sector_neutral=True`; the function was never "
+            "the problem, the map feeding it was. Three surviving user-facing "
+            "claims were corrected: the stage-4 run note, `FactorMember.rank`'s "
+            "contract docstring, and two strings in the interface.",
+        regression_test="tests/test_no_sector_neutralisation.py",
+        before_after="out-of-sample rank IC, measured through the shipped "
+                     "score_frame: h=5 +0.0402 -> +0.0485, h=21 +0.0421 -> "
+                     "+0.0562 (t +1.97 -> +2.18), h=63 +0.0456 -> +0.0759. "
+                     "Removing a lookahead RAISED the signal, and the direction "
+                     "reproduces what features/v9r.py recorded independently",
+        moves_coefficients=True, moves_history=True, forces_restart=True,
+        notes="This CHANGES THE RANKING and therefore opens a new epoch -- it "
+              "is not a correctness patch that leaves the model alone. The "
+              "sealed windows do not describe it, which is already true of the "
+              "shipped configuration after the cap repair.",
+    ),
+    _f(
+        fid="Q4", severity="high",
+        title="Every panel-wide statistic pooled the dates the model was "
+              "chosen on with the dates that tested it, and averaged across "
+              "structurally different models while doing it",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="TWO CUTS, both missing. The signs and weights were fitted "
+                   "2018-11-27..2024-10-25, which is 293 of the panel's 380 "
+                   "signal dates, and the ranking table pooled those with the "
+                   "87 that followed -- so the published figure was neither an "
+                   "in-sample fit statistic nor an out-of-sample result. "
+                   "Separately, `score_frame` re-caps the theme blend over the themes a "
+                   "name actually has, which is right per name and turns into "
+                   "a validation problem across time. The fundamentals feed "
+                   "reaches almost nobody early in the panel and most of the "
+                   "universe late in it -- `quality_sub` coverage runs 0.0% "
+                   "(2018), 1.5% (2020), 23.3% (2021), 50.2% (2023), 86.4% "
+                   "(2026), and mean themes per name rises 2.99 -> 4.86 over "
+                   "the same span. So an early score is a three-theme blend "
+                   "and a late one is a five-theme blend, and every IC, "
+                   "spread and book figure quoted over the whole panel is a "
+                   "weighted average across different models whose weighting "
+                   "nobody chose: it was set by when a vendor's coverage "
+                   "improved.",
+        location="prosignal.validation.results::_ranking_results",
+        fix="`_ranking_windows` reports four spans, headline first: "
+            "OUT_OF_SAMPLE (the claim), IN_SAMPLE, STABLE_MODEL and "
+            "FULL_PANEL. A span holding fewer than `MIN_STABLE_DATES` signal "
+            "dates is not reported at all, because a handful of dates is not "
+            "an out-of-sample result. "
+            "`v3_monitor.theme_availability` reports the coverage per date "
+            "and `stable_model_window` returns the first date from which "
+            "EVERY theme stays above 40% -- 2023-07-21, leaving 150 of 380 "
+            "dates. The ranking table now carries both windows side by side "
+            "with a themes/name column, so the reader can see which model "
+            "each row describes rather than inferring it. FULL_PANEL is kept, "
+            "not replaced: it is the longer record, and hiding it would be "
+            "the same class of selection this register exists to stop.",
+        regression_test="tests/test_model_stability_window.py",
+        before_after="rank IC at h=21, overlap-corrected, from the "
+                     "regenerated docs/RESULTS_OF_RECORD.md (the 5-session "
+                     "panel the shipped generator builds): OUT_OF_SAMPLE "
+                     "+0.0580 t +2.28 on 87 dates; IN_SAMPLE +0.0691 t +3.70 "
+                     "on 269; STABLE_MODEL +0.0646 t +3.62 on 150. The "
+                     "ordering survives both restrictions with a 16% decay, "
+                     "and the out-of-sample t does NOT clear the "
+                     "Harvey-Liu-Zhu 3.0 bar on this panel -- 87 dates five "
+                     "sessions apart against a 21-session label carry VIF "
+                     "4.17. Re-measured on a 21-session panel, where the same "
+                     "87 observations do not overlap, the reading is +0.0411 "
+                     "at t +3.91. Both are true of their own sampling and the "
+                     "document is the authority",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This does not move a coefficient. It changes what the evidence "
+              "is understood to be evidence ABOUT, and it cuts the honest "
+              "sample behind a claim about the shipped composite from 380 "
+              "dates to 87.",
+    ),
+    _f(
+        fid="Q5", severity="critical",
+        title="The Deflated Sharpe charged for the tuning done after the model "
+              "shipped and for none of the search that produced it",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="The trial registry held 99 configurations and every one "
+                   "came from a research command written AFTER the v3 "
+                   "composite existed -- estimator arms, spread bands, CPCV "
+                   "folds, the 2026-08 execution re-audit. Not one row came "
+                   "from the search that chose the 22 factors, the five "
+                   "themes, the combination method, the weight caps, the "
+                   "quality floor or the book. The escape hatch, "
+                   "`cumulative_trials_logged`, shipped at 20. The reason it "
+                   "could not be reconstructed is that "
+                   "`research/V3_SEARCH.md` was DELETED in commit f1b2a9a "
+                   "along with `work/v3/` and `research/v3/` -- deleting the "
+                   "search code is defensible since it no longer chooses "
+                   "anything, and deleting the record of the search removed "
+                   "the only evidence of how much dredging the shipped model "
+                   "rests on.",
+        location="prosignal.validation.v3_search",
+        fix="`research/V3_SEARCH.md` restored from f1b2a9a^. "
+            "`validation/v3_search.py` is its machine-readable form: every "
+            "group cites the section it comes from and expands to one "
+            "registry label per configuration, so the registry's own "
+            "content-addressing keeps it idempotent. "
+            "`research trials --register-v3-search` appends them; the plain "
+            "command now prints the enumeration and flags loudly when the "
+            "rows are missing. Two grids whose arm counts the record does not "
+            "state are entered at their documented minimum and marked, so the "
+            "total prints as AT LEAST rather than an equals sign.",
+        regression_test="tests/test_v3_search_trials.py",
+        before_after="trials charged by the DSR 119 -> 622. On the shipped "
+                     "trial-score variance (0.0874 over 50 scored arms) that "
+                     "raises the Sharpe a selected configuration must beat "
+                     "from 2.59 to 3.12 per period",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This makes every deflated statistic in the engine STRICTLY "
+              "HARDER to pass. It does not change a single return, and it is "
+              "the second-largest single correction in this audit after the "
+              "leverage confound.",
+    ),
+    _f(
+        fid="Q6", severity="critical",
+        title="The simulator decided four times a year and the engine decides "
+              "twelve, so every cost figure described a different strategy",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`simulate` walks `ceil(horizon / step_sessions)` ranking "
+                   "dates at a time, and the numerator was always "
+                   "`horizon_sessions`. At the shipped horizon of 63 that is a "
+                   "NON-OVERLAPPING COHORT schedule -- form a book, hold it "
+                   "for the whole horizon, liquidate, form the next -- and "
+                   "four decisions a year. The live engine decides every "
+                   "`stage6_entry.admission.entry_cadence_sessions`, which is "
+                   "21: twelve times a year, three times as often, carrying "
+                   "names across decisions through the exit band. The cohort "
+                   "schedule cannot re-rank a held name for 63 sessions, so it "
+                   "never pays the turnover the hysteresis band generates, and "
+                   "its cost is the cheaper of the two. The code comment even "
+                   "stated the assumption -- 'rebalances are ceil(horizon/step) "
+                   "apart precisely so one cohort finishes before the next "
+                   "opens' -- while the engine it was measuring did not work "
+                   "that way.",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="`decision_sessions` truncates each cohort at the next decision "
+            "date and re-selects: a name still inside the exit band is kept "
+            "and owes nothing, a name that has left it or whose position "
+            "closed early is replaced and pays a round trip -- the live book's "
+            "arithmetic. `PortfolioParams.decision_sessions` carries it and "
+            "`_portfolio_params` reads the live cadence, so the shipped "
+            "measurement and the shipped engine now decide on the same clock. "
+            "`phase_summary` annualises on the HOLD rather than the horizon "
+            "(twelve periods a year at cadence 21, not four) and reports "
+            "`decision_sessions` on the result, so a cost figure can no longer "
+            "be quoted without its schedule. The default is unchanged for a "
+            "caller that passes nothing.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="RE-MEASURED after Q23. Same ranking, same params, only "
+                     "the cadence moved: cost 0.45% -> 1.19% a year and its "
+                     "share of gross 10.3% -> 24.9%; round trips 15.8 -> 41.5; "
+                     "periods per year 4.0 -> 12.0. Alpha on deployed capital "
+                     "FALLS, +4.50% -> +3.50%. The first measurement of this "
+                     "finding reported it RISING to +6.74%, and that was the "
+                     "ratcheting stop of Q23 inflating the fast cadence by 3.2 "
+                     "points, not the signal",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+        notes="This does not change the ranking, and it changes every cost, "
+              "turnover and net-return figure the simulator has ever "
+              "produced. Everything moves the same way: worse. The schedule "
+              "the engine actually runs costs more than twice as much to "
+              "trade AND earns a point less alpha on deployed capital than "
+              "the cohort schedule it was being measured on. An earlier "
+              "version of this finding said the opposite; see Q23 for why it "
+              "was wrong.",
+    ),
+    _f(
+        fid="Q7", severity="high",
+        title="Market impact cannot be calibrated, because the ledger holds no "
+              "fills -- it holds the engine's own entry rule",
+        category=Category.EXECUTION, status=Status.OPEN,
+        root_cause="`CostModel.impact_bps` is "
+                   "`coefficient * participation ** exponent` plus an assumed "
+                   "half-spread, and both constants are config values that "
+                   "have never been compared to a price this engine traded at. "
+                   "The obvious calibration -- regress realised implementation "
+                   "shortfall on participation -- cannot run: in 126 of the "
+                   "128 rows of `data/ledger/outcomes.jsonl` the recorded "
+                   "`entry_price` equals the NEXT SESSION'S OPEN to the tick, "
+                   "so the ledger is recording the simulator's entry rule "
+                   "rather than an execution. Fitting the impact model to "
+                   "those rows would fit it to the assumption it was built "
+                   "from and report the circularity as agreement. The other "
+                   "two are VEDL rows carrying an unadjusted price against an "
+                   "adjusted open (415.65 against 145.90, ratio 2.85, with "
+                   "`price_basis_factor` recorded as 1.0) -- the price-basis "
+                   "defect, not a fill.",
+        location="prosignal.validation.fill_calibration::calibrate",
+        fix="OPEN, and it stays open until the ledger holds broker fills -- no "
+            "amount of code closes it. What is built is the harness and its "
+            "refusal: `calibrate` returns SYNTHETIC_FILLS when the recorded "
+            "price collapses onto a reference price for more than "
+            "`SYNTHETIC_SHARE` of rows, reports NO coefficient when it "
+            "refuses, and drops price-basis rows by name rather than fitting "
+            "through them. It returns CALIBRATED on genuine fills, which is "
+            "what makes the refusal mean something.",
+        regression_test="tests/test_fill_calibration.py",
+        before_after="87 bps round trip, asserted; still asserted, and now "
+                     "labelled as an assumption with the harness that would "
+                     "test it standing ready",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Reading the same ledger off the raw year parquets instead of "
+              "through `DataStore` gives a different answer -- 92.4% "
+              "synthetic, and TATAINVEST appears with a fill of 1066.00 "
+              "against a raw open of 10660.00. The ledger's `entry_price` is "
+              "not on one consistent price basis. That is a second defect and "
+              "it is recorded here rather than fixed here.",
+    ),
+    _f(
+        fid="Q8", severity="high",
+        title="Every recorded ablation was decided on a statistic that moves "
+              "with the knob being ablated",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`parameters.yaml` settles its exit, target and band "
+                   "ablations on annual alpha, excess Sharpe and worst-year -- "
+                   "'booking at 3R cost 0.9 points of annual alpha', 'booking "
+                   "at 1.5R cost 4.6 points'. None of those is comparable "
+                   "across the arms that produced them. Position size is "
+                   "`risk_budget / risk_per_share`, so an arm that changes the "
+                   "stop distance, the risk budget or the slot count changes "
+                   "how much capital is deployed; with `r = dep * r_d`, raw "
+                   "alpha is PROPORTIONAL to deployment and raw excess "
+                   "additionally carries a cash-drag term against a "
+                   "fully-invested benchmark. Disarming the 3R target changes "
+                   "how long positions live and therefore how much capital "
+                   "sits in cash, so the arm moved for a reason that has "
+                   "nothing to do with whether the target is a good rule.",
+        location="prosignal.validation.ablation::rank_arms",
+        fix="`validation/ablation.py` runs arms through the shipped simulator "
+            "at a FIXED cadence -- letting `decision_sessions` vary would make "
+            "a one-variable comparison into a two-variable one, see Q6 -- and "
+            "`rank_arms` RAISES on any key in `CONFOUNDED` rather than sorting "
+            "by it, naming the mechanism and pointing at "
+            "`alpha_on_deployed_ann`. The confounded columns are still printed "
+            "in `table`, because every earlier write-up quotes them and a "
+            "reconciliation needs them; what they may not do is decide.",
+        regression_test="tests/test_ablation_leverage_neutral.py",
+        before_after="the guard is demonstrated on a pure sizing sweep in "
+                     "which the ranking, the names and the costs are "
+                     "identical: raw excess separates the arms and "
+                     "alpha-on-deployed does not",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="The recorded ablation VERDICTS are not overturned here -- "
+              "re-running them needs the full panel and is its own decision. "
+              "What is fixed is that the next one cannot be decided the same "
+              "way.",
+    ),
+    _f(
+        fid="Q9", severity="high",
+        title="Breadth was counted in declared factors, and 22 correlated "
+              "factors are not 22 bets",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="Grinold's IR = IC * sqrt(breadth) takes breadth to be "
+                   "INDEPENDENT bets. This engine describes itself as 22 "
+                   "factors across 5 themes and every breadth argument in the "
+                   "repository rests on those two counts. The pairwise "
+                   "redundancy check catches duplicates one pair at a time and "
+                   "says nothing about the aggregate, so nothing measured how "
+                   "many independent columns the composite actually carries. "
+                   "The participation ratio over each cross-section's Spearman "
+                   "matrix, averaged across 380 panel dates: 20.9 factor "
+                   "columns present carry 6.94 effective (median 7.34), and "
+                   "4.59 theme columns carry 3.96 (median 4.30).",
+        location="prosignal.v3_monitor::effective_breadth",
+        fix="`participation_ratio`, `effective_count` and `effective_breadth` "
+            "in `v3_monitor`, wired into `_v3_redundancy` so every stage-4 run "
+            "reports it on `RedundancyReport.effective_breadth` with a note "
+            "naming the overstatement factor. Averaged across dates rather "
+            "than pooled: a matrix over stacked cross-sections mixes "
+            "within-date structure with drift in the factor means, and drift "
+            "is not breadth. The default is an EMPTY dict, because an absent "
+            "measurement and a measured 22 are different things.",
+        regression_test="tests/test_effective_breadth.py",
+        before_after="breadth counted as 22; measured at 6.94, so any IR "
+                     "computed from the declared count overstates by 1.74x. "
+                     "The theme level is close to honest at 3.96 of 4.59, "
+                     "which is the two-level structure doing its job",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This does not prune anything. Pruning to the effective count is "
+              "a model change that spends trials and opens an epoch, and it is "
+              "an operator's decision taken against this measurement rather "
+              "than a consequence of it.",
+    ),
+    _f(
+        fid="Q10", severity="critical",
+        title="The book is concentrated in the one part of the ranking that "
+              "did not generalise",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`decile_monotonicity` compresses the whole shape of the "
+                   "ranking into one rank correlation, so a profile that rises "
+                   "to D7 and falls away past it scores +0.33 and reads as "
+                   "healthy. The profile itself, mean excess over each date's "
+                   "own cross-section at h=63:\n"
+                   "        D1     D2     D3     D4     D5     D6     D7     "
+                   "D8     D9    D10\n"
+                   "  IS  -2.77  -1.41  -0.93  -0.10  -0.22  +0.06  +0.70  "
+                   "+0.78  +1.44  +2.45\n"
+                   "  OOS -2.31  -1.27  -0.60  -0.65  +0.31  +1.23  +1.73  "
+                   "+0.64  +0.58  +0.36\n"
+                   "In sample it is monotone and D10 wins by a distance. Out "
+                   "of sample it PEAKS AT D7 and D10 is the sixth-best decile: "
+                   "D10 minus D6 is +2.39 in sample and -0.87 out of it, and "
+                   "the same inversion appears at h=21 (+0.82 -> -0.27). The "
+                   "shipped book holds six names off the very top of D10.",
+        location="prosignal.validation.results::_decile_profile",
+        fix="Every ranking row carries `decile_profile` -- all ten deciles, "
+            "the peak decile and D10 minus D6 -- and the document renders it "
+            "as its own table under the ranking, split by fit-window "
+            "provenance. A report that only ever prints the top decile cannot "
+            "say that the top decile is not where the information is, so the "
+            "peak is reported rather than assumed and "
+            "`test_a_monotone_ranking_peaks_at_the_top_and_an_inverted_one_"
+            "does_not` exercises the detector in both directions.",
+        regression_test="tests/test_model_stability_window.py",
+        before_after="the out-of-sample top-decile t in the regenerated "
+                     "document is +0.59 (h=21), +0.62 (h=42), +0.29 (h=63) "
+                     "against an in-sample +2.64, +2.43, +2.44. The quintile "
+                     "spread and the rank IC hold up; the tail does not",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="The BOTTOM of the distribution generalises closely, -2.77 to "
+              "-2.31 at h=63. That is the Stambaugh-Yu-Yuan result -- anomaly "
+              "alpha concentrates in the short leg -- reproduced from a "
+              "long-only panel that was never built to test it, and it is not "
+              "a leg this engine can trade. Nothing here changes the book: "
+              "widening it to D6-D8 is a model decision that spends trials "
+              "and opens an epoch, and it is now a decision somebody can take "
+              "against a measurement instead of against a monotonicity "
+              "coefficient that hid the shape.",
+    ),
+    _f(
+        fid="Q11", severity="high",
+        title="The second-largest weight in the model is held down by a "
+              "coverage cap that expired",
+        category=Category.FEATURE, status=Status.FIXED,
+        root_cause="Each theme's weight was capped at the share of names it "
+                   "can speak about, measured once over the fit window and "
+                   "frozen on `Theme.coverage`. That was the right call: "
+                   "V3_SEARCH.md §6 records that fitted without the "
+                   "constraint, `quality` took 40%+ of the composite while "
+                   "only 19% of names had fundamentals at all, which ranks the "
+                   "19% and the 81% by two different models and calls the "
+                   "result one score. Quality's shipped 0.18991 IS its 0.1899 "
+                   "coverage cap. The feed has since caught up: measured "
+                   "`quality_sub` coverage is 0.363 over the fit window and "
+                   "0.837 over the last year, a 4.4x drift. min(0.40, 0.837) "
+                   "is 0.40, so a refreshed cap would not cut quality at all "
+                   "-- the weight is held down by a constraint that no longer "
+                   "binds, and the constant recording it says nothing about "
+                   "that.",
+        location="prosignal.features.v3::coverage_drift",
+        fix="`coverage_drift` reports declared against measured per theme with "
+            "the binding status of each, and `stale_coverage_caps` returns a "
+            "sentence per theme whose BINDING STATUS has changed. Only that: "
+            "momentum's 0.9988 could halve and its weight would still be set "
+            "by the structural 0.40 cap, and an alarm that fires there is one "
+            "nobody reads. Both directions are reported -- a cap that has "
+            "stopped binding holds a weight down for an expired reason, and "
+            "one that has started binding means a theme is weighted for "
+            "coverage it no longer has.",
+        regression_test="tests/test_coverage_cap_is_stale.py",
+        before_after="quality: declared coverage 0.1899, measured 0.8372 over "
+                     "the last year (4.4x). The cap bound when the weight was "
+                     "chosen and does not now",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="NOTHING IS REFITTED. Refreshing the cap roughly doubles the "
+              "quality weight and pushes momentum off its own cap, which is a "
+              "model change that spends trials and opens an epoch. It is a "
+              "decision to take against this measurement, not a consequence "
+              "of it. `test_the_shipped_weight_still_equals_the_declared_cap` "
+              "fails if the weights move, so acting on this cannot happen "
+              "quietly either.",
+    ),
+    _f(
+        fid="Q12", severity="medium",
+        title="The regime factor multipliers are computed, logged, printed and "
+              "inert on the shipped path",
+        category=Category.UI, status=Status.FIXED,
+        root_cause="Stage 2 derives three factor multipliers from the regime "
+                   "read and scales the FAMILY block with them. "
+                   "`_apply_ranking_policy` discards that block under "
+                   "`ranking.source = v3_composite`, which is the shipped "
+                   "setting. The stage-4 run NOTE was already fixed this way "
+                   "-- deferred until the ranking source is known -- because "
+                   "'Regime range_lowvol multipliers applied (momentum x0.75)' "
+                   "on a run ordered by an unmodified v3 blend tells an "
+                   "operator the engine leaned against momentum today, and it "
+                   "did not. Every other surface the number reaches was left: "
+                   "the CLI regime table, the regime history row, and the "
+                   "ledger.",
+        location="prosignal.core.contracts::RegimeState.multiplier_note",
+        fix="`RegimeState.scores_the_shipped_book`, set in stage 2 from "
+            "`ranking.source`, defaulting FALSE -- the shipped configuration "
+            "is the one where the multipliers do not reach the book, so an "
+            "unset flag must read that way or every caller who forgets "
+            "restores the misreading. `multiplier_note()` returns the sentence "
+            "or None; the CLI marks the table [INERT] and the history column "
+            "with an asterisk; the ledger row carries "
+            "`momentum_multiplier_scored_the_book`.",
+        regression_test="tests/test_regime_multipliers_are_inert.py",
+        before_after="a ledger row carried `momentum_multiplier: 0.75` and "
+                     "nothing else; it now carries whether that 0.75 reached "
+                     "the book",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Not deleted. They work on the `fitted_composite` path, which is "
+              "still selectable, and the regime READ itself -- trend, "
+              "volatility, breadth, and the hard entry gate -- is live on "
+              "every path. `compatibility()` is deliberately not gated on the "
+              "flag: it reads the regime, and suppressing it would remove a "
+              "live signal to fix an inert one.",
+    ),
+    _f(
+        fid="Q13", severity="medium",
+        title="99% of ledger rows carry a mode that was inferred afterwards, "
+              "and nothing downstream could tell",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`repair_lineage` stamps each row's `mode` from what its "
+                   "own timestamps prove -- `logged_at` against `date` -- and "
+                   "writes `mode_source` saying so. That is the right repair "
+                   "and it does not make the label a recording. On the shipped "
+                   "ledger 250 of 253 rows carry it. Nothing could see that: "
+                   "`outcomes.load_outcomes` partitions on `exit_model` and on "
+                   "the research epoch, both recorded at write time, and never "
+                   "on `mode`; `forward.progress` counted observations without "
+                   "asking how their liveness was established. A forward test "
+                   "reporting 'N sessions elapsed' was resting on an inference "
+                   "with no way to say so.",
+        location="prosignal.ledger::Ledger.mode_provenance",
+        fix="`mode_provenance` and `live_evidence_warning` on the ledger; "
+            "`Progress.reconstructed_mode_rows`, counted AFTER the "
+            "`when < start` guard so a window opened since the repair inherits "
+            "none of it, and surfaced through `Progress.caveats()` and the "
+            "forward CLI.",
+        regression_test="tests/test_reconstructed_mode_is_visible.py",
+        before_after="250 of 253 rows (99%) reconstructed, reported nowhere; "
+                     "now reported wherever a count is taken",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Reported, not refused. A hard failure would void a window for a "
+              "defect in how its rows were LABELLED rather than in what they "
+              "contain, and the inference rule is sound. Caveats print even "
+              "when the window is already broken: a reader deciding how to "
+              "re-register needs both.",
+    ),
+    _f(
+        fid="Q14", severity="high",
+        title="Re-run leverage-neutral, the exit-band ablation reverses: the "
+              "shipped band is too narrow and the old metric said the "
+              "opposite",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="PHASE 0 asked for the exit/stop/size ablations to be "
+                   "re-run on a statistic that does not move with the knob. "
+                   "Building the harness (Q8) was not the same as running "
+                   "them. RE-MEASURED after Q23, on the whole store at the "
+                   "live cadence, ranked on alpha over deployed capital:\n"
+                   "  EXIT BAND   12: +3.92%  18 (shipped): +3.50%  "
+                   "36: +5.00%\n"
+                   "  maxDD       12: -12.7%  18: -12.3%  36: -9.6%\n"
+                   "The shipped band is the WORST of the three, and the "
+                   "ordering is not monotone in width -- both a narrower and a "
+                   "wider band beat it -- so 'wider is better' is not what "
+                   "this shows. What it shows is that 18 is a local worst and "
+                   "the width was never chosen on a statistic that could see "
+                   "that.",
+        location="prosignal.validation.ablation",
+        fix="Ablations re-run and the arms charged to the trial registry -- "
+            "11 configurations, taking the DSR count to 633. Re-measuring a "
+            "configuration already tried is still a look at the same data, "
+            "and the registry's rule is that anything whose out-of-sample "
+            "score was looked at is charged.",
+        regression_test="tests/test_ablation_leverage_neutral.py",
+        before_after="EXIT RUNGS: the shipped arm, no_target and "
+                     "no_invalidation are identical at +3.50%, which is "
+                     "correct -- both rungs are already disarmed, so "
+                     "disarming them again changes nothing. `no_stop` is "
+                     "+3.63%, so the ATR stop COSTS 0.13 points. The first "
+                     "measurement had it earning +0.83; that was Q23's "
+                     "ratchet, and the sign flipped when it came out. RISK "
+                     "BUDGET: raw excess spans 12.3 points (-6.96% to "
+                     "-19.29%) while alpha on deployed spans 1.91 (+2.79% to "
+                     "+4.70%) -- the confound reproduced on the real panel at "
+                     "6.4x",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="ALPHA ON DEPLOYED IS NOT PERFECTLY FLAT across the sizing "
+              "sweep -- it rises from +2.79% at 0.5% risk to +4.70% at 4%, "
+              "where deployment reaches 75% and the worst drawdown reaches "
+              "-38.4%. It is six times more stable than the raw figure and it "
+              "is not an invariant, and saying otherwise would be the "
+              "overclaim this audit exists to remove. WITHDRAWN FROM THE "
+              "FIRST VERSION OF THIS FINDING: that the raw metric would have "
+              "rejected the better band. On the corrected numbers raw excess "
+              "also ranks band 36 best, so the two metrics agree here and the "
+              "claim was an artefact of the ratchet. Nothing is applied: "
+              "changing the band is a model change that spends trials and "
+              "opens an epoch.",
+    ),
+    _f(
+        fid="Q15", severity="medium",
+        title="The hysteresis band carries less than a third of the book, and "
+              "nothing measured what it saved",
+        category=Category.EXECUTION, status=Status.FIXED,
+        root_cause="`entry_rank`/`exit_rank` is 6/18 and the wider exit band "
+                   "exists so a held name is kept while it stays inside it, "
+                   "paying nothing. Nothing reported whether that happened. "
+                   "Measured at the live cadence, 3.46 of 5.09 held names are "
+                   "charged a round trip EVERY period -- the band carries 32% "
+                   "of the book and 41.5 round trips a year are paid anyway. "
+                   "The band is not the only thing that can fail to save a "
+                   "position: a name whose position closed early, stopped out "
+                   "or exited at the horizon, is re-bought and pays however "
+                   "comfortably it sits inside the band.",
+        location="prosignal.validation.portfolio_sim::phase_summary",
+        fix="`carried_free_share` and `round_trips_per_year` on the phase "
+            "summary. The second is the number every cost figure is built "
+            "from and nothing reported it.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="`avg_new` was reported and undercounted turnover by "
+                     "excluding re-entries; the share of the book the band "
+                     "actually carries was not reported at all",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="A hysteresis band cannot be judged by its width. Q14 measures "
+              "that a wider one is worth +2.0 points of alpha here; this "
+              "measures why a band of any width leaves most of the turnover "
+              "in place.",
+    ),
+    _f(
+        fid="Q16", severity="medium",
+        title="The interface headline read as the account's return and was a "
+              "per-position average",
+        category=Category.UI, status=Status.FIXED,
+        root_cause="The open-positions headline read `+X% vs the index`. That "
+                   "figure is the average one POSITION is ahead of the index "
+                   "over the days it was held -- the right way to judge the "
+                   "SELECTION, since a position's return does not depend on "
+                   "how large the position was, and not what an account "
+                   "running this engine is up. Position size is "
+                   "`risk_budget / risk_per_share`, so the book runs about a "
+                   "fifth invested and the rest sat in cash while the index "
+                   "compounded. The closed-record headline had always said "
+                   "'average per position'; the open one said only 'vs the "
+                   "index', and neither said anything about the cash.",
+        location="prosignal.static.index.html",
+        fix="The open headline reads 'vs the index, per position', and both "
+            "headlines carry a note that this is not what the account earned "
+            "because sizing leaves most of it in cash. A test asserts that no "
+            "leverage-confounded BOOK figure -- `mean_excess`, "
+            "`information_ratio` -- ever reaches the interface.",
+        regression_test="tests/test_ui_headline_is_honest.py",
+        before_after="'+X% vs the index' -> '+X% vs the index, per position "
+                     "... not what the account earned: sizing leaves most of "
+                     "it in cash'",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="No number changes. What changes is what the page claims one "
+              "means. The per-position figure is kept as the headline because "
+              "it is the honest measure of selection; it is the missing "
+              "sentence about cash that made it read as a balance.",
+    ),
+    _f(
+        fid="Q17", severity="critical",
+        title="The long-only constraint is not what binds -- the six-name "
+              "concentration is, and a tradeable shape carries the signal",
+        category=Category.MODEL, status=Status.FIXED,
+        root_cause="IR = TC x IC x sqrt(breadth), and nothing measured TC. A "
+                   "signal that fails to appear in the book is either a broken "
+                   "signal or a book that cannot hold the signal's opinion, "
+                   "and those call for opposite responses. Measured out of "
+                   "sample at h=63 over 87 dates and a median 750 names, "
+                   "gross of cost:\n"
+                   "  D10-D1        LONG_SHORT  +2.6729%  t +1.08  TC +0.762\n"
+                   "  half-minus-half LONG_SHORT +1.8120%  t +1.54  TC +0.822\n"
+                   "  D6-D8         LONG_ONLY   +1.1934%  t +2.42  TC +0.296\n"
+                   "  top-half      LONG_ONLY   +0.9052%  t +1.54  TC +0.822\n"
+                   "  D10           LONG_ONLY   +0.3242%  t +0.26  TC +0.553\n"
+                   "  top6 SHIPPED  LONG_ONLY   -1.5196%  t -0.67  TC +0.206\n"
+                   "The shipped shape is the worst of the six and its "
+                   "out-of-sample excess is NEGATIVE. The decile it is drawn "
+                   "from is indistinguishable from zero on its own. D6-D8 -- "
+                   "where the decile profile peaks out of sample, see Q10 -- "
+                   "is the ONLY shape of any kind that clears t = 2, and it is "
+                   "long-only and tradeable.",
+        location="prosignal.validation.transfer",
+        fix="`validation/transfer.py` evaluates portfolio SHAPES against the "
+            "same panel the IC is measured on, reporting gross excess over the "
+            "equal-weight cross-section, an overlap-corrected t, Grinold's "
+            "transfer coefficient, and how many names the shape needs. "
+            "Long-short shapes are computed and marked untradeable: India has "
+            "no retail borrow market worth the name, and a table that ranks a "
+            "short book beside a long one without saying so is proposing "
+            "something the engine cannot do.",
+        regression_test="tests/test_transfer_coefficient.py",
+        before_after="the engine's answer to 'the IC is real but the book "
+                     "loses' was a shrug between two diagnoses; it is now a "
+                     "measurement that rules one of them out",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="GROSS, and the word is load-bearing: D6-D8 holds 221 names and "
+              "pays turnover a six-name book does not, and nothing here prices "
+              "it. This is a construction diagnostic, not a proposal -- "
+              "changing the book is a model decision that spends trials and "
+              "opens an epoch. The six shapes are charged to the registry. "
+              "What it settles is the DIAGNOSIS: the long-only constraint is "
+              "not the binding one, because the best-performing shape in the "
+              "table is long-only.",
+    ),
+    _f(
+        fid="Q18", severity="high",
+        title="Two factor signs are backwards out of sample, and one of them "
+              "is in the theme whose weight a cap refresh would double",
+        category=Category.MODEL, status=Status.FIXED,
+        root_cause="The signs ARE the model, and nothing checked them off the "
+                   "data they were chosen on. `review_factors` watches a "
+                   "ROLLING window, which answers 'is this drifting' and not "
+                   "'was this ever true out of sample'. Measured at h=63 over "
+                   "78 dates after the fit window closed, 20 of 22 factors "
+                   "hold their shipped sign and several strongly -- "
+                   "`deliv_z_21` t +9.13, `ret_kurt_126` t -6.42, `mom_12_6` "
+                   "t +6.64. Two do not: `mom_3_1` ships +1 and reads -0.0248 "
+                   "at t -2.18, and `net_margin` ships -1 and reads +0.0207 "
+                   "at t +2.52. Both are significant in the OTHER direction, "
+                   "which is not the same failure as decaying to zero -- the "
+                   "factor still carries information and the model is using "
+                   "the sign backwards.",
+        location="prosignal.v3_monitor::out_of_sample_signs",
+        fix="`out_of_sample_signs` scores every shipped (factor, sign) pair on "
+            "the dates after `v3.FIT_WINDOW` closes and separates a FLIP -- "
+            "wrong direction at |t| >= SIGN_FLIP_T -- from a decay to zero, "
+            "because only one of those is actionable. `flipped_signs` returns "
+            "the sentences. The threshold is a significance bar rather than a "
+            "sign test: half the factors read the wrong way by chance on a "
+            "short window and flagging all of them is an alarm nobody reads.",
+        regression_test="tests/test_out_of_sample_signs.py",
+        before_after="22 shipped signs, none of them ever checked out of "
+                     "sample; 20 hold, 2 are backwards at |t| > 2",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="ACTED ON 2026-09-06, and not in the way this finding first "
+              "implied. `net_margin` is dropped; the quality theme STAYS. The "
+              "obvious reading -- a theme whose own out-of-sample IC is "
+              "+0.0103 at t +1.41 should go -- is what I recommended, and "
+              "measuring it refuted it. Four dispositions, all charged to the "
+              "registry, out of sample:\\n"
+              "    shipped, 2 factors   h21 +0.0551 t +2.14   h63 +0.0748 "
+              "t +1.64\\n"
+              "    theme dropped        h21 +0.0560 t +1.97   h63 +0.0718 "
+              "t +1.38\\n"
+              "    margin_stability only h21 +0.0572 t +2.20  h63 +0.0776 "
+              "t +1.66\\n"
+              "    net_margin flipped   h21 +0.0582 t +2.15   h63 +0.0771 "
+              "t +1.57\\n"
+              "Dropping the theme is WORSE at h=63 than shipping it. "
+              "`margin_stability` holds its sign at t -4.74 and carries the "
+              "theme alone, and removing only the refuted factor wins at both "
+              "horizons on IC and on t. Flipping the sign scores nearly as "
+              "well and was not taken: a sign fitted on one window and "
+              "reversed on the next is a sign nothing supports, and refitting "
+              "it against the out-of-sample window spends the only clean "
+              "evidence there is. `mom_3_1` remains shipped at +1 against an "
+              "out-of-sample -0.0248 (t -2.18) and is now the only open sign "
+              "flip. Q11 still stands: the theme's coverage cap has expired, "
+              "so a refresh would double the weight of a theme that is now one "
+              "factor wide.",
+    ),
+    _f(
+        fid="Q19", severity="critical",
+        title="Cadence parity, applied naively, deleted the time backstop",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="Q6 truncates each cohort at the decision cadence and "
+                   "re-selects, which is what gives the simulator the live "
+                   "engine's 21-session clock. On its own it also removes "
+                   "`stage7_risk.max_holding_sessions`: `_hold` was re-run "
+                   "every 21 sessions with no memory of when the position "
+                   "opened, so a name that stayed inside the exit band for "
+                   "five periods was carried 105 sessions while the live "
+                   "engine closes it at 63. The simulator would hold winners "
+                   "past the point the engine sells them -- flattering exactly "
+                   "the tail Q10 and Q17 found does not generalise. A fix for "
+                   "one parity break that opens another is worse than the "
+                   "break it fixed, because it looks corrected.",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="`opened_at` tracks the index position each CURRENT position was "
+            "opened at. A carried name spends its REMAINING budget "
+            "(`horizon_sessions - age`) rather than a fresh horizon; a "
+            "position that has run the full backstop is closed however well it "
+            "ranks and stamped `EXIT_TIMEOUT_EXPIRED`, which is deliberately "
+            "not `EXIT_TIMEOUT` -- that value is what the cost logic reads as "
+            "'carried, owes nothing', and a position the engine has sold is "
+            "not carried. Re-selecting it pays a round trip. `age` is zero for "
+            "any name being opened, including a re-buy after an early exit, "
+            "because that is a new position.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="holds were unbounded above the 63-session backstop at "
+                     "any cadence shorter than the horizon; they are now "
+                     "bounded by it at every cadence, asserted at 7, 21 and 63",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+        notes="Found by re-checking my own change against the config rather "
+              "than against the test I had just written. The test passed "
+              "throughout: it asserted the hold equalled the cadence, which "
+              "was true and was not the property that mattered.",
+    ),
+    _f(
+        fid="Q20", severity="high",
+        title="Two theme sub-scores are one bet, and the redundancy check "
+              "judged them by the factor-pair bar",
+        category=Category.FEATURE, status=Status.FIXED,
+        root_cause="`_v3_redundancy` compares factor pairs against "
+                   "`max_abs_spearman` (0.60) and reports THEME pairs against "
+                   "the same bar. Two factors inside a theme are supposed to "
+                   "overlap -- the theme averages them, and the average is "
+                   "what carries a weight. Two themes are not, and nothing "
+                   "downstream nets them: the cap is applied per theme, so "
+                   "shared exposure is weighted twice. That makes the theme "
+                   "level matter at a correlation a factor pair would shrug "
+                   "off, and the 0.60 bar meant nothing was ever flagged. "
+                   "Measured per date across the shipped panel: momentum <-> "
+                   "risk +0.389 (weights 40.0% and 11.1%) and ownership <-> "
+                   "reversal +0.306 (18.9% and 11.0%). `ulcer_120` enters risk "
+                   "at -1 and `prox_52w` enters momentum at +1 and the two "
+                   "correlate -0.773 raw, so ORIENTED they reinforce: the risk "
+                   "theme is substantially a second momentum vote.",
+        location="prosignal.v3_monitor::theme_sub_score_overlap",
+        fix="`theme_sub_score_overlap` and `overlapping_themes`, against "
+            "`THEME_OVERLAP_ALERT = 0.30` -- half the factor cutoff, on "
+            "purpose. Each sentence carries BOTH weights, because 0.39 between "
+            "two 6% themes and 0.39 between a 40% and an 11% theme are "
+            "different problems. Negative overlap is flagged too: two themes "
+            "moving opposite each other are also one bet, taken from both "
+            "ends, and the cap sees neither.",
+        regression_test="tests/test_effective_breadth.py",
+        before_after="every theme pair passed a 0.60 bar and nothing was "
+                     "reported; two pairs now alert, and one of them is the "
+                     "40% theme",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="The audit named momentum <-> risk at +0.341. Measured on the "
+              "full 356-date panel it is +0.389, and there is a second pair "
+              "the audit did not name. Neither theme is dropped here: that is "
+              "a model change, and Q9 already records that the theme level is "
+              "close to honest on effective count (3.96 of 4.59) even with "
+              "this overlap in it.",
+    ),
+    _f(
+        fid="Q21", severity="high",
+        title="Cost was reported on total equity while only a fifth of it "
+              "traded",
+        category=Category.EXECUTION, status=Status.FIXED,
+        root_cause="`mean_cost` is a share of TOTAL equity, and the book "
+                   "deploys about 20% of it. So an annualised cost of 1.2% of "
+                   "equity is 5.8% of the rupees that actually traded, and it "
+                   "is the second number that has to clear the gross return -- "
+                   "the cash was never going to pay for anything. Every cost "
+                   "figure in the repository was quoted on the first basis and "
+                   "compared against gross returns earned on the second.",
+        location="prosignal.validation.portfolio_sim::phase_summary",
+        fix="`cost_ann_on_deployed` on the phase summary, alongside the "
+            "existing figure rather than replacing it. Both are true and they "
+            "answer different questions: what the account paid, and what the "
+            "trading cost.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="cost quoted only as a share of equity; now also on "
+                     "deployed capital, which at 20.3% deployment is 4.9x "
+                     "larger",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="This is the same class of error as Q1 in the opposite "
+              "direction: Q1 was a return figure flattered by cash, this is a "
+              "cost figure flattered by the same cash. Both are fixed by "
+              "dividing by deployment.",
+    ),
+    _f(
+        fid="Q22", severity="high",
+        title="The signal is strongest at the horizon the engine does not "
+              "trade, and the table started past it",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="The ranking was only ever reported at h >= 21 while the "
+                   "book holds for 63, so the one question the horizon choice "
+                   "turns on could not be asked. IC MAGNITUDE rises with "
+                   "horizon and its SIGNIFICANCE falls, because a longer label "
+                   "leaves fewer independent windows in the same span. Those "
+                   "point opposite ways and a table starting at 21 shows only "
+                   "one of them. On the 21-session panel where the "
+                   "observations do not overlap, out-of-sample h=5 reads "
+                   "+0.0388 at t +3.66 -- clearing the Harvey-Liu-Zhu 3.0 bar "
+                   "without an overlap correction doing any work -- against "
+                   "t +1.20 at h=63.",
+        location="prosignal.validation.results::REPORT_HORIZONS",
+        fix="`REPORT_HORIZONS = (5, 21, 42)` unioned with the configured "
+            "horizon, so the record builds and reports the short end "
+            "alongside the traded one, in every window.",
+        regression_test="tests/test_model_stability_window.py",
+        before_after="the ranking table began at h=21 and the engine trades "
+                     "63; it now begins at 5",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="Reporting it is not the same as trading it, and moving the "
+              "horizon is a model change that spends trials and opens an "
+              "epoch. What was missing was the evidence to take that decision "
+              "against. Note the cost side: Q21 measures cost on deployed "
+              "capital, and a 5-session horizon means roughly 50 rebalances a "
+              "year -- the short end is where the signal is strongest AND "
+              "where cost is most likely to eat it, and the two have to be "
+              "decided together.",
+    ),
+    _f(
+        fid="Q23", severity="critical",
+        title="The cadence fix gave every carried position a ratcheting stop, "
+              "and inflated the live schedule by three points of alpha",
+        category=Category.VALIDATION, status=Status.FIXED,
+        root_cause="`resolve_exits` treats the index it is handed as the ENTRY "
+                   "row -- its own docstring says 'resolve every symbol's "
+                   "trade opened at row i'. Q6 truncates a cohort at the "
+                   "decision cadence and re-selects, and it resolved each "
+                   "carried name from TODAY. So a position held across three "
+                   "21-session decisions had its stop, its 3R target and its "
+                   "invalidation level re-based to the current price twice: a "
+                   "ratcheting stop, when `stage7_risk.trailing_stop.enabled` "
+                   "is false and the engine has none. A re-based stop on a "
+                   "winner sits far closer to the price than the original ever "
+                   "did. The same code also RE-SIZED carried positions to the "
+                   "risk budget at today's price each period, which is a "
+                   "rebalance to target risk every cadence that the engine "
+                   "also does not do.",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="A carried position is resolved from its OWN entry row and books "
+            "only the increment for this period, "
+            "(1+r_through)/(1+r_before) - 1, so the stop that decides its fate "
+            "is the one it was opened with. `opened_size` fixes the size at "
+            "entry and marks it to what the position is now worth. The "
+            "default cohort schedule is untouched: `truncated` gates both.",
+        regression_test="tests/test_cadence_parity.py",
+        before_after="on the fixture the ratchet made the stop look like it "
+                     "cost 4.22 points of alpha at a 21-session cadence "
+                     "against 0.40 at the default; corrected, 2.28 against "
+                     "0.40, and the residual is real -- a faster cadence "
+                     "re-buys stopped names more often. On the real store the "
+                     "live cadence read +6.74% alpha on deployed and reads "
+                     "+3.50% once the ratchet is out",
+        moves_coefficients=False, moves_history=True, forces_restart=False,
+        notes="THIS REVERSED A PUBLISHED CONCLUSION OF MY OWN. Q6 originally "
+              "reported that alpha on deployed capital RISES at the live "
+              "cadence and read that as the engine's real schedule being the "
+              "better one. It falls. Q14's headline -- that the raw metric "
+              "would have rejected the better exit band -- also did not "
+              "survive: on corrected numbers both metrics agree. Every "
+              "finding measured through `simulate` at a truncated cadence was "
+              "re-run and Q6, Q14 and Q15 rewritten. Found by re-reading my "
+              "own change against `features/exits.py` rather than against the "
+              "test I had just written; the test asserted the hold equalled "
+              "the cadence, which was true and was not the property that "
+              "mattered.",
+    ),
+    _f(
+        fid="Q24", severity="critical",
+        title="D6-D8 does not survive costing, and the change that matters is "
+              "the number of names, not the band",
+        category=Category.MODEL, status=Status.OPEN,
+        root_cause="Q17 measured portfolio SHAPES gross and found D6-D8 the "
+                   "only one clearing t=2 (+1.19%, t +2.42). The audit's §18 "
+                   "target architecture is built on that number and so was my "
+                   "own recommendation. Gross was doing all the work. "
+                   "`portfolio_sim` can now express a percentile band and "
+                   "equal-weight sizing, so the same shapes were re-run "
+                   "through the real simulator NET of the modelled cost, at "
+                   "the live cadence. Alpha on deployed capital, out of "
+                   "sample over 87 dates:\\n"
+                   "    top-6 shipped        -10.46%  sh -0.28   40 RT/yr\\n"
+                   "    D6-D8, 200 slots      -7.65%  sh -0.12  908 RT/yr  "
+                   "cost 10.19% of deployed\\n"
+                   "    D10, 75 slots         -5.80%  sh -0.07  346 RT/yr\\n"
+                   "    D10, 40 slots         -2.83%  sh +0.11  175 RT/yr\\n"
+                   "    D10, 20 slots         -1.94%  sh +0.15   85 RT/yr\\n"
+                   "    D10, 10 slots         -2.90%  sh +0.06   43 RT/yr\\n"
+                   "    top-half, 350 slots  -12.96%  sh -0.47 1412 RT/yr  "
+                   "cost 14.47% of deployed\\n"
+                   "D6-D8 at its natural size turns +1.19% gross into -7.65% "
+                   "net, because band membership churns: 908 round trips a "
+                   "year against 85 for a 20-name top-decile book. On the "
+                   "full panel it is WORSE than the shipped book (+0.39% "
+                   "against +3.50%).",
+        location="prosignal.validation.portfolio_sim::simulate",
+        fix="OPEN. Nothing is changed in the shipped book. What exists now is "
+            "the capability to price these shapes -- `entry_pct_band`, "
+            "`exit_pct_band`, `equal_weight_slots` and `target_deployment` on "
+            "`PortfolioParams`, all opt-in, with the rank-and-risk-budget "
+            "default byte-identical. Ten shapes were charged to the registry.",
+        regression_test="tests/test_band_book.py",
+        before_after="the best shape measured is the TOP DECILE at ~20 names, "
+                     "equal weight, fully deployed: -1.94% alpha on deployed "
+                     "out of sample against the shipped -10.46%, Sharpe +0.15 "
+                     "against -0.28; and on the full panel +9.48% against "
+                     "+3.50% with excess on deployed turning positive "
+                     "(+1.87%) and Sharpe +1.27 against +0.68",
+        moves_coefficients=False, moves_history=False, forces_restart=False,
+        notes="THREE THINGS THIS REFUTES, TWO OF THEM MINE. §18's target "
+              "architecture (D6-D8, equal weight, ~100% deployed) is worse "
+              "than the shipped book on the full panel and worse than every "
+              "top-decile variant in both windows. Equal weight ALONE is not "
+              "the fix: top-6 at full deployment is the worst arm tested "
+              "(-11.73% out of sample, -43.1% drawdown on the full panel) -- "
+              "removing the leverage confound reveals the book rather than "
+              "repairing it. And the name count has an interior optimum near "
+              "20; 10 is worse and 75 is much worse.\\n"
+              "WHY THIS STAYS OPEN. Out-of-sample alpha is still NEGATIVE at "
+              "-1.94% and Sharpe +0.15 is not significant, so the best shape "
+              "measured is less bad rather than good. More importantly every "
+              "figure here is net of an UNCALIBRATED impact coefficient (Q7), "
+              "and the arms differ by twenty-fold in turnover -- 43 to 1412 "
+              "round trips a year -- which is exactly where that assumption "
+              "bites hardest. The ranking between these arms is a function of "
+              "a number nobody has validated. Q7 is the gating item for "
+              "acting on any of this, which is why the fills feed was built "
+              "first.",
+    ),
     _f(
         fid="P0-6", severity="high",
         title="The trial budget was countable but not enforceable",

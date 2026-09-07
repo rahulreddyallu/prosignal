@@ -1177,12 +1177,37 @@ class TestTheReadmeAgreesWithHead:
         ships."""
         r = self._readme()
         assert "## RESULTS OF RECORD" in r, "the table itself must not be deleted"
-        assert "NEITHER TABLE IN THIS FILE DESCRIBES WHAT SHIPS" in r, (
-            "the README must say which model each table measured, or a reader "
-            "takes one of them for the shipped configuration"
+        # RE-POINTED AT THE PROPERTY, 2026-09-06, for the same reason
+        # `test_a_benchmark_relative_hypothesis_exists` was: the old assertion
+        # pinned a SENTENCE, and the audit remediation made that sentence
+        # false. "Neither table describes what ships" was true while the
+        # record's shipped arm measured a pre-cap, sector-neutralised ranking.
+        # The record has since been regenerated against the current store and
+        # its first arm IS `ranking.source = v3_composite` -- the shipped
+        # configuration. Asserting the old wording would now require the README
+        # to state something untrue to stay green, which is the failure mode
+        # this whole file exists to prevent.
+        #
+        # What must never be lost is the PROPERTY: a reader must not be able to
+        # mistake a non-shipped table for the shipped one. So each table has to
+        # name the ranker it measured.
+        assert "MEASURES THE SHIPPED CONFIGURATION" in r, (
+            "the README must say which of its tables measures the shipped "
+            "ranker, or a reader takes whichever one they read first"
         )
-        assert "supersede every other number in this file" not in r, (
-            "the withdrawn claim is back"
+        assert "v3_composite" in r, "the shipped ranking source must be named"
+        assert "measured_factor" in r, (
+            "the tuning table measures a single momentum column the engine "
+            "does not rank on, and the README must say so next to it"
+        )
+        assert "supersede every other number in this file" in r, (
+            "the record does supersede -- what it must not do is supersede "
+            "numbers about a DIFFERENT configuration, which is why the "
+            "sentence is qualified rather than deleted"
+        )
+        assert "that is about that configuration" in r, (
+            "the supersession claim is unqualified again; it would then cover "
+            "the tuning table, which measures a different ranker"
         )
 
     def test_superseded_numbers_are_marked_not_deleted(self):

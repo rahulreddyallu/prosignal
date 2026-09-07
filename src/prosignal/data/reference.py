@@ -18,12 +18,13 @@ be the worst kind of leak -- the kind that improves a backtest.
 derived from the exchange's own broadcast timestamp, and there are 1,234
 distinct ones spanning 2022-01-07 onward. It can be as-of joined honestly.
 
-`security_list` and `fo_lots` are a SINGLE SNAPSHOT. Every row shares one
-`snapshot_date`. Applying today's surveillance list to a 2019 replay would
-reject names for measures the exchange had not yet imposed and clear names it
-later restricted -- lookahead in both directions. So the snapshot is usable only
-for a run close to its own date, and every other run gets NOT_TESTABLE rather
-than a silently wrong answer.
+`security_list` and `fo_lots` ACCUMULATE FORWARD. NSE publishes neither at a
+dated URL, so the table cannot be reconstructed backwards: every ingest stores
+one snapshot, and the table is point-in-time only from its first one onward.
+This reader therefore takes the latest snapshot AT OR BEFORE the run date --
+never the newest overall, which would hand a 2024 replay the 2026 surveillance
+state. A date before the first snapshot gets NOT_TESTABLE rather than a
+silently wrong answer, and so does a snapshot gone stale.
 
 WHAT `restricted` MEANS. The provider defines it as trade-for-trade settlement,
 OR an explicit GSM stage, OR a price band cut below the ordinary 20%. Its own
@@ -53,10 +54,11 @@ __all__ = [
 #: The ordinary NSE band. Anything tighter is a surveillance measure.
 ORDINARY_BAND_PCT = 20.0
 
-#: How far a run date may sit from the surveillance snapshot before the snapshot
-#: stops describing it. Seven days either side: the list is refreshed daily, so
-#: a week covers a normal gap between ingests, and anything beyond it is either
-#: a stale file or a replay reaching for information from its own future.
+#: How stale the newest snapshot at or before the run date may be. Seven days:
+#: the ingest refreshes on the reference cadence, so a week covers a normal gap,
+#: and beyond it the exchange has likely revised measures the file predates.
+#: Lookahead is handled separately and absolutely -- a snapshot after the run
+#: date is never used at any tolerance.
 DEFAULT_TOLERANCE_DAYS = 7
 
 
@@ -128,24 +130,38 @@ def surveillance(store, as_of: dt.date,
             unavailable="no security list in the store; run `prosignal data "
                         "ingest` to fetch NSE's surveillance file")
 
-    snap = pd.to_datetime(sec["snapshot_date"]).max()
-    snap_date = snap.date() if pd.notna(snap) else None
-    if snap_date is None:
+    # THE LATEST SNAPSHOT AT OR BEFORE THE RUN DATE, never the newest overall.
+    #
+    # NSE publishes neither the security list nor the F&O list at a dated URL,
+    # so the table cannot be reconstructed backwards -- it accumulates FORWARD,
+    # one snapshot per ingest. Once it holds more than one, taking `max()`
+    # would hand a 2024 replay the 2026 surveillance state: it would reject
+    # names for measures the exchange had not yet imposed and clear names it
+    # later restricted. Lookahead in both directions, and it runs in the
+    # flattering one.
+    dates = pd.to_datetime(sec["snapshot_date"]).dt.date
+    prior = sorted({d for d in dates.dropna() if d <= as_of})
+    if not prior:
+        first = min(dates.dropna()) if dates.notna().any() else None
         return SurveillanceSnapshot(
             None, as_of, tolerance_days,
-            unavailable="the security list carries no snapshot date")
+            unavailable=(
+                f"no surveillance snapshot on or before {as_of.isoformat()}"
+                + (f"; the table starts at {first.isoformat()}" if first else "")
+                + ". Projecting a later list backwards would be lookahead."))
+    snap_date = prior[-1]
 
+    # And it must not be STALE either: a snapshot months old describes a
+    # surveillance state the exchange has since revised.
     gap = (as_of - snap_date).days
-    if abs(gap) > tolerance_days:
-        direction = ("ahead of" if gap < 0 else "behind")
+    if gap > tolerance_days:
         return SurveillanceSnapshot(
             snap_date, as_of, tolerance_days,
             unavailable=(
-                f"the surveillance snapshot is dated {snap_date.isoformat()}, "
-                f"{abs(gap)} days {direction} this run's {as_of.isoformat()} -- "
-                f"beyond the {tolerance_days}-day tolerance. Applying it would "
-                f"be lookahead: it would reject names for measures the exchange "
-                f"had not yet imposed and clear names it later restricted."))
+                f"the newest surveillance snapshot at or before this run is "
+                f"dated {snap_date.isoformat()}, {gap} days stale against "
+                f"{as_of.isoformat()} -- beyond the {tolerance_days}-day "
+                f"tolerance. The exchange revises these measures continuously."))
 
     latest = sec[pd.to_datetime(sec["snapshot_date"]).dt.date == snap_date]
     idx = latest[SYMBOL].astype(str)

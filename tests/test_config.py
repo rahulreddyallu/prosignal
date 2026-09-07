@@ -244,11 +244,34 @@ def test_regime_multiplier_rows_must_be_triples(tmp_project, baseline_yaml):
 
 
 def test_position_value_splits_capital_when_unset(cfg):
-    expected = (
-        cfg.params.capital.total_capital_inr.value
-        / cfg.params.capital.max_open_positions.value
-    )
-    assert cfg.params.capital.position_value_inr() == pytest.approx(expected)
+    """The split is over the TARGET DEPLOYMENT, not the whole account.
+
+    Under `sizing_mode: equal_weight` the book deliberately holds cash -- 20
+    names at 75% is Rs 37,500 each on a Rs 10 lakh account, and the remaining
+    quarter is uninvested by design. Alpha on deployed capital does not move
+    with deployment while drawdown does, so the cash costs nothing measurable
+    and buys five points of worst drawdown (see capital.target_deployment).
+
+    Under `risk_budget` the whole account is split, which is what this asserted
+    before and still asserts on that path.
+    """
+    cap = cfg.params.capital
+    expected = cap.total_capital_inr.value / cap.max_open_positions.value
+    if str(cap.sizing_mode.value) == "equal_weight":
+        expected *= float(cap.target_deployment.value)
+    assert cap.position_value_inr() == pytest.approx(expected)
+
+
+def test_equal_weight_leaves_the_target_cash_uninvested(cfg):
+    """The property, stated as money rather than as a ratio: the book's slots
+    must sum to the target deployment and not to the account."""
+    cap = cfg.params.capital
+    if str(cap.sizing_mode.value) != "equal_weight":
+        pytest.skip("risk_budget sizing splits the whole account")
+    book = cap.position_value_inr() * cap.max_open_positions.value
+    assert book == pytest.approx(
+        cap.total_capital_inr.value * float(cap.target_deployment.value))
+    assert book < cap.total_capital_inr.value, "nothing is being held back"
 
 
 def test_transparency_report_counts_match(cfg):
