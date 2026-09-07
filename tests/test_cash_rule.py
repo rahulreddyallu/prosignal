@@ -123,7 +123,10 @@ def test_the_threshold_defaults_to_the_band_the_book_lives_in(cfg):
     opened."""
     cr = cfg.params.stage8_final_signal.scarcity.cash_rule
     assert cr.min_qualifying.value is None
-    assert int(cfg.params.stage6_entry.admission.exit_rank.value) == 18
+    # 18 -> 106 with the breadth change of 2026-09-07. The content of this
+    # test is `min_qualifying is None`; the literal only records what band the
+    # default resolves to, so it moves with the band.
+    assert int(cfg.params.stage6_entry.admission.exit_rank.value) == 106
 
 
 def test_a_normal_day_does_not_trip_the_rule():

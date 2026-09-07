@@ -184,18 +184,51 @@ class AppConfig:
             self._identity = identify(self, self._bound_store)
         return self._identity
 
+    #: Marks a version string that covers PARAMETERS ONLY. See `version`.
+    PARAMS_ONLY_MARK = "params-only:"
+
     @property
     def version(self) -> str:
         """The string written to every ledger row, e.g. ``baseline-v1@3f9c...``.
 
         With a store bound this is
         ``label@ H(params) XOR H(store_fingerprint) XOR H(train_window)``;
-        without one it is ``label@H(params)``.
+        without one it is ``label@params-only:H(params)``.
+
+        WHY THE DEGRADED FORM IS MARKED. It used to be plain
+        ``label@H(params)`` -- the same shape as the full identity, differing
+        only in a hash nobody can evaluate by eye. `bind_store` documents the
+        fallback as honest "so a caller can tell which one it is holding", and
+        that was true only of `identity`, which is None when unbound. Every
+        caller that reads `version` instead -- which is every caller that
+        stamps a record -- could not tell.
+
+        It cost: the API bound no store at all, so `/ready`, the forward-test
+        registration, the performance cache key and the live/research parity
+        check all recorded a parameters-only identity, while `pipeline` bound
+        one and wrote the full identity into the ledger from the same process.
+        `test_restart_gate` compared a store-bound epoch against an unbound
+        in-test identity and could never pass, reporting a "configuration
+        change" that had not happened.
+
+        A marked string cannot be mistaken for a full one, cannot silently
+        compare equal to one, and names its own limitation wherever it is
+        printed. Use `params_version` when parameters-only is what you actually
+        want to ask about.
         """
         ident = self.identity                    # resolves lazily, then caches
         if ident is not None:
             return ident.version
-        return f"{self.params.meta.config_label}@{self.hash}"
+        return f"{self.params.meta.config_label}@{self.PARAMS_ONLY_MARK}{self.hash}"
+
+    @property
+    def identity_is_complete(self) -> bool:
+        """Whether `version` covers the data and training window, not just knobs.
+
+        The question every consumer of `version` should be able to ask without
+        knowing how the config was constructed.
+        """
+        return self.identity is not None
 
     @property
     def params_version(self) -> str:

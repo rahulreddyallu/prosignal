@@ -1,0 +1,11 @@
+{
+ "rebalances":89.0,
+ "invested_mean":0.9995831461,
+ "invested_min":0.9964,
+ "rebalances_below_95pct":0.0,
+ "turnover_mean_per_rebalance":0.3530129425,
+ "turnover_annualised":4.4479630759,
+ "cost_at_80bps_annual":0.0355837046,
+ "held_median":50.0,
+ "eligible_median":532.0
+}

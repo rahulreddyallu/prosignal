@@ -1159,22 +1159,31 @@ class TestTheReadmeAgreesWithHead:
         import prosignal
         return (Path(prosignal.__file__).parent.parent.parent / "README.md").read_text()
 
-    def test_the_readme_does_not_claim_a_table_describes_what_ships(self):
-        """This asserted that RESULTS OF RECORD "supersede every other number
-        in this file". That claim was withdrawn on 2026-09-05, and the test is
-        strengthened rather than deleted.
+    def test_each_headline_table_says_which_model_it_measured(self):
+        """WHY THIS TEST WAS REWRITTEN ON 2026-09-07, and it is a rewrite that
+        needs justifying, because loosening a guard to get a green suite is the
+        exact failure mode this file exists to catch.
 
-        The two headline tables measure two different models with two different
-        exit geometries: the executive summary is `mom_6_1_r` traded alone, and
-        RESULTS OF RECORD is the fitted Fama-MacBeth composite with a 2.5xATR
-        stop, a 3R target and risk-budget sizing. The engine ranks on
-        `v3_composite` and uses none of those exits. So neither table is the
-        live one, and a README that nominates either is more misleading than one
-        that nominates neither.
+        It required the literal string "NEITHER TABLE IN THIS FILE DESCRIBES
+        WHAT SHIPS", and forbade the phrase "supersede every other number in
+        this file". Both were correct when written: RESULTS OF RECORD then
+        carried the fitted Fama-MacBeth composite with a 2.5xATR stop and a 3R
+        target, the executive summary carried `mom_6_1_r` traded alone, and the
+        engine ranked on `v3_composite` using neither.
 
-        What must remain true: both are still present (a bad result is never
-        deleted here) and the file says plainly that neither describes what
-        ships."""
+        That is no longer the state of the repository. `research results` now
+        generates the shipped arm itself, and `docs/RESULTS_OF_RECORD.md` says
+        of it, in generated text: "This arm **is** the configuration the engine
+        ships." The same file asserts supersession over every other number in
+        the repository. So the old assertions now demand that README.md state
+        something false and forbid it from repeating something the generated
+        source of truth says in its own header. The guard had gone stale, not
+        the README -- and it had been failing on `main` since 2026-09-05.
+
+        What the guard was FOR is unchanged and is asserted below, harder: a
+        reader must never mistake a withdrawn table for the live one. Both
+        tables must still be present, the dead one must be marked dead, and the
+        live one must be named as live."""
         r = self._readme()
         assert "## RESULTS OF RECORD" in r, "the table itself must not be deleted"
         # RE-POINTED AT THE PROPERTY, 2026-09-06, for the same reason

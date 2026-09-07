@@ -331,3 +331,6 @@ def test_the_three_books_are_distinct_and_the_note_says_which_one_trades():
         "the note must say what changed and why; a book that silently widened "
         "reads as though it was always this size")
     assert "t 0.81" in note, "the weakest holdout statistic must be named"
+    assert "BROADER than either sealed window" in note, (
+        "a book wider than both holdouts is not described by either, and the "
+        "note must not let a reader borrow their numbers for it")

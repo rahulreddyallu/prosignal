@@ -121,32 +121,47 @@ def _tickers(recs):
 
 
 # ------------------------------------------------- the sector cap eviction
-def test_the_sector_cap_does_not_evict_a_position_already_held(cfg):
-    """Two fresh names outscore a held one in the same sector. The cap is 2.
+def _sector_cap(cfg) -> int:
+    return int(cfg.params.stage8_final_signal.portfolio.max_signals_per_sector.value)
 
-    Applied in score order with no knowledge of the book, the held name is
-    third in its sector and is demoted -- deleting the position. It must not be.
+
+def test_the_sector_cap_does_not_evict_a_position_already_held(cfg):
+    """Fresh names outscore a held one in the same sector, enough to fill the cap.
+
+    Applied in score order with no knowledge of the book, the held name is past
+    the cap in its sector and is demoted -- deleting the position. It must not be.
+
+    DERIVED FROM THE CAP, not from a literal. These tests hardcoded a cap of 2
+    and went red when it moved to 6 on 2026-09-07, which is the same failure the
+    slate constant had: pinning the value instead of the relationship. The cap
+    is a book-size constraint expressed per sector, so it moves whenever the
+    book does, and a test that fixes it in place will keep breaking for reasons
+    that are not defects.
     """
-    rows = [("FRESH1", 1, 0.99, "Metals"),
-            ("FRESH2", 2, 0.98, "Metals"),
-            ("HELD",  12, 0.97, "Metals")]
-    buys, watch, _ = _run(cfg, rows, triggered={"FRESH1", "FRESH2", "HELD"},
-                          held={"HELD"})
+    cap = _sector_cap(cfg)
+    fresh = [(f"FRESH{i}", i, 0.99 - i * 0.001, "Metals") for i in range(1, cap + 1)]
+    rows = fresh + [("HELD", cap + 10, 0.90, "Metals")]
+    names = {t for t, _, _, _ in rows}
+    buys, watch, _ = _run(cfg, rows, triggered=names, held={"HELD"})
+
     assert "HELD" in _tickers(buys), (
         "the sector cap closed an open position; it governs entries only"
     )
-    # The cap still bites -- on the NEW name, which is what it is for.
-    assert "FRESH2" in _tickers(watch)
-    assert _tickers(buys) == ["HELD", "FRESH1"]
+    # The cap still bites -- on the NEW name, which is what it is for. With the
+    # held name occupying one slot, the last fresh name is the one pushed out.
+    assert f"FRESH{cap}" in _tickers(watch)
+    assert len(buys) == cap
 
 
 def test_the_sector_cap_still_limits_new_entries(cfg):
-    rows = [("A", 1, 0.99, "Metals"), ("B", 2, 0.98, "Metals"),
-            ("C", 3, 0.97, "Metals")]
-    buys, watch, _ = _run(cfg, rows, triggered={"A", "B", "C"})
-    assert _tickers(buys) == ["A", "B"]
-    assert _tickers(watch) == ["C"]
-    assert "already 2 signal(s)" in " ".join(watch[0].why_this_signal_exists)
+    cap = _sector_cap(cfg)
+    rows = [(chr(65 + i), i + 1, 0.99 - i * 0.001, "Metals") for i in range(cap + 1)]
+    names = {t for t, _, _, _ in rows}
+    buys, watch, _ = _run(cfg, rows, triggered=names)
+
+    assert _tickers(buys) == [chr(65 + i) for i in range(cap)]
+    assert _tickers(watch) == [chr(65 + cap)]
+    assert f"already {cap} signal(s)" in " ".join(watch[0].why_this_signal_exists)
 
 
 def test_the_book_size_cap_does_not_evict_a_held_position(cfg):

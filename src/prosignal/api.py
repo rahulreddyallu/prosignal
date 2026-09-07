@@ -96,6 +96,35 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # you did not. It is how an audit put a `live` row in the production ledger
     # from a session it had sandboxed.
     cfg = config or get_config()
+
+    # THE SERVER HAS TO BIND A STORE, and until 2026-09-07 it did not. `cli.main`
+    # binds one on every invocation and `pipeline.run_analysis` binds one before
+    # anything reads `config.version`; the API bound none, so every identity it
+    # stamped was `label@H(params)` while the ledger rows written by the very
+    # same process carried `label@XOR(params, store, train)`. Both print as
+    # `baseline-v2@<16 hex>` and nothing distinguishes them by eye.
+    #
+    # What that corrupted: `/ready`'s config_version check, the forward test's
+    # registration -- whose entire integrity test is "did config_version
+    # change" -- the performance cache key, the live/research parity comparison
+    # at `/measurement`, and every measurement record. A forward test cannot
+    # detect a store that grew if the identity it registered never looked at
+    # the store.
+    #
+    # Bound once, here, for the life of the app: the identity resolves lazily
+    # and caches, so this costs one fingerprint on first use and nothing after.
+    try:
+        from .data.store import DataStore as _DataStore
+
+        cfg.bind_store(_DataStore(cfg.paths.curated, cfg.paths.snapshots))
+    except Exception as exc:                       # noqa: BLE001
+        # Deliberately not fatal: a server that will not start because the store
+        # is unreadable cannot serve /health to say so. The degraded identity is
+        # now self-describing (`AppConfig.version`), so anything it stamps is
+        # visibly parameters-only rather than quietly so.
+        log.warning("config identity covers parameters only; the store could "
+                    "not be read", extra={"error": str(exc)})
+
     log_cfg = cfg.params.runtime.logging
     setup_logging(
         level=str(log_cfg.level),

@@ -422,7 +422,72 @@ def cmd_data_ingest(cfg: AppConfig, args: argparse.Namespace) -> int:
             else f"Stage 1 will halt: missing={missing_required} stale={stale_required}"
         )
         return 2
-    return 0
+
+    return _settle_after_ingest(cfg)
+
+
+def _settle_after_ingest(cfg: AppConfig) -> int:
+    """Re-manifest the store and report what the ingest did to the engine's identity.
+
+    WHY INGEST OWNS THIS. `config_version` is `label@XOR(params_hash,
+    store_hash, train_hash)` (`config/identity.py:346`), so pulling a day of
+    prices moves the identity of the model BY CONSTRUCTION -- no parameter has
+    to change. Ingest used to end here reporting success, and the drift was
+    discovered days later by whichever guard happened to run first. On
+    2026-09-07 that was four at once: the store manifest, the restart gate, the
+    open epoch and the research panel, all invalidated by one routine pull, all
+    reported as separate failures.
+
+    They are one event and it belongs to the ingest that caused it.
+
+    The manifest is rewritten rather than merely checked, because a manifest
+    describing a store that no longer exists is strictly worse than one that
+    does -- and it blinds nothing: `store_fingerprint` reads the STORE, not the
+    manifest, so epoch drift is still detected independently.
+
+    The epoch is NOT re-opened here. Whether a change is material enough to
+    start a new out-of-sample question is a judgement, and this only makes sure
+    it is a judgement somebody is asked to make on the day, rather than one a
+    test discovers later. Exit 3 says exactly that: the data landed and the
+    engine's identity moved.
+    """
+    from .data.manifest import build, load, write
+    from .validation import epoch as ep
+
+    root = Path(cfg.paths.curated)
+    before = load(root)
+    man = build(root)
+    moved = before is None or before.digest != man.digest
+    write(man, root)
+
+    _rule("Store manifest")
+    _print(f"  digest {man.digest}" + ("  (unchanged)" if not moved else
+                                       f"  (was {before.digest})" if before else "  (new)"))
+    _print(f"  {man.summary()}")
+
+    active, reasons = ep.drifted_from(Path(cfg.paths.ledger), cfg)
+    if active is None:
+        _print()
+        _print("  No epoch is open, so nothing describes which engine produced "
+               "this data. `prosignal research epoch open` before the next run.")
+        return 3
+    if not reasons:
+        return 0
+
+    _print()
+    _print(f"[yellow]The ingest moved the engine's identity[/yellow] from epoch "
+           f"{active.epoch_id}:" if _console
+           else f"The ingest moved the engine's identity from epoch {active.epoch_id}:")
+    for reason in reasons:
+        _print(f"    {reason}")
+    _print()
+    _print("  Nothing is broken and nothing was decided for you. Either open a "
+           "new epoch, or re-ingest to the state the open one describes. Until "
+           "one of those happens, results carry an epoch that does not describe "
+           "the store they were computed from.")
+    _print("  Research panels are guarded separately and are now stale: rebuild "
+           "with `research/v3/experiments/build_panel.py`.")
+    return 3
 
 
 def cmd_data_status(cfg: AppConfig, args: argparse.Namespace) -> int:

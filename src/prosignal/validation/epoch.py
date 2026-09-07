@@ -246,6 +246,25 @@ class Identity:
         return hashlib.sha256(payload).hexdigest()[:16]
 
     def differences(self, other: "Identity") -> List[str]:
+        """Field-by-field drift, `other` (the epoch) -> `self` (now).
+
+        A PARAMETERS-ONLY IDENTITY IS NOT COMPARED, it is refused. `label@
+        params-only:...` and `label@<xor>` are answers to different questions,
+        and reporting their inequality as `config_version: X -> Y` reads as "the
+        configuration changed" when what actually happened is that nobody bound
+        a store. That misreport is what `test_restart_gate` published for two
+        days. Naming the real precondition is both true and actionable.
+        """
+        mark = "@params-only:"
+        for side, ident in (("now", self), ("the epoch", other)):
+            version = str(getattr(ident, "config_version", "") or "")
+            if mark in version:
+                return [
+                    f"config_version for {side} covers PARAMETERS ONLY "
+                    f"({version}); it cannot be compared against an identity "
+                    f"that includes the store and training window. Bind a "
+                    f"store before asking whether the engine has drifted."
+                ]
         out = []
         for f in ("code_sha", "model_sources_sha", "config_version",
                   "data_manifest_sha", "feature_schema_sha", "universe_policy",
@@ -257,9 +276,32 @@ class Identity:
 
 
 def current_identity(cfg) -> Identity:
-    """What the engine is right now."""
+    """What the engine is right now.
+
+    BINDS A STORE IF THE CALLER DID NOT. `cfg.version` degrades to a
+    parameters-only string when no store is bound (`AppConfig.version`), and an
+    epoch records whichever form its opener happened to hold. `cli.main` binds,
+    `pipeline.run_analysis` binds, and until 2026-09-07 `create_app` and every
+    test did not -- so the same tree produced two different "current"
+    identities depending on which entry point asked, and `test_restart_gate`
+    compared a bound epoch against an unbound reading and reported a
+    configuration change that had never happened.
+
+    An epoch answers "which engine produced this", and the store is part of the
+    engine. Resolving it here means the answer does not depend on the caller's
+    construction order. Failure is not fatal: the identity then carries the
+    marked parameters-only string, which `differences` refuses to compare.
+    """
     from ..data.manifest import digest_of
     from ..modelprint import source_digest
+
+    if not getattr(cfg, "identity_is_complete", True):
+        try:
+            from ..data.store import DataStore
+
+            cfg.bind_store(DataStore(cfg.paths.curated, cfg.paths.snapshots))
+        except Exception:                          # noqa: BLE001
+            pass
 
     root = Path(cfg.paths.root)
     return Identity(

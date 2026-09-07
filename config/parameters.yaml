@@ -242,7 +242,7 @@ capital:
     status: MEASURED
     optimization_tier: A_SEARCH
     search_points: 3
-    search_range: [3, 30]
+    search_range: [3, 60]
     note: >-
       No longer a placeholder. Measured at trade level across book sizes 5, 6,
       8, 10, 12 and 15 on the surviving signal: 6 and 8 are the two live
@@ -2100,7 +2100,7 @@ stage6_entry:
     entry_rank:
       value: 20
       status: MEASURED
-      search_range: [3, 30]
+      search_range: [3, 60]
       note: >-
         Matches capital.max_open_positions; the loader enforces it. A name
         outside this is not bought. Six rather than eight: at cadence 21 with
@@ -2118,7 +2118,7 @@ stage6_entry:
     exit_rank:
       value: 60
       status: MEASURED
-      search_range: [4, 60]
+      search_range: [4, 150]
       note: >-
         THREE times entry_rank, not the two-times index convention that shipped.
         Measured on the same surface: at cadence 21 with six names and a
@@ -2620,13 +2620,30 @@ stage8_final_signal:
       status: UNVALIDATED
       search_range: [42, 252]
     max_signals_per_sector:
-      value: 2
+      # CHANGED 2026-09-07, 2 -> 6, because the book went from 6 names to 50 and
+      # a cap of 2 per sector made the target size unreachable: it is a
+      # BOOK-SIZE constraint expressed per sector, so it had to move with the
+      # book. Measured on the 2026-08-03 cross-section, a top-50 spans 19 of 23
+      # sectors with at most 6 in any real one, so 6 binds rarely and does not
+      # fight the ranking.
+      #
+      # It is a BACKSTOP, not the primary diversification control. Stage 4
+      # already ranks within sector (`v3.sector_neutral_rank`), so a tight cap
+      # here double-counts and costs transfer coefficient -- it pushes the book
+      # away from the order the model actually produced.
+      #
+      # KNOWN DEFECT, recorded rather than silently handled: the largest bucket
+      # in that top-50 was UNCLASSIFIED with 9 names. The cap treats a hole in
+      # `sector_map.parquet` as though it were one sector, so a data gap
+      # becomes a concentration limit on names that are in different real
+      # sectors. Fixing that means fixing the sector map, not the cap.
+      value: 6
       status: OPERATIONAL
-      search_range: [1, 5]
+      search_range: [1, 15]
     max_signals_per_run:
       value: 20
       status: OPERATIONAL
-      search_range: [1, 20]
+      search_range: [1, 60]
       note: >-
         Must be at least stage6_entry.admission.entry_rank, which the loader
         enforces. At 5 against an entry band of 8, Stage 8 discarded three
