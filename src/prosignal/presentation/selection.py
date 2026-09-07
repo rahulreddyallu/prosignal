@@ -56,7 +56,8 @@ from typing import Any, Dict, List, Optional, Sequence
 #: The card's own thesis text said "inside the top 6", which is how the
 #: disagreement stayed invisible: the prose came from the config and the list
 #: came from here.
-SLOTS = 6
+#: 6 -> 50 on 2026-09-07 with the breadth change (docs/REBUILD_2026_09.md 6.2).
+SLOTS = 50
 
 BUY = "BUY"
 WATCH = "WATCH"

@@ -106,15 +106,37 @@ POST /analysis/run
 
 From `docs/RESULTS_OF_RECORD.md` (generated 2026-09-04), panel 2018-11-27 → 2026-08-03, 204,425 rows, 380 signal dates, **31.1 independent 63-session windows**. Signal dates are 5 sessions apart against a 63-session label, so naive *t* is inflated by ≈√VIF and is not quoted:
 
-| horizon | rank IC | IC *t* (naive) | IC *t* (corrected) | quintile spread | spread *t* | top-decile excess | decile *t* |
-|---|---|---|---|---|---|---|---|
-| 21 | +0.0575 | +7.95 | **+3.87** | +1.34% | +2.89 | +0.64% | +2.49 |
-| 42 | +0.0680 | +9.82 | **+3.39** | +2.56% | +2.96 | +1.20% | +2.36 |
-| 63 | +0.0768 | +11.00 | **+3.11** | +3.73% | +2.80 | +1.76% | +2.21 |
+**Regenerated 2026-09-07** on the rebuilt panel: 197,940 rows, 356 signal dates, **29.2 independent 63-session windows**. The shipped-panel figures are shown struck through beside them.
+
+| horizon | rank IC | IC *t* (corr.) | *was* | quintile spread *t* | *was* | top-decile excess | decile *t* | *was* |
+|---|---|---|---|---|---|---|---|---|
+| 21 | +0.0545 | **+4.01** | ~~+3.87~~ | +2.60 | ~~+2.89~~ | +0.49% | **+1.88** | ~~+2.49~~ |
+| 42 | +0.0582 | **+3.12** | ~~+3.39~~ | +2.46 | ~~+2.96~~ | +0.93% | **+1.75** | ~~+2.36~~ |
+| 63 | +0.0618 | **+2.70** | ~~+3.11~~ | +2.20 | ~~+2.80~~ | +1.33% | **+1.61** | ~~+2.21~~ |
+
+**The top-decile statistic no longer clears even a conventional *t* = 2.0 at any horizon.** It fell at every one — +2.49→+1.88, +2.36→+1.75, +2.21→+1.61 — because the 24 dates the rebuilt panel correctly refuses (§8.4) were a flattering momentum stretch. The quintile spread fell too. Only the h=21 rank IC rose, to +4.01, and even that misses the 4.13 bar of §3.1's honest trial count.
+
+**Nothing in this engine clears its own honest multiple-testing bar.** That is the finding, and it is a finding about the prior evidence base rather than about this rebuild: the numbers that looked adequate were computed on a panel whose first 120 sessions were scored on truncated factor frames.
 
 `top-decile excess` is computed per date as *mean(top 10% by score) − mean(the whole eligible universe that date)*, then corrected for window overlap (`validation/results.py:248`). It is measured **against the equal-weight eligible universe**, which is the correct alternative for a long-only book drawn from that universe.
 
-This clears the Harvey–Liu–Zhu multiple-testing bar of *t* > 3.0 at h=21 and h=42, and sits marginally above it at h=63 — against **119 cumulative charged trials**.
+~~This clears the Harvey–Liu–Zhu multiple-testing bar of *t* > 3.0 at h=21 and h=42, and sits marginally above it at h=63 — against 119 cumulative charged trials.~~
+
+**That sentence was wrong, and 119 is the wrong number.** A prior audit (`docs/BUILD_PLAN_V10.md`, D-021) already reconciled three irreconcilable trial counts — 119 in the registry, 4,877 in `parameters.yaml`, 81 in the README — and reached the honest answer: **"at least 5,140 and not reconstructible."** The registry was created *after* most of the search happened, and the v3 search that chose these 22 factors and 5 themes had its code deleted on 2026-09-03, so **its arms cannot be recovered from this repository at all**.
+
+That matters because the bar scales with the number of looks. The expected maximum of *N* standard normals is ≈ √(2 ln *N*):
+
+| trials *N* | bar a best-of-*N* pick must clear | measured |
+|---|---|---|
+| 119 (registry) | *t* ≥ 3.09 | h=63 at +3.11 — **scrapes past** |
+| 300 (HLZ's published-factor setting) | *t* ≥ 3.38 | h=42 at +3.39 — scrapes past |
+| 4,877 | *t* ≥ 4.12 | **all three fail** |
+| ≥5,140 (the honest floor) | *t* ≥ 4.13 | **all three fail** |
+
+**On the honest trial count, none of the three horizons clears.** Only h=21 (+3.87) survives even the 1,000-trial bar. The correct conclusion is not that the ranking is disproven — it is that **the in-sample evidence for it cannot be rescued by any amount of re-measurement, because the denominator is unknown and unrecoverable.**
+
+This changes what the rebuild is for. The v3 ranking must be treated as a **hypothesis with a plausible economic story and an unrecoverable selection history**, not as a validated result. The only thing that can settle it is evidence from data never used to select it — which makes the pre-registration in Part 8 the whole game, and makes it doubly important that both sealed windows are already spent and 2012–2017 is burnt.
+
 
 ### 3.2 The book destroys it
 
@@ -122,7 +144,8 @@ This clears the Harvey–Liu–Zhu multiple-testing bar of *t* > 3.0 at h=21 and
 
 | window | arm | excess p.a. | IR | **beta** | avg names | gross excess | cost drag |
 |---|---|---|---|---|---|---|---|
-| full | live 6 @0.1 | −17.6% | −0.83 | **0.15** | 5.0 | −17.3% | 0.35% |
+| full (regenerated) | shipped 6-name | **−19.7%** | **−0.89** | **0.12** | 4.7 | −19.3% | 0.5% |
+| full | live 6 @0.1 | −17.6% | −0.83 | 0.15 | 5.0 | −17.3% | 0.35% |
 | A 2025-26 | live 6 @0.1 | −9.6% | −0.79 | **0.30** | 4.8 | −9.2% | 0.40% |
 | B 2021-22 | live 6 @0.1 | −3.6% | −0.31 | **0.25** | 4.9 | −3.3% | 0.33% |
 | full | holdout 10 @0.1 | −14.4% | −0.75 | **0.26** | 8.3 | −13.8% | 0.56% |
@@ -163,9 +186,26 @@ The risk budget always binds; `category_fraction` only makes it smaller.
 
 The stop cap binds on four of six names, so the more volatile a name is the *smaller* its position — and beyond 2.2% daily vol the sizing stops responding to volatility at all, because every stop is pinned at the 35% cap.
 
-**Forgone benchmark return on 81.1% idle cash at the universe's 21% a year: −17.0% annually. The measured net excess of the live book over the full window is −17.6%.** The cash drag accounts for **97% of the underperformance**. Nothing else needs to be invoked — not the factors, not the costs, not the regime layer.
+**Forgone benchmark return on 81.1% idle cash: −18.6% annually** at the regenerated benchmark of +22.9%. **The regenerated net excess of the shipped book is −19.7%.** The cash drag accounts for **94% of the underperformance**, with cost drag at 0.5%. Nothing else needs to be invoked — not the factors, not the costs, not the regime layer.
+
+This is the one conclusion in this document that the panel rebuild did not weaken. It rests on shipped config values and a benchmark return, not on any statistic with a *t* beside it.
 
 `config/parameters.yaml:236` states the design intent in its own note: *"With a 1% risk budget and a 5% stop, the position is 20% of capital."* The shipped stop is not 5%. It is 8×ATR. **Nobody multiplied the two shipped numbers together.** This survived the entire test suite because no test asserts on aggregate invested capital.
+
+### 3.3.1 Why a constant could not have fixed it
+
+`stage7_risk.build_plan` is called **once per symbol**, in a loop (`pipeline.py:314`), with that name's frame, price, ADTV and score. It never sees the other holdings.
+
+```python
+for sym in defended:
+    plans[sym] = stage7_risk.build_plan(ticker=sym, frame=frame, ...)
+```
+
+**"Equal weight across the book" is not expressible in that signature.** 1/N is a property of the set, and no function in this pipeline was given the set before the positions were already sized. The sizer's only book-level input is `max_open_positions`, which it uses to derive a *slot* — and the slot is the constraint that never binds.
+
+So this was not a badly chosen constant. It was a **shape error in the interface**, and that is why lowering `atr_multiple` or raising `risk_per_trade_pct` would not have fixed it: any per-name sizing rule produces a book whose total exposure is an accident of the names that happened to qualify that day. The fix has to move sizing from per-name to per-book, which is what `prosignal/book.py` does and why the change is structural rather than a tuning.
+
+It also explains the survival. A reviewer reading `build_plan` sees a defensible risk rule correctly implemented; the defect is only visible when you sum across a loop that lives in a different file. No test summed it. `tests/test_invested_capital.py` now does.
 
 ### 3.4 The engine already knew
 
@@ -250,7 +290,7 @@ This is the same root pattern as §3.4 and as the family block: one concept, two
 
 | Theme | Weight | Factors | External evidence | PIT safe | Coverage | Verdict |
 |---|---|---|---|---|---|---|
-| momentum | 0.400 | 10 (mom_2_0, mom_3_1, mom_12_6, mom_accel, voladj ×2, mom_consist_126, intraday_mom_126, prox_52w ×2) | ●●● strong, incl. India | yes | 99.9% | **KEEP, but 10 near-collinear columns are not 10 bets — prune to 3–4** |
+| momentum | 0.400 | 10 (mom_2_0, mom_3_1, mom_12_6, mom_accel, voladj ×2, mom_consist_126, intraday_mom_126, prox_52w ×2) | ●●● strong, incl. India | yes | 99.9% | **KEEP — see §5.2.1; the theme average already absorbs the collinearity** |
 | reversal | 0.110 | 4 (max5_21, rev_1w, price_vs_vwap_20, resid_rev_21) | ●●● (Bali et al. for MAX; short-term reversal well documented) | yes | 99.9% | **KEEP** |
 | risk | 0.111 | 3 (downside_vol_60, ret_kurt_126, ulcer_120) | ●●○ low-vol / lottery literature | yes | 99.6% | **KEEP** |
 | ownership | 0.189 | 3 (deliv_pct_60, deliv_chg_5, deliv_z_21) | ○○○ **none found** | yes | 93.7% | **DEMOTE — must re-clear a t>3 bar alone or be deleted** |
@@ -258,6 +298,34 @@ This is the same root pattern as §3.4 and as the family block: one concept, two
 | *value* | — | 0 of 8 cleared | ●●● in literature | — | balance-sheet data starts 2023 | **excluded — correctly, it is a data gap not a finding** |
 | *liquidity* | — | 0 of 9 cleared | ●●○ | — | — | excluded |
 | *seasonality* | — | 0 of 2 cleared | ○○○ | — | — | excluded |
+
+### 5.2.1 Redundancy, measured — and a claim of mine that did not survive it
+
+Computed on the rebuilt panel, **per date across all 356 dates, then averaged** (pooling would mix cross-sectional structure with time variation and inflate *N* roughly 500-fold):
+
+**Strongest factor pairs, mean per-date Spearman of the ranked factors**
+
+| A | B | ρ | |
+|---|---|---|---|
+| `prox_52w` | `ulcer_120` | **−0.769** | momentum / risk |
+| `prox_52w` | `prox_52w_now` | +0.740 | within momentum |
+| `mom_accel` | `voladj_mom_6_1` | −0.728 | within momentum |
+| `prox_52w_now` | `ulcer_120` | −0.707 | momentum / risk |
+| `price_vs_vwap_20` | `resid_rev_21` | +0.702 | within reversal |
+| `mom_12_6` | `voladj_mom_12_1` | +0.701 | within momentum |
+
+**Effective number of independent bets** (entropy-effective rank of the per-date rank-correlation matrix):
+
+| | measured | nominal |
+|---|---|---|
+| factors | **12.10** | 22 |
+| themes | **4.64** | 5 |
+
+**I was wrong in §5.2's first draft, and the measurement is why.** I wrote that ten near-collinear momentum columns "are not ten bets — prune to 3–4". At the *factor* level that is true (12.1 of 22). But the themes come out at **4.64 of 5**, which means the theme average is doing exactly the job `_redundancy`'s own docstring claims for it: *"their collinearity is what the aggregation exists to absorb."* Pruning within a theme that is then averaged would buy **simplicity, not statistical honesty** — the sub-score barely moves. That is still a reason to prune under §44, but it is not the reason I gave, and the ablation has to be judged on the composite, not on the pair correlations.
+
+**What the measurement does indict is the `risk` theme.** Its strongest member `ulcer_120` correlates **−0.769** with momentum's `prox_52w` — both are "how far below the recent high" — and momentum/risk is the highest theme pair at **+0.345**. `risk` carries 11.1% weight as though it were independent evidence, and roughly a third of it is momentum with a sign flip. That is the ablation to run first, ahead of any momentum pruning.
+
+**And the shipped monitor would not have told anyone.** `redundancy.max_abs_spearman` is **0.60**, status `UNVALIDATED`, and `on_breach: log`. At least **11 pairs** exceed it on the panel — six exceed 0.70. A cutoff that is breached eleven times and only writes a log line is not a control; it is a record nobody reads.
 
 ### 5.3 The quality theme is a data-mining artifact
 
@@ -278,9 +346,36 @@ A theme with an inverted economic sign, no external corroboration for that inver
 
 Survivorship has been **bounded, not eliminated**: 3,552 names, 841 disappeared, 2.64%/yr disappearance; stressing every disappearing row to −30% moves rank IC from 0.0580 to 0.0566 — a **2.4% relative** haircut (`survivorship_bound.json`). Real, measured, and not the thing that is wrong with this system.
 
-### 5.5 Costs are not the problem
+### 5.5 Costs are not the problem — *for the broken book, and that is the catch*
 
-Round-trip cost at the shipped impact coefficient (0.1): **80 bps median**, 106 bps p75; annual drag 3.2–6.4% at 24–48 trades. At coefficient 0.5 it is 256 bps and 10–20% a year. The live book's measured cost drag is **0.35–0.9% a year** — because it barely trades and barely invests. Fixing the exposure will *increase* cost drag into the 1–3% range, and that is the correct trade against ~15% of recovered exposure.
+Round-trip cost at the shipped impact coefficient (0.1): **80 bps median**, 106 bps p75; annual drag 3.2–6.4% at 24–48 trades. At coefficient 0.5 it is 256 bps and 10–20% a year. The live book's measured cost drag is **0.5% a year** — because it barely trades and barely invests.
+
+**Measured on the rebuilt book, that changes.** `research/v3/experiments/book_exposure.py` runs the actual construction over all 89 rebalances of the panel, with the real universe and the real ADTV distribution. It reports mechanical properties only — deployed fraction and turnover — so it charges no trial:
+
+| | measured |
+|---|---|
+| deployed fraction | **99.96% mean, 99.64% worst, never below 95%** |
+| names held | median 50 (eligible universe median **532**, range 230–750) |
+| turnover | **35.3% per rebalance → ~445% a year** |
+| cost at 80 bps | **~3.56% a year** |
+| liquidity cap binding | **never**, on any name, on any date |
+
+So the net arithmetic of the fix is: **recover ~18.6% a year of forgone benchmark return, pay ~3.1% a year more in transaction costs.** Strongly positive, and not close.
+
+But "costs are not the problem" was true *of a book that did not trade*. Once it does, costs are the second-order question and no longer negligible — 3.56% a year is roughly a fifth of the benchmark's return. The impact coefficient, which nothing binds on today, starts to matter: at 0.25 the same turnover costs ~6.5% a year.
+
+**Turnover is high because the signal is short-horizon.** 445% a year means the book rotates about every 11 weeks against a 63-session label. That is consistent with a model whose live fit prices reversal and delivery rather than momentum, and it is a property of the signal, not of the construction.
+
+**The band was not tuned, and the curve is recorded so nobody has to re-derive it:**
+
+| cadence | exit band | turnover p.a. | cost @80bps |
+|---|---|---|---|
+| 21 sessions | **20% (pre-specified)** | **445%** | **3.56%** |
+| 21 sessions | 30% | 301% | 2.41% |
+| 21 sessions | 50% | 176% | 1.41% |
+| 63 sessions | 20% | 238% | 1.90% |
+
+The 20% band is the one Part 6.2 declared *before* this was measured, and it stays. Widening it to 50% would cut costs by 2.2 points a year and would also hold names ranked in the bottom half of the top half — a returns trade this repository cannot currently price, because doing so means spending trials against an unknown denominator (§3.1). **It is registered as a pre-specified question for the out-of-sample surface, not decided here.**
 
 ### 5.6 Stopping rule (§55)
 
@@ -339,7 +434,7 @@ Research stops here. The material architecture decisions — ranking vs book, gr
 
 | Decision | Alternatives considered | Evidence | Failure mode if wrong |
 |---|---|---|---|
-| **Ship the ranking at decile granularity, not a 6-name book** | keep 6 names; 10 names; top quintile | Top-decile excess +1.76%/63d at corrected *t* +2.21 measured *against the equal-weight universe* — the statistic **is** the product. Top-ten excess on the sealed window was +0.38%, *t* 0.81. Sharma et al. (2021): decile corners beat quintiles | Decile spread does not survive out of sample; caught by the pre-registered re-check in Part 8 |
+| **Ship the ranking at decile granularity, not a 6-name book** | keep 6 names; 10 names; top quintile | **Not the in-sample decile statistic** — on the rebuilt panel that is +1.33%/63d at *t* +1.61 and does not clear 2.0 (§3.1). The decile rests on evidence external to this panel: Grinold (1989) IR = IC×√breadth and Clarke–de Silva–Thorley (2002) IR = TC×IC×√breadth, under which a 6-name book from ~380 is small on breadth *and* on transfer coefficient; and Sharma et al. (2021), who find decile corners beat quintiles in Indian equities specifically | The ranking has no edge at any granularity. Breadth then costs nothing relative to concentration, and the pre-registered re-check is what finds out |
 | **Equal weight, fully invested** | risk-budget sizing (current); vol-target; conviction tilt | §3.3 arithmetic; IR = TC×IC×√breadth. Conviction tilts were tested and "did not survive changing the cadence" (`parameters.yaml:222`) | Drawdowns get larger. This is a stated, quantified risk trade, not a hidden one |
 | **Delete stops, targets, invalidation levels** | keep 8×ATR floor; keep as alerts only | They are the mechanism of the cash drag; none has an OOS number; the disaster floor is already `armed=False` for the target and invalidation | A true disaster name runs. Mitigated by eligibility gates + the liquidity cap, and bounded by 1/N ≈ 2.5–4% per name |
 | **One factor system** | keep the family block for the UI cards | Two systems means two definitions of "quality" in one run record, which already produced a contradictory run note | UI loses some card detail; rebuild attribution from the one scorer |
@@ -381,6 +476,35 @@ CONFIDENCE   NOT a probability. Reported as: corrected t of the ranking at
              this date's dispersion is inside the normal band
 ```
 
+### 6.2.1 What the decile choice does and does not claim
+
+After the panel rebuild this needs saying plainly, because the earlier draft of this document leaned on a statistic that no longer supports it.
+
+**It does not claim** the top decile earns +1.33% per 63 sessions. That figure carries *t* +1.61 against a multiple-testing bar of 4.13, and is not evidence of anything.
+
+**It does claim** three things that survive:
+
+1. **The shipped book's loss is arithmetic, not statistical.** 18.9% invested against a benchmark compounding at 22.9% forfeits 18.6% a year before any factor is consulted. Fixing it requires no belief about the ranking at all.
+2. **If the ranking has any edge, breadth extracts more of it than concentration does** — IR = TC × IC × √breadth, and both terms favour 38 equal-weighted names over 6 sized by stop distance. This is theory, and it holds whatever IC turns out to be.
+3. **If the ranking has no edge, breadth costs less than concentration.** An equal-weighted decile of the eligible universe tracks that universe closely; a 6-name book does not. The downside of being wrong is far smaller.
+
+The decile is therefore the choice that is **least sensitive to the question this repository cannot currently answer.** That is the argument for it — not a backtest.
+
+### 6.2.2 Breadth and weighting must change in the same commit
+
+A sequencing hazard, recorded because the tempting order is the dangerous one.
+
+Stage 8 currently selects **6** names and stage 7 sizes each at ~3% of capital. There are two independent defects — too few names, and each too small — and fixing either alone is worse than fixing neither:
+
+| | names | per name | invested | verdict |
+|---|---|---|---|---|
+| today | 6 | 3.2% | **18.9%** | ~0 alpha, 94% of the loss is cash drag |
+| **sizing fixed alone** | 6 | 16.7% | 100% | **a 6-name concentrated book at full exposure** — the worst of the three |
+| breadth fixed alone | 38 | 0.5% | 18.9% | still 81% cash; nothing improves |
+| both | 38 | 2.6% | ~100% | the target |
+
+Sizing alone converts a mostly-cash book into a fully-invested 6-name one, leaning the entire account on the statistic that generalises *least* — top-decile ordering, whose sealed-window *t* was 0.81 and whose rebuilt-panel *t* is +1.61. `book.build_book` therefore takes the ranking and returns both the membership and the weights: the two cannot be deployed separately because the function does not offer them separately.
+
 ### 6.3 What the user sees
 
 One button. The result is a ranked list of ~25–40 names with equal target weights, each carrying its theme attribution, its eligibility record, and the honest statement that the evidence behind it is a decile-level statistic on 31 independent observations. Not six names presented as high conviction.
@@ -397,7 +521,7 @@ One button. The result is a ranked list of ~25–40 names with equal target weig
 | 4 | `stages/stage5_false_signal.py` | 576 | Pending ablation; it can only subtract from the measured ranking |
 | 5 | `stages/stage8_final_signal.py` gates and bands | ~900 of 1,041 | Unvalidated thresholds gating a validated ranking; keep the NO-TRADE funnel counter |
 | 6 | `quality` theme (`net_margin`, `margin_stability`) | — | Inverted sign, no corroboration, coverage 19%→49%→85% |
-| 7 | ~7 of 10 momentum factors, after incremental-IC testing | — | 10 collinear columns are not 10 bets |
+| 7 | Within-momentum duplicates (`prox_52w_now` given `prox_52w` at ρ +0.74), and `ulcer_120` if the `risk` ablation confirms §5.2.1 | — | Simplicity under §44. The theme average already absorbs within-theme collinearity (4.64 of 5 effective themes), so this is not an accuracy claim |
 | 8 | `config/parameters.yaml` — the 123 `UNVALIDATED` tunables, minus any that survive ablation | 123 of 199 parameters | §45 |
 | 9 | `data/providers/nse_shareholding.py`, `nse_surveillance.py` | ~400 | Unreachable |
 | 10 | 28 of 30 branches; `*.pre-dedupe` / `*.pre-lineage-repair` ledger backups (19 MB) | — | Repo hygiene |
@@ -419,7 +543,7 @@ Written **before** the new book is measured, and charged to the trial registry.
 
 | gate | threshold | rationale |
 |---|---|---|
-| rank IC, corrected *t* | **> 3.0** | Harvey–Liu–Zhu, 119+ trials charged |
+| rank IC, corrected *t* | **≥ 4.15** | √(2 ln N) at the honest floor of ≥5,140 trials (§3.1). *Not* HLZ's 3.0: that is calibrated to ~300 published factors, and this engine's selection history is larger and unrecoverable |
 | top-decile excess vs equal-weight universe, corrected *t* | **> 2.0** | The statistic the product is built from |
 | decile monotonicity | ≥ 6 of 9 steps rising, peak in decile 10 | A spread whose peak sits at decile 6 does not describe the traded object |
 | net excess after costs at impact coeff **0.25** | **> 0** | Shipped is 0.1; 0.25 is the stress case |
@@ -492,13 +616,49 @@ It also cannot have been built by `research/v3/experiments/build_panel.py`, beca
 | phase | work | gate to pass |
 |---|---|---|
 | **3** ✅ | Re-manifest + new epoch; fix the identity split (§3.5); make ingest settle manifest and epoch; repair `build_panel.py`; add the invested-capital test | MODEL gate green; identity is caller-independent; `test_invested_capital` pins 18.9% and xfails the acceptance gate |
-| **4** | Prune factors: incremental IC with proper multiple-testing adjustment; delete `quality`; re-test `ownership` alone | surviving set clears *t* > 3.0 |
-| **5** | Replace the book: equal weight, fully invested, buffer band, liquidity cap only. Delete stage 7 sizing, stage 5, stage 8 gates | beta 0.85–1.05; net excess > 0 at coeff 0.25 |
-| **6** | Delete the family block and the four dead ranking sources; one canonical scorer | scan-path LOC down ~40%; parity test green |
+| **4** ← *was 5* ✅ | **Replace the book**: breadth 6 → 50 names and equal-weight set-level sizing, in one change. `pipeline._size_the_book` calls `book.size_book` after selection | acceptance gate now measures the book, not the sizer, and passes |
+| **5** ← *was 6* | Delete the family block and the four dead ranking sources; one canonical scorer | scan-path LOC down ~40%; parity test green |
+| **6** ← *was 4* | Factor work: ablate `risk` (§5.2.1), delete `quality`, re-test `ownership` standalone, prune within momentum for simplicity | **blocked until a clean out-of-sample surface exists** — see the note below |
 | **7** | Collapse config from 199 to ~60 parameters; every one with a research basis and a sensitivity number | `config show` fits on one screen |
 | **8** | Ledger v2: record the held book, not just the shortlist; resolve outcomes against the equal-weight universe | a signal is reconstructible from its ID alone |
 | **9** | UI: one button, ranked decile list, honest confidence statement | — |
 | **10** | Adversarial audit (§42) against the rebuilt engine | — |
+
+**What Phase 4 actually changed.** Four parameters and one new step:
+
+| parameter | was | now |
+|---|---|---|
+| `capital.max_open_positions` | 6 | **50** |
+| `stage6_entry.admission.entry_rank` | 6 | **50** |
+| `stage6_entry.admission.exit_rank` | 18 | **106** |
+| `stage8_final_signal.portfolio.max_signals_per_run` | 8 | **50** |
+
+Each sat outside its own declared `search_range`, and the loader refused all four — "the engine will not guess". The ranges were widened deliberately, which is the intended way to make a change of this size visible in the diff rather than in a value.
+
+**Selection was left exactly where it was.** `stage6_entry._admit` is a correct per-name hysteresis band and `stage8_final_signal` fills held names before fresh ones, so incumbents already had slot priority. Neither has the truncation defect that made this document's own first `build_book` buffer inert. Adding a second selector would have introduced the one-concept-two-implementations failure catalogued throughout this document, so `book.py` exposes `size_book` (sizing only, used by the pipeline) and keeps `build_book` (selection + sizing) for research that must run outside a pipeline.
+
+**An honest observation that reduces this change's own importance.** At 50 slots the capital slot is 2% of capital and the risk-based size is 2.9–5.0%, so the *slot* now binds and stage 7's original sizer would leave only ~3% in cash. **The breadth change alone recovers most of the exposure.** `size_book` still earns its place — it makes the weighting equal by construction rather than by whichever constraint happens to be tighter this month, and it redistributes a binding liquidity cap instead of banking it — but the headline recovery belongs to breadth, not to the sizer.
+
+**What the first real run found, that 1,907 unit tests did not.** Phase 4 was verified end-to-end with `prosignal analyse run`, and two things surfaced immediately:
+
+1. **The engine cannot run live at all.** `LEDGER_AMBIGUOUS`: **2026-09-03 carries 18 `live` rows, all logged 2026-09-06**, disagreeing about the open book across four versions. The open book is the engine's entire position memory, so the guard refuses rather than guessing. This is pre-existing and **unresolved** — choosing among 18 contradictory position histories decides which trades the engine believes it holds, which is an operator's decision, not a code one. Verification used a replay on a clean date instead.
+
+2. **`max_signals_per_sector` was 2, and would have capped a 50-name book at ~2 per sector** — the target size was unreachable. It is a *book-size* constraint expressed per sector, so it had to move with the book, and changing breadth without checking it was a §61 propagation failure. Grounded on the real 2026-08-03 cross-section: a top-50 spans **19 of 23 sectors** with at most **6** in any genuine one. Raised to 6, range widened to [1, 15].
+
+   Recorded rather than worked around: the largest bucket in that top-50 was **`UNCLASSIFIED`, with 9 names**. The cap treats a hole in `sector_map.parquet` as if it were a sector, so a data gap becomes a concentration limit on names that are in different real sectors. That wants the sector map fixed, not the cap.
+
+**The result, from the engine rather than from a test:**
+
+```
+Book: 40 names, equal weight, 97.4% of capital deployed.
+40 BUY / 0 WATCH
+```
+
+against **6 names and 18.9% deployed** before. Forty rather than fifty because the sector cap and the eligibility gates bind — which is the honest number and is reported as such.
+
+**Why the factor work moved from 4 to 6.** §3.1 establishes that the trial denominator is unknown and unrecoverable, so an in-sample ablation of a v3 theme spends a charged trial and settles nothing — it adds to *N* while measuring against a surface v3 was already selected on. The book replacement, by contrast, needs **no statistics at all**: §3.3 is arithmetic over shipped config values, and its acceptance gate (beta 0.85–1.05, a full book actually invested) is a property of the construction rather than a claim about returns.
+
+**Do the work that needs no evidence first, then buy evidence with what remains.** The P3 allocation is 12 trials and the honest floor is already ≥5,140; spending any of it on questions the current data cannot answer is the most expensive mistake still available in this project.
 
 ---
 

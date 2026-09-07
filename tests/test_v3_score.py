@@ -308,9 +308,24 @@ def test_the_three_books_are_distinct_and_the_note_says_which_one_trades():
     becomes a claim it never made."""
     assert v3.LIVE_BOOK != v3.RESEARCH_BOOK != v3.HOLDOUT_BOOK
     assert v3.BOOK is v3.RESEARCH_BOOK, "BOOK must stay the research book"
-    assert v3.LIVE_BOOK["slots"] < v3.HOLDOUT_BOOK["slots"], \
-        "the live book is the more concentrated one -- that is the point"
+    # REVERSED 2026-09-07. This asserted the live book was the MORE
+    # concentrated one, "and that is the point". It was the point, and it was
+    # the defect: six names sized by a risk budget invested 18.9% of capital and
+    # bet the account on top-decile ordering, the statistic the holdouts
+    # supported least. The live book is now BROADER than either sealed window,
+    # so no window describes it -- which the note has to say rather than imply.
+    assert v3.LIVE_BOOK["slots"] > v3.HOLDOUT_BOOK["slots"], (
+        "the live book should now be the broader one; if it is concentrated "
+        "again, docs/REBUILD_2026_09.md 6.2.2 explains why that is the worst "
+        "of the available configurations")
     note = v3.BOOK_NOTE
     assert "NO BOOK DOES" in note, "the note must not imply a book was validated"
-    assert "SIX positions" in note and "21-session" in note
+    assert "SIX positions" in note, (
+        "the note must keep describing the book that actually ran, or the "
+        "record of why it was replaced disappears with it")
+    assert "18.9%" in note, "the cash drag is the reason; name it"
+    assert "21-session" in note
     assert "t 0.81" in note, "the weakest holdout statistic must be named"
+    assert "BROADER than either sealed window" in note, (
+        "a book wider than both holdouts is not described by either, and the "
+        "note must not let a reader borrow their numbers for it")

@@ -454,7 +454,7 @@ RESEARCH_BOOK = {"slots": 12, "entry_rank": 24, "exit_rank": 48,
                  "universe_max_names": 750, "floor_applies_to": "entries_only"}
 
 #: Read-only mirror of the LIVE book. The config is the source of truth.
-LIVE_BOOK = {"slots": 6, "entry_rank": 6, "exit_rank": 18,
+LIVE_BOOK = {"slots": 50, "entry_rank": 50, "exit_rank": 106,
              "entry_cadence_sessions": 21}
 
 #: Kept as the name older code imported. It is the RESEARCH book -- which is
@@ -468,19 +468,25 @@ BOOK_NOTE = (
     "filtering the whole population -- lost to the benchmark by 2.8% a year on "
     "window A and beat it by 2.0% on window B, and on both the reason was "
     "transaction costs of 9.7% and 13.7% a year. "
-    "AND THAT IS NOT THE BOOK THAT TRADES. Production runs SIX positions on a "
-    "21-session cadence with a 3x exit band (18), which is both slower and far "
-    "more concentrated than anything either window measured. Slower cuts the "
-    "cost drag that sank the tested book, and turnover needs no labels to "
-    "verify. More concentrated cuts the other way, and it leans on the "
-    "statistic that generalised LEAST: top-ten excess on window A was +0.38% "
-    "at t 0.81, indistinguishable from zero, while the quintile spread held at "
-    "t 2.89. Ordering within the top few names is the part of this model the "
-    "holdouts did not support, and a six-name book is a bet on exactly that. "
-    "Read the shortlist as drawn from an evidenced ranking; the concentration "
-    "is an operator's risk choice, not a validated one. Both windows are spent, "
-    "so no book can be settled here -- the quarterly re-check is what will do "
-    "it, once its window stops overlapping window A.")
+    "AND THAT IS NOT THE BOOK THAT TRADES. "
+    "Until 2026-09-07 production ran SIX positions sized by a risk budget, "
+    "which was both far more concentrated than anything either window measured "
+    "and, because 1% of capital divided by an 8xATR stop is about 3% of "
+    "capital, only 18.9% invested. It leaned on the statistic that generalised "
+    "LEAST: top-ten excess on window A was +0.38% at t 0.81, indistinguishable "
+    "from zero, while the quintile spread held at t 2.89. "
+    "PRODUCTION NOW RUNS ~50 NAMES AT EQUAL WEIGHT, fully invested, on the "
+    "same 21-session cadence with a 106-rank exit band. That removes the "
+    "concentration bet rather than validating a new one: breadth is chosen on "
+    "Grinold (1989) and Clarke, de Silva & Thorley (2002), which are external "
+    "to this panel, and on the arithmetic of the cash drag -- NOT on any "
+    "number measured here. It is also BROADER than either sealed window, so "
+    "those evaluations do not describe it either. "
+    "Read the list as drawn from a ranking whose own trial denominator is "
+    "unknown and unrecoverable, held at a breadth chosen to be least sensitive "
+    "to that. Both windows are spent, so no book can be settled here -- the "
+    "quarterly re-check is what will do it, once its window stops overlapping "
+    "window A.")
 
 
 def absolute_floor(scored: pd.DataFrame, dist_200dma: pd.Series,

@@ -244,19 +244,19 @@ the eligible universe it selects from.** Re-run: **REPRODUCED.**
 
 | | |
 |---|---|
-| mean excess per 63-session period | <!--shipped_mean_excess-->-4.46% |
-| information ratio | <!--shipped_ir-->-0.84 |
-| alpha per period | <!--shipped_alpha-->+0.09% |
-| periods beating the benchmark | <!--shipped_beat_rate-->32.6% |
+| mean excess per 63-session period | <!--shipped_mean_excess-->-4.93% |
+| information ratio | <!--shipped_ir-->-0.89 |
+| alpha per period | <!--shipped_alpha-->+0.11% |
+| periods beating the benchmark | <!--shipped_beat_rate-->32.9% |
 
 **Gross and cost, separately.** Netting them and keeping the last number hides
 which of the two is binding — and here it is emphatically not cost:
 
 | | annualised |
 |---|---|
-| gross excess over the universe | <!--shipped_gross_excess_ann-->-17.4% |
+| gross excess over the universe | <!--shipped_gross_excess_ann-->-19.3% |
 | cost drag | <!--shipped_cost_drag_ann-->0.5% |
-| **net excess** | <!--shipped_net_excess_ann-->-17.8% |
+| **net excess** | <!--shipped_net_excess_ann-->-19.7% |
 
 <!-- RESULTS_OF_RECORD:END -->
 

@@ -102,118 +102,104 @@ def cfg():
 # What the shipped configuration does today
 # =============================================================================
 
-def test_every_slot_is_sized_by_the_risk_budget_not_the_capital_slot(cfg):
-    """The binding constraint, named on every card, on every name.
+def test_the_historical_defect_is_recorded_as_arithmetic(cfg):
+    """WHAT THE SHIPPED SIZER DID, kept as a computation rather than a live check.
 
-    If this ever reports "capital slot" the arithmetic below stops applying and
-    the aggregate assertions need re-deriving rather than re-tuning.
+    Three tests here used to drive `stage7_risk.build_plan` and assert that six
+    slots invested under 40% of capital. They passed on the tree that shipped
+    them and they are gone, because both of their inputs moved on 2026-09-07:
+    sizing left stage 7 for `pipeline._size_the_book`, and the book went from 6
+    names to 50. A test that re-derives a historical defect from CURRENT config
+    stops measuring the defect the moment the config is fixed -- and then either
+    fails for the right reason (noise) or, worse, passes for a new one.
+
+    So the arithmetic is frozen here with the constants it actually ran under.
+    It is a record, and it is checkable.
+
+    A NOTE WORTH KEEPING. At 50 slots the capital slot is 2% and the risk-based
+    size is 2.9-5.0%, so the SLOT binds and stage 7's own sizer would now leave
+    only ~3% in cash. The breadth change alone recovers most of the exposure;
+    `size_book` makes it equal-weighted, explicit, and independent of which
+    constraint happens to be tighter this month. Both were needed, and neither
+    is redundant.
     """
-    for plan in _book(cfg):
-        binding = plan.risk_category_inputs
-        assert binding["qty_by_risk"] <= binding["qty_by_slot"], (
-            f"{plan.ticker}: the capital slot bound before the risk budget "
-            f"({binding['qty_by_risk']:.0f} vs {binding['qty_by_slot']:.0f}). "
-            f"The cash-drag arithmetic in this file assumes the opposite."
+    capital = 1_000_000.0
+    risk_pct = 1.0            # capital.risk_per_trade_pct, as shipped
+    slots = 6                 # capital.max_open_positions, as shipped
+    slot_value = capital / slots
+
+    # An 8xATR stop capped at 35% lands between 20% and 35% on this universe;
+    # 21.6%-35.0% was the measured span across 1.2%-3.5% daily volatility.
+    for stop_pct, expected_share in ((0.35, 0.0286), (0.216, 0.0463)):
+        by_risk = capital * (risk_pct / 100.0) / stop_pct
+        assert by_risk < slot_value, (
+            "the risk budget must bind ahead of the capital slot; that is the "
+            "whole mechanism"
         )
-        assert binding["qty_by_risk"] <= binding["qty_by_liquidity"], (
-            f"{plan.ticker}: liquidity bound, so this measures the wrong thing"
-        )
+        assert abs(by_risk / capital - expected_share) < 0.001
 
+    # Six slots at the cap: the measured figure was 18.9% deployed.
+    invested_at_cap = slots * (capital * (risk_pct / 100.0) / 0.35) / capital
+    assert 0.16 < invested_at_cap < 0.20
 
-def test_an_eight_atr_stop_is_a_fifth_to_a_third_of_the_entry_price(cfg):
-    """The input to the sizing arithmetic, measured rather than assumed."""
-    distances = [p.stop_distance_pct for p in _book(cfg)]
-    assert min(distances) > 12.0, (
-        f"the tightest stop was {min(distances):.1f}%; at that distance the "
-        f"capital slot binds instead and this file's premise is wrong"
-    )
-    assert max(distances) <= 35.0 + 1e-9, (
-        f"the widest stop was {max(distances):.1f}%, above the configured "
-        f"max_stop_distance_pct cap"
+    # And what that cost, against the regenerated benchmark of +22.9% a year.
+    forgone = (1.0 - 0.189) * 0.229
+    assert 0.18 < forgone < 0.19
+    assert forgone / 0.197 > 0.9, (
+        "the cash drag should account for ~94% of the -19.7% measured net "
+        "excess; if this ratio moves, the diagnosis in REBUILD_2026_09.md 3.3 "
+        "needs revisiting rather than the test"
     )
 
 
-def test_no_single_position_exceeds_a_twentieth_of_capital(cfg):
-    """2.9-5.0% per name, against a 16.7% slot that never binds."""
-    capital = float(cfg.params.capital.total_capital_inr.value)
-    for plan in _book(cfg):
-        share = (plan.position_value_inr or 0.0) / capital
-        assert share < 0.06, (
-            f"{plan.ticker} took {share:.1%} of capital; the risk budget "
-            f"should hold it near 3-5%"
-        )
-
-
-def test_the_shipped_book_is_mostly_cash(cfg):
-    """THE DEFECT, pinned so it cannot be fixed by accident and unnoticed.
-
-    This test PASSES on the tree that shipped it. It is not an aspiration; it is
-    a measurement, kept because a number this consequential should not live only
-    in a document. When the book layer is replaced under Phase 5 of
-    docs/REBUILD_2026_09.md this test SHOULD start failing, and the correct
-    response is to delete it and unmark the acceptance gate below -- not to
-    widen the bound.
-    """
-    invested = _invested_fraction(cfg, _book(cfg))
-    # Measured 2026-09-07 on the shipped config: 18.9% invested, 81.1% idle.
-    # Forgone benchmark return on that idle cash at the universe's 21% a year is
-    # -17.0%, against a measured net excess of -17.6% in book_sim.json. The cash
-    # drag is 97% of the underperformance.
-    assert invested < 0.40, (
-        f"the shipped book now invests {invested:.1%} of capital. If this is a "
-        f"deliberate fix, delete this test and remove the xfail marker from "
-        f"test_a_full_book_is_actually_invested."
-    )
-    assert 0.10 < invested, (
-        f"the book invests {invested:.1%}, below anything the arithmetic in "
-        f"this file's docstring predicts; something else is binding"
-    )
-
-
-def test_the_cash_drag_costs_more_than_every_cost_model_assumption(cfg):
-    """Perspective, and the reason this is the first thing to fix.
-
-    Measured round-trip cost is 80 bps at the shipped impact coefficient and the
-    live book's realised drag is 0.35% a year. The uninvested fraction gives up
-    the benchmark's return on three-quarters of the book. The two are not the
-    same order of magnitude and the repository spent a generation tuning the
-    smaller one.
-    """
-    idle = 1.0 - _invested_fraction(cfg, _book(cfg))
-    benchmark_annual = 0.21          # equal-weight eligible universe, full panel
-    forgone = idle * benchmark_annual
-    measured_cost_drag = 0.0035      # book_sim.json, live_6@0.1, full window
-    assert forgone > 20 * measured_cost_drag, (
-        f"forgone benchmark return on the idle {idle:.0%} is {forgone:.1%} a "
-        f"year against {measured_cost_drag:.2%} of measured cost drag"
-    )
-
-
-# =============================================================================
-# The acceptance gate for the rebuilt book
-# =============================================================================
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 5 of docs/REBUILD_2026_09.md has not landed. The book is "
-           "sized by risk budget against an 8xATR stop and holds 17-30% of "
-           "capital. Remove this marker when equal-weight full-investment "
-           "ships; a strict xfail fails the suite the moment it starts "
-           "passing, which is exactly when this marker should be deleted.",
-)
 def test_a_full_book_is_actually_invested(cfg):
-    """A long-only book with every slot filled holds equities, not cash.
+    """THE ACCEPTANCE GATE, and it now measures the book rather than the sizer.
 
-    The band is deliberately not 100%: rounding to whole shares, a liquidity cap
-    binding on a genuinely thin name, and an unfilled slot on a day the ranking
-    is short of eligible names all pull below 1.0, and none of those is a
-    market-timing decision. Anything under 0.85 is.
+    It was a strict xfail against `stage7_risk` while sizing lived there. Sizing
+    moved to `pipeline._size_the_book` on 2026-09-07, because 1/N is a property
+    of the SET and `build_plan` is called once per symbol -- so a per-name test
+    can no longer answer this question at all, whatever it asserts.
+
+    The band is deliberately not 100%: whole-share rounding, a liquidity cap
+    binding on a genuinely thin name, and a slot left empty on a day the
+    ranking is short of eligible names all pull below 1.0, and none of those is
+    a market-timing decision. Anything under 0.85 is.
     """
-    invested = _invested_fraction(cfg, _book(cfg))
+    from prosignal.book import BookSpec, size_book
+
+    slots = int(cfg.params.capital.max_open_positions.value)
+    names = [f"N{i:03d}" for i in range(slots)]
+    spec = BookSpec(
+        capital=float(cfg.params.capital.total_capital_inr.value),
+        max_participation_of_adtv=float(
+            cfg.params.capital.max_participation_of_adtv.value),
+        min_names=1, max_names=slots,
+    )
+    b = size_book(names, {t: 250.0 for t in names},
+                  {t: ABUNDANT_ADTV for t in names}, spec)
+
     lo, hi = INVESTED_BAND
-    assert lo <= invested <= hi, (
-        f"a full book invests {invested:.1%} of capital, outside the "
+    assert lo <= b.invested_fraction <= hi, (
+        f"a full book invests {b.invested_fraction:.1%} of capital, outside the "
         f"{lo:.0%}-{hi:.0%} band. Below the band the engine is making an "
         f"unauthorised market-timing bet that dominates every stock-selection "
         f"decision above it; above it, it is levered."
     )
+    assert all(p.binding == "equal weight" for p in b.positions)
+
+
+def test_the_book_is_sized_as_a_set_not_per_name(cfg):
+    """The structural claim, pinned so it cannot regress quietly.
+
+    `stage7_risk.build_plan` takes one ticker. `pipeline._size_the_book` takes
+    the selected list. If sizing ever moves back behind a per-name signature the
+    total exposure becomes an accident of which names qualified that day, which
+    is exactly how the book came to hold 18.9% of capital.
+    """
+    import inspect
+
+    from prosignal.book import size_book
+    from prosignal.pipeline import _size_the_book
+
+    assert "chosen" in inspect.signature(size_book).parameters
+    assert "buys" in inspect.signature(_size_the_book).parameters

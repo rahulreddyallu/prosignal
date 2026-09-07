@@ -101,6 +101,13 @@ class AnalysisRun:
     #: persisted, not in the ledger. A monitor that flags into a field nobody
     #: reads is not a monitor, so the notes are carried out of the run here.
     scoring_notes: List[str] = field(default_factory=list)
+    #: What the run actually intends to HOLD, as a set: the equal-weighted
+    #: positions and the fraction of capital they deploy. Before 2026-09-07 no
+    #: object in this engine carried that. `RiskPlan.position_value_inr` was a
+    #: per-name number and nothing summed it, which is how a book holding 18.9%
+    #: of capital ran for a generation without anything being able to say so.
+    #: `book.TargetBook`; None only when the run produced no buys.
+    book: Optional[Any] = None
 
 
 def run_analysis(
@@ -364,6 +371,29 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     )
     timings[stage8_final_signal.STAGE_NAME] = t()
 
+    # ---- the book: size the selected set, once, as a set ------------------
+    #
+    # THE DEFECT THIS CLOSES. `stage7_risk.build_plan` is called once per symbol
+    # in the loop above, with that name's frame, price, ADTV and score and
+    # nothing else. "Equal weight across the book" is not expressible in that
+    # signature -- 1/N is a property of the SET, and no function in this
+    # pipeline had ever been given the set before the positions were sized.
+    #
+    # What that produced: a risk budget of 1% divided by an 8xATR stop capped
+    # at 35% bound ahead of the 16.7% capital slot on every name, so each
+    # position came out at 2.9-5.0% of capital and six slots invested 18.9%.
+    # Forgone benchmark return on the idle 81% at the eligible universe's
+    # +22.9% a year is -18.6%, against a measured net excess of -19.7%: the
+    # cash drag was 94% of the underperformance. docs/REBUILD_2026_09.md 3.3.
+    #
+    # It was never a badly chosen constant. No per-name rule can control a
+    # book's total exposure, because the total depends on which names happened
+    # to qualify that day. So sizing moves here, after selection, where the set
+    # exists. Selection is unchanged and stays where it is: `stage6_entry.
+    # _admit` is a correct hysteresis band and stage 8 fills held names before
+    # fresh ones, so incumbents already have slot priority.
+    book_target = _size_the_book(buys, plans, eligibility, config)
+
     # ---- open positions the run never reached -----------------------------
     # A held name that fails eligibility, fails a data-quality check or leaves
     # the universe never reaches Stage 8 at all. It simply stopped appearing,
@@ -476,8 +506,20 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     except Exception as exc:                        # never fail a run to report
         log.warning("drawdown check did not run", extra={"error": str(exc)})
 
+    if book_target is not None and book_target.positions:
+        scoring_notes.append(
+            f"Book: {len(book_target.positions)} names, equal weight, "
+            f"{book_target.invested_fraction:.1%} of capital deployed."
+            + ("" if book_target.invested_fraction >= 0.85 else
+               " BELOW THE INTENDED BAND -- the remainder is sitting in cash, "
+               "which is a market call nobody made.")
+        )
+        for note in book_target.notes:
+            scoring_notes.append(f"Book: {note}")
+
     result = AnalysisRun(output=output, context=context, timings_ms=timings,
-                         funnel=funnel, scoring_notes=scoring_notes)
+                         funnel=funnel, scoring_notes=scoring_notes,
+                         book=book_target)
 
     # THE SCREEN READS THIS, not the API's job queue.
     #
@@ -953,3 +995,44 @@ def _prefetch_prices(store, config, universe, as_of, calendar) -> None:
         # A prefetch failure must never fail the run; the stages read directly.
         log.warning("price prefetch skipped", extra={"error": str(exc)})
         store.clear_price_cache()
+
+
+def _size_the_book(buys, plans, eligibility, config):
+    """Equal-weight the selected names and write the sizes onto their plans.
+
+    Returns the `TargetBook` so the run can record what it actually intended to
+    hold, which the ledger could not previously state: `position_value_inr` was
+    a per-name number with no book-level meaning, and nothing summed it.
+
+    The plans are UPDATED IN PLACE rather than rebuilt. Stage 7 still computes
+    the ATR, the stop level and the exit hierarchy, and those are unchanged and
+    still worth having on the card; what it no longer decides is how much to
+    buy. Overwriting exactly the two size fields keeps that split visible.
+    """
+    from .book import BookSpec, size_book
+
+    cap = config.params.capital
+    spec = BookSpec(
+        capital=float(v(cap.total_capital_inr)),
+        max_participation_of_adtv=float(v(cap.max_participation_of_adtv)),
+        # Selection already happened; these bound nothing here and are carried
+        # so the spec reads the same in both call paths.
+        min_names=1,
+        max_names=max(int(v(cap.max_open_positions)), 1),
+    )
+    chosen = [r.ticker for r in buys]
+    prices, adtv = {}, {}
+    for sym in chosen:
+        plan = plans.get(sym)
+        if plan is None or plan.reference_price is None:
+            continue
+        prices[sym] = float(plan.reference_price)
+        adtv[sym] = eligibility.adtv_inr.get(sym)
+
+    target = size_book(chosen, prices, adtv, spec)
+    for pos in target.positions:
+        plan = plans.get(pos.ticker)
+        if plan is not None:
+            plan.position_size_shares = pos.shares
+            plan.position_value_inr = pos.value
+    return target
