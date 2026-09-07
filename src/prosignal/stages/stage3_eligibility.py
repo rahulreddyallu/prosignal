@@ -19,6 +19,7 @@ import pandas as pd
 from ._cfg import bv, fv, iv, v
 from ..core.calendar import TradingCalendar
 from ..core.contracts import DataQualityReport, EligibilityReport
+from ..data import reference
 from ..indicators.circuit import band_state, is_untradeable
 from ..core.enums import RejectionReason
 from ..core.logging import get_logger
@@ -81,6 +82,28 @@ def run(
     regulatory = _regulatory_map(store, calendar, as_of, cfg)
     pledging = store.read_pledging()
     pledging_available = pledging is not None and not pledging.empty
+
+    # EXCHANGE SURVEILLANCE. The store has carried this table since the
+    # surveillance provider was written and nothing had ever read it: 3,534
+    # rows, 332 of them EQ-series names the exchange has restricted. The
+    # provider's own definition -- trade-for-trade, an explicit GSM stage, or a
+    # price band cut below the ordinary 20% -- comes with the judgement that
+    # such a name "cannot be filled at a simulated price". That is exactly this
+    # stage's question.
+    #
+    # NOT_TESTABLE WHEN THE SNAPSHOT DOES NOT DESCRIBE THIS DATE. The table is
+    # a single snapshot, so a replay of an older session would be applying
+    # today's restrictions to a market that did not have them. `reference.
+    # surveillance` refuses rather than guessing, and an untestable gate does
+    # not reject anybody -- it is recorded and printed, as every other
+    # untestable gate here is.
+    surv = reference.surveillance(
+        store, as_of,
+        tolerance_days=iv(getattr(cfg, "surveillance_tolerance_days", 7))
+        if hasattr(cfg, "surveillance_tolerance_days") else 7)
+    if not surv.testable():
+        log.info("surveillance gate not testable",
+                 extra={"reason": surv.unavailable})
 
     adtv_map: Dict[str, float] = {}
     eligible: List[str] = []
@@ -269,6 +292,20 @@ def run(
             if since is not None and since <= cd:
                 rejected[sym] = RejectionReason.REGULATORY_COOLDOWN
                 details[sym] = f"regulatory event {since} sessions ago, cooldown {cd}"
+                continue
+
+        # 8b. Exchange surveillance -- NOT_TESTABLE when the snapshot cannot
+        # describe this date, and never a pass. A name absent from the security
+        # list is UNKNOWN, not unrestricted.
+        if not surv.testable():
+            untestable.append("exchange_surveillance")
+        else:
+            flag = surv.is_restricted(sym)
+            if flag is None:
+                untestable.append("exchange_surveillance")
+            elif flag:
+                rejected[sym] = RejectionReason.SURVEILLANCE_RESTRICTION
+                details[sym] = f"exchange surveillance: {surv.reason(sym)}"
                 continue
 
         # 9. Pledging -- NOT_TESTABLE when absent, never a pass

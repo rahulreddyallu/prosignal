@@ -1227,6 +1227,7 @@ class DataIngestor:
         except Exception as exc:
             log.warning("sector map refresh failed", extra={"error": str(exc)})
 
+
         if opts.force_reference_refresh or self._should_refresh(
             "statements", as_of, opts.reference_refresh_sessions
         ):

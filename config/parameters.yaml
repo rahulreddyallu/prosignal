@@ -3340,12 +3340,22 @@ stage9_conviction:
     value: 1.0
     status: UNVALIDATED
     search_range: [0.0, 3.0]
-  # THE NO-EDGE ZONE. Measured live, ranks 7 to 10 were separated by 0.004 to
-  # 0.013 sigma. That ordering is noise and must not produce a BUY.
-  min_gap_to_next:
-    value: 0.05
-    status: UNVALIDATED
-    search_range: [0.0, 0.5]
+  # min_gap_to_next WAS HERE AND IS GONE, on measurement rather than opinion.
+  #
+  # The hypothesis was that a leader bunched against #2 is inside the noise and
+  # should not be bought. Measured on the 380-date research panel it is wrong,
+  # twice over:
+  #
+  #   * bucketing dates by #1's lead over #2, the WIDEST quartile had the WORST
+  #     outcome -- mean 21-session excess -1.585% at a 42.1% hit rate, against
+  #     +0.667% for the narrowest. Spearman(margin, #1 excess) = -0.0219.
+  #   * adding it to the ENB filter cut mean excess +1.114% -> +0.400% and NW t
+  #     +1.29 -> +0.44. Alone it produced -0.244% at t -0.25.
+  #
+  # A dominant-looking leader is not a better leader. The measurement is on the
+  # panel v3 was SELECTED on and so is not out-of-sample -- but a gate with no
+  # justification beyond intuition, contradicted twice in-sample, does not keep
+  # gating. `gap_to_next_sigma` is still recorded on every candidate.
 
   # ---- robustness ----------------------------------------------------------
   # Share of alternative theme weightings -- each theme dropped, each tilted

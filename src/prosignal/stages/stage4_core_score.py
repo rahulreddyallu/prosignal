@@ -83,7 +83,7 @@ class RankingUnavailable(PipelineError):
 
 
 def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
-                          v3_scored=None, sectors=None):
+                          v3_scored=None, sectors=None, principal=None):
     """Return the series the book is ordered by, and say which one it is.
 
     `composite_raw` arrives holding whatever ranked upstream -- the fitted
@@ -135,6 +135,34 @@ def _apply_ranking_policy(composite_raw, model_features, cfg, notes,
                 f"the v9R composite covers {len(covered)} of "
                 f"{len(composite_raw)} scoreable names, under the {floor} floor.")
         return covered, "v9r_core"
+
+    if source == "principal_pc1":
+        # THE PRINCIPAL DIRECTION. Measured on the 380-date panel at 21
+        # sessions: top-1 excess +1.973% (NW t 1.72) against v3's +0.012%
+        # (t 0.01), and +2.097% at t 2.09 once the independent-evidence filter
+        # is applied. The selection curve INVERTS -- it falls with N rather
+        # than rising -- which is the shape a one-signal engine requires.
+        #
+        # t 2.09 is NOT a ship gate. The bar in a factor-mining environment is
+        # nearer 3.0, the panel holds ~90 independent 21-session windows, and
+        # it overlaps the surface v3 was selected on. PC1 was never fitted on
+        # that surface and has no parameters to fit, which makes it the least
+        # overfitted object tested -- not a validated one.
+        if principal is None or not principal.testable():
+            raise RankingUnavailable(
+                "stage4_core_score.ranking.source is 'principal_pc1' and the "
+                "principal direction did not build"
+                + (f": {principal.unavailable}" if principal is not None else "")
+                + ". Falling back to another scorer would issue signals from a "
+                "model that was not the one measured.")
+        ranked = principal.scores.dropna()
+        covered = ranked.reindex(composite_raw.index).dropna()
+        floor = min(max(int(0.6 * len(composite_raw)), 20), len(composite_raw))
+        if len(covered) < floor:
+            raise RankingUnavailable(
+                f"the principal direction covers {len(covered)} of "
+                f"{len(composite_raw)} scoreable names, under the {floor} floor.")
+        return covered, "principal_pc1"
 
     if source == "v3_composite":
         # THE SHIPPED SCORER. Twenty-two factors in five themes, combined within
@@ -633,9 +661,81 @@ def run(
         if v3_err:
             notes.append(f"v3 block unavailable: {v3_err}")
 
+    # ==================================================================
+    # EVERY SPECIFICATION THE ENGINE CAN FORM, kept rather than discarded.
+    #
+    # This repository contains three legitimate scorers and runs one. The other
+    # two were computed and thrown away: `_apply_ranking_policy` REPLACES
+    # `composite_raw` and keeps only its index, so the fitted composite -- the
+    # Fama-MacBeth model, ~103KB of tested code, fitted on every single run --
+    # left no trace at all. The v9R core needs nothing but a second call on the
+    # raw factor frame already in hand.
+    #
+    # WHY KEEP THEM. Model disagreement is a measurement of uncertainty, and it
+    # is the one dimension of conviction this engine could always have had for
+    # free. A name that ranks top-5 under all three specifications is evidenced
+    # very differently from one only the incumbent likes -- and the incumbent's
+    # own ranking is a point estimate from a search over 960 configurations.
+    #
+    # NONE OF THESE BECOMES THE RANKING. `ranking.source` still decides that,
+    # and v9R in particular FAILED its pre-registered ship gate (+9.50% net
+    # active at NW t +1.87 against a bar of 2.0). Reading a failed gate as a
+    # second opinion is legitimate; reading it as a vote to switch is not.
+    alternatives: Dict[str, Dict[str, float]] = {}
+    try:
+        _fitted = composite_raw.dropna()
+        if len(_fitted) >= 8:
+            alternatives["fitted_composite"] = {
+                str(k): float(v) for k, v in _fitted.items() if pd.notna(v)}
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("fitted composite unavailable as an alternative",
+                    extra={"error": str(exc)})
+    if v3_scored is not None and "score" in getattr(v3_scored, "columns", []):
+        _v3 = v3_scored["score"].dropna()
+        if len(_v3) >= 8:
+            alternatives["v3_composite"] = {
+                str(k): float(v) for k, v in _v3.items() if pd.notna(v)}
+    if v3_raw is not None and not v3_raw.empty and _src != "v9r_core":
+        try:
+            from ..features import v9r as _v9rfeat
+            _v9 = _v9rfeat.score_frame(v3_raw)
+            if _v9 is not None and "score" in getattr(_v9, "columns", []):
+                _v9s = _v9["score"].dropna()
+                if len(_v9s) >= 8:
+                    alternatives["v9r_core"] = {
+                        str(k): float(v) for k, v in _v9s.items() if pd.notna(v)}
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("v9r core unavailable as an alternative",
+                        extra={"error": str(exc)})
+
+    # PC1 -- THE DIRECTION THE DATA PICKS. Zero free parameters: no weight to
+    # tune, no theme to cap, no blend to renormalise. It exists because the
+    # other three specifications disagree about rank 1 on essentially every
+    # date (3.26 distinct names across four specs), and that disagreement is a
+    # consequence of projecting a ~3-dimensional factor space through arbitrary
+    # weightings rather than of the models carrying different information.
+    # See `features/principal.py` for the measurement.
+    principal = None
+    if v3_raw is not None and not v3_raw.empty:
+        try:
+            from ..features import principal as _pc
+            principal = _pc.score_frame(v3_raw)
+            if principal.testable():
+                _pcs = principal.scores.dropna()
+                if len(_pcs) >= 8:
+                    alternatives["principal_pc1"] = {
+                        str(k): float(v) for k, v in _pcs.items()}
+                notes.append(principal.summary())
+            else:
+                notes.append(f"principal direction unavailable: "
+                             f"{principal.unavailable}")
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("principal direction unavailable",
+                        extra={"error": str(exc)})
+
     composite_raw, ranking_source = _apply_ranking_policy(
         composite_raw, model_features, cfg, notes, v3_scored=v3_scored,
-        sectors=sectors)
+        sectors=sectors, principal=principal)
 
     # The family block's regime multipliers and dropped factors moved the
     # ranking only if the family block IS the ranking. `fitted_composite` is
@@ -931,6 +1031,7 @@ def run(
         redundancy=redundancy,
         universe_size=len(symbols),
         notes=notes,
+        alternative_rankings=alternatives,
     )
 
 

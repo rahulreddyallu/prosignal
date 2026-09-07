@@ -458,6 +458,15 @@ class CoreScoreReport(_Contract):
     effective_weights: Dict[str, float] = Field(default_factory=dict)
     dropped_factors: Dict[str, str] = Field(default_factory=dict)
     ranked_scores: List[StockScore] = Field(default_factory=list)
+    #: EVERY SPECIFICATION THE ENGINE COULD FORM, not just the one that ranked.
+    #: {source -> {ticker -> raw score}}. The fitted Fama-MacBeth composite is
+    #: computed on every run and was previously discarded by the ranking policy,
+    #: which keeps only its index; the v9R core costs one call on the raw factor
+    #: frame already in hand. Neither becomes the ranking -- `ranking.source`
+    #: still decides that -- but model DISAGREEMENT is a measurement of
+    #: uncertainty, and it is the one conviction dimension this engine could
+    #: always have had for free.
+    alternative_rankings: Dict[str, Dict[str, float]] = Field(default_factory=dict)
     redundancy: RedundancyReport = Field(default_factory=RedundancyReport)
     universe_size: int = 0
     notes: List[str] = Field(default_factory=list)

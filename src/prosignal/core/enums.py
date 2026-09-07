@@ -194,6 +194,11 @@ class RejectionReason(str, Enum):
     REGULATORY_COOLDOWN = "regulatory_cooldown"
     MANUAL_EXCLUSION = "manual_exclusion"
     SERIES_NOT_ALLOWED = "series_not_allowed"
+    #: The exchange has the name under a surveillance measure -- trade-for-trade
+    #: settlement, an explicit GSM stage, or a price band cut below the
+    #: ordinary 20%. Any one of them means it cannot be filled at a
+    #: simulated price, which is an investability fact rather than a view.
+    SURVEILLANCE_RESTRICTION = "surveillance_restriction"
     #: Outside the population the model was FITTED on. `resolve_exits` gives a
     #: name below its thesis-invalidation level a NaN label and `build_panel`
     #: drops the row, so the coefficients were estimated on pullbacks WITHIN

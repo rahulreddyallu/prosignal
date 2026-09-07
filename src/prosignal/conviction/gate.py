@@ -48,7 +48,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from . import economics, evidence, independence, robustness, separation
+from . import (agreement, economics, evidence, independence, robustness,
+               separation)
 
 __all__ = [
     "Thresholds",
@@ -92,10 +93,26 @@ class Thresholds:
     #: No single direction may carry more than this share of the evidence.
     max_evidence_concentration: float = 0.85
 
-    #: SEPARATION, in robust cross-sectional sigma units of the RAW score.
-    #: A leader inside noise of the field is not a leader.
+    #: SEPARATION. `min_gap_to_median` is kept as a gate. `min_gap_to_next` is
+    #: NOT, and the reason is measured rather than argued.
+    #:
+    #: MEASURED ON THE 380-DATE RESEARCH PANEL, two independent ways, both
+    #: against the hypothesis:
+    #:
+    #:   1. Bucketing dates by #1's lead over #2 in sigma units, the WIDEST
+    #:      quartile had the WORST outcome -- mean 21-session excess -1.585%
+    #:      and a 42.1% hit rate, against +0.667% for the narrowest.
+    #:      Spearman(margin, #1 excess) = -0.0219.
+    #:   2. Adding `gap_next >= 0.05` to the ENB filter cut mean excess from
+    #:      +1.114% to +0.400% and NW t from +1.29 to +0.44. Applied alone it
+    #:      produced -0.244% at t -0.25.
+    #:
+    #: A dominant-looking leader is not a better leader; if anything it is a
+    #: more extreme one. The measurement is on the panel v3 was SELECTED on, so
+    #: it is not out-of-sample -- but a gate with no prior justification beyond
+    #: intuition, contradicted twice in-sample, does not get to keep gating.
+    #: It is recorded on every candidate as a disclosure.
     min_gap_to_median: float = 1.00
-    min_gap_to_next: float = 0.05
 
     #: SPECIFICATION SURVIVAL. The share of alternative theme weightings under
     #: which the name holds a top-10 place.
@@ -109,6 +126,25 @@ class Thresholds:
     max_residual_correlation: float = 0.35
     max_evidence_similarity: float = 0.80
     min_basket_enb: float = 1.70
+
+    #: MODEL AGREEMENT. Share of covering specifications placing the name
+    #: inside `agreement_top_k`. A name only ONE of three models likes is what a
+    #: search over 960 configurations produces by construction.
+    min_model_agreement: float = 0.5
+    agreement_top_k: int = 10
+
+    #: RISK ASYMMETRY IS NOT A GATE, and this records why rather than deleting
+    #: the idea. `RiskPlan.reward_to_risk_t1` was measured across the live
+    #: defended set: 37 plans, ONE distinct value, 1.500 exactly. Target 1 is
+    #: placed at a fixed multiple of the stop distance, so the ratio is a
+    #: config constant wearing the costume of a per-name measurement, and a
+    #: threshold on it can never discriminate between two candidates. It is
+    #: recorded on the candidate as a disclosure and gates nothing. Shipping it
+    #: as a gate would have added exactly the inert machinery this layer exists
+    #: to remove.
+
+    #: EXECUTION. An unmeasurable ADTV must not be sized as if it were fine.
+    require_known_liquidity: bool = True
 
     #: Hard cap. The production layer can never emit more than this.
     max_buys: int = 2
@@ -131,6 +167,19 @@ class Candidate:
     notes: List[str] = field(default_factory=list)
     #: Set once the name is placed, explaining independence from the first pick.
     independence: Optional[independence.Independence] = None
+    #: Where the OTHER model specifications rank this name.
+    agreement: Optional[agreement.ModelAgreement] = None
+    #: Modelled reward-to-risk at target 1, from the Stage 7 plan.
+    reward_to_risk: Optional[float] = None
+    #: Stage 6's price-structure read and Stage 7's liquidity verdict.
+    execution: Dict[str, object] = field(default_factory=dict)
+    #: Point-in-time free float %, from the quarterly shareholding pattern.
+    #: REPORTED, never gated: a low free float makes a name harder to
+    #: accumulate and easier to squeeze, but no threshold on it has been
+    #: measured against this engine's outcomes, so inventing one would be the
+    #: same unvalidated-gate mistake this layer exists to remove.
+    free_float_pct: Optional[float] = None
+    free_float_dated: Optional[str] = None
 
     @property
     def clears(self) -> bool:
@@ -234,7 +283,8 @@ def _panic_state(regime) -> Tuple[bool, str]:
 def evaluate(score, ranked_scores, plan, regime, horizon_sessions: int,
              thresholds: Thresholds,
              theme_panel=None, member_panel=None,
-             themes: Sequence[str] = ()) -> Candidate:
+             themes: Sequence[str] = (),
+             free_float=None, alternatives=None) -> Candidate:
     """Run every conviction test on one candidate and record what failed."""
     cand = Candidate(ticker=score.ticker, rank=int(score.rank or 0),
                      sector=score.sector)
@@ -272,11 +322,8 @@ def evaluate(score, ranked_scores, plan, regime, horizon_sessions: int,
             cand.failures.append(
                 f"only {got} sigma above the median name, below the "
                 f"{thresholds.min_gap_to_median:.2f} required")
-        if sep.gap_to_next is not None and sep.gap_to_next < thresholds.min_gap_to_next:
-            cand.failures.append(
-                f"only {sep.gap_to_next:.3f} sigma clear of the next candidate, "
-                f"below the {thresholds.min_gap_to_next:.3f} required -- the "
-                f"ordering here is inside the noise")
+        # `gap_to_next` is RECORDED and does not gate -- see `Thresholds`. The
+        # widest-margin quartile had the worst outcomes on the research panel.
 
     # ---- robustness ------------------------------------------------------
     env = robustness.envelope(ranked_scores, score.ticker)
@@ -306,6 +353,80 @@ def evaluate(score, ranked_scores, plan, regime, horizon_sessions: int,
             cand.failures.append(
                 f"cost consumes {net.cost_burden:.0%} of the measured edge, "
                 f"above the {thresholds.max_cost_burden:.0%} limit")
+
+    # ---- model agreement -------------------------------------------------
+    # The fitted Fama-MacBeth composite is fitted on EVERY run and was
+    # discarded; v9R costs one call on a frame already in hand. Both are now
+    # kept, and this asks the question they make possible: does the incumbent's
+    # opinion survive a change of model?
+    agr = agreement.measure(score.ticker, alternatives or {},
+                            top_k=thresholds.agreement_top_k)
+    cand.agreement = agr
+    if not agr.testable():
+        cand.notes.append(f"Model agreement not testable: {agr.unavailable}")
+    else:
+        cons = agr.consensus
+        if cons is not None and cons < thresholds.min_model_agreement:
+            cand.failures.append(
+                f"only {agr.agreeing} of {len(agr.ranks)} model specifications "
+                f"place it inside the top {agr.top_k} (worst: #{agr.worst_rank}). "
+                f"A name one model likes and the others do not is what a search "
+                f"over many configurations produces by construction")
+
+    # ---- risk asymmetry, from the Stage 7 plan ---------------------------
+    # Computed on every plan since the stage was written and read by nothing.
+    # Now carried onto the record -- but NOT gated: it is 1.500 on every name.
+    if plan is not None:
+        rr = getattr(plan, "reward_to_risk_t1", None)
+        if rr is not None and np.isfinite(rr):
+            # RECORDED, NOT GATED. Measured across the live defended set this
+            # is 1.500 for every name -- target 1 sits at a fixed multiple of
+            # the stop distance, so it carries no cross-sectional information.
+            cand.reward_to_risk = float(rr)
+
+    # ---- execution feasibility -------------------------------------------
+    # Stage 7's liquidity verdict decides whether there is a position at all
+    # and never reached the decision: an ADTV that could not be measured used
+    # to fall through to a full-size position.
+    #
+    # Stage 6's price triggers are NOT read here. Their decision depends on the
+    # previous run's book -- see the note in `stage9_conviction.run` -- and a
+    # disclosure is not worth putting historical state back into a stateless
+    # decision.
+    if plan is not None:
+        state = getattr(plan, "liquidity_state", None)
+        ratio = getattr(plan, "liquidity_ratio_recent", None)
+        cand.execution["liquidity_state"] = state
+        if ratio is not None and np.isfinite(ratio):
+            cand.execution["liquidity_ratio_recent"] = float(ratio)
+        cand.execution["position_value_inr"] = getattr(plan, "position_value_inr", None)
+        warn = getattr(plan, "liquidity_warning", None)
+        if warn:
+            cand.notes.append(f"Liquidity: {warn}")
+        if thresholds.require_known_liquidity and state is not None \
+                and str(state) != "KNOWN_VALID":
+            cand.failures.append(
+                f"liquidity is {state}, not KNOWN_VALID -- the traded value "
+                f"this position would be sized against could not be measured, "
+                f"and an unmeasured ADTV is not a large one")
+
+    # ---- capacity, from the point-in-time free float ---------------------
+    # The shareholding table has been in the store since the provider was
+    # written and nothing read it. ADTV alone overstates how much of a name is
+    # actually available: a stock with 12% free float trades thinly against its
+    # own turnover the moment anyone else wants it too.
+    if free_float is not None and free_float.testable():
+        ff = free_float.get(score.ticker)
+        if ff is not None:
+            cand.free_float_pct = float(ff)
+            d = free_float.dated.get(score.ticker)
+            cand.free_float_dated = d.isoformat() if d is not None else None
+            if ff < 25.0:
+                cand.notes.append(
+                    f"Free float {ff:.0f}% of shares outstanding (disclosed "
+                    f"{cand.free_float_dated}). ADTV overstates available "
+                    f"stock at this float. Reported, not gated -- no float "
+                    f"threshold has been measured against this engine.")
 
     # ---- momentum crash defense -----------------------------------------
     panic, why = _panic_state(regime)
@@ -456,6 +577,17 @@ def to_record(verdict: "Verdict") -> List[Dict[str, object]]:
                            if c.independence and c.independence.testable()
                            and c.independence.basket_enb is not None else None),
             # why not
+            "model_agreement_ranks": (dict(c.agreement.ranks)
+                                      if c.agreement and c.agreement.testable() else None),
+            "model_agreement_consensus": (round(c.agreement.consensus, 3)
+                                          if c.agreement and c.agreement.testable()
+                                          and c.agreement.consensus is not None else None),
+            "model_agreement_worst_rank": (c.agreement.worst_rank
+                                           if c.agreement and c.agreement.testable() else None),
+            "reward_to_risk": c.reward_to_risk,
+            "execution": dict(c.execution) if c.execution else None,
+            "free_float_pct": c.free_float_pct,
+            "free_float_dated": c.free_float_dated,
             "failures": list(c.failures),
             "notes": list(c.notes),
         })

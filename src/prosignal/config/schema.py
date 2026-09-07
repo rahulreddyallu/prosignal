@@ -2085,8 +2085,6 @@ class ConvictionConfig(_Base):
     #: Separation in robust sigma units of the RAW score, not the rank.
     min_gap_to_median: TF = Field(default_factory=lambda: Tunable[float](
         value=1.0, status="UNVALIDATED", search_range=[0.0, 3.0]))
-    min_gap_to_next: TF = Field(default_factory=lambda: Tunable[float](
-        value=0.05, status="UNVALIDATED", search_range=[0.0, 0.5]))
     #: Share of alternative theme weightings keeping the name in the top 10.
     min_robustness: TF = Field(default_factory=lambda: Tunable[float](
         value=0.70, status="UNVALIDATED", search_range=[0.0, 1.0]))
@@ -2099,6 +2097,18 @@ class ConvictionConfig(_Base):
         value=0.80, status="UNVALIDATED", search_range=[0.0, 1.0]))
     min_basket_enb: TF = Field(default_factory=lambda: Tunable[float](
         value=1.70, status="UNVALIDATED", search_range=[1.0, 2.0]))
+    #: MODEL AGREEMENT. The fitted Fama-MacBeth composite is fitted on every
+    #: run and used to be discarded; v9R costs one call on a frame already in
+    #: hand. Neither becomes the ranking -- v9R FAILED its pre-registered ship
+    #: gate -- but disagreement between them measures model uncertainty, which
+    #: is the one conviction dimension this engine could always have had free.
+    min_model_agreement: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.5, status="UNVALIDATED", search_range=[0.0, 1.0]))
+    agreement_top_k: TI = Field(default_factory=lambda: Tunable[int](
+        value=10, status="UNVALIDATED", search_range=[3, 50]))
+    #: An ADTV that could not be measured used to fall through to a full-size
+    #: position. An unmeasured traded value is not a large one.
+    require_known_liquidity: bool = True
     #: HARD CAP on what the production layer may emit. Not a target.
     max_buys: TI = Field(default_factory=lambda: Tunable[int](
         value=2, status="OPERATIONAL", search_range=[1, 5]))
