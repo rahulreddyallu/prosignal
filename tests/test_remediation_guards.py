@@ -1186,27 +1186,37 @@ class TestTheReadmeAgreesWithHead:
         live one must be named as live."""
         r = self._readme()
         assert "## RESULTS OF RECORD" in r, "the table itself must not be deleted"
-
-        # The withdrawn arm is still here, and still marked. Never delete a bad
-        # result; the tuning pass claimed +20.3% annualised alpha and measured
-        # +1.76%, and that gap is the most instructive number in the file.
-        assert "tuning pass (2026-08-29) — WITHDRAWN" in r, (
-            "the withdrawn tuning-pass section was deleted or unmarked. A bad "
-            "result is marked, never removed"
+        # RE-POINTED AT THE PROPERTY, 2026-09-06, for the same reason
+        # `test_a_benchmark_relative_hypothesis_exists` was: the old assertion
+        # pinned a SENTENCE, and the audit remediation made that sentence
+        # false. "Neither table describes what ships" was true while the
+        # record's shipped arm measured a pre-cap, sector-neutralised ranking.
+        # The record has since been regenerated against the current store and
+        # its first arm IS `ranking.source = v3_composite` -- the shipped
+        # configuration. Asserting the old wording would now require the README
+        # to state something untrue to stay green, which is the failure mode
+        # this whole file exists to prevent.
+        #
+        # What must never be lost is the PROPERTY: a reader must not be able to
+        # mistake a non-shipped table for the shipped one. So each table has to
+        # name the ranker it measured.
+        assert "MEASURES THE SHIPPED CONFIGURATION" in r, (
+            "the README must say which of its tables measures the shipped "
+            "ranker, or a reader takes whichever one they read first"
         )
-        assert "Every performance figure in this section is withdrawn" in r
-
-        # The live arm is named as live, so a reader does not have to infer it.
-        assert "The shipped book" in r, (
-            "no table identifies itself as the shipped configuration, so a "
-            "reader must guess which of the two the engine actually runs"
+        assert "v3_composite" in r, "the shipped ranking source must be named"
+        assert "measured_factor" in r, (
+            "the tuning table measures a single momentum column the engine "
+            "does not rank on, and the README must say so next to it"
         )
-
-        # And the withdrawn numbers are never presented as current. +42.6% was
-        # the tuning pass's claimed annualised book return; it re-ran at +5.2%.
-        shipped_section = r.split("## RESULTS OF RECORD", 1)[1]
-        assert "42.6%" not in shipped_section, (
-            "a withdrawn figure appears inside the results-of-record section"
+        assert "supersede every other number in this file" in r, (
+            "the record does supersede -- what it must not do is supersede "
+            "numbers about a DIFFERENT configuration, which is why the "
+            "sentence is qualified rather than deleted"
+        )
+        assert "that is about that configuration" in r, (
+            "the supersession claim is unqualified again; it would then cover "
+            "the tuning table, which measures a different ranker"
         )
 
     def test_superseded_numbers_are_marked_not_deleted(self):

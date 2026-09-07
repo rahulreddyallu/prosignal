@@ -234,18 +234,55 @@ class RegimeState(_Contract):
     transition_flag: bool = False
     transition_components: List[str] = Field(default_factory=list)
 
+    #: FACTOR MULTIPLIERS, AND THEY SCALE NOTHING THE SHIPPED BOOK IS ORDERED
+    #: BY. They multiply the FAMILY block in `stage4_core_score`, which
+    #: `_apply_ranking_policy` then discards under `ranking.source =
+    #: v3_composite` -- the shipped setting. They are still computed, logged to
+    #: the ledger and printed, and on the shipped path a reader who sees
+    #: "momentum x0.75" is being told the engine leaned against momentum today,
+    #: which it did not. `scores_the_shipped_book` is the flag that says so;
+    #: anything DISPLAYING these must call it. The run note was already fixed
+    #: this way -- it is emitted only after the ranking source is known.
     momentum_multiplier: float
     quality_multiplier: float
     sector_rs_multiplier: float
     dampener_applied: float = 1.0
+    #: True only when a ranking source exists that these multipliers reach.
+    #: Default False: an unset flag must read as "does not scale the book",
+    #: because the shipped configuration is the one where it does not, and a
+    #: default of True would restore the misreading on every caller that
+    #: forgets to set it.
+    scores_the_shipped_book: bool = False
 
     allow_new_entries: bool = True
     block_reason: Optional[str] = None
 
     notes: List[str] = Field(default_factory=list)
 
+    def multiplier_note(self) -> Optional[str]:
+        """Why the multipliers below did not change the ranking, or None.
+
+        Returned rather than raised or hidden: the regime read is real and
+        worth printing -- trend, volatility, breadth, the entry gate -- and it
+        is only the FACTOR MULTIPLIERS that go nowhere. Deleting them would
+        also delete them from the `fitted_composite` path, where they work.
+        """
+        if self.scores_the_shipped_book:
+            return None
+        return ("INERT ON THIS RUN. These scale the family block, which the "
+                "shipped `v3_composite` ranking discards -- the book was not "
+                "tilted by them. The regime read itself, and the entry gate, "
+                "are live.")
+
     def compatibility(self) -> RegimeCompatibility:
-        """Human-facing 'Regime Compatibility' line on the recommendation card."""
+        """Human-facing 'Regime Compatibility' line on the recommendation card.
+
+        NOT gated on `scores_the_shipped_book`. This reads the regime, which is
+        live on every path; it is the multipliers that are inert, and it uses
+        `momentum_multiplier` only as a compact encoding of the regime's own
+        read. Every branch below is reachable from the trend/vol/breadth state
+        alone.
+        """
         if not self.allow_new_entries:
             return RegimeCompatibility.UNFAVORABLE
         if self.momentum_multiplier >= 0.9 and not self.transition_flag:
@@ -296,8 +333,10 @@ class FactorMember(_Contract):
     -1.81 sd" says nothing about WHICH lottery moment moved, and the reader
     cannot check the theme against the measurements without them.
 
-    `rank` is the cross-sectional rank in [-1, +1], taken within sector where
-    the sector is large enough -- the same number the family averages.
+    `rank` is the cross-sectional rank in [-1, +1] across the whole eligible
+    universe -- the same number the family averages. It was taken WITHIN
+    SECTOR until the sector map was found to be current-vintage (and so future
+    information) and to cost the signal 0.029 of IC; see `v3.SECTOR_NEUTRAL`.
     """
 
     name: str
@@ -384,6 +423,15 @@ class RedundancyReport(_Contract):
     action_taken: str = "log"
     technical_collapse: Dict[str, float] = Field(default_factory=dict)
     notes: List[str] = Field(default_factory=list)
+    #: INDEPENDENT columns behind the composite, not declared ones. Grinold's
+    #: IR = IC * sqrt(breadth) takes breadth to be independent bets, and 22
+    #: correlated factors are not 22 bets. Measured across 380 panel dates the
+    #: 22 declared factors carry 6.94 effective and the 5 themes carry 3.96, so
+    #: a breadth argument made on the factor count overstates by 1.74x. Keys:
+    #: `factors_declared`, `factors_effective`, `themes_declared`,
+    #: `themes_effective`, `breadth_overstatement`. Empty when a cross-section
+    #: is too thin to correlate.
+    effective_breadth: Dict[str, float] = Field(default_factory=dict)
 
 
 class CoreScoreReport(_Contract):
@@ -410,6 +458,15 @@ class CoreScoreReport(_Contract):
     effective_weights: Dict[str, float] = Field(default_factory=dict)
     dropped_factors: Dict[str, str] = Field(default_factory=dict)
     ranked_scores: List[StockScore] = Field(default_factory=list)
+    #: EVERY SPECIFICATION THE ENGINE COULD FORM, not just the one that ranked.
+    #: {source -> {ticker -> raw score}}. The fitted Fama-MacBeth composite is
+    #: computed on every run and was previously discarded by the ranking policy,
+    #: which keeps only its index; the v9R core costs one call on the raw factor
+    #: frame already in hand. Neither becomes the ranking -- `ranking.source`
+    #: still decides that -- but model DISAGREEMENT is a measurement of
+    #: uncertainty, and it is the one conviction dimension this engine could
+    #: always have had for free.
+    alternative_rankings: Dict[str, Dict[str, float]] = Field(default_factory=dict)
     redundancy: RedundancyReport = Field(default_factory=RedundancyReport)
     universe_size: int = 0
     notes: List[str] = Field(default_factory=list)
@@ -845,6 +902,12 @@ class FinalSignalOutput(_Contract):
     #: could never show the clock. Keys: cadence_sessions, is_entry_date,
     #: sessions_since_anchor, next_entry_date, sessions_until_next.
     entry_clock: Dict[str, Any] = Field(default_factory=dict)
+    #: Stage 9's full evaluation, one entry per shortlisted candidate --
+    #: including the ones it refused, which is the half that makes the record
+    #: worth keeping. Flows into `LedgerRow.conviction`.
+    conviction: List[Dict[str, Any]] = Field(default_factory=list)
+    #: Which mutually exclusive NO-TRADE cause bound, when one did.
+    conviction_cause: Optional[str] = None
     #: What happens to held names the run produced no card for -- suspended,
     #: dropped from the universe, or delisted. Without this a position left the
     #: book by omission and no exit was ever recorded.
@@ -913,6 +976,16 @@ class LedgerRow(_Contract):
     no_trade_reason: Optional[str] = None
 
     gate_counts: Dict[str, int] = Field(default_factory=dict)
+    #: THE CONVICTION RECORD -- every candidate Stage 9 evaluated, cleared or
+    #: not, with the four measurements that decided it and the reason the first
+    #: one failed. This is the research substrate for the selection-precision
+    #: study: without it there is no way to ask, later, whether the names the
+    #: gate refused went on to outperform the ones it took. `conviction_grade`
+    #: is ORDINAL and uncalibrated -- see `conviction.gate`.
+    conviction: List[Dict[str, Any]] = Field(default_factory=list)
+    #: Which of the mutually exclusive NO-TRADE causes bound, when one did.
+    #: A thin-evidence day and a broken feed are not the same fact.
+    conviction_cause: Optional[str] = None
     data_quality_flags: List[str] = Field(default_factory=list)
     survivorship_risk: bool = False
     stage_timings_ms: Dict[str, float] = Field(default_factory=dict)

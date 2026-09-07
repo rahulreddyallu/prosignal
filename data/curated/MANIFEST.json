@@ -1,9 +1,9 @@
 {
  "root": "/Users/rahulreddyallu/Desktop/Pro Stock Signal BOT/data/curated",
- "built_at": "2026-09-07T15:11:56+00:00",
- "digest": "808e9c104f856f7f",
+ "built_at": "2026-09-06T10:11:39+00:00",
+ "digest": "ab4767cae833fba4",
  "n_files": 51,
- "total_bytes": 257899305,
+ "total_bytes": 257686902,
  "files": [
   {
    "path": "corporate_actions.parquet",
@@ -153,7 +153,7 @@
    "min_date": null,
    "max_date": null,
    "schema_sha": "8768724028ec37c1",
-   "mtime_ms": 1788732329797
+   "mtime_ms": 1788676152593
   },
   {
    "path": "fundamentals.parquet",
@@ -393,7 +393,7 @@
    "min_date": null,
    "max_date": null,
    "schema_sha": "a8f25e6f5e8a08a1",
-   "mtime_ms": 1788732329637
+   "mtime_ms": 1788681229346
   },
   {
    "path": "security_list.parquet",
@@ -403,7 +403,7 @@
    "min_date": null,
    "max_date": null,
    "schema_sha": "33c7e0d86d2ceefe",
-   "mtime_ms": 1788732329670
+   "mtime_ms": 1788676152585
   },
   {
    "path": "shareholding.parquet",

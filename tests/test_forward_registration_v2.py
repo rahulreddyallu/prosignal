@@ -61,8 +61,8 @@ def row(date, version="cfg@aaa", error=None):
 
 
 # ------------------------------------------------------------- the v2 contract
-def test_a_new_registration_is_written_under_the_v2_scheme(tmp_path):
-    assert open_v2(tmp_path).scheme == SCHEME == "v2"
+def test_a_new_registration_is_written_under_the_current_scheme(tmp_path):
+    assert open_v2(tmp_path).scheme == SCHEME == "v3"
 
 
 def test_the_primary_is_the_spread_against_an_external_model(tmp_path):
@@ -85,7 +85,24 @@ def test_the_secondary_is_benchmark_relative(tmp_path):
 
 def test_the_engine_is_registered_to_fail_the_secondary(tmp_path):
     """A forward test whose outcome is not in doubt is not a test."""
-    assert "expected to FAIL" in open_v2(tmp_path).secondary
+    assert "expected to fail" in open_v2(tmp_path).secondary.lower()
+
+
+def test_the_secondary_is_stated_on_deployed_capital(tmp_path):
+    """Scheme v3's whole reason for existing.
+
+    v2 asked for MEAN EXCESS against a fully-invested benchmark while the book
+    deploys ~21.8% of capital, so the hypothesis could be passed by raising
+    `risk_per_trade_pct` -- a position-sizing knob -- with the ranking and the
+    names untouched. A criterion that a sizing parameter can satisfy is not a
+    criterion about the signal.
+    """
+    s = open_v2(tmp_path).secondary
+    assert "DEPLOYED CAPITAL" in s.upper()
+    assert "risk_per_trade_pct" in s, (
+        "the registration must name the parameter that confounded the previous "
+        "hypothesis, or the next reader repeats the mistake")
+    assert "21.8%" in s
 
 
 def test_the_falsification_set_is_the_brief_s(tmp_path):
@@ -260,13 +277,28 @@ def test_the_registration_is_committed_so_ci_can_check_it():
         f"CI can check that its criteria were frozen.")
 
 
-def test_the_shipped_registration_is_v2_and_intact():
-    """The assertion the brief asks CI to carry."""
+def test_the_shipped_registration_is_intact_and_refused_as_pre_v3():
+    """The registration on disk is INTACT and NOT GRADEABLE, and both matter.
+
+    Intact: it still matches its own fingerprint, so nobody edited the criteria
+    after observations started. Not gradeable: it is a scheme-v2 window whose
+    benchmark hypothesis is stated as mean excess against a fully-invested
+    benchmark, which moves with the risk budget. Those are different claims and
+    conflating them is how a void window gets read as a running one.
+    """
     assert verify(LEDGER), (
         "data/ledger/forward_test.json does not match its own fingerprint. "
         "The criteria are supposed to be frozen; if they were edited the "
         "window is void and must be restarted, not repaired.")
     assert fingerprint_scheme(LEDGER) == "current"
     reg = load_registration(LEDGER)
-    assert reg is not None and reg.scheme == SCHEME
+    assert reg is not None
     assert reg.falsification and reg.power
+    if reg.scheme != SCHEME:
+        from prosignal.validation.forward import progress
+        prog = progress(LEDGER, [], live_config_version=reg.config_version)
+        assert prog is not None
+        assert any("scheme" in b and "deployed capital" in b
+                   for b in prog.broken), (
+            f"a scheme-{reg.scheme} registration must be REFUSED under the "
+            f"current contract, not graded. broken={prog.broken}")

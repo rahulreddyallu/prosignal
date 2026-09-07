@@ -70,6 +70,304 @@ DRAWDOWN_FLAG = -0.25
 #: Below this many scored names an influence share is noise, not a measurement.
 MIN_NAMES_FOR_INFLUENCE = 30
 
+#: Coverage every theme must reach before the composite is the SAME MODEL it is
+#: at the end of the sample. See `theme_availability`.
+STABLE_MODEL_FLOOR = 0.40
+
+
+def theme_availability(panel: pd.DataFrame) -> pd.DataFrame:
+    """Share of names each theme can speak about, per date.
+
+    WHY THIS IS A VALIDATION CONCERN AND NOT A DATA NOTE. `score_frame`
+    re-caps the blend over the themes a name actually has, so a name scored on
+    three themes and a name scored on five are combined by different weight
+    vectors. That is correct per name. Across TIME it means the composite is
+    not one model: the fundamentals feed reaches almost nobody early in the
+    sample and most of the universe late in it, so an early score is a
+    three-theme blend and a late one is a five-theme blend.
+
+    Measured on the 380-date panel, `quality_sub` coverage by year:
+
+        2018  0.0%   2019  0.0%   2020  1.5%   2021 23.3%   2022 26.5%
+        2023 50.2%   2024 68.9%   2025 77.1%   2026 86.4%
+
+    and mean `n_themes` per name rises 2.99 -> 4.86 over the same span. Any IC
+    or book statistic quoted over the whole panel is therefore a weighted
+    average across structurally different models, and the weighting is set by a
+    data feed rather than by anything anybody chose.
+    """
+    cols = [t + "_sub" for t in THEMES if t + "_sub" in panel.columns]
+    if not cols or "date" not in panel.columns:
+        return pd.DataFrame()
+    return panel.groupby("date", sort=True)[cols].apply(
+        lambda g: g.notna().mean())
+
+
+def participation_ratio(corr: np.ndarray) -> float:
+    """Effective number of independent columns behind a correlation matrix.
+
+    `(sum L)^2 / sum L^2` over the eigenvalues. It equals the column count when
+    the columns are orthogonal and collapses toward 1 as they align, which is
+    the quantity a breadth claim actually needs -- Grinold's IR = IC * sqrt(N)
+    takes N to be independent bets, and correlated factors are not independent
+    bets.
+    """
+    m = np.nan_to_num(np.asarray(corr, dtype="float64"), nan=0.0)
+    # Numerical asymmetry in a Spearman matrix makes eigvalsh unhappy on some
+    # BLAS builds; symmetrise rather than trusting the input.
+    ev = np.linalg.eigvalsh((m + m.T) / 2.0)
+    ev = np.clip(ev, 0.0, None)
+    total = float(ev.sum())
+    sq = float(np.sum(ev * ev))
+    return (total * total) / sq if sq > 0 else float("nan")
+
+
+def effective_count(frame: pd.DataFrame, min_names: int = 30) -> float:
+    """`participation_ratio` of one cross-section's Spearman matrix."""
+    if frame is None or frame.empty:
+        return float("nan")
+    x = frame.astype("float64")
+    x = x.loc[:, x.notna().sum() >= int(min_names)]
+    if x.shape[1] < 2:
+        return float("nan")
+    c = np.nan_to_num(x.corr(method="spearman").to_numpy(), nan=0.0)
+    np.fill_diagonal(c, 1.0)
+    return participation_ratio(c)
+
+
+def effective_breadth(panel: pd.DataFrame,
+                      columns: Optional[Sequence[str]] = None,
+                      min_names: int = 30) -> Dict[str, float]:
+    """How many independent columns the composite really carries, per date.
+
+    THE CLAIM THIS CHECKS. The engine describes itself as 22 factors across 5
+    themes, and every breadth argument in this repository rests on those two
+    numbers. Measured per date on the 380-date panel and averaged:
+
+        factors   20.9 columns present  ->   6.94 effective  (median 7.34)
+        themes     4.59 columns present ->   3.96 effective
+
+    So the factor count overstates independent breadth by a factor of three,
+    and `sqrt(22 / 6.94)` = 1.78x on any IR computed from it. The theme level
+    is close to honest, which is the two-level structure doing its job.
+
+    Averaged ACROSS DATES rather than pooled: a single correlation matrix over
+    stacked cross-sections mixes within-date structure with the drift of the
+    factor means, and the second is not breadth.
+    """
+    cols = list(columns) if columns else [c for c in panel.columns
+                                          if c in set(FACTOR_THEME)]
+    cols = [c for c in cols if c in panel.columns]
+    if not cols or "date" not in panel.columns:
+        return {}
+    eff, present = [], []
+    for _, g in panel.groupby("date", sort=True):
+        e = effective_count(g[cols], min_names=min_names)
+        if np.isfinite(e):
+            eff.append(e)
+            present.append(int((g[cols].notna().sum() >= min_names).sum()))
+    if not eff:
+        return {}
+    return {"n_dates": float(len(eff)),
+            "columns_declared": float(len(cols)),
+            "columns_present_mean": float(np.mean(present)),
+            "effective_mean": float(np.mean(eff)),
+            "effective_median": float(np.median(eff)),
+            "breadth_overstatement": (float(np.sqrt(np.mean(present)
+                                                    / np.mean(eff)))
+                                      if np.mean(eff) > 0 else float("nan"))}
+
+
+#: A sign that has flipped this significantly out of sample is not noise.
+SIGN_FLIP_T = 2.0
+
+
+def out_of_sample_signs(panel: pd.DataFrame, label: str,
+                        min_names: int = 50) -> pd.DataFrame:
+    """Every factor's shipped sign against what it did after the fit closed.
+
+    THE CHECK NOTHING PERFORMED. `review_factors` watches a ROLLING window,
+    which answers "is this drifting" and not "was this ever true off the data
+    it was chosen on". The signs are the model: `V3_SEARCH.md` records that two
+    of them read backwards against their own theme name and pins them with a
+    test "so nobody 'corrects' it", which is right -- a measured sign is a
+    measurement. It is also exactly why a sign that fails out of sample has to
+    be found by something other than reading it.
+
+    Measured on the shipped panel at h=63, raw Spearman against the forward
+    return, per date and averaged:
+
+                          in sample            out of sample
+        margin_stability  -0.0581 (t -5.73)    -0.0272 (t -4.74)   holds
+        net_margin        -0.0486 (t -6.42)    +0.0207 (t +2.52)   FLIPPED
+        quality_sub       +0.0547 (t +7.31)    +0.0103 (t +1.41)
+
+    `net_margin` ships at sign -1 on an in-sample t of -6.42 and comes back
+    POSITIVE out of sample at t +2.52 -- significant in the other direction,
+    which is a different thing from decaying to zero. The theme it sits in
+    carries 18.99% of the composite and is out-of-sample indistinguishable from
+    zero.
+
+    Columns: `shipped_sign`, `ic_oos`, `t_oos`, `agrees`, `flipped`.
+    """
+    from .features import v3
+
+    lo, hi = v3.FIT_WINDOW
+    if panel is None or "date" not in getattr(panel, "columns", ()):
+        return pd.DataFrame()
+    when = pd.to_datetime(panel["date"])
+    oos = panel[when > pd.Timestamp(hi)]
+    if oos.empty or label not in oos.columns:
+        return pd.DataFrame()
+
+    rows = []
+    for theme, spec in v3.THEMES.items():
+        for factor, sign in spec.factors:
+            col = factor + "_r" if factor + "_r" in oos.columns else factor
+            if col not in oos.columns:
+                continue
+            ics = []
+            for _, g in oos.groupby("date", sort=True):
+                g = g.dropna(subset=[col, label])
+                if len(g) < int(min_names):
+                    continue
+                v = g[col].corr(g[label], method="spearman")
+                if np.isfinite(v):
+                    ics.append(float(v))
+            if len(ics) < 3:
+                continue
+            a = np.asarray(ics, dtype="float64")
+            sd = float(a.std(ddof=1))
+            t = float(a.mean() / sd * np.sqrt(a.size)) if sd > 0 else float("nan")
+            agrees = bool(np.sign(a.mean()) == np.sign(sign))
+            rows.append({
+                "theme": theme, "factor": factor, "shipped_sign": float(sign),
+                "n_dates": int(a.size), "ic_oos": float(a.mean()),
+                "t_oos": t, "agrees": agrees,
+                # A DECAY TO ZERO AND A FLIP ARE DIFFERENT FAILURES. The first
+                # says the factor stopped working; the second says it works and
+                # the model has the sign backwards, which is worse and is
+                # actionable in a way the first is not.
+                "flipped": bool(not agrees and np.isfinite(t)
+                                and abs(t) >= SIGN_FLIP_T),
+            })
+    return pd.DataFrame(rows)
+
+
+def flipped_signs(panel: pd.DataFrame, label: str) -> List[str]:
+    """One sentence per factor whose sign failed out of sample. Empty is healthy."""
+    frame = out_of_sample_signs(panel, label)
+    if frame.empty:
+        return []
+    out = []
+    for _, r in frame[frame["flipped"]].iterrows():
+        out.append(
+            f"{r['factor']} ({r['theme']}) ships at sign "
+            f"{int(r['shipped_sign']):+d} and its out-of-sample IC is "
+            f"{r['ic_oos']:+.4f} at t {r['t_oos']:+.2f} over {int(r['n_dates'])} "
+            f"dates -- significant in the OTHER direction, which is not the "
+            f"same failure as decaying to zero.")
+    return out
+
+
+#: Two theme sub-scores correlating above this are not two bets, whatever the
+#: weights say. Well below the 0.60 factor-pair cutoff on purpose: the themes
+#: are the level the weights are applied at, so overlap there defeats the whole
+#: two-level design, and it defeats it at a correlation a factor pair would
+#: shrug off.
+THEME_OVERLAP_ALERT = 0.30
+
+
+def theme_sub_score_overlap(panel: pd.DataFrame) -> pd.DataFrame:
+    """Cross-theme sub-score correlation, per date and averaged.
+
+    THE LEVEL THAT MATTERS AND WAS NOT CHECKED. `_v3_redundancy` compares
+    FACTOR pairs against a 0.60 cutoff and reports theme pairs against the same
+    bar. The themes are what the blend weights multiply, so two themes that
+    move together are one bet carrying two weights -- and they do that at a
+    correlation far below the level at which two factors would matter, because
+    nothing downstream ever nets them.
+
+    Measured on the shipped panel, the pair that matters:
+
+        momentum <-> risk   +0.341
+
+    `ulcer_120` enters `risk` at sign -1 and `prox_52w` enters `momentum` at
+    +1, and the two correlate -0.773 raw -- so ORIENTED they reinforce. The
+    risk theme carries 11.1% of the weight and is substantially a second
+    momentum vote. The two-level structure exists precisely to stop "a momentum
+    bet with decoration", and at 0.341 it has not fully succeeded.
+
+    Per date and averaged, never pooled: a matrix over stacked cross-sections
+    mixes the ordering with drift in the sub-score means.
+    """
+    cols = [t + "_sub" for t in THEMES if t + "_sub" in
+            getattr(panel, "columns", ())]
+    if len(cols) < 2 or "date" not in getattr(panel, "columns", ()):
+        return pd.DataFrame()
+    acc: Dict[tuple, List[float]] = {}
+    for _, g in panel.groupby("date", sort=True):
+        x = g[cols].astype("float64")
+        keep = [c for c in cols if x[c].notna().sum() >= MIN_NAMES_FOR_INFLUENCE]
+        if len(keep) < 2:
+            continue
+        c = x[keep].corr(method="spearman")
+        for a in range(len(keep)):
+            for b in range(a + 1, len(keep)):
+                v = c.iloc[a, b]
+                if np.isfinite(v):
+                    acc.setdefault((keep[a][:-4], keep[b][:-4]), []).append(float(v))
+    rows = []
+    for (a, b), vals in acc.items():
+        if len(vals) < 3:
+            continue
+        rho = float(np.mean(vals))
+        rows.append({"theme_a": a, "theme_b": b, "rho": rho,
+                     "n_dates": len(vals),
+                     "weight_a": float(THEMES[a].weight),
+                     "weight_b": float(THEMES[b].weight),
+                     "alert": bool(abs(rho) >= THEME_OVERLAP_ALERT)})
+    out = pd.DataFrame(rows)
+    return (out.sort_values("rho", key=lambda s: s.abs(), ascending=False)
+            .reset_index(drop=True) if not out.empty else out)
+
+
+def overlapping_themes(panel: pd.DataFrame) -> List[str]:
+    """One sentence per theme pair that is really one bet. Empty is healthy."""
+    frame = theme_sub_score_overlap(panel)
+    if frame.empty:
+        return []
+    out = []
+    for _, r in frame[frame["alert"]].iterrows():
+        out.append(
+            f"{r['theme_a']} and {r['theme_b']} sub-scores correlate "
+            f"{r['rho']:+.3f} across {int(r['n_dates'])} dates. They carry "
+            f"{r['weight_a']:.1%} and {r['weight_b']:.1%} of the blend and the "
+            f"cap is applied per theme, so the shared exposure is weighted "
+            f"twice and nothing nets it.")
+    return out
+
+
+def stable_model_window(panel: pd.DataFrame,
+                        floor: float = STABLE_MODEL_FLOOR):
+    """First date from which EVERY theme stays above `floor`, or None.
+
+    "From which it stays" rather than "on which it first happens": a single
+    date clearing the bar and then falling back is not the point at which the
+    model settled. Measured on the shipped panel at a 40% floor this is
+    2023-07-21, leaving 150 of 380 dates -- which is a hard fact about how much
+    evidence describes the model as it now stands, and it is a great deal less
+    than the row count suggests.
+    """
+    av = theme_availability(panel)
+    if av.empty:
+        return None
+    ok = (av >= float(floor)).all(axis=1)
+    for d in ok.index:
+        if bool(ok.loc[d:].all()):
+            return d
+    return None
+
 
 @dataclass
 class FactorHealth:

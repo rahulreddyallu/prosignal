@@ -380,14 +380,52 @@ class CapitalConfig(_Base):
     max_open_positions: TI
     per_position_inr: TOF
     max_participation_of_adtv: TF
+    #: "risk_budget" sizes each name at `risk_budget / risk_per_share`, which
+    #: is what this engine has always done and is the reason the old book held
+    #: about a fifth of its capital: at a 1% budget and an 8xATR stop clipped
+    #: to 35%, the risk term binds on essentially every name. That made the
+    #: SIZING RULE the largest determinant of every performance figure the
+    #: engine printed -- see finding Q1.
+    #:
+    #: "equal_weight" gives every name `capital * target_deployment / n` and
+    #: lets liquidity still refuse it. It removes the leverage confound at
+    #: source rather than dividing it out afterwards.
+    sizing_mode: TS = Field(default_factory=lambda: Tunable[str](
+        value="risk_budget", status=ParamStatus.MEASURED))
+    #: Share of capital the book aims to hold under `equal_weight`. Ignored by
+    #: `risk_budget`, which arrives at its deployment as a by-product.
+    #:
+    #: 0.75 RATHER THAN 1.0, and the 25% is not timidity. Alpha on deployed
+    #: capital is invariant to deployment while drawdown scales with it, so
+    #: measured out of sample the two read -1.95% against -1.94% on alpha and
+    #: -15.1% against -20.1% on the worst drawdown. The cash costs nothing and
+    #: buys five points of drawdown.
+    target_deployment: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.75, status=ParamStatus.MEASURED))
+
+    @field_validator("sizing_mode")
+    @classmethod
+    def _sizing(cls, v):
+        allowed = {"risk_budget", "equal_weight"}
+        if str(getattr(v, "value", v)) not in allowed:
+            raise ValueError(f"capital.sizing_mode must be one of {sorted(allowed)}")
+        return v
 
     def position_value_inr(self) -> float:
-        """Rupee value of one new position -- explicit override or an even split."""
+        """Rupee value of one new position -- explicit override or an even split.
+
+        Under `equal_weight` the split is over the TARGET DEPLOYMENT rather
+        than the whole account, so 20 names at 75% is Rs 37,500 each on a Rs 10
+        lakh book and the remaining quarter is deliberately uninvested.
+        """
         explicit = self.per_position_inr.value
         if explicit is not None and explicit > 0:
             return float(explicit)
         n = max(int(self.max_open_positions.value), 1)
-        return float(self.total_capital_inr.value) / n
+        capital = float(self.total_capital_inr.value)
+        if str(self.sizing_mode.value) == "equal_weight":
+            capital *= float(self.target_deployment.value)
+        return capital / n
 
 
 # =============================================================================
@@ -499,6 +537,11 @@ class CsvImportConfig(_Base):
     enabled: bool = True
     pledging_file: str
     fundamentals_file: str
+    #: Your own executions. The only feed that can calibrate
+    #: `costs.impact_model`; absent means impact stays UNCALIBRATED and
+    #: `research impact` says so rather than fitting to the simulator's own
+    #: entry rule. Reading it is not order routing -- see EXECUTION_GATE.md.
+    fills_file: str = "config/reference/fills.csv"
     earnings_calendar_file: str
     corporate_actions_file: str
     regulatory_events_file: str
@@ -2008,6 +2051,69 @@ class ExpectancyConfig(_Base):
         return self
 
 
+# =============================================================================
+# Stage 9 -- CONVICTION
+# =============================================================================
+
+
+class ConvictionConfig(_Base):
+    """The final 0-2 gate. EVERY value here is UNVALIDATED.
+
+    These thresholds were chosen to be defensible a priori, not fitted to make
+    any particular day's output look good. Signal frequency must be a
+    CONSEQUENCE of them; tuning them to hit a target number of BUYs per week is
+    the failure this whole layer exists to prevent.
+
+    The one number with a measurement behind it is `max_cost_burden`, and only
+    indirectly: `docs/RESULTS_OF_RECORD.json` puts the ranking's top-decile
+    excess at +1.76% over 63 sessions (corrected t 2.21), while the shipped cost
+    model prices live candidates at 60-84 bps round-trip. A candidate spending
+    more than 60% of the only edge the model has ever demonstrated is not a
+    trade worth one of two slots.
+    """
+
+    enabled: bool = True
+    #: Candidates evaluated in full. A compute bound, not a selection rule.
+    shortlist: TI = Field(default_factory=lambda: Tunable[int](
+        value=15, status="UNVALIDATED", search_range=[5, 50]))
+    #: Meucci ENB over the supporting factors. Below 2.0 the case is one bet
+    #: wearing many hats. Measured live, the top-ranked name spans 1.53.
+    min_independent_evidence: TF = Field(default_factory=lambda: Tunable[float](
+        value=2.0, status="UNVALIDATED", search_range=[1.0, 5.0]))
+    max_evidence_concentration: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.85, status="UNVALIDATED", search_range=[0.5, 1.0]))
+    #: Separation in robust sigma units of the RAW score, not the rank.
+    min_gap_to_median: TF = Field(default_factory=lambda: Tunable[float](
+        value=1.0, status="UNVALIDATED", search_range=[0.0, 3.0]))
+    #: Share of alternative theme weightings keeping the name in the top 10.
+    min_robustness: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.70, status="UNVALIDATED", search_range=[0.0, 1.0]))
+    max_cost_burden: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.60, status="UNVALIDATED", search_range=[0.1, 1.0]))
+    #: The second slot must be a second BET.
+    max_residual_correlation: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.35, status="UNVALIDATED", search_range=[0.0, 0.9]))
+    max_evidence_similarity: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.80, status="UNVALIDATED", search_range=[0.0, 1.0]))
+    min_basket_enb: TF = Field(default_factory=lambda: Tunable[float](
+        value=1.70, status="UNVALIDATED", search_range=[1.0, 2.0]))
+    #: MODEL AGREEMENT. The fitted Fama-MacBeth composite is fitted on every
+    #: run and used to be discarded; v9R costs one call on a frame already in
+    #: hand. Neither becomes the ranking -- v9R FAILED its pre-registered ship
+    #: gate -- but disagreement between them measures model uncertainty, which
+    #: is the one conviction dimension this engine could always have had free.
+    min_model_agreement: TF = Field(default_factory=lambda: Tunable[float](
+        value=0.5, status="UNVALIDATED", search_range=[0.0, 1.0]))
+    agreement_top_k: TI = Field(default_factory=lambda: Tunable[int](
+        value=10, status="UNVALIDATED", search_range=[3, 50]))
+    #: An ADTV that could not be measured used to fall through to a full-size
+    #: position. An unmeasured traded value is not a large one.
+    require_known_liquidity: bool = True
+    #: HARD CAP on what the production layer may emit. Not a target.
+    max_buys: TI = Field(default_factory=lambda: Tunable[int](
+        value=2, status="OPERATIONAL", search_range=[1, 5]))
+
+
 class RootConfig(_Base):
     """The fully validated contents of config/parameters.yaml."""
 
@@ -2026,6 +2132,7 @@ class RootConfig(_Base):
     stage6_entry: Stage6Config
     stage7_risk: Stage7Config
     stage8_final_signal: Stage8Config
+    stage9_conviction: ConvictionConfig = Field(default_factory=ConvictionConfig)
     costs: CostsConfig
     expectancy: ExpectancyConfig
     ledger: LedgerConfig

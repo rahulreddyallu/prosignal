@@ -7,7 +7,7 @@ and it is deliberately one-directional: it reads what the engine produced and
 never feeds anything back into it.
 """
 
-from .selection import SLOTS, Slate, select_slate
+from .selection import HOLD, SLOTS, Slate, select_slate
 from .evidence import EVIDENCE_CATEGORIES, build_evidence
 from .history import (build_history, changes, distinct_names, load_days,
                       runs_for_ticker, slate_picks)
@@ -16,7 +16,7 @@ from .narrative import build_narrative
 from .viewmodel import build_view
 
 __all__ = [
-    "SLOTS", "Slate", "select_slate",
+    "HOLD", "SLOTS", "Slate", "select_slate",
     "EVIDENCE_CATEGORIES", "build_evidence",
     "build_history", "changes", "distinct_names", "load_days",
     "runs_for_ticker",

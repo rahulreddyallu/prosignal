@@ -900,6 +900,128 @@ class DataIngestor:
         except Exception as exc:
             log.warning("fundamentals refresh skipped", extra={"error": str(exc)})
 
+    def _refresh_shareholding(self, as_of: dt.date, opts: "IngestOptions") -> None:
+        """Quarterly shareholding patterns -- the free float, from the exchange.
+
+        WHY THIS IS INGESTED BEFORE ANYTHING READS IT. `public_val` IS the free
+        float as a percentage, published per quarter per symbol, not derived
+        and not estimated. `costs.impact_model` scales participation by TRADED
+        VALUE because the engine has no float data, and Indian promoter
+        holdings are high enough that two identical-capitalisation names can
+        have floats differing threefold -- so that model prices them the same
+        when they are nothing alike to trade.
+
+        The provider was built in commit 2922c30 under the build plan's own
+        rule for that pass -- "DATA, NOT MODELS. No factor reads any of this
+        yet" -- and was then never connected to `data ingest`, so the table sat
+        at whatever the one-off backfill left. This is the connection.
+
+        ONE REQUEST PER SYMBOL, so it is gated hard. The pattern is quarterly
+        and the endpoint sits behind the bot shield, so refreshing it more than
+        once a quarter spends several hundred requests to re-read numbers that
+        have not changed. Failure is never fatal: the existing rows stay and
+        any future consumer sees a stale `availability_date` rather than a
+        silent absence.
+        """
+        if opts.offline:
+            return
+        if not self.config.params.providers.nse_json_api.enabled:
+            return
+        stored = self.store.read_shareholding()
+        if not opts.force_reference_refresh and not stored.empty:
+            newest = pd.to_datetime(stored.get("availability_date"),
+                                    errors="coerce").max()
+            # A quarter plus the measured p90 disclosure lag of 21 days. Inside
+            # that window there is nothing new to fetch.
+            if pd.notna(newest) and (pd.Timestamp(as_of) - newest).days < 112:
+                return
+        try:
+            from .providers.http import NseJsonSession
+            from .providers.nse_shareholding import NseShareholdingProvider
+
+            p = self.config.params.providers
+            session = NseJsonSession(
+                client=self.http, base=p.nse_json_api.base,
+                warmup_path=p.nse_json_api.warmup_path,
+            )
+            provider = NseShareholdingProvider(
+                session=session, client=self.http,
+                path=p.nse_json_api.shareholding_path,
+            )
+            index = str(self.config.params.universe.index_name.value)
+            dates = self.store.universe_snapshot_dates(index)
+            if not dates:
+                return
+            symbols = self.store.read_universe_snapshot(index, dates[-1])[SYMBOL].tolist()
+            frame = provider.fetch_universe(symbols)
+            if frame is not None and not frame.empty:
+                written = self.store.write_shareholding(frame)
+                self.store.update_feed_state("shareholding", as_of,
+                                             "nse_json_api", written)
+                log.info("shareholding refreshed",
+                         extra={"rows": written,
+                                "symbols": int(frame[SYMBOL].nunique()),
+                                "unknown": len(provider.unknown)})
+        except Exception as exc:  # noqa: BLE001 - degrade, never fail the run
+            log.warning("shareholding refresh skipped", extra={"error": str(exc)})
+
+    def _refresh_surveillance(self, as_of: dt.date, opts: "IngestOptions") -> None:
+        """Surveillance state and F&O eligibility, as DATED SNAPSHOTS.
+
+        A name under Trade-for-Trade settlement, a cut price band or a GSM/ASM
+        stage cannot be filled at a simulated price. The long book already
+        screens most of this through `allowed_series: [EQ]`, which is per
+        session and genuinely point-in-time; what this adds is the band and the
+        GSM/ASM stage, which the series code does not carry, and the F&O list
+        -- of the 750-name universe only 207 (27.6%) are F&O eligible, and that
+        is the shortable universe the build plan's next pass needs to size.
+
+        WHY IT RUNS ON THE REFERENCE CADENCE AND NOT ONCE. NSE publishes
+        neither file at a dated URL, so membership accumulates going FORWARD
+        from the first snapshot and cannot be reconstructed backwards. Every
+        run that stores a snapshot makes the table point-in-time from that day
+        on; skipping runs leaves holes that can never be filled. Two cheap
+        archive files, no cookie needed.
+
+        A consumer asking about a date before the first snapshot must get
+        NOT_TESTABLE rather than today's list -- projecting today's
+        surveillance list backwards is the lookahead the universe screen
+        already refuses for index membership, and it runs in the flattering
+        direction.
+        """
+        if opts.offline:
+            return
+        if not opts.force_reference_refresh and not self._should_refresh(
+            "surveillance", as_of, opts.reference_refresh_sessions
+        ):
+            return
+        try:
+            from .providers.nse_surveillance import NseSurveillanceProvider
+
+            provider = NseSurveillanceProvider(
+                client=self.http,
+                base=self.config.params.providers.nse_archives.base_archives,
+            )
+            rows = 0
+            secs = provider.fetch_security_list(snapshot_date=as_of)
+            if secs is not None and not secs.empty:
+                rows += self.store.write_security_list(secs)
+            lots = provider.fetch_fo_lots(snapshot_date=as_of)
+            if lots is not None and not lots.empty:
+                rows += self.store.write_fo_lots(lots)
+            if rows:
+                self.store.update_feed_state("surveillance", as_of,
+                                             "nse_archives", rows)
+                log.info("surveillance snapshot stored",
+                         extra={"rows": rows,
+                                "securities": 0 if secs is None else len(secs),
+                                "fo_contracts": 0 if lots is None else len(lots)})
+            elif provider.last_error:
+                log.warning("surveillance snapshot empty",
+                            extra={"error": provider.last_error})
+        except Exception as exc:  # noqa: BLE001 - degrade, never fail the run
+            log.warning("surveillance refresh skipped", extra={"error": str(exc)})
+
     # =====================================================================
     # corporate actions & earnings
     # =====================================================================
@@ -1105,16 +1227,48 @@ class DataIngestor:
         except Exception as exc:
             log.warning("sector map refresh failed", extra={"error": str(exc)})
 
+
         if opts.force_reference_refresh or self._should_refresh(
             "statements", as_of, opts.reference_refresh_sessions
         ):
             if self._refresh_statements(symbols):
                 self.store.update_feed_state("statements", as_of, "yfinance", 0)
 
+        # REALISED EXECUTIONS. The only feed that can calibrate the impact
+        # coefficient, and the only one no vendor supplies. Absent is the
+        # normal state and is recorded as such -- `research impact` then
+        # reports UNCALIBRATED rather than fitting to the simulator's own
+        # entry rule.
+        fills = self.csv.load_fills()
+        if not fills.empty:
+            written = self.store.write_fills(fills)
+            self.store.update_feed_state("fills", as_of, "csv_import", written)
+            log.info("fills imported",
+                     extra={"rows": written,
+                            "symbols": int(fills[SYMBOL].nunique()),
+                            "calibratable": int(fills["decision_date"].notna().sum())})
+        self._record_feed(
+            "fills",
+            FeedStatus.OK if not fills.empty else FeedStatus.MISSING,
+            SourceName.CSV_IMPORT,
+            notes=[
+                "no realised fills supplied, so `costs.impact_model` stays "
+                "UNCALIBRATED. Drop a CSV at "
+                f"{p.providers.csv_import.fills_file} to enable it -- see "
+                "validation/fill_calibration.py."
+            ] if fills.empty else [],
+        )
+
         fundamentals = self.csv.load_fundamentals()
         if not fundamentals.empty:
             self.store.write_fundamentals(fundamentals)
         self._refresh_nse_fundamentals(as_of, opts)
+        # PASS-1 POINT-IN-TIME FEEDS. Both were built ahead of any consumer --
+        # that was the pass's rule -- and neither was ever connected here, so
+        # each sat at whatever its one-off backfill left. Both degrade to a
+        # warning; neither can fail a run.
+        self._refresh_shareholding(as_of, opts)
+        self._refresh_surveillance(as_of, opts)
         stored_fund = self.store.read_fundamentals()
         self._record_feed(
             "fundamentals",

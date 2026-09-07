@@ -66,6 +66,40 @@ __all__ = ["ArmResult", "RankingResult", "Stamp", "ResultsOfRecord",
 
 DOC_RELPATH = "docs/RESULTS_OF_RECORD.md"
 
+#: Below this many signal dates a restricted window is not a measurement, and
+#: printing an IC over it invites the reader to compare a number against noise.
+MIN_STABLE_DATES = 60
+
+#: A decile of fewer than ten names is not a decile. The profile is built from
+#: cross-sections of at least this many scored names.
+MIN_NAMES_FOR_DECILES = 100
+
+#: Horizons the ranking is reported at, shortest first.
+#:
+#: WHY 5 IS ON THIS LIST. The engine holds for `model_horizon_sessions`, which
+#: is 63, and the ranking was only ever reported at 21 and above -- so the one
+#: question the horizon choice turns on could not be asked. The IC MAGNITUDE
+#: rises with horizon (+0.058 at 21, +0.078 at 63 out of sample) while its
+#: SIGNIFICANCE falls (+2.28 to +1.73), because a longer label leaves fewer
+#: independent windows in the same span. Those two facts point opposite ways
+#: and a table that starts at 21 shows only one of them.
+REPORT_HORIZONS: Tuple[int, ...] = (5, 21, 42)
+
+#: The window a claim about the shipped model rests on. The others are context.
+#:
+#: WHY THIS AND NOT `FULL_PANEL`. The signs and weights were fitted
+#: 2018-11-27..2024-10-25 (`v3.FIT_WINDOW`), so 293 of the panel's 380 dates
+#: are dates the model was chosen on. Pooling them with the 87 that followed
+#: produces one number that is neither an in-sample fit statistic nor an
+#: out-of-sample result, and it is the pooled number every published table
+#: quoted.
+HEADLINE_WINDOW = "OUT_OF_SAMPLE"
+
+#: Mirrored from `v3_monitor` so `render` can name the bar without importing
+#: the monitor at module scope; `tests/test_model_stability_window.py` pins the
+#: two together.
+_STABLE_FLOOR = 0.40
+
 #: How close a re-run has to land before the published claim is called
 #: REPRODUCED. Generous on purpose -- the question is whether a number is the
 #: same RESULT, not whether it matches to the basis point. The simulator's
@@ -143,6 +177,22 @@ class RankingResult:
     decile_monotonicity: float
     independent_observations: float
     vif: float
+    #: FULL_PANEL, or STABLE_MODEL for the rows restricted to the span over
+    #: which the composite is the same model it is today. See
+    #: `v3_monitor.stable_model_window`.
+    window: str = "FULL_PANEL"
+    #: Mean themes a scored name actually had. On the full panel this rises
+    #: 2.99 -> 4.86 across the sample, which is what makes the two windows
+    #: different models rather than the same model on different dates.
+    n_themes_mean: float = float("nan")
+    #: The least-covered theme's share of names, over the same rows.
+    min_theme_coverage: float = float("nan")
+    #: Mean excess of every decile over its own date's cross-section, plus
+    #: `peak_decile` and `top_minus_d6`. See `_decile_profile`: in sample the
+    #: profile is monotone and D10 wins; out of sample it peaks at D6/D7 and
+    #: D10 is the sixth-best decile, which is the part of the model the shipped
+    #: six-name book is concentrated in.
+    decile_profile: Dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -245,6 +295,56 @@ def _decile_monotonicity(panel: pd.DataFrame, label: str,
     return float(np.mean(rhos)) if rhos else float("nan")
 
 
+def _decile_profile(panel: pd.DataFrame, label: str,
+                    score: str = "score") -> Dict[str, float]:
+    """Mean excess of EVERY decile, not just the top one, per date and averaged.
+
+    WHY THE WHOLE PROFILE AND NOT THE TOP DECILE. The book holds six names off
+    the very top of D10, and `decile_monotonicity` compresses the entire shape
+    into one rank correlation -- a profile that rises to D7 and falls away can
+    score +0.33 there and look healthy. Measured on the shipped panel at h=63,
+    excess over each date's own cross-section:
+
+               D1     D2     D3     D4     D5     D6     D7     D8     D9    D10
+        IS  -2.77  -1.41  -0.93  -0.10  -0.22  +0.06  +0.70  +0.78  +1.44  +2.45
+        OOS -2.31  -1.27  -0.60  -0.65  +0.31  +1.23  +1.73  +0.64  +0.58  +0.36
+
+    In sample the profile is monotone and D10 is the best decile by a distance.
+    Out of sample it PEAKS AT D7 and D10 is the sixth-best decile, so D10-D6 is
+    +2.39 in sample and -0.87 out of it. The bottom of the distribution
+    generalises almost perfectly (-2.77 -> -2.31); the top does not generalise
+    at all.
+
+    That is a fact about the book, not only about the ranking: a six-name book
+    from the very top of D10 is a concentrated bet on the one part of this
+    model the out-of-sample evidence does not support. It corroborates
+    Stambaugh-Yu-Yuan -- the alpha is in the short leg -- from a long-only
+    panel that was never constructed to test it.
+    """
+    rows: List[pd.Series] = []
+    for _, g in panel.groupby("date", sort=True):
+        g = g.dropna(subset=[score, label])
+        if len(g) < MIN_NAMES_FOR_DECILES:
+            continue
+        d = pd.qcut(g[score].rank(method="first"), 10, labels=False,
+                    duplicates="drop")
+        means = g.groupby(d)[label].mean() - float(g[label].mean())
+        if len(means) < 10:
+            continue
+        rows.append(means)
+    if not rows:
+        return {}
+    m = pd.DataFrame(rows).mean()
+    out = {f"d{i + 1}": float(m.get(i, float("nan"))) for i in range(10)}
+    out["n_dates"] = float(len(rows))
+    out["top_minus_d6"] = float(m.get(9, float("nan")) - m.get(5, float("nan")))
+    finite = {k: v for k, v in out.items()
+              if k.startswith("d") and np.isfinite(v)}
+    out["peak_decile"] = (float(max(finite, key=finite.get)[1:]) if finite
+                          else float("nan"))
+    return out
+
+
 def _top_decile_excess(panel: pd.DataFrame, label: str,
                        score: str = "score") -> List[float]:
     """Per-date mean of the top decile minus the mean of the whole date.
@@ -319,13 +419,23 @@ def _run_book(rankings, panels, params, step_sessions: int) -> Optional[Dict[str
         "bench_return_per_period": float(m["bench_mean_return"]),
         "sharpe": float(m["sharpe"]),
         "bench_sharpe": float(m["bench_sharpe"]),
+        # -- HEADLINE: leverage-invariant. See portfolio_sim._benchmark_stats
+        # for why the raw excess below is not a performance statistic.
+        "alpha_on_deployed_ann": float(m.get("alpha_on_deployed_ann", float("nan"))),
+        "alpha_t": float(m.get("alpha_t", float("nan"))),
+        "excess_on_deployed_ann": float(m.get("excess_on_deployed_ann", float("nan"))),
+        "deployed_frac": float(m.get("deployed_frac", float("nan"))),
+        "levmatch_excess_ann": float(m.get("levmatch_excess_ann", float("nan"))),
+        # -- proportional to deployment ------------------------------------
+        "alpha_per_period": float(m["alpha_per_period"]),
+        "alpha_ann": float(m["alpha_per_period"]) * ppy,
+        "beta_to_benchmark": float(m["beta_to_benchmark"]),
+        # -- LEVERAGE-CONFOUNDED, retained for reconciliation only ---------
         "mean_excess_per_period": float(m["mean_excess"]),
         "excess_ann": float(m["mean_excess"]) * ppy,
         "gross_excess_ann": gross * ppy,
         "cost_drag_ann": float(m.get("mean_cost", 0.0) or 0.0) * ppy,
         "ir": float(m["information_ratio"]),
-        "alpha_per_period": float(m["alpha_per_period"]),
-        "beta_to_benchmark": float(m["beta_to_benchmark"]),
         "periods_beating_benchmark": float(m["excess_hit_rate"]),
         "worst_schedule_drawdown": float(m["worst_schedule_drawdown"]),
         "avg_names": float(m["avg_names"]),
@@ -399,8 +509,53 @@ def _stamp(cfg, store, panel: pd.DataFrame, horizon: int, stride: int,
     )
 
 
+def _theme_shape(sub: pd.DataFrame) -> Tuple[float, float]:
+    """Mean themes per name, and the least-covered theme's coverage."""
+    from ..v3_monitor import THEMES
+    n_mean = (float(sub["n_themes"].mean()) if "n_themes" in sub.columns
+              else float("nan"))
+    cols = [t + "_sub" for t in THEMES if t + "_sub" in sub.columns]
+    cov = (min(float(sub[c].notna().mean()) for c in cols) if cols
+           else float("nan"))
+    return n_mean, cov
+
+
+def _ranking_windows(panel: pd.DataFrame) -> List[Tuple[str, pd.DataFrame]]:
+    """The spans the ranking is reported over, headline first.
+
+    Two independent cuts, and they answer different questions:
+
+      OUT_OF_SAMPLE / IN_SAMPLE split on `v3.FIT_WINDOW` -- was this measured
+      on dates the model was CHOSEN on? 293 of 380 panel dates are.
+
+      STABLE_MODEL splits on theme availability -- is this the model that
+      ships, or an earlier one that could not see fundamentals? See
+      `v3_monitor.stable_model_window`.
+
+    `FULL_PANEL` is kept and reported last. It is the longer record and the
+    one every published figure was quoted from; dropping it would hide what is
+    being corrected.
+    """
+    from ..features import v3 as v3feat
+    from ..v3_monitor import stable_model_window
+
+    d = pd.to_datetime(panel["date"])
+    lo, hi = v3feat.FIT_WINDOW
+    out: List[Tuple[str, pd.DataFrame]] = [
+        ("OUT_OF_SAMPLE", panel[d > pd.Timestamp(hi)]),
+        ("IN_SAMPLE", panel[(d >= pd.Timestamp(lo)) & (d <= pd.Timestamp(hi))]),
+    ]
+    start = stable_model_window(panel)
+    if start is not None:
+        out.append(("STABLE_MODEL", panel[d >= pd.Timestamp(start)]))
+    out.append(("FULL_PANEL", panel))
+    return [(name, frame) for name, frame in out
+            if not frame.empty and int(frame["date"].nunique()) >= MIN_STABLE_DATES]
+
+
 def _ranking_results(panel: pd.DataFrame, horizons: Sequence[int],
-                     stride: int) -> List[RankingResult]:
+                     stride: int, window: str = "FULL_PANEL"
+                     ) -> List[RankingResult]:
     out: List[RankingResult] = []
     for h in horizons:
         label = f"y{h}"
@@ -428,6 +583,10 @@ def _ranking_results(panel: pd.DataFrame, horizons: Sequence[int],
             decile_monotonicity=_decile_monotonicity(sub, label),
             independent_observations=_independent(n_dates, stride, h),
             vif=vif,
+            window=window,
+            n_themes_mean=_theme_shape(sub)[0],
+            min_theme_coverage=_theme_shape(sub)[1],
+            decile_profile=_decile_profile(sub, label),
         ))
     return out
 
@@ -477,7 +636,7 @@ def build(cfg, store, *, panel: Optional[pd.DataFrame] = None,
         say("building the v3 score panel over the whole store")
         panel = build_v3_panel(
             store, end=end, stride=stride,
-            horizons=(21, 42, horizon),
+            horizons=tuple(sorted(set(REPORT_HORIZONS) | {horizon})),
             max_names=int(getattr(u.pit_max_names, "value", u.pit_max_names)),
             min_adtv_inr=float(getattr(u.pit_min_adtv_inr, "value",
                                        u.pit_min_adtv_inr)),
@@ -517,7 +676,11 @@ def build(cfg, store, *, panel: Optional[pd.DataFrame] = None,
     close = price_panels["close"]
 
     say("scoring the ranking")
-    ranking = _ranking_results(panel, (21, 42, horizon), stride)
+    ranking: List[RankingResult] = []
+    report_at = tuple(sorted(set(REPORT_HORIZONS) | {horizon}))
+    for name, frame in _ranking_windows(panel):
+        ranking += _ranking_results(frame, report_at, stride, window=name)
+
     n_dates = int(panel["date"].nunique())
     independent = _independent(n_dates, stride, horizon)
 
@@ -679,18 +842,31 @@ def _mom_6_1_panel(panel: pd.DataFrame, close: pd.DataFrame) -> Optional[pd.Data
     return pd.concat(rows, ignore_index=True)
 
 
-#: (figure, tolerance, is_headline). HEADLINE figures decide the arm's status
-#: and are the ones the published table's own summary sentence asserts. The
-#: rest are compared and reported but do not by themselves withdraw a claim --
-#: `alpha_per_period` is the case in point: it is a near-zero residual whose
-#: sign is not stable across two different books, and letting it withdraw a
-#: table whose headline reproduces to two decimals would be as misleading as
-#: hiding it.
+#: (figure, tolerance, is_headline). HEADLINE figures decide the arm's status.
+#:
+#: THE HEADLINE FLAGS WERE ON THE WRONG ROWS AND THIS IS THE CORRECTION.
+#: `ir` and `mean_excess_per_period` were headline and `alpha_per_period` was
+#: explicitly demoted, with a note calling it "a near-zero residual whose sign
+#: is not stable". That reading is backwards. The raw excess compares a book
+#: that deploys 21.8% of capital against a benchmark that is fully invested,
+#: so it carries an additive `-(1-dep)*mean(bench)` term worth 17.3 points a
+#: year -- and it MOVES WITH `risk_per_trade_pct`, spanning 9.5 points across a
+#: sweep in which the ranking, the names and every other setting are identical.
+#: The near-zero alpha was not a nuisance residual; it was the answer.
+#:
+#: So the raw figures stay in the comparison -- every published number in this
+#: repository quotes them and a reconciliation needs them -- and they no longer
+#: decide anything. `alpha_on_deployed_ann` is leverage-invariant (see
+#: `portfolio_sim._benchmark_stats`) and is the figure a WITHDRAWN verdict now
+#: rests on.
 SHIPPED_FIGURES = (
-    ("ir", "information ratio", 0.50, True),
-    ("mean_excess_per_period", "mean excess / period", 0.05, True),
-    ("periods_beating_benchmark", "periods beating the benchmark", 0.20, True),
-    ("alpha_per_period", "alpha / period", 0.02, False),
+    ("alpha_on_deployed_ann", "alpha on deployed capital (ann)", 0.05, True),
+    ("excess_on_deployed_ann", "excess on deployed capital (ann)", 0.08, True),
+    ("ir", "information ratio [LEVERAGE-CONFOUNDED]", 0.50, False),
+    ("mean_excess_per_period", "mean excess / period [LEVERAGE-CONFOUNDED]",
+     0.05, False),
+    ("periods_beating_benchmark", "periods beating the benchmark", 0.20, False),
+    ("alpha_per_period", "alpha / period (scales with deployment)", 0.02, False),
 )
 
 
@@ -725,6 +901,7 @@ def _judge_shipped(claimed: Dict[str, Any], measured: Dict[str, Any]
     rows = _compare(claimed, measured, SHIPPED_FIGURES)
     bad = [r for r in rows if r["headline"] and r["verdict"] not in
            ("matches", "NOT_TESTABLE")]
+    testable = [r for r in rows if r["headline"] and r["verdict"] != "NOT_TESTABLE"]
     other = [r for r in rows if not r["headline"] and r["verdict"] not in
              ("matches", "NOT_TESTABLE")]
     if bad:
@@ -733,17 +910,42 @@ def _judge_shipped(claimed: Dict[str, Any], measured: Dict[str, Any]
                           f"measured {r['measured']:+.4g} -- {r['verdict']}"
                           for r in bad),
                 rows)
+
+    # NO HEADLINE FIGURE IS EVEN TESTABLE. That is the state after the
+    # leverage correction: the published table quoted `mean_excess` and `ir`,
+    # which are confounded with `risk_per_trade_pct` and are no longer what a
+    # verdict rests on, and it quoted NO leverage-neutral figure because none
+    # existed when it was written. A claim made in a unit the engine has
+    # retired cannot be reproduced OR refuted -- it is superseded, and saying
+    # "REPRODUCED" here would let a withdrawn unit ride on a green word.
+    if not testable:
+        raw = {r["key"]: r for r in rows}
+        me = raw.get("mean_excess_per_period", {})
+        return ("SUPERSEDED",
+                (f"the published claim is stated in `mean_excess` and `ir`, "
+                 f"both of which are confounded with the risk budget and are "
+                 f"no longer headline figures. Re-run on the current store the "
+                 f"book deploys {measured.get('deployed_frac', float('nan')):.1%} "
+                 f"of capital, so of its "
+                 f"{measured.get('excess_ann', float('nan')):+.1%} raw annual "
+                 f"excess, {measured.get('excess_ann', float('nan')) - measured.get('levmatch_excess_ann', float('nan')):+.1%} "
+                 f"is the cash it is not holding. The leverage-neutral reading "
+                 f"is {measured.get('alpha_on_deployed_ann', float('nan')):+.2%} "
+                 f"a year on deployed capital at t "
+                 f"{measured.get('alpha_t', float('nan')):+.2f} -- "
+                 f"indistinguishable from zero. The old claim is neither "
+                 f"confirmed nor refuted; it is expressed in a retired unit."),
+                rows)
+
     tail = ""
     if other:
-        tail = (" Note, and it is reported rather than dropped because it is "
-                "not a headline figure: "
+        tail = (" Reported rather than dropped, though not headline: "
                 + "; ".join(f"{r['figure']} claimed {r['claimed']:+.4g} against "
                             f"{r['measured']:+.4g} measured ({r['verdict']})"
                             for r in other)
-                + ". Alpha here is a near-zero residual of two different books "
-                  "with different betas, so its sign is not stable; the "
-                  "headline claim is the underperformance, and that "
-                  "reproduces.")
+                + ". The raw excess and the information ratio are confounded "
+                  "with the risk budget -- see SHIPPED_FIGURES -- so a "
+                  "disagreement there is not evidence about the signal.")
     return ("REPRODUCED",
             "the direction and magnitude of the published headline claim "
             "survive a re-run on the current store." + tail,
@@ -782,6 +984,11 @@ _STATUS_BADGE = {
     "REPRODUCED": "REPRODUCED",
     "WITHDRAWN": "WITHDRAWN",
     "NOT_TESTABLE": "NOT_TESTABLE",
+    #: The claim was stated in a unit the engine has retired. Distinct from
+    #: WITHDRAWN (measured and refuted) and from NOT_TESTABLE (could not be
+    #: measured at all): the figure was measurable, it simply no longer means
+    #: what it was quoted to mean. See `_judge_shipped`.
+    "SUPERSEDED": "SUPERSEDED",
 }
 
 
@@ -821,18 +1028,46 @@ def _arm_block(a: ArmResult) -> List[str]:
         L.append("")
         return L
 
-    L += ["| | book | benchmark (equal-weight eligible universe) |",
+    # THE LEVERAGE-NEUTRAL READING LEADS. Everything below it is either
+    # proportional to deployment or additively confounded by it.
+    dep = m.get("deployed_frac", float("nan"))
+    L += ["**Headline — leverage-neutral.** The book does not hold all of its "
+          "capital, so a raw comparison against a fully-invested benchmark "
+          "measures the sizing knob as much as the signal:",
+          "",
+          "| | value |",
+          "|---|---|",
+          f"| **alpha on deployed capital (ann)** | "
+          f"**{_pct(m.get('alpha_on_deployed_ann'), 2)}** |",
+          f"| t(alpha) | {_num(m.get('alpha_t'))} |",
+          f"| excess on deployed capital (ann) | "
+          f"{_pct(m.get('excess_on_deployed_ann'), 2)} |",
+          f"| capital actually deployed | "
+          f"{dep:.1%}" + (" |" if np.isfinite(dep) else " (unknown) |"),
+          ""]
+
+    L += ["**Full reconciliation.** The rows marked *confounded* move with "
+          "`risk_per_trade_pct` even when the ranking and the names are "
+          "identical; they are retained so published figures can be traced, "
+          "not because they measure anything:",
+          "",
+          "| | book | benchmark (equal-weight eligible universe) |",
           "|---|---|---|",
           f"| mean return / period | {_pct(m['mean_return_per_period'])} | "
           f"{_pct(m['bench_return_per_period'])} |",
           f"| annualised | {_pct(m['book_return_ann'], 1)} | "
           f"{_pct(m['bench_return_ann'], 1)} |",
           f"| Sharpe | {_num(m['sharpe'])} | {_num(m['bench_sharpe'])} |",
-          f"| mean excess / period | {_pct(m['mean_excess_per_period'])} | — |",
-          f"| information ratio | {_num(m['ir'])} | — |",
           f"| beta to benchmark | {_num(m['beta_to_benchmark'])} | — |",
-          f"| alpha / period | {_pct(m['alpha_per_period'])} | — |",
-          f"| periods beating the benchmark | {m['periods_beating_benchmark']:.1%} | — |",
+          f"| alpha / period *(scales with deployment)* | "
+          f"{_pct(m['alpha_per_period'])} | — |",
+          f"| leverage-matched excess (ann) | "
+          f"{_pct(m.get('levmatch_excess_ann'), 1)} | — |",
+          f"| mean excess / period *(confounded)* | "
+          f"{_pct(m['mean_excess_per_period'])} | — |",
+          f"| information ratio *(confounded)* | {_num(m['ir'])} | — |",
+          f"| periods beating the benchmark *(confounded)* | "
+          f"{m['periods_beating_benchmark']:.1%} | — |",
           f"| worst schedule drawdown | {_pct(m['worst_schedule_drawdown'], 1)} | — |",
           f"| mean names held | {m['avg_names']:.1f} | — |",
           f"| periods scored | {m['n_periods']} | — |",
@@ -866,6 +1101,18 @@ def _arm_block(a: ArmResult) -> List[str]:
                      f"{r['verdict']} | {'yes' if r['headline'] else 'no'} |")
         L.append("")
     return L
+
+
+def _in_sample_dates(rec: ResultsOfRecord) -> int:
+    """Signal dates inside the fit window, from the ranking rows themselves.
+
+    Read off the report rather than recomputed, so the sentence in the prose
+    cannot disagree with the table under it.
+    """
+    for r in rec.ranking:
+        if r.window == "IN_SAMPLE":
+            return r.n_dates
+    return 0
 
 
 def render(rec: ResultsOfRecord) -> str:
@@ -922,19 +1169,74 @@ def render(rec: ResultsOfRecord) -> str:
           f"{s.stride_sessions} sessions apart against a "
           f"{s.horizon_sessions}-session label, so observations overlap and the "
           "naive statistic is inflated by roughly `sqrt(VIF)`.", "",
-          "| horizon | dates | rows | rank IC | IC t (naive) | IC t (corrected) | "
+          "**`" + HEADLINE_WINDOW + "` is the row a claim about the shipped "
+          "model rests on.** The signs and weights were fitted over "
+          f"`v3.FIT_WINDOW`, which covers {_in_sample_dates(rec)} of the "
+          f"panel's {s.panel_distinct_dates} signal dates, so a figure pooled "
+          "across the whole panel is neither an in-sample fit statistic nor "
+          "an out-of-sample result. Every published table quoted the pooled "
+          "number.", "",
+          "`STABLE_MODEL` is a second and independent cut. `score_frame` "
+          "re-caps the theme blend over the themes a "
+          "name actually has, so a name scored on three themes and a name "
+          "scored on five are combined by different weight vectors. The "
+          "fundamentals feed reaches almost nobody at the start of the panel "
+          "and most of the universe at the end, so `FULL_PANEL` averages "
+          "across structurally different models with the weighting set by a "
+          "data feed. `STABLE_MODEL` is the span over which every theme stays "
+          "above "
+          f"{_pct(_STABLE_FLOOR, 0)} coverage -- the composite as it now "
+          "stands, and there is much less of it.", "",
+          "`FULL_PANEL` is reported last rather than dropped. It is the longer "
+          "record and the one every superseded figure came from.", "",
+          "| window | horizon | dates | rows | themes/name | rank IC | "
+          "IC t (naive) | IC t (corrected) | "
           "quintile spread | spread t (corr.) | top-decile excess | "
           "top-decile t (corr.) | decile monotonicity | indep. obs | VIF |",
-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rec.ranking:
+        name = (f"**{r.window}**" if r.window == HEADLINE_WINDOW else r.window)
         L.append(
-            f"| {r.horizon} | {r.n_dates} | {r.n_rows:,} | {r.ic:+.4f} | "
+            f"| {name} | {r.horizon} | {r.n_dates} | {r.n_rows:,} | "
+            f"{_num(r.n_themes_mean)} | {r.ic:+.4f} | "
             f"{_num(r.ic_t_naive)} | **{_num(r.ic_t_corrected)}** | "
             f"{_pct(r.spread)} | **{_num(r.spread_t_corrected)}** | "
             f"{_pct(r.top_decile_excess)} | **{_num(r.top_decile_t_corrected)}** | "
             f"{r.decile_monotonicity:+.3f} | {r.independent_observations} | "
             f"{r.vif:.2f} |")
     L.append("")
+
+    # -- where in the ordering the information actually is -------------------
+    prof = [r for r in rec.ranking if r.decile_profile]
+    if prof:
+        L += ["### Where in the ordering the information actually is", "",
+              "`decile monotonicity` above compresses the whole shape into one "
+              "rank correlation, and a profile that rises to D7 and falls away "
+              "can score well there. Each row below is the mean excess of that "
+              "decile over its own date's cross-section, averaged across "
+              "dates. **The shipped book holds six names off the very top of "
+              "D10.**", "",
+              "| window | horizon | " + " | ".join(f"D{i}" for i in range(1, 11))
+              + " | peak | D10−D6 |",
+              "|---|---|" + "---|" * 12]
+        for r in prof:
+            d = r.decile_profile
+            name = (f"**{r.window}**" if r.window == HEADLINE_WINDOW
+                    else r.window)
+            L.append(
+                f"| {name} | {r.horizon} | "
+                + " | ".join(_pct(d.get(f"d{i}"), 2) for i in range(1, 11))
+                + f" | D{d.get('peak_decile', float('nan')):.0f} | "
+                  f"{_pct(d.get('top_minus_d6'), 2)} |")
+        L += ["",
+              "Read the `peak` and `D10−D6` columns against each other across "
+              "the two windows. In sample the profile is monotone and D10 wins "
+              "by a distance; out of sample it peaks in the middle of the "
+              "upper half and D10 is not the best decile. The BOTTOM of the "
+              "distribution generalises closely -- which is the "
+              "Stambaugh-Yu-Yuan result, reproduced from a long-only panel "
+              "that was never built to test it, and it is not a leg this "
+              "engine can trade.", ""]
 
     # -- the arms -----------------------------------------------------------
     L += ["## The two book tables, re-run", "",

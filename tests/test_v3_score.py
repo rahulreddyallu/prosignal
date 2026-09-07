@@ -37,7 +37,14 @@ def test_the_shipped_themes_and_weights_are_the_deployed_configuration():
     assert sum(t.weight for t in v3.THEMES.values()) == pytest.approx(1.0)
     assert max(t.weight for t in v3.THEMES.values()) <= 0.40 + 1e-9
     assert min(t.weight for t in v3.THEMES.values()) >= 0.06 - 1e-9
-    assert len(v3.ALL_FACTORS) == 22
+    # 21 since 2026-09-06. `net_margin` was dropped from `quality`: it ships
+    # at -1 on an in-sample t of -6.42 and reads +0.0207 at t +2.52 out of
+    # sample -- significant in the OTHER direction. The theme was kept, which
+    # is what the measurement said: dropping it outright is worse at h=63
+    # (+0.0718 t +1.38 against +0.0748 t +1.64 shipped), because
+    # `margin_stability` holds its sign at t -4.74 and carries the theme
+    # alone. See v3.THEMES["quality"] and finding Q18.
+    assert len(v3.ALL_FACTORS) == 21
     # Both were frozen rounded (weight to 5dp, coverage to 4dp), so the
     # comparison is only meaningful to the coarser of the two.
     assert v3.THEMES["quality"].weight <= v3.THEMES["quality"].coverage + 5e-5
@@ -138,7 +145,7 @@ def test_theme_contributions_sum_to_the_score():
 def test_a_name_missing_a_theme_is_scored_on_the_rest_not_pushed_to_zero():
     close, open_, vwap, turnover, deliv, bench = _panel()
     raw = v3_factors.factor_frame(close, open_, vwap, turnover, deliv, bench)
-    assert raw["net_margin"].isna().all(), "no fundamentals in this fixture"
+    assert raw["margin_stability"].isna().all(), "no fundamentals in this fixture"
     scored = v3.score_frame(raw, sectors=None)
     assert (scored["n_themes"] == 4).all()
     assert scored["score"].notna().any()
@@ -308,23 +315,21 @@ def test_the_three_books_are_distinct_and_the_note_says_which_one_trades():
     becomes a claim it never made."""
     assert v3.LIVE_BOOK != v3.RESEARCH_BOOK != v3.HOLDOUT_BOOK
     assert v3.BOOK is v3.RESEARCH_BOOK, "BOOK must stay the research book"
-    # REVERSED 2026-09-07. This asserted the live book was the MORE
-    # concentrated one, "and that is the point". It was the point, and it was
-    # the defect: six names sized by a risk budget invested 18.9% of capital and
-    # bet the account on top-decile ordering, the statistic the holdouts
-    # supported least. The live book is now BROADER than either sealed window,
-    # so no window describes it -- which the note has to say rather than imply.
-    assert v3.LIVE_BOOK["slots"] > v3.HOLDOUT_BOOK["slots"], (
-        "the live book should now be the broader one; if it is concentrated "
-        "again, docs/REBUILD_2026_09.md 6.2.2 explains why that is the worst "
-        "of the available configurations")
+    # REVERSED ON 2026-09-06, and the reversal IS the finding. This asserted
+    # the live book was the more concentrated of the two, "which is the
+    # point" -- and concentration was the defect. Six names cannot carry a
+    # ranking over 386 (transfer coefficient 0.206 against 0.296 for a wider
+    # book), and net of cost the widening moves out-of-sample alpha on
+    # deployed capital from -10.46% to -1.95%. The live book is now WIDER
+    # than the holdout book, deliberately.
+    assert v3.LIVE_BOOK["slots"] > v3.HOLDOUT_BOOK["slots"], \
+        "the live book is the wider one now -- concentration was the defect"
     note = v3.BOOK_NOTE
     assert "NO BOOK DOES" in note, "the note must not imply a book was validated"
-    assert "SIX positions" in note, (
-        "the note must keep describing the book that actually ran, or the "
-        "record of why it was replaced disappears with it")
-    assert "18.9%" in note, "the cash drag is the reason; name it"
-    assert "21-session" in note
+    assert "TWENTY positions" in note and "21-session" in note
+    assert "IT USED TO BE SIX" in note, (
+        "the note must say what changed and why; a book that silently widened "
+        "reads as though it was always this size")
     assert "t 0.81" in note, "the weakest holdout statistic must be named"
     assert "BROADER than either sealed window" in note, (
         "a book wider than both holdouts is not described by either, and the "

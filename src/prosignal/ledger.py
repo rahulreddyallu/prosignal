@@ -306,6 +306,61 @@ class Ledger:
             "live_dates_that_conflict": conflicted,
         }
 
+    #: A `mode` written by `repair_lineage` rather than recorded at write time.
+    #: The rule it was inferred by is honest and it is still an inference.
+    RECONSTRUCTED_MODE = "repair_lineage"
+
+    def mode_provenance(self) -> Dict[str, Any]:
+        """How much of this ledger's `mode` labelling was RECONSTRUCTED.
+
+        `repair_lineage` stamps `mode` from what a row's own timestamps prove
+        -- `logged_at` against `date` -- and records `mode_source` saying so.
+        That is the right repair and it does not make the label a recording.
+        Measured on the shipped ledger, 250 of 253 run rows carry it.
+
+        Nothing downstream could see that. `outcomes.load_outcomes` partitions
+        on `exit_model` and on the research epoch, which are both recorded at
+        write time, and never on `mode` -- so a run whose mode was inferred
+        afterwards is indistinguishable from one the engine wrote as it ran.
+        Any claim that rests on "this many live runs" is resting on the
+        inference unless it checks here first.
+
+        Returns counts and `reconstructed_share`, so a caller can refuse rather
+        than discover it later.
+        """
+        total = recorded = reconstructed = 0
+        by_mode: Dict[str, int] = {}
+        for row in self.iter_rows():
+            total += 1
+            mode = str(row.get("mode") or "live")
+            by_mode[mode] = by_mode.get(mode, 0) + 1
+            if str(row.get("mode_source") or "").startswith(
+                    self.RECONSTRUCTED_MODE):
+                reconstructed += 1
+            else:
+                recorded += 1
+        return {
+            "rows": total,
+            "mode_recorded_at_write_time": recorded,
+            "mode_reconstructed": reconstructed,
+            "reconstructed_share": (reconstructed / total if total else 0.0),
+            "by_mode": by_mode,
+        }
+
+    def live_evidence_warning(self) -> Optional[str]:
+        """A sentence for any report that counts live runs, or None."""
+        p = self.mode_provenance()
+        if not p["mode_reconstructed"]:
+            return None
+        return (
+            f"{p['mode_reconstructed']} of {p['rows']} ledger rows "
+            f"({p['reconstructed_share']:.0%}) carry a mode that was "
+            f"RECONSTRUCTED by `repair_lineage` from `logged_at` against "
+            f"`date`, not recorded as the engine ran. The rule is sound and "
+            f"the label is still an inference; a count of live runs taken from "
+            f"these is a count of what the timestamps imply."
+        )
+
     def repair_lineage(self, *, dry_run: bool = True) -> Dict[str, Any]:
         """Stamp each row with the lineage its own timestamps prove, once.
 
@@ -557,6 +612,13 @@ def row_from_output(
             "breadth_pct": regime.breadth_pct_above_ma,
             "transition": regime.transition_flag,
             "momentum_multiplier": regime.momentum_multiplier,
+            # WHETHER THAT MULTIPLIER REACHED THE BOOK. It scales the family
+            # block, which the shipped `v3_composite` ranking discards, so on
+            # every shipped run it is inert. A ledger row carrying the number
+            # and not this flag reads, years later, as though the engine leaned
+            # against momentum that day.
+            "momentum_multiplier_scored_the_book":
+                bool(getattr(regime, "scores_the_shipped_book", False)),
             "allow_new_entries": regime.allow_new_entries,
         },
         eligible_universe_size=funnel.get("passed_eligibility", 0),
@@ -570,6 +632,8 @@ def row_from_output(
         new_entries_blocked=output.new_entries_blocked,
         no_trade_reason=output.no_trade.reason if output.no_trade else None,
         gate_counts=dict(funnel),
+        conviction=list(getattr(output, "conviction", []) or []),
+        conviction_cause=getattr(output, "conviction_cause", None),
         data_quality_flags=list(output.data_quality_flags),
         survivorship_risk=bool(output.manifest.survivorship_risk) if output.manifest else False,
         stage_timings_ms=dict(output.stage_timings_ms),

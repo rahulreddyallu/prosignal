@@ -250,8 +250,15 @@ def _execution_gate(cfg) -> Gate:
 def _validation_gate(cfg) -> Gate:
     still_open = [f for f in _find.open_findings() if f.fid != "R1"]
     if still_open:
+        # THE COUNT BELONGS IN BOTH BRANCHES. It used to appear only when the
+        # gate passed, so a refusal read "open findings: Q7" with no sense of
+        # scale -- one open finding out of forty-nine is a different report
+        # from one out of three, and the reader could not tell which.
         return Gate("VALIDATION", False,
-                    "open findings: " + ", ".join(f.fid for f in still_open),
+                    f"{len(still_open)} of {len(_find.REGISTER)} findings "
+                    f"registered are open: "
+                    + ", ".join(f.fid for f in still_open)
+                    + " (R1 excepted -- it is the forward test itself)",
                     "resolve or consciously defer each; 'reviewed' is not a "
                     "disposition")
     return Gate("VALIDATION", True,

@@ -893,7 +893,7 @@ def _resolve_as_of(calendar, requested: Optional[str]):
 
 def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     """RUN MARKET ANALYSIS -- the full eight-stage decision pipeline."""
-    from .pipeline import PipelineBlocked, run_analysis
+    from .pipeline import STAGE_LABELS, PipelineBlocked, run_analysis
     from .stages.stage8_final_signal import PROBABILITY_UNAVAILABLE
 
     _rule("RUN MARKET ANALYSIS")
@@ -912,7 +912,7 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
         run = run_analysis(
             cfg,
             as_of=_resolve_arg_date(getattr(args, "date", None)),
-            progress=lambda i, label: _print(f"  [{i+1}/9] {label}"),
+            progress=lambda i, label: _print(f"  [{i+1}/{len(STAGE_LABELS)}] {label}"),
         )
     except PipelineBlocked as blocked:
         _print()
@@ -964,7 +964,18 @@ def cmd_analyse_run(cfg: AppConfig, args: argparse.Namespace) -> int:
             else:
                 _print(f"  {note}")
 
-    decision = f"{len(o.recommendations)} BUY / {len(o.watchlist)} WATCH"
+    # BUY AND HOLD ARE COUNTED APART. `recommendations` is the book -- names
+    # newly admitted AND names already held, which Stage 6's cadence gate
+    # exempts. Reporting both as BUY told the operator to open positions they
+    # already have.
+    _held = sum(1 for r in o.recommendations
+                if str(getattr(r.decision, "value", r.decision)) == "HOLD")
+    _new = len(o.recommendations) - _held
+    decision = " / ".join(filter(None, [
+        f"{_new} BUY" if _new or not _held else "",
+        f"{_held} HOLD" if _held else "",
+        f"{len(o.watchlist)} WATCH",
+    ]))
     _print()
     _rule("Decision")
     if o.no_trade:
@@ -1176,8 +1187,9 @@ def cmd_analyse_regime(cfg: AppConfig, args: argparse.Namespace) -> int:
         rows.append(["  ", component])
     _table("Regime", ["read", "value"], rows)
 
+    inert = state.multiplier_note()
     _table(
-        "Factor multipliers",
+        "Factor multipliers" + (" [INERT]" if inert else ""),
         ["factor", "multiplier"],
         [
             ["momentum", f"{state.momentum_multiplier:.3f}"],
@@ -1186,6 +1198,9 @@ def cmd_analyse_regime(cfg: AppConfig, args: argparse.Namespace) -> int:
             ["dampener applied", f"{state.dampener_applied:.2f}"],
         ],
     )
+    if inert:
+        _print(_tag("THESE MULTIPLIERS DID NOT SCALE THE BOOK"))
+        _print("  " + inert)
 
     _print()
     _print(f"New entries allowed : {'YES' if state.allow_new_entries else 'NO'}")
@@ -1232,7 +1247,8 @@ def _regime_history(cfg, store, calendar, symbols, as_of, history: int) -> int:
                 f"{state.vol_tercile.value}/{state.vol_context.value}",
                 _opt_num(state.breadth_pct_above_ma, "%"),
                 "T" if state.transition_flag else "",
-                f"{state.momentum_multiplier:.2f}",
+                (f"{state.momentum_multiplier:.2f}"
+                 + ("" if state.scores_the_shipped_book else "*")),
                 "" if state.allow_new_entries else "BLOCKED",
             ]
         )
@@ -1243,6 +1259,10 @@ def _regime_history(cfg, store, calendar, symbols, as_of, history: int) -> int:
         ["date", "bucket", "trend", "volatility", "breadth", "trn", "mom", "entries"],
         rows,
     )
+    if any(r[6].endswith("*") for r in rows):
+        _print("  * the momentum multiplier scales the family block, which the "
+               "shipped `v3_composite` ranking discards. It did not tilt the "
+               "book on those dates.")
 
     changes = sum(1 for a, b in zip(buckets, buckets[1:]) if a != b)
     _print()
@@ -1697,6 +1717,13 @@ def _portfolio_params(cfg: AppConfig):
         invalidation_ma_sessions=iv(c7.thesis_invalidation.structure_ma_sessions),
         invalidation_buffer_atr=fv(c7.thesis_invalidation.structure_buffer_atr),
         horizon_sessions=iv(cfg.params.stage4_core_score.model_horizon_sessions),
+        # CADENCE PARITY. Without this the simulator decides once per horizon
+        # -- four times a year at H=63 -- while the live engine decides every
+        # `entry_cadence_sessions`, twelve times a year, and carries names
+        # across decisions through the exit band. Every cost and turnover
+        # figure measured on the cohort schedule and quoted about the live book
+        # was a number about a different strategy.
+        decision_sessions=iv(c6.admission.entry_cadence_sessions),
         entry_rank=iv(c6.admission.entry_rank),
         exit_rank=iv(c6.admission.exit_rank),
         target_r_multiple=fv(c7.targets.t2_r_multiple),
@@ -1948,7 +1975,16 @@ def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
     """
     from .validation.registry import TrialRegistry, registry_path
 
+    from .validation import v3_search as v3s
+
     reg = TrialRegistry(registry_path(cfg.paths.curated))
+    if getattr(args, "register_v3_search", False):
+        added = reg.record(v3s.COMMAND, v3s.labels())
+        _rule("Registering the v3 factor search")
+        _print(v3s.summary())
+        _print()
+        _print(f"  {added} newly recorded (the registry is idempotent by "
+               f"command and label, so re-running this adds nothing).")
     trials = reg.load()
     carried = int(cfg.params.validation.search_budget.cumulative_trials_logged)
 
@@ -1973,6 +2009,24 @@ def cmd_research_trials(cfg: AppConfig, args: argparse.Namespace) -> int:
         _print("  `cumulative_trials_logged` is 0. Everything before this "
                "registry existed is therefore uncounted -- it cannot be "
                "reconstructed, and is not being silently assumed to be nothing.")
+
+    # THE SEARCH THAT CHOSE THE MODEL. Every row above came from a command
+    # written AFTER the v3 composite shipped. If the reconstruction is not on
+    # the registry, the DSR is charging for the tuning and not for the search.
+    recorded_search = reg.by_command().get(v3s.COMMAND, 0)
+    _rule("The search that chose the shipped model")
+    _print(v3s.summary())
+    _print()
+    if recorded_search >= v3s.total():
+        _print(f"  on the registry: {recorded_search} of {v3s.total()}. The "
+               f"Deflated Sharpe is charging for the search as well as for "
+               f"the tuning done after it.")
+    else:
+        _print(f"  [!] ON THE REGISTRY: {recorded_search} of "
+               f"{v3s.total()}. Until these are recorded the DSR charges the "
+               f"headline result for the {len(trials)} configurations tried "
+               f"AFTER the model existed and nothing for the search that "
+               f"produced it. Run `prosignal research trials --register-v3-search`.")
     return 0
 
 
@@ -2298,11 +2352,192 @@ def cmd_research_forward(cfg: AppConfig, args: argparse.Namespace) -> int:
     ])
     _print()
     _print(f"  {prog.summary()}")
+    # TRUE STATEMENTS THAT DO NOT VOID THE WINDOW. `broken` stops the test;
+    # these travel with any count taken from it. Printed even when the window
+    # IS broken -- a reader deciding how to re-register needs both.
+    for caveat in prog.caveats():
+        _print()
+        _print(_tag("READ THE COUNT WITH THIS"))
+        _print(f"  {caveat}")
     if not prog.complete and not prog.broken:
         _print()
         _print("  No performance figure is shown by design. The pre-registered "
                "tests run once, at the end.")
     return 0 if not prog.broken else 1
+
+
+def _shape_inputs(cfg, args):
+    """The v3 panel and its price frames, built once for the shape commands."""
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .stages._cfg import fv, iv
+    from .validation.results import REPORT_HORIZONS
+    from .validation.v3_panel import SIGNAL_STRIDE_SESSIONS, build_v3_panel
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        raise DataError("the local store has no price sessions.")
+    end = sessions[-1]
+    cache = getattr(args, "panel_cache", None)
+    if cache and Path(cache).is_file():
+        _print(f"  reading the panel from {cache}")
+        panel = pd.read_parquet(cache)
+    else:
+        _rule("Building the v3 panel")
+        u = cfg.params.universe
+        horizon = iv(cfg.params.stage4_core_score.model_horizon_sessions)
+        panel = build_v3_panel(
+            store, end=end, stride=SIGNAL_STRIDE_SESSIONS,
+            horizons=tuple(sorted(set(REPORT_HORIZONS) | {horizon})),
+            max_names=iv(u.pit_max_names),
+            min_adtv_inr=fv(u.pit_min_adtv_inr),
+            min_price_inr=fv(u.min_price_inr),
+            min_history_sessions=iv(u.min_history_sessions))
+        if cache:
+            panel.to_parquet(cache)
+    return store, sessions, end, panel
+
+
+def cmd_research_shapes(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """What a portfolio SHAPE would have earned, and whether it can carry the IC.
+
+    IR = TC x IC x sqrt(breadth). The transfer coefficient is the correlation
+    between the positions a book takes and the positions the signal implies,
+    and without it a signal that fails to appear in the book is either a broken
+    signal or a book that cannot hold the signal's opinion -- two diagnoses
+    calling for opposite responses.
+    """
+    import pandas as pd
+
+    from .features import v3
+    from .stages._cfg import iv
+    from .validation import transfer as T
+    from .validation.v3_panel import SIGNAL_STRIDE_SESSIONS
+
+    _, _, _, panel = _shape_inputs(cfg, args)
+    horizon = int(args.horizon or iv(cfg.params.stage4_core_score.model_horizon_sessions))
+    label = f"y{horizon}"
+    if label not in panel.columns:
+        raise DataError(f"the panel carries no {label} column; "
+                        f"available: {sorted(c for c in panel.columns if c.startswith('y'))}")
+
+    when = pd.to_datetime(panel["date"])
+    _, hi = v3.FIT_WINDOW
+    windows = [("OUT_OF_SAMPLE", panel[when > pd.Timestamp(hi)]),
+               ("FULL_PANEL", panel)]
+    slots = iv(cfg.params.capital.max_open_positions)
+    for name, frame in windows:
+        if frame.empty:
+            continue
+        n = int(frame.groupby("date").size().median())
+        _rule(f"{name} -- h={horizon}, {frame['date'].nunique()} dates, "
+              f"median {n} names")
+        _print(T.table(T.evaluate(frame, label, T.standard_shapes(n, slots),
+                                  stride=SIGNAL_STRIDE_SESSIONS,
+                                  horizon=horizon)))
+        _print()
+    return 0
+
+
+def cmd_research_ablate(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Exit, sizing and band arms, ranked on the statistic that does not move.
+
+    Position size is `risk_budget / risk_per_share`, so any arm that changes
+    the stop, the risk budget or the slot count changes how much capital is
+    deployed. Ranking arms on raw excess compares leverage rather than the rule
+    under test -- measured, 14.4 points across a sizing sweep in which the
+    ranking and the names are identical.
+    """
+    import pandas as pd
+
+    from .validation import ablation as A
+    from .validation.v3_panel import SIGNAL_STRIDE_SESSIONS
+
+    store, sessions, end, panel = _shape_inputs(cfg, args)
+    _rule("Building price panels")
+    prices = _portfolio_inputs(cfg, store, sessions, None, end)
+    base = _portfolio_params(cfg)
+
+    rankings = []
+    for d, g in panel.groupby("date", sort=True):
+        sc = (g.dropna(subset=["score"]).set_index("symbol")["score"]
+              .sort_values(ascending=False))
+        if len(sc):
+            rankings.append((pd.Timestamp(d), sc))
+
+    groups = [("Exit rungs", A.exit_rung_arms()),
+              ("Risk budget (a pure sizing sweep)",
+               A.risk_budget_arms(base.risk_per_trade_pct)),
+              ("Exit band", A.band_arms(base))]
+    for name, arms in groups:
+        _rule(name)
+        _print(A.table(A.run(arms, rankings, prices, base,
+                             step_sessions=SIGNAL_STRIDE_SESSIONS)))
+        _print()
+    _print("  Every arm here was a look at the same data. Record them with "
+           "`TrialRegistry.record`")
+    _print("  before quoting any of them -- see findings Q5 and Q14.")
+    return 0
+
+
+def cmd_research_impact(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Calibrate the impact coefficient against what the book actually paid.
+
+    Or say why it cannot be. `CostModel.impact_bps` is a config constant that
+    has never been compared to a price this engine traded at.
+    """
+    import pandas as pd
+
+    from .data.store import DataStore
+    from .stages._cfg import fv, iv
+    from .validation.fill_calibration import calibrate, read_outcomes
+
+    from .validation.fill_calibration import from_fills
+
+    store = DataStore(cfg.paths.curated, cfg.paths.snapshots)
+
+    # REAL FILLS FIRST. `csv_import.load_fills` imports what the book actually
+    # paid; the outcome ledger cannot stand in for it, because 126 of its 128
+    # entry prices are the next session's open to the tick. If both exist the
+    # fills win -- they are executions and the ledger is the entry rule.
+    led = from_fills(store.read_fills())
+    source = "recorded fills"
+    if led.empty:
+        led = read_outcomes(Path(cfg.paths.ledger) / "outcomes.jsonl")
+        source = "the outcome ledger (NOT executions -- see below)"
+    if led.empty:
+        _print("  no fills and no outcome ledger; nothing to calibrate against")
+        return 1
+    _print(f"  source: {source}  ({len(led)} rows)")
+
+    _rule("Reading the price store")
+    px = store.read_prices()
+    px = px[px["symbol"].isin(set(led["ticker"].astype(str)))].copy()
+    px["date"] = pd.to_datetime(px["date"])
+    px = px.set_index(["symbol", "date"]).sort_index()
+
+    m = cfg.params.costs.impact_model
+    slot = (fv(cfg.params.capital.total_capital_inr)
+            / max(iv(cfg.params.capital.max_open_positions), 1))
+    out = calibrate(led, px, config_coefficient=fv(m.coefficient),
+                    config_exponent=fv(m.exponent), position_value_inr=slot)
+
+    _rule("Impact calibration")
+    _print(f"  verdict   {out.verdict}")
+    _print(f"  {out.reason}")
+    _print()
+    _print(f"  ledger rows          {out.n_rows}")
+    _print(f"  priced               {out.n_usable}")
+    if out.usable:
+        _print(f"  fitted coefficient   {out.fitted_coefficient:.4f} "
+               f"(config {out.config_coefficient:.4f})")
+        _print(f"  fitted exponent      {out.fitted_exponent:.4f} "
+               f"(config {out.config_exponent:.4f})")
+    for row in out.rows_dropped:
+        _print(f"  dropped: {row}")
+    return 0 if out.usable else 1
 
 
 def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
@@ -2387,12 +2622,30 @@ def cmd_research_portfolio(cfg: AppConfig, args: argparse.Namespace) -> int:
     if not sharpe:
         _print("  no split produced a tradeable book; nothing to report")
         return 1
-    _table("Book performance across CPCV splits",
-           ["metric", "min", "p25", "median", "p75", "max"],
-           [["Sharpe"] + [f"{sharpe[k]:+.2f}" for k in ("min", "p25", "median", "p75", "max")],
-            ["return/period"] + [f"{ret[k]:+.2%}" for k in ("min", "p25", "median", "p75", "max")],
-            ["max drawdown"] + [f"{dd[k]:+.1%}" for k in ("min", "p25", "median", "p75", "max")]])
+    K = ("min", "p25", "median", "p75", "max")
+    rows = [["Sharpe"] + [f"{sharpe[k]:+.2f}" for k in K],
+            ["return/period"] + [f"{ret[k]:+.2%}" for k in K],
+            ["max drawdown"] + [f"{dd[k]:+.1%}" for k in K]]
+    # THE LEVERAGE-NEUTRAL HEADLINE, if the splits produced one. Without it
+    # this table reports a book's return with no statement of how much capital
+    # was behind it, and `mean_excess` -- which is what a reader reaches for
+    # next -- moves with `risk_per_trade_pct`. See portfolio_sim.
+    alpha = result.spread("alpha_on_deployed_ann")
+    dep = result.spread("deployed_frac")
+    if alpha:
+        rows.append(["ALPHA on deployed (ann)"] + [f"{alpha[k]:+.2%}" for k in K])
+    if dep:
+        rows.append(["capital deployed"] + [f"{dep[k]:.1%}" for k in K])
+    _table("Book performance across CPCV splits", ["metric", *K], rows)
     _print()
+    if dep and dep["median"] < 0.75:
+        _print(_tag(f"THE BOOK DEPLOYS {dep['median']:.0%} OF CAPITAL"))
+        _print("  Every raw excess figure compares that against a benchmark")
+        _print("  that is fully invested, so most of the gap is cash rather")
+        _print("  than selection. Read the ALPHA row, which is invariant to")
+        _print("  the risk budget; `mean_excess` is not and moves nine points")
+        _print("  across a sweep of `risk_per_trade_pct` alone.")
+        _print()
     _print(f"  splits scored          {sharpe['n']} of {result.n_splits}")
     _print(f"  splits with Sharpe < 0 {sharpe['share_negative']:.0%}")
     _print(f"  mean names held        {np.mean([m['avg_names'] for m in result.split_metrics]):.1f}")
@@ -2670,6 +2923,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     trials_p = research_sub.add_parser(
         "trials", help="every configuration compared, and what the DSR charges")
+    trials_p.add_argument(
+        "--register-v3-search", action="store_true",
+        help="append the reconstructed v3 factor search to the registry "
+             "(idempotent; see validation/v3_search.py)")
     trials_p.set_defaults(func=cmd_research_trials)
 
     v3_p = research_sub.add_parser(
@@ -2717,6 +2974,29 @@ def build_parser() -> argparse.ArgumentParser:
                              "one honest test")
     port_p.set_defaults(func=cmd_research_portfolio)
 
+    shapes_p = research_sub.add_parser(
+        "shapes",
+        help="what a portfolio SHAPE would have earned, and its transfer "
+             "coefficient -- can a book carry the measured IC at all?")
+    shapes_p.add_argument("--horizon", type=int, default=None,
+                          help="label horizon; defaults to the configured one")
+    shapes_p.add_argument("--panel-cache", default=None,
+                          help="parquet to read the v3 panel from, or write to")
+    shapes_p.set_defaults(func=cmd_research_shapes)
+
+    abl_p = research_sub.add_parser(
+        "ablate",
+        help="exit / sizing / band arms, ranked on alpha over DEPLOYED capital")
+    abl_p.add_argument("--panel-cache", default=None,
+                       help="parquet to read the v3 panel from, or write to")
+    abl_p.set_defaults(func=cmd_research_ablate)
+
+    imp_p = research_sub.add_parser(
+        "impact",
+        help="calibrate the impact coefficient against realised fills, or say "
+             "why it cannot be")
+    imp_p.set_defaults(func=cmd_research_impact)
+
     ep_p = research_sub.add_parser(
         "epoch",
         help="which engine produced a result -- code, config, data, features, "
@@ -2742,6 +3022,20 @@ def build_parser() -> argparse.ArgumentParser:
                           choices=["SUPERSEDED", "VOID"])
     ep_close.add_argument("--superseded-by", default="",
                           dest="superseded_by")
+
+    conv_p = research_sub.add_parser(
+        "conviction",
+        help="replay the 0-2 conviction gate across history and report what "
+             "it decides, which gate bound, and the BUY frequency it produces")
+    conv_p.add_argument("--start", help="first session (YYYY-MM-DD)")
+    conv_p.add_argument("--end", help="last session (YYYY-MM-DD)")
+    conv_p.add_argument("--stride", type=int, default=21,
+                        help="sessions between sampled dates (default 21)")
+    conv_p.add_argument("--limit", type=int, default=0,
+                        help="keep only the last N sampled dates")
+    conv_p.add_argument("--out", help="write the full book to this JSON path")
+    conv_p.add_argument("--quiet-progress", action="store_true")
+    conv_p.set_defaults(func=cmd_research_conviction)
 
     find_p = research_sub.add_parser(
         "findings",
@@ -3207,3 +3501,164 @@ def cmd_research_record(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
+
+
+# =============================================================================
+# research conviction -- the historical signal book
+# =============================================================================
+
+
+def cmd_research_conviction(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Replay the conviction gate across history and report what it decides.
+
+    THE QUESTION THIS ANSWERS. Every threshold in `stage9_conviction` is
+    UNVALIDATED. This is the instrument that moves them: it reports the BUY
+    frequency the current bar produces, which gate bound on the days it
+    refused, and how the decisions distribute across regimes. Signal frequency
+    must be a CONSEQUENCE of the thresholds, so this reports it rather than
+    targeting it.
+
+    Nothing is written to the ledger. This is a measurement, not a run.
+    """
+    import collections
+    import json as _json
+
+    from .conviction import gate as _cgate
+    from .costs import CostModel as _CostModel
+    from .data.store import DataStore as _DataStore
+    from .core.calendar import TradingCalendar as _Cal
+    from . import pipeline as _pl
+    from .stages import (stage1_data_quality as _s1, stage2_regime as _s2,
+                         stage3_eligibility as _s3, stage4_core_score as _s4,
+                         stage5_false_signal as _s5, stage6_entry as _s6,
+                         stage7_risk as _s7, stage9_conviction as _s9)
+
+    store = _DataStore(cfg.paths.curated, cfg.paths.snapshots)
+    sessions = store.price_sessions()
+    if not sessions:
+        _print("no price sessions in the store")
+        return 1
+    cfg.bind_store(store)
+    cal = _Cal(sessions)
+
+    start = _resolve_arg_date(args.start)
+    end = _resolve_arg_date(args.end)
+    span = [d for d in sessions
+            if (start is None or d >= start) and (end is None or d <= end)]
+    stride = max(int(args.stride), 1)
+    dates = span[::stride]
+    if args.limit:
+        dates = dates[-int(args.limit):]
+    if not dates:
+        _print("no sessions in the requested range")
+        return 1
+
+    _rule(f"CONVICTION BOOK -- {len(dates)} sessions, "
+          f"{dates[0]} to {dates[-1]}, stride {stride}")
+
+    book = []
+    for i, as_of in enumerate(dates):
+        row = {"date": as_of.isoformat()}
+        try:
+            uni = _pl._universe(store, cfg, as_of)
+            man = _pl._manifest_from_store(store, cfg, "conviction", as_of, uni)
+            q = _s1.run(man, store, cal, uni, cfg)
+            reg = _s2.run(store, cal, uni.symbols, cfg, as_of=as_of)
+            el = _s3.run(uni, store, cal, q, cfg, as_of=as_of, held=[])
+            sc = _s4.run(el, store, cal, reg, cfg, as_of=as_of)
+            df = _s5.run(sc, store, cal, reg, cfg, as_of=as_of)
+            defended = list(df.per_stock)
+            frames = _pl._frames(store, cal, defended, cfg, as_of)
+            closes = _pl._closes(frames)
+            ranks = {s.ticker: s.rank for s in sc.ranked_scores}
+            ent = _s6.run(defended, frames, cfg, as_of, ranks=ranks, held=[],
+                          entries_open=True)
+            costs = _CostModel(cfg)
+            plans = {}
+            for sym in defended:
+                fr, d = frames.get(sym), ent.decisions.get(sym)
+                if fr is None or d is None or d.reference_price is None:
+                    continue
+                s0 = next((x for x in sc.ranked_scores if x.ticker == sym), None)
+                if s0 is None:
+                    continue
+                plans[sym] = _s7.build_plan(
+                    ticker=sym, frame=fr,
+                    reference_price=float(d.reference_price),
+                    composite_score=df.per_stock[sym].score_after,
+                    adtv_inr=el.adtv_inr.get(sym), config=cfg, costs=costs)
+            v = _s9.run(sc, df, plans, reg, closes, cfg, as_of=as_of)
+            row.update(regime=reg.regime_bucket,
+                       eligible=len(el.eligible_universe),
+                       buys=len(v.buys),
+                       names=[c.ticker for c in v.buys],
+                       grades=[c.grade() for c in v.buys],
+                       cause=v.cause,
+                       candidates=_cgate.to_record(v))
+        except Exception as exc:                       # noqa: BLE001
+            row["error"] = f"{type(exc).__name__}: {exc}"
+        book.append(row)
+        if not args.quiet_progress:
+            _print(f"  [{i + 1}/{len(dates)}] {row['date']}  "
+                   f"buys={row.get('buys', '-')}  {row.get('regime', '')}"
+                   f"{'  ' + row['error'] if 'error' in row else ''}")
+
+    ok = [r for r in book if "error" not in r]
+    if not ok:
+        _print("every session errored")
+        return 1
+
+    # -- frequency ---------------------------------------------------------
+    dist = collections.Counter(r["buys"] for r in ok)
+    total = len(ok)
+    _rule("BUY FREQUENCY")
+    _table("Sessions by BUY count", ["buys", "sessions", "share"],
+           [[str(k), str(dist.get(k, 0)), f"{dist.get(k, 0) / total:.1%}"]
+            for k in sorted(dist)])
+    per = sum(k * n for k, n in dist.items()) / total
+    _print(f"  {per:.2f} BUYs per scanned session; "
+           f"{dist.get(0, 0) / total:.0%} of sessions are NO TRADE.")
+    _print("  Frequency is a CONSEQUENCE of the thresholds, not a target. "
+           "See stage9_conviction in parameters.yaml.")
+
+    # -- which gate bound --------------------------------------------------
+    binding = collections.Counter()
+    for r in ok:
+        for c in r.get("candidates") or []:
+            if c["failures"]:
+                f = c["failures"][0]
+                key = ("independent evidence" if "independent direction" in f
+                       else "evidence concentration" if "single direction" in f
+                       else "separation from next" if "clear of the next" in f
+                       else "separation from median" if "above the median" in f
+                       else "robustness" if "alternative theme" in f
+                       else "cost" if "cost" in f
+                       else "momentum crash" if "momentum crash" in f.lower()
+                       or "Daniel" in f else "other")
+                binding[key] += 1
+    _rule("WHICH GATE REFUSED (first failure per candidate)")
+    tot = sum(binding.values()) or 1
+    _table("Binding constraint", ["gate", "candidates", "share"],
+           [[k, str(n), f"{n / tot:.1%}"]
+            for k, n in binding.most_common()])
+
+    # -- by regime ---------------------------------------------------------
+    by_regime = collections.defaultdict(lambda: [0, 0])
+    for r in ok:
+        b = by_regime[r.get("regime") or "?"]
+        b[0] += 1
+        b[1] += r["buys"]
+    _rule("BY REGIME")
+    _table("Decisions by regime", ["regime", "sessions", "buys", "per session"],
+           [[k, str(v[0]), str(v[1]), f"{v[1] / v[0]:.2f}"]
+            for k, v in sorted(by_regime.items())])
+
+    if args.out:
+        path = Path(args.out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_json.dumps(book, indent=1))
+        _print(f"\n  wrote {len(book)} sessions to {path}")
+
+    _print()
+    _print(rec_warning())
+    return 0

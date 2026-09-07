@@ -60,6 +60,7 @@ def run(
     company_names: Optional[Dict[str, str]] = None,
     held: Optional[Sequence[str]] = None,
     earnings_notes: Optional[Dict[str, str]] = None,
+    conviction=None,
 ) -> Tuple[List[Recommendation], List[Recommendation], Optional[NoTradeReport],
              Dict[str, int]]:
     """Returns (buys, watchlist, no_trade, gate_counts).
@@ -239,7 +240,95 @@ def run(
                      plans.get(sym), regime, eligibility, scores,
                      defense_res.score_after, cfg, position=positions[sym],
                      config=config,
-                     earnings_note=(earnings_notes or {}).get(sym))
+                     earnings_note=(earnings_notes or {}).get(sym),
+                     is_held=sym in open_book)
+
+    # =====================================================================
+    # STAGE 9 HAS ALREADY DECIDED.
+    #
+    # When a conviction verdict is supplied it is the AUTHORITY on what is
+    # bought, and everything below -- the score gate, the entry trigger, the
+    # rank band, the sector and correlation caps, the book-size cap -- is
+    # bypassed rather than re-applied. Those gates answered "is this name in
+    # the top K and is the calendar willing"; Stage 9 answers "is the evidence
+    # strong, broad, robust and cheap enough to spend one of two slots". Running
+    # both would let a name Stage 9 refused be admitted by a rank band, which is
+    # the exact substitution this layer exists to remove.
+    #
+    # THE WATCHLIST IS NOT PRODUCED ON THIS PATH. Thirty-odd cards, each with a
+    # full trade plan, is a report rather than a decision; the names are still
+    # in the ledger's shortlist record and in the run detail for research.
+    # =====================================================================
+    if conviction is not None:
+        # THE CONTRACT BETWEEN STAGE 9 AND THIS ONE, checked rather than
+        # assumed. Stage 9 selects from Stage 5's survivors; this stage can
+        # only card a name that is in `positions` (the defended set) AND has an
+        # entry decision. If those populations ever diverge the old behaviour
+        # was a bare KeyError from `positions[sym]`, or -- worse -- `_build`
+        # returning None and the buy being silently dropped, so the engine
+        # would decide two and report one.
+        #
+        # A decision the engine cannot render is a broken engine, not a
+        # smaller book. It refuses the run instead.
+        uncardable = [c.ticker for c in conviction.buys
+                      if c.ticker not in positions
+                      or entries.decisions.get(c.ticker) is None
+                      or by_ticker.get(c.ticker) is None]
+        if uncardable:
+            raise ValueError(
+                f"stage 9 selected {uncardable} but stage 8 cannot build a card "
+                f"for them: they are outside the defended set or have no entry "
+                f"decision. The two stages disagree about the candidate "
+                f"population, and issuing the rest would silently shrink a "
+                f"decision that was already made."
+            )
+        for c in conviction.buys:
+            rec = _build(c.ticker)
+            if rec is None:
+                raise ValueError(
+                    f"stage 9 selected {c.ticker} and stage 8 built no card for "
+                    f"it. A decision that cannot be rendered must not be "
+                    f"silently dropped.")
+            rec.decision = Decision.BUY_CANDIDATE
+            rec.why_this_signal_exists.append(
+                f"CONVICTION {c.grade()}. {c.evidence.summary()}")
+            rec.why_this_signal_exists.append(c.separation.summary())
+            rec.why_this_signal_exists.append(c.robustness.summary())
+            rec.why_this_signal_exists.append(c.economics.summary())
+            if c.independence is not None:
+                rec.why_this_signal_exists.append(c.independence.summary())
+            for n in c.notes:
+                rec.data_quality_note.append(n)
+            buys.append(rec)
+
+        # THE FUNNEL MUST NARROW, and on this path the gates that fill
+        # `passed_score_threshold`, `triggered` and `passed_portfolio_limits`
+        # never ran -- the loop that fills them is bypassed. Leaving them at 0
+        # printed "passed score threshold 0" above "buys 1", which is the exact
+        # non-monotonic funnel this stage documents having fixed once already.
+        # A gate that did not run does not get a row.
+        for stale in ("passed_score_threshold", "triggered",
+                      "passed_portfolio_limits", "passed_meta_label",
+                      "cleared_absolute_floor"):
+            gate_counts.pop(stale, None)
+        gate_counts["conviction_evaluated"] = len(conviction.considered)
+        gate_counts["conviction_cleared"] = sum(
+            1 for c in conviction.considered if c.clears)
+        gate_counts["buys"] = len(buys)
+
+        if buys:
+            return buys, [], None, gate_counts
+
+        # NO TRADE, with the cause that actually bound. These are not
+        # interchangeable and the research record needs them apart: a day the
+        # evidence was thin is a different fact from a broken feed.
+        runner = conviction.runner_up()
+        reason = conviction.reason or "no candidate cleared the conviction gate."
+        if runner is not None and runner.failures:
+            reason += (f" Closest: {runner.ticker} at rank {runner.rank} -- "
+                       f"{runner.failures[0]}.")
+        return [], [], _no_trade(reason, scores, gate_counts, cfg,
+                                 defense=defense, entries=entries), gate_counts
 
     # -- the score gate, applied once, in score order ------------------------
     # Score gate first, then the entry trigger. Counting the trigger before
@@ -629,7 +718,8 @@ def _ordinal(n: int) -> str:
 
 def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
           scores, final_score, cfg, position: int = 0,
-          config=None, earnings_note: Optional[str] = None) -> Recommendation:
+          config=None, earnings_note: Optional[str] = None,
+          is_held: bool = False) -> Recommendation:
     """Build the recommendation, including the evidence AGAINST it."""
     why: List[str] = []
     # WHAT PUT THIS NAME HERE, first, before any theme attribution. Under
@@ -643,9 +733,15 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
                 if config is not None else None)
     source = str(rank_cfg.source) if rank_cfg is not None else "fitted_composite"
     if source == "v3_composite":
+        # COUNTED FROM THE MODEL, NOT WRITTEN DOWN. This said "22 factors in 5
+        # themes" as a literal and the model is now 21 -- `net_margin` was
+        # dropped when its sign failed out of sample. A card that states the
+        # shape of the scorer has to read it.
+        from ..features import v3 as v3feat
         why.append(
             f"Ranked #{score.rank} of {scores.universe_size} eligible names by the "
-            f"v3 composite -- 22 factors in 5 themes, each theme combined on its "
+            f"v3 composite -- {len(v3feat.ALL_FACTORS)} factors in "
+            f"{len(v3feat.THEMES)} themes, each theme combined on its "
             f"own and then blended with weights capped at 40%, floored at 6% and "
             f"capped again at the share of names the theme can speak about. The "
             f"THEME rows below sum to the score; the factor rows under each are "
@@ -867,8 +963,17 @@ def _card(sym, name, score, defense_res, decision, plan, regime, eligibility,
         ticker=sym,
         company_name=name,
         sector=score.sector,
-        decision=Decision.BUY_CANDIDATE if decision.status is EntryStatus.TRIGGERED
-        else Decision.WATCHLIST,
+        # A NAME YOU ALREADY OWN IS NOT A BUY. Stage 6's cadence gate exempts
+        # held positions -- correctly: a closed entry clock must never keep a
+        # position open that the rank band would have released -- so on a
+        # non-entry session a held name stays TRIGGERED while every new name is
+        # demoted. Mapping both to BUY_CANDIDATE told the operator to buy
+        # something already in the book, and ranked it below names the same
+        # card said to skip.
+        decision=(
+            (Decision.HOLD if is_held else Decision.BUY_CANDIDATE)
+            if decision.status is EntryStatus.TRIGGERED
+            else Decision.WATCHLIST),
         signal_strength_band=_band(final_score, cfg),
         regime_compatibility=regime.compatibility(),
         expected_holding_period=(

@@ -96,6 +96,19 @@ class BreadthState(str, Enum):
 
 class Decision(str, Enum):
     BUY_CANDIDATE = "BUY CANDIDATE"
+    #: ALREADY OWNED, and still passing every test. Added 2026-09-06.
+    #:
+    #: Without it a held position was reported as BUY CANDIDATE, because
+    #: Stage 6's cadence gate exempts held names -- correctly, a closed entry
+    #: clock must never keep a position open that the band would have released
+    #: -- and Stage 8 then mapped TRIGGERED to BUY without asking whether the
+    #: name was already in the book.
+    #:
+    #: On a non-entry session that produced the reading that started this: the
+    #: rank-11 name showed BUY while ranks 1 to 10 showed WATCHLIST. Both
+    #: labels were right about the ENGINE and together they were unreadable,
+    #: because "buy this" and "you own this" had one word between them.
+    HOLD = "HOLD"
     WATCHLIST = "WATCHLIST"
     NO_TRADE = "NO TRADE"
 
@@ -181,6 +194,11 @@ class RejectionReason(str, Enum):
     REGULATORY_COOLDOWN = "regulatory_cooldown"
     MANUAL_EXCLUSION = "manual_exclusion"
     SERIES_NOT_ALLOWED = "series_not_allowed"
+    #: The exchange has the name under a surveillance measure -- trade-for-trade
+    #: settlement, an explicit GSM stage, or a price band cut below the
+    #: ordinary 20%. Any one of them means it cannot be filled at a
+    #: simulated price, which is an investability fact rather than a view.
+    SURVEILLANCE_RESTRICTION = "surveillance_restriction"
     #: Outside the population the model was FITTED on. `resolve_exits` gives a
     #: name below its thesis-invalidation level a NaN label and `build_panel`
     #: drops the row, so the coefficients were estimated on pullbacks WITHIN
