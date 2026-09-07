@@ -1,24 +1,32 @@
 """Does the edge survive the cost of capturing it?
 
-THE NUMBER THAT MAKES THIS BIND. `docs/RESULTS_OF_RECORD.json` measures the
-ranking's top-decile excess return on the shipped panel, per horizon:
+THE NUMBER THAT MAKES THIS BIND, and it got much worse when the results file
+was rebuilt to separate in-sample from out-of-sample. `docs/RESULTS_OF_RECORD.
+json` now records the SAME horizon under four windows:
 
-    horizon   top-decile excess   corrected t
-      21              +0.64%          2.49
-      42              +1.20%          2.36
-      63              +1.76%          2.21
+    horizon 63     top-decile excess   corrected t
+      OUT_OF_SAMPLE        +0.360%         0.29
+      STABLE_MODEL         +1.202%         1.37
+      FULL_PANEL           +1.941%         2.34
+      IN_SAMPLE            +2.399%         2.44
 
-Against that, the shipped cost model prices real candidates on the live run at
-60 to 84 bps round-trip including impact. So:
+An earlier version of this module quoted +1.76% at t 2.21 -- a number that no
+longer exists in the file -- and read the arm POSITIONALLY, taking the first
+row matching the horizon. It landed on OUT_OF_SAMPLE by luck. See
+`DEFAULT_WINDOW`.
 
-  * at 21 sessions the measured edge is SMALLER than the cost of a typical
-    candidate. The trade is negative before it starts.
-  * at 63 sessions -- the shipped horizon -- a candidate costing 84 bps keeps
-    about 92 bps of a 176 bps edge. Slightly more than half.
+Against the honest arm, the shipped cost model prices real live candidates at
+60 to 84 bps round-trip including impact. So at the shipped 63-session horizon:
 
-That is the whole argument for this module. Cost is not a rounding error to be
-netted off at the end; on this strategy it is comparable in size to the entire
-measured edge, and a candidate whose cost is high enough eliminates it.
+    out-of-sample edge     36 bps
+    typical candidate cost 60 to 84 bps
+    net                    NEGATIVE, before the trade starts
+
+The out-of-sample edge does not cover the cost of capturing it at ANY horizon
+in the file. That is not this module failing -- it is this module reporting,
+for the first time, what the measurement actually says. A gate calibrated
+against +1.76% waves candidates through that a gate calibrated against +0.36%
+refuses, and only one of those numbers is out of sample.
 
 WHAT THE REFERENCE EDGE IS, AND WHAT IT IS NOT. `top_decile_excess` is a
 UNIVERSE-LEVEL, TOP-DECILE, HISTORICAL AVERAGE. It is not a forecast for this
@@ -28,8 +36,9 @@ this codebase already refuses elsewhere. What is computed is a RATIO:
 
     cost_burden = (round-trip cost + impact) / reference gross edge
 
-"This trade spends 48% of the only edge the model has ever demonstrated." That
-is a statement the evidence supports. "This trade will make 1.2%" is not.
+"This trade spends 233% of the only out-of-sample edge the model has ever
+demonstrated" is a statement the evidence supports. "This trade will make 1.2%"
+is not, and neither is any figure taken from the in-sample arm.
 
 WHY THE REFERENCE IS READ FROM THE RESULTS FILE. Hardcoding 1.76% here would
 let the constant and the measurement drift apart silently, which is the failure
@@ -45,7 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
-__all__ = ["NetEdge", "reference_edge", "assess"]
+__all__ = ["NetEdge", "reference_edge", "assess", "DEFAULT_WINDOW"]
 
 #: Where the measured ranking table lives, relative to the repository root.
 _RESULTS = Path("docs/RESULTS_OF_RECORD.json")
@@ -74,12 +83,33 @@ def _load_results(root: Optional[Path] = None) -> Optional[dict]:
     return data
 
 
+#: WHICH ARM OF THE RESULTS FILE A TRADE IS PRICED AGAINST.
+#:
+#: The file records the SAME horizon under four windows, and they disagree by
+#: a factor of nearly seven. At 63 sessions: OUT_OF_SAMPLE +0.360% (t 0.29),
+#: STABLE_MODEL +1.202% (t 1.37), FULL_PANEL +1.941% (t 2.34), IN_SAMPLE
+#: +2.399% (t 2.44).
+#:
+#: This constant used to be absent, and the lookup took the FIRST row matching
+#: the horizon. It happened to land on OUT_OF_SAMPLE, so the shipped behaviour
+#: was correct -- by accident. Nothing in the code knew windows existed, and a
+#: reordered file would have silently started pricing every trade against a
+#: number 6.7x larger while every test still passed.
+#:
+#: OUT_OF_SAMPLE is the only honest default. An in-sample edge is what the
+#: model was fitted to produce; charging a real cost against it and calling the
+#: difference an economic edge is the arithmetic that makes every overfitted
+#: strategy look profitable.
+DEFAULT_WINDOW = "OUT_OF_SAMPLE"
+
+
 def reference_edge(horizon_sessions: int,
-                   root: Optional[Path] = None) -> tuple:
+                   root: Optional[Path] = None,
+                   window: str = DEFAULT_WINDOW) -> tuple:
     """(gross_edge_fraction, t_stat, note) for the shipped horizon.
 
     Returns (None, None, reason) when the measurement is unavailable. The
-    caller must treat that as NOT TESTABLE.
+    caller must treat that as NOT TESTABLE -- never as a pass.
     """
     data = _load_results(root)
     if not data or "ranking" not in data:
@@ -87,12 +117,28 @@ def reference_edge(horizon_sessions: int,
                             "measured gross edge this trade is priced against "
                             "cannot be read")
     rows = data.get("ranking") or []
-    exact = [r for r in rows if int(r.get("horizon", -1)) == int(horizon_sessions)]
-    if not exact:
-        have = ", ".join(str(r.get("horizon")) for r in rows)
+    at_h = [r for r in rows if int(r.get("horizon", -1)) == int(horizon_sessions)]
+    if not at_h:
+        have = ", ".join(sorted({str(r.get("horizon")) for r in rows}))
         return None, None, (f"no measured edge at horizon {horizon_sessions} "
                             f"sessions; the results file covers {have}")
-    r = exact[0]
+
+    # NAMED, NEVER POSITIONAL. A file carrying several windows and no way to
+    # say which one is being read is a file that will eventually be read wrong.
+    windows = [r for r in at_h if str(r.get("window", "")) == window]
+    if not windows:
+        available = ", ".join(sorted({str(r.get("window") or "unlabelled")
+                                      for r in at_h}))
+        if len(at_h) == 1 and at_h[0].get("window") is None:
+            windows = at_h                     # single unlabelled arm: no ambiguity
+        else:
+            return None, None, (
+                f"the results file records {len(at_h)} arms at horizon "
+                f"{horizon_sessions} ({available}) and none is {window!r}. "
+                f"Pricing a trade against an unnamed arm is how an in-sample "
+                f"number becomes an economic claim.")
+
+    r = windows[0]
     edge = r.get("top_decile_excess")
     if edge is None:
         return None, None, "the results file records no top-decile excess"
@@ -156,9 +202,10 @@ class NetEdge:
 
 
 def assess(ticker: str, plan, horizon_sessions: int,
-           root: Optional[Path] = None) -> NetEdge:
+           root: Optional[Path] = None,
+           window: str = DEFAULT_WINDOW) -> NetEdge:
     """Price one candidate against the measured edge at the shipped horizon."""
-    edge, t, why = reference_edge(horizon_sessions, root=root)
+    edge, t, why = reference_edge(horizon_sessions, root=root, window=window)
     if edge is None:
         return NetEdge(ticker, horizon_sessions, unavailable=why)
     if plan is None:

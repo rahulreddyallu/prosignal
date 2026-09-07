@@ -251,9 +251,52 @@ def test_cost_can_exceed_the_measured_edge():
     assert net.cost_burden > 1.0
 
 
-def test_a_cheap_trade_at_a_long_horizon_keeps_most_of_the_edge():
+def test_even_a_cheap_trade_barely_clears_the_out_of_sample_edge():
+    """The premise of this test was wrong and the measurement corrected it.
+
+    It used to assert that a 30 bps trade at 63 sessions keeps MOST of the
+    edge, which was true against the +1.76% figure the module once quoted. That
+    number was in-sample. Out of sample the 63-session top-decile excess is
+    +0.360%, so a 30 bps round trip -- cheaper than any real candidate on the
+    live run, which price at 60 to 84 -- consumes 83% of it.
+    """
     net = economics.assess("X", _Plan(cost=30.0), 63)
-    assert net.net_edge > 0 and net.cost_burden < 0.25
+    assert net.testable()
+    assert net.gross_edge < 0.005, "the OOS edge at 63 sessions is under 50 bps"
+    assert net.cost_burden > 0.75, (
+        f"a 30 bps trade should consume most of a 36 bps edge, got "
+        f"{net.cost_burden:.2f}")
+    assert 0 < net.net_edge < 0.002
+
+
+def test_a_realistic_cost_wipes_out_the_out_of_sample_edge():
+    """Live candidates price at 60-84 bps against a 36 bps OOS edge."""
+    for cost in (60.0, 84.0):
+        net = economics.assess("X", _Plan(cost=cost), 63)
+        assert net.net_edge < 0, (
+            f"{cost:.0f} bps against a {net.gross_edge*100:.3f}% edge should be "
+            f"negative, got {net.net_edge*100:+.3f}%")
+        assert net.cost_burden > 1.0
+
+
+def test_the_results_window_is_chosen_by_name_never_by_position():
+    """The defect this pins: four arms at one horizon, differing 6.7x.
+
+    The lookup used to take the first row matching the horizon. It happened to
+    land on OUT_OF_SAMPLE, so the behaviour was right by accident -- a
+    reordered file would have silently priced every trade against the in-sample
+    number while every test still passed.
+    """
+    oos, _, _ = economics.reference_edge(63, window="OUT_OF_SAMPLE")
+    ins, _, _ = economics.reference_edge(63, window="IN_SAMPLE")
+    assert oos is not None and ins is not None
+    assert ins > oos * 3, "the arms must actually differ for this to matter"
+    assert economics.DEFAULT_WINDOW == "OUT_OF_SAMPLE"
+    default, _, _ = economics.reference_edge(63)
+    assert default == oos, "the default must be the out-of-sample arm"
+    # An unknown arm is refused, not silently substituted.
+    edge, _, why = economics.reference_edge(63, window="NO_SUCH_WINDOW")
+    assert edge is None and "arms at horizon" in why
 
 
 def test_a_plan_without_a_cost_is_not_testable():
