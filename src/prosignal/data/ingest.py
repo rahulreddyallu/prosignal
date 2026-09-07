@@ -138,6 +138,17 @@ class DataIngestor:
             base=p.providers.nse_json_api.base,
             warmup_path=p.providers.nse_json_api.warmup_path,
         )
+        # SURVEILLANCE AND SHAREHOLDING. Both providers existed, were tested,
+        # and were imported by nothing -- so the tables they fill were stale or
+        # absent and the gates that read them reported NOT_TESTABLE forever.
+        # Constructed here so the daily ingest refreshes them like every other
+        # feed.
+        from .providers.nse_surveillance import NseSurveillanceProvider
+        from .providers.nse_shareholding import NseShareholdingProvider
+        self.surveillance = NseSurveillanceProvider(
+            client=self.http, base=p.providers.nse_archives.base_archives)
+        self.shareholding = NseShareholdingProvider(
+            session=self.json_api, client=self.http)
         self.universe_resolver = UniverseResolver(self.store, p.universe)
         self._feeds: Dict[str, FeedRecord] = {}
 
@@ -903,6 +914,85 @@ class DataIngestor:
     # =====================================================================
     # corporate actions & earnings
     # =====================================================================
+    def _refresh_surveillance(self, as_of: dt.date) -> None:
+        """The exchange's surveillance list and F&O lots, EVERY run.
+
+        NOT on `reference_refresh_sessions`. The snapshot is a single dated
+        file and `reference.surveillance` refuses to apply it more than seven
+        days from the run date -- so a five-session cadence would put it at the
+        edge of its own tolerance and the Stage 3 gate would flicker between
+        enforcing and NOT_TESTABLE for no reason a reader could see. It is
+        cheap (two CSVs) and it decides whether a name is investable, so it is
+        refreshed whenever the ingest runs.
+
+        A FAILURE IS RECORDED, NOT SWALLOWED. If the fetch fails the stored
+        snapshot ages, and once it ages past the tolerance the gate stops
+        gating -- silently, unless the feed record says why.
+        """
+        try:
+            sec = self.surveillance.fetch_security_list(as_of)
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("security list refresh failed", extra={"error": str(exc)})
+            sec = None
+        if sec is not None and not sec.empty:
+            self.store.write_table("security_list", sec, [SYMBOL, "snapshot_date"])
+            self.store.update_feed_state("security_list", as_of, "nse_surveillance",
+                                         len(sec))
+            self._record_feed("security_list", FeedStatus.OK,
+                              SourceName.NSE_ARCHIVES, last_timestamp=as_of,
+                              row_count=len(sec),
+                              symbols_covered=int(sec[SYMBOL].nunique()))
+        else:
+            stored = self.store.read_security_list()
+            age = None
+            if stored is not None and not stored.empty:
+                snap = pd.to_datetime(stored["snapshot_date"]).max()
+                age = (as_of - snap.date()).days if pd.notna(snap) else None
+            self._record_feed(
+                "security_list", FeedStatus.MISSING, SourceName.NSE_ARCHIVES,
+                notes=[
+                    self.surveillance.last_error or "security list unavailable",
+                    (f"the stored snapshot is {age} days old; the Stage 3 "
+                     f"surveillance gate stops enforcing past 7 days and "
+                     f"reports NOT_TESTABLE"
+                     if age is not None else
+                     "no surveillance snapshot is stored, so the Stage 3 gate "
+                     "cannot run at all"),
+                ])
+
+        try:
+            lots = self.surveillance.fetch_fo_lots(as_of)
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("fo lots refresh failed", extra={"error": str(exc)})
+            lots = None
+        if lots is not None and not lots.empty:
+            self.store.write_table("fo_lots", lots, [SYMBOL, "snapshot_date"])
+            self.store.update_feed_state("fo_lots", as_of, "nse_surveillance",
+                                         len(lots))
+
+    def _refresh_shareholding(self, symbols, as_of: dt.date) -> int:
+        """Quarterly shareholding, for the FREE FLOAT.
+
+        Quarterly data on a slow cadence -- unlike the surveillance list, this
+        does not need refreshing every session. It is keyed on the exchange's
+        broadcast timestamp, so `reference.free_float` can as-of join it
+        honestly.
+        """
+        try:
+            frame = self.shareholding.fetch_universe(symbols)
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("shareholding refresh failed", extra={"error": str(exc)})
+            return 0
+        if frame is None or frame.empty:
+            return 0
+        written = self.store.write_shareholding(frame)
+        self.store.update_feed_state("shareholding", as_of, "nse_shareholding",
+                                     written)
+        if self.shareholding.unknown:
+            log.info("shareholding unknown for some symbols",
+                     extra={"count": len(self.shareholding.unknown)})
+        return written
+
     def _ingest_corporate_actions(
         self,
         symbols: Sequence[str],
@@ -1104,6 +1194,18 @@ class DataIngestor:
             self._refresh_sector_map()
         except Exception as exc:
             log.warning("sector map refresh failed", extra={"error": str(exc)})
+
+        # EVERY RUN -- see `_refresh_surveillance` for why this one is not on
+        # the reference cadence.
+        if not opts.offline:
+            self._refresh_surveillance(as_of)
+
+        # Quarterly, so the ordinary reference cadence is right.
+        if opts.force_reference_refresh or self._should_refresh(
+            "shareholding", as_of, opts.reference_refresh_sessions
+        ):
+            if not opts.offline:
+                self._refresh_shareholding(symbols, as_of)
 
         if opts.force_reference_refresh or self._should_refresh(
             "statements", as_of, opts.reference_refresh_sessions

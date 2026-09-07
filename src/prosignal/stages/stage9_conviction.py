@@ -34,6 +34,7 @@ import pandas as pd
 
 from ._cfg import bv, fv, iv, v
 from ..conviction import evidence as _ev
+from ..data import reference as _ref
 from ..conviction import gate as _gate
 from ..core.logging import get_logger
 
@@ -48,10 +49,12 @@ def thresholds_from_config(config) -> _gate.Thresholds:
     c = config.params.stage9_conviction
     return _gate.Thresholds(
         shortlist=iv(c.shortlist),
+        min_model_agreement=fv(c.min_model_agreement),
+        agreement_top_k=iv(c.agreement_top_k),
+        require_known_liquidity=bool(c.require_known_liquidity),
         min_independent_evidence=fv(c.min_independent_evidence),
         max_evidence_concentration=fv(c.max_evidence_concentration),
         min_gap_to_median=fv(c.min_gap_to_median),
-        min_gap_to_next=fv(c.min_gap_to_next),
         min_robustness=fv(c.min_robustness),
         max_cost_burden=fv(c.max_cost_burden),
         max_residual_correlation=fv(c.max_residual_correlation),
@@ -77,7 +80,7 @@ def _horizon(config) -> int:
 
 def run(scores, defense, plans: Dict[str, object], regime,
         closes: pd.DataFrame, config,
-        as_of: Optional[dt.date] = None) -> _gate.Verdict:
+        as_of: Optional[dt.date] = None, store=None) -> _gate.Verdict:
     """Evaluate the shortlist and fill 0, 1 or 2 slots."""
     th = thresholds_from_config(config)
 
@@ -120,11 +123,50 @@ def run(scores, defense, plans: Dict[str, object], regime,
     themes = theme_panel[1]
 
     horizon = _horizon(config)
+
+    # POINT-IN-TIME FREE FLOAT, read once for the shortlist. As-of joined on
+    # the exchange's broadcast timestamp, so it is honest on a replay; before
+    # 2022 the table does not exist and it reports NOT TESTABLE rather than
+    # nothing.
+    ff = None
+    if store is not None and as_of is not None:
+        try:
+            ff = _ref.free_float(store, as_of, [s.ticker for s in shortlist])
+            if not ff.testable():
+                log.info("free float not testable",
+                         extra={"reason": ff.unavailable})
+        except Exception as exc:                              # noqa: BLE001
+            log.warning("free float unavailable", extra={"error": str(exc)})
+
+    # EVERY SPECIFICATION THE RUN FORMED. Stage 4 now keeps the fitted
+    # Fama-MacBeth composite and the v9R core alongside the incumbent instead
+    # of discarding them, which is what makes model agreement measurable.
+    alternatives = dict(getattr(scores, "alternative_rankings", {}) or {})
+    if len(alternatives) < 2:
+        log.info("model agreement unavailable",
+                 extra={"specifications": sorted(alternatives)})
+
+    # STAGE 6'S ENTRY DECISION IS DELIBERATELY NOT READ HERE, and the
+    # omission is the point. Its `status` comes from `_admit(rank, entry_rank,
+    # exit_rank, is_held)` -- a HELD name is judged against the wider exit
+    # band -- so the decision depends on the previous run's book. Carrying it
+    # into conviction, even as a disclosure, would put historical state back
+    # into a decision whose whole contract is that it has none.
+    #
+    # The price-structure read it carries is worth having and will come from
+    # calling stage 6's pure trigger functions on the frames, which take no
+    # book. Until that exists, it is absent rather than contaminated.
+    #
+    # `tests/test_conviction.py::test_the_stage_takes_no_book_and_no_clock`
+    # caught this by inspecting the signature; the parameter was added and
+    # removed the same session.
+
     candidates: List[_gate.Candidate] = []
     for s in shortlist:
         candidates.append(_gate.evaluate(
             s, ranked, plans.get(s.ticker), regime, horizon, th,
-            theme_panel=theme_panel, member_panel=member_panel, themes=themes))
+            theme_panel=theme_panel, member_panel=member_panel, themes=themes,
+            free_float=ff, alternatives=alternatives))
 
     verdict = _gate.select_at_most_two(candidates, closes, th, themes=themes)
 

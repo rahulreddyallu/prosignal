@@ -348,7 +348,8 @@ def _run_analysis_locked(config, as_of, progress, manifest, started, run_id,
     step(8)
     t = _clock()
     verdict = stage9_conviction.run(
-        scores, defense, plans, regime, closes, config, as_of=resolved)
+        scores, defense, plans, regime, closes, config, as_of=resolved,
+        store=store)
     timings[stage9_conviction.STAGE_NAME] = t()
     release_memory()
 
